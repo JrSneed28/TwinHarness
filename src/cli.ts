@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import * as fs from "node:fs";
 import { resolveProjectPaths } from "./core/paths";
 import { type CommandResult, renderResult, failure } from "./core/output";
 import { runInit } from "./commands/init";
@@ -12,7 +13,7 @@ import { runAnchorsScan } from "./commands/anchors";
 import { runDriftAdd, runDriftList, runDriftResolve } from "./commands/drift";
 import { runTraceRender } from "./commands/trace";
 import { runStale } from "./commands/stale";
-import { runHookStopGate } from "./commands/hook";
+import { runHookStopGate, type StopHookInput } from "./commands/hook";
 
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
@@ -289,13 +290,31 @@ function dispatch(parsed: ParsedArgs): CommandResult {
   }
 }
 
+/**
+ * Best-effort read of the Claude Code hook payload from stdin. Hooks always
+ * receive piped JSON; a TTY means a human ran the command by hand, so skip
+ * reading rather than hang waiting for EOF. Malformed/absent input → undefined.
+ */
+function readHookStdin(): StopHookInput | undefined {
+  if (process.stdin.isTTY) return undefined;
+  try {
+    const raw = fs.readFileSync(0, "utf8");
+    if (!raw.trim()) return undefined;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    return parsed as StopHookInput;
+  } catch {
+    return undefined;
+  }
+}
+
 function main(): void {
   const parsed = parseArgs(process.argv.slice(2));
 
   // Hook commands speak the Claude Code hook protocol on stdout (not --json).
   if (parsed.positionals[0] === "hook" && parsed.positionals[1] === "stop-gate") {
     const paths = resolveProjectPaths(parsed.flags.cwd);
-    const out = runHookStopGate(paths);
+    const out = runHookStopGate(paths, readHookStdin());
     process.stdout.write(out.stdout + "\n");
     process.exit(out.exitCode);
   }

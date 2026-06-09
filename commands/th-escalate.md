@@ -4,11 +4,12 @@ description: Surface TwinHarness blocking escalations that need a human decision
 
 Surface everything currently **blocking** completion of this TwinHarness run (spec §8, §10, §18).
 
-Gather state and drift:
+Gather state and drift (the `th` CLI ships inside this plugin — `th <args>` below means this
+invocation):
 
 ```
-th state status
-th drift list --json
+node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" state status
+node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" drift list --json
 ```
 
 Then present, in priority order, anything that requires a human decision:

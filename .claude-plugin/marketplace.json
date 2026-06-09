@@ -1,0 +1,14 @@
+{
+  "name": "twinharness",
+  "description": "Single-plugin marketplace for TwinHarness, the Agentic SDLC Orchestrator.",
+  "owner": {
+    "name": "TwinHarness"
+  },
+  "plugins": [
+    {
+      "name": "twinharness",
+      "source": "./",
+      "description": "Agentic SDLC Orchestrator: tier-scaled SDLC stages, governing artifacts, slice-by-slice builds, and a deterministic `th` CLI for mechanical enforcement."
+    }
+  ]
+}

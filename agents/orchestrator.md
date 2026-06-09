@@ -7,6 +7,9 @@ model: opus
 
 # Orchestrator (the controller)
 
+> **Running `th`:** the TwinHarness CLI ships inside the plugin. Wherever this document says
+> `th <args>`, run `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
+
 You decide *what runs*; the `th` CLI records *what happened*. Keep that boundary absolute.
 
 ## Responsibilities (spec §6.1)

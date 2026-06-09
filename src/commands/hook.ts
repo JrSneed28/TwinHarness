@@ -46,18 +46,44 @@ export function evaluateStopGate(paths: ProjectPaths): StopGateDecision {
 }
 
 /**
+ * The subset of the Claude Code Stop-hook stdin payload the gate cares about.
+ * `stop_hook_active` is true when Claude is ALREADY continuing because a stop
+ * hook blocked — the documented signal for preventing infinite stop loops.
+ */
+export interface StopHookInput {
+  stop_hook_active?: boolean;
+}
+
+/**
  * `th hook stop-gate` — emit a Claude Code Stop-hook decision on stdout.
  * Blocks with a reason, or allows with `{}`. Always exits 0 (the JSON carries
  * the decision).
+ *
+ * Loop protection: the gate blocks at most once per stop sequence. If the gate
+ * would block again while `stop_hook_active` is true, it allows the stop but
+ * surfaces the unresolved reasons as a `systemMessage` — blocking drift needs a
+ * human decision, and re-blocking forever would spin the model instead of
+ * yielding the turn to that human.
  */
-export function runHookStopGate(paths: ProjectPaths): { stdout: string; exitCode: number } {
+export function runHookStopGate(
+  paths: ProjectPaths,
+  input?: StopHookInput,
+): { stdout: string; exitCode: number } {
   const decision = evaluateStopGate(paths);
   if (decision.block) {
+    const reason = "TwinHarness stop-gate blocked completion: " + decision.reasons.join(" ");
+    if (input?.stop_hook_active === true) {
+      return {
+        stdout: JSON.stringify({
+          systemMessage:
+            "TwinHarness stop-gate is STILL blocked, but allowed the stop to avoid an infinite loop. " +
+            "A human decision is required. " + reason,
+        }),
+        exitCode: 0,
+      };
+    }
     return {
-      stdout: JSON.stringify({
-        decision: "block",
-        reason: "TwinHarness stop-gate blocked completion: " + decision.reasons.join(" "),
-      }),
+      stdout: JSON.stringify({ decision: "block", reason }),
       exitCode: 0,
     };
   }

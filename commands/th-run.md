@@ -5,6 +5,9 @@ argument-hint: <your idea, e.g. "build a CLI todo app">
 
 Start (or resume) a **TwinHarness** orchestration run for: **$ARGUMENTS**
 
+> **Running `th`:** the CLI ships inside this plugin. Wherever instructions say `th <args>`, run
+> `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
+
 Follow the `twinharness` skill (the Orchestrator playbook). In brief:
 
 1. If `.agentic-sdlc/state.json` exists, run `th state status` and **resume** from `current_stage`.

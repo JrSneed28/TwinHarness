@@ -4,10 +4,10 @@ description: Review and ratify the TwinHarness drift log — async derived-layer
 
 Review the TwinHarness drift log (spec §10) for this project.
 
-Run:
+Run (the `th` CLI ships inside this plugin — `th <args>` below means this invocation):
 
 ```
-th drift list --json
+node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" drift list --json
 ```
 
 Then summarize for the user, separating the two layers (spec §10):

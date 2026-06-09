@@ -20,6 +20,41 @@ See [`TwinHarness-Plan.md`](./TwinHarness-Plan.md) for the frozen spec and
 
 The CLI **records and computes; it never decides** which stage/agent/tier runs.
 
+## Install as a Claude Code plugin
+
+The repo doubles as its own single-plugin marketplace (`.claude-plugin/marketplace.json`):
+
+```
+/plugin marketplace add <path-or-github-repo>   # e.g. C:\path\to\TwinHarness or owner/TwinHarness
+/plugin install twinharness@twinharness
+```
+
+For a throwaway local test session instead:
+
+```
+claude --plugin-dir C:\path\to\TwinHarness
+```
+
+Installed surface (plugin-namespaced):
+
+| Invocation | What it does |
+|---|---|
+| `/twinharness:th-run <idea>` | Start or resume an orchestration run |
+| `/twinharness:th-status` | Tier / stage / gates / drift snapshot |
+| `/twinharness:th-drift` | Review + ratify the drift log |
+| `/twinharness:th-escalate` | Show everything blocking completion |
+
+Plus 5 agents (orchestrator, spec, critic, vertical-slice, builder), the `twinharness` skill, and a
+**Stop hook** that runs `th hook stop-gate` so "done" cannot be claimed while state is invalid or a
+blocking drift is open. The hook blocks at most once per stop sequence (it honors
+`stop_hook_active`), then yields with a visible warning — blocking drift needs a *human* decision,
+not an infinite model loop.
+
+**Note:** `dist/` is committed on purpose. Plugin installs copy this repo as-is into the Claude Code
+plugin cache — no `npm install`/build step runs — so the compiled zero-dependency CLI must ship in
+git. After editing `src/`, run `npm run build` and commit `dist/` together with the source
+(`tests/plugin-manifest.test.ts` enforces this mechanically).
+
 ## `th` CLI (current surface)
 
 ```
@@ -92,11 +127,12 @@ npm run typecheck
 
 ## Build status
 
-Built in vertical slices (build plan §4). **Slice 0 — walking skeleton** (this milestone): plugin
-manifest + Orchestrator skill + Spec(requirements) + requirements template + the `th` state spine
-(`init`, `state`, stop-gate hook) with a green REQ-anchored test suite. Slices 1–7 (Critic loop,
-tiering + veto, architecture/domain, vertical slicing, builder + drift, traceability + cascade, Tier-3
-extras) follow in order, each gated green before the next.
+Built in vertical slices (build plan §4) — **all 8 slices complete and green**: Slice 0 walking
+skeleton (manifest, skill, state spine, stop-gate), Slice 1 Critic loop + revise caps, Slice 2
+tiering + blast-radius veto, Slice 3 architecture/domain stages, Slice 4 vertical slicing + coverage
+gate, Slice 5 Builder + bidirectional drift, Slice 6 final verification + traceability + cascade
+staleness, Slice 7 Tier-3 stages + parallel-build scheduler. The REQ-anchored vitest suite covers the
+CLI plus plugin-packaging integrity (manifests, shipped `dist/`, `${CLAUDE_PLUGIN_ROOT}` wiring).
 
 ## License
 

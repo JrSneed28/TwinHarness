@@ -15,6 +15,19 @@ The single governing axis (spec §2) resolves every judgment call:
 > touching security, money, data integrity, or migrations — gets **human gates** and strict, sticky
 > treatment. **Everything else flows, self-maintains, auto-generates, or can be bypassed.**
 
+## Running the `th` CLI
+
+The `th` CLI ships inside this plugin (zero runtime dependencies, Node ≥ 18). Wherever this
+playbook — or any TwinHarness agent or command — says `th <args>`, run:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>
+```
+
+Pass that exact invocation on to every agent you spawn (they receive the same substitution, but
+restate it in your delegation prompt so there is no ambiguity). A globally linked `th` (dev
+`npm link` setups) also works, but prefer the plugin's own copy.
+
 ## Mechanical truths are CODE, not prose (critical)
 
 Instructions do not enforce themselves (spec §11). All **mechanical** operations go through the `th`
@@ -26,8 +39,9 @@ CLI — never hand-edit `state.json`, never eyeball traceability, never "remembe
 | Read/patch/validate state | `th state get\|set\|status\|verify` |
 | Emit a stop-gate decision | `th hook stop-gate` |
 
-> Later slices add: `th artifact register`, `th anchors scan`, `th trace render`, `th coverage check`,
-> `th drift add\|list`, `th stale --since`, `th tier classify`, `th tier veto-check`.
+> Also available (all implemented): `th artifact register|list`, `th anchors scan`, `th trace render`,
+> `th coverage check`, `th drift add|list|resolve`, `th stale --since`, `th tier classify`,
+> `th tier veto-check`, `th build plan`, `th revise bump|status|reset`.
 
 Run `th` with `--json` whenever you need to parse the result. The CLI **records and computes; it
 never decides** which stage/agent/tier runs — those are your calls.

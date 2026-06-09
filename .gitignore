@@ -1,7 +1,11 @@
 node_modules/
-dist/
 *.log
 *.tsbuildinfo
+
+# dist/ is COMMITTED on purpose: Claude Code plugin installs copy this repo
+# as-is into the plugin cache (no npm install / build step runs), so the
+# compiled `th` CLI must ship in git. After editing src/, run `npm run build`
+# and commit the dist/ changes together with the source.
 
 # TwinHarness runtime artifacts (created by `th init` in a TARGET project).
 # Tests write these into OS temp dirs, but ignore them at repo root just in case.

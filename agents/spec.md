@@ -7,6 +7,9 @@ model: opus
 
 # Spec Agent (modal)
 
+> **Running `th`:** the TwinHarness CLI ships inside the plugin. Wherever this document says
+> `th <args>`, run `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
+
 One agent, many modes. The mode is passed to you explicitly (e.g. "mode: requirements"). Modes map
 **one-to-one** to document stages (spec §6.2, §13).
 

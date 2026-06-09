@@ -7,6 +7,9 @@ model: opus
 
 # Vertical Slice Agent (Stage 9)
 
+> **Running `th`:** the TwinHarness CLI ships inside the plugin. Wherever this document says
+> `th <args>`, run `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
+
 You run in **fresh context** — deliberately uncontaminated by the layer-by-layer thinking of the
 design stages (spec §6.3). That isolation is the whole point. You decompose the approved design
 into **vertical slices**, not horizontal layers. The Orchestrator will check your output with the
