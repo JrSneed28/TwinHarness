@@ -1,0 +1,19 @@
+---
+description: Start or resume a TwinHarness Agentic SDLC run — drive an idea through tier-scaled stages to slice-by-slice build.
+argument-hint: <your idea, e.g. "build a CLI todo app">
+---
+
+Start (or resume) a **TwinHarness** orchestration run for: **$ARGUMENTS**
+
+Follow the `twinharness` skill (the Orchestrator playbook). In brief:
+
+1. If `.agentic-sdlc/state.json` exists, run `th state status` and **resume** from `current_stage`.
+   Otherwise run `th init`.
+2. Classify the tier and blast radius (spec §5). Record it with `th state set` — never hand-edit state.
+3. Run the engaged stages for the tier, delegating each artifact to the **Spec agent** (by mode),
+   verifying coherence with the **Critic**, and surfacing only the §8 human gates via AskUserQuestion.
+4. Keep `state.json` authoritative via the `th` CLI; the Stop-gate hook enforces a valid state before
+   any "stage complete" claim.
+
+If the brief is a vague mega-request, **narrow it with targeted questions first** — do not generate a
+thin, useless spec (§5, §14.1).
