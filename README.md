@@ -6,6 +6,9 @@ tests, vertical-slice planning, implementation, verification — producing struc
 **govern** implementation rather than decorate it, and feeding implementation discoveries back into
 those artifacts so they stay honest.
 
+**New here? Read [`USAGE.md`](./USAGE.md)** — the full usage guide, from install and first run
+through tiers, drift, the stop-gate, and the complete `th` CLI reference.
+
 See [`TwinHarness-Plan.md`](./TwinHarness-Plan.md) for the frozen spec and
 [`.omc/plans/ralplan-twinharness-plugin.md`](./.omc/plans/ralplan-twinharness-plugin.md) for the build plan.
 
