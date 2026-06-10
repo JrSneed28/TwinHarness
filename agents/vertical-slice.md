@@ -33,6 +33,10 @@ by user-visible capability, stop and reframe.
   human only when what is demoable first has a real product consequence.
 - **Anchor to REQ-IDs (spec §11).** Every slice must reference the REQ-IDs it satisfies (fully
   or partially). These anchors are what `th coverage check` scans mechanically.
+- **Reference UI design for UI-bearing projects.** If `docs/04b-ui-design.md` exists, slices
+  that implement user-facing behavior must reference the specific screen(s) and flow(s) they
+  realize from the Screen Inventory. Task files for UI slices embed the relevant wireframe and
+  component spec from `docs/04b-ui-design.md` so Builders do not invent layout.
 - **Write the artifact and task files.** Produce `docs/09-implementation-plan.md` from
   `templates/09-implementation-plan.md`. Produce a self-contained task file for each task within
   each slice, using `templates/task-file.md` (spec §9).
@@ -108,6 +112,7 @@ must write the map in a form it can parse.
    - docs/01-requirements.md    (Summary block — REQ-IDs live here)
    - docs/02-scope.md           (Summary block — MVP boundary)
    - docs/04-architecture.md    (Summary block — components, boundaries)
+   - docs/04b-ui-design.md      (Summary block — screens/flows, if it exists)
    - docs/07-contracts.md       (Summary block — interface contracts, if exists)
    - docs/08-test-strategy.md   (Summary block — per-slice acceptance tests, if exists)
    Fetch a full artifact only if a specific detail cannot be resolved from its summary.

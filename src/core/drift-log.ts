@@ -35,6 +35,11 @@ export interface DriftEntryInput {
   discovery: string;
   action: string;
   escalation: string;
+  /**
+   * Who logged this entry. Defaults to "Builder". Other callers (Orchestrator,
+   * human) pass their own label so the heading reflects the actual source.
+   */
+  source?: string;
 }
 
 /** The heading action-tag per layer (§10): derived auto-applies, requirement blocks. */
@@ -46,9 +51,13 @@ function actionTag(layer: "derived" | "requirement"): string {
  * Format a drift entry as the §10 markdown block (trailing blank line so blocks
  * are visually separated when appended). Aligns the field labels to match the
  * canonical example.
+ *
+ * The `source` field (default "Builder") is written into the parenthetical so
+ * entries from the Orchestrator or a human are attributed correctly.
  */
 export function formatDriftEntry(entry: DriftEntryInput): string {
-  const heading = `## ${entry.id}  (${entry.ref}, Builder)  — ${entry.layer} layer, ${actionTag(entry.layer)}`;
+  const src = entry.source ?? "Builder";
+  const heading = `## ${entry.id}  (${entry.ref}, ${src})  — ${entry.layer} layer, ${actionTag(entry.layer)}`;
   return [
     heading,
     `Discovery : ${entry.discovery}`,
@@ -58,7 +67,20 @@ export function formatDriftEntry(entry: DriftEntryInput): string {
   ].join("\n");
 }
 
-const HEADING_RE = /^##\s+(DRIFT-\d+)\s*\(([^)]*?)(?:,\s*Builder)?\)\s*—\s*(derived|requirement)\s+layer/;
+// Heading regex: captures the parenthetical content as a single group so the
+// parser can split off the optional ", <source>" suffix. This is
+// backward-compatible with old logs (no source or ", Builder") and handles any
+// new source string.
+const HEADING_RE = /^##\s+(DRIFT-\d+)\s*\(([^)]+)\)\s*—\s*(derived|requirement)\s+layer/;
+
+/** Strip the optional ", <source>" suffix from a parenthetical ref string. */
+function extractRef(paren: string): string {
+  // If the string contains a comma, the part after the last comma is the source
+  // label. Strip it, returning just the ref.
+  const lastComma = paren.lastIndexOf(",");
+  if (lastComma < 0) return paren.trim();
+  return paren.slice(0, lastComma).trim();
+}
 const FIELD_RE = /^(Discovery|Action|Escalation)\s*:\s*(.*)$/;
 
 /**
@@ -77,7 +99,7 @@ export function parseDriftEntries(text: string): DriftEntry[] {
       if (current) entries.push(current);
       current = {
         id: head[1]!,
-        ref: head[2]!.trim(),
+        ref: extractRef(head[2]!),
         layer: head[3]!,
         discovery: "",
         action: "",

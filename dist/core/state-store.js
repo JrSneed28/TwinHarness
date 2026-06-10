@@ -64,9 +64,9 @@ function readState(paths) {
  * observed and is *replaced, not duplicated* on resume (spec §18 idempotency).
  */
 function writeState(paths, state) {
-    fs.mkdirSync(paths.agenticDir, { recursive: true });
+    fs.mkdirSync(paths.stateDir, { recursive: true });
     const serialized = (0, state_schema_1.serializeState)(state);
-    const tmp = path.join(paths.agenticDir, `state.json.tmp-${process.pid}`);
+    const tmp = path.join(paths.stateDir, `state.json.tmp-${process.pid}`);
     fs.writeFileSync(tmp, serialized, "utf8");
     fs.renameSync(tmp, paths.stateFile);
 }

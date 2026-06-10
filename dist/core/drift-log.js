@@ -26,9 +26,13 @@ function actionTag(layer) {
  * Format a drift entry as the §10 markdown block (trailing blank line so blocks
  * are visually separated when appended). Aligns the field labels to match the
  * canonical example.
+ *
+ * The `source` field (default "Builder") is written into the parenthetical so
+ * entries from the Orchestrator or a human are attributed correctly.
  */
 function formatDriftEntry(entry) {
-    const heading = `## ${entry.id}  (${entry.ref}, Builder)  — ${entry.layer} layer, ${actionTag(entry.layer)}`;
+    const src = entry.source ?? "Builder";
+    const heading = `## ${entry.id}  (${entry.ref}, ${src})  — ${entry.layer} layer, ${actionTag(entry.layer)}`;
     return [
         heading,
         `Discovery : ${entry.discovery}`,
@@ -37,7 +41,20 @@ function formatDriftEntry(entry) {
         "",
     ].join("\n");
 }
-const HEADING_RE = /^##\s+(DRIFT-\d+)\s*\(([^)]*?)(?:,\s*Builder)?\)\s*—\s*(derived|requirement)\s+layer/;
+// Heading regex: captures the parenthetical content as a single group so the
+// parser can split off the optional ", <source>" suffix. This is
+// backward-compatible with old logs (no source or ", Builder") and handles any
+// new source string.
+const HEADING_RE = /^##\s+(DRIFT-\d+)\s*\(([^)]+)\)\s*—\s*(derived|requirement)\s+layer/;
+/** Strip the optional ", <source>" suffix from a parenthetical ref string. */
+function extractRef(paren) {
+    // If the string contains a comma, the part after the last comma is the source
+    // label. Strip it, returning just the ref.
+    const lastComma = paren.lastIndexOf(",");
+    if (lastComma < 0)
+        return paren.trim();
+    return paren.slice(0, lastComma).trim();
+}
 const FIELD_RE = /^(Discovery|Action|Escalation)\s*:\s*(.*)$/;
 /**
  * Parse all drift entries from a `drift-log.md` blob. Resolution notes
@@ -55,7 +72,7 @@ function parseDriftEntries(text) {
                 entries.push(current);
             current = {
                 id: head[1],
-                ref: head[2].trim(),
+                ref: extractRef(head[2]),
                 layer: head[3],
                 discovery: "",
                 action: "",

@@ -41,6 +41,12 @@ describe("REQ-PLUGIN-001: plugin manifest is valid and complete", () => {
     expect(typeof manifest.description).toBe("string");
   });
 
+  it("plugin.json version === package.json version", () => {
+    const plugin = readJson(".claude-plugin/plugin.json");
+    const pkg = readJson("package.json");
+    expect(plugin.version).toBe(pkg.version);
+  });
+
   it("marketplace.json parses, and its plugin entry matches plugin.json", () => {
     const marketplace = readJson(".claude-plugin/marketplace.json");
     expect(typeof marketplace.name).toBe("string");
@@ -87,8 +93,8 @@ describe("REQ-PLUGIN-003: every component resolves `th` without relying on PATH"
     .filter((f) => f.endsWith(".md"))
     .map((f) => `agents/${f}`);
 
-  it("expected component counts (5 agents, 4 commands, 1 skill)", () => {
-    expect(agentFiles).toHaveLength(5);
+  it("expected component counts (7 agents, 4 commands, 1 skill)", () => {
+    expect(agentFiles).toHaveLength(7);
     expect(commandFiles).toHaveLength(4);
   });
 

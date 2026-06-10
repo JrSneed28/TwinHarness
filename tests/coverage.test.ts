@@ -126,3 +126,94 @@ describe("REQ-COVERAGE-006: custom --reqs/--plan/--tests locations are honored",
     expect(res.data?.covered).toBe(1);
   });
 });
+
+describe("REQ-COVERAGE-007: MVP scope filtering via docs/02-scope.md", () => {
+  it("applies MVP filter when scope file has ## MVP Scope section", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    // Requirements: REQ-001 and REQ-002.
+    writeFile(tp, "docs/01-requirements.md", "REQ-001 and REQ-002.\n");
+    // Scope file: MVP only includes REQ-001.
+    writeFile(
+      tp,
+      "docs/02-scope.md",
+      "# Scope\n\n## MVP Scope\n\nREQ-001 is MVP.\n\n## Out of Scope\n\nREQ-002 is post-MVP.\n",
+    );
+    writeFile(tp, "docs/09-implementation-plan.md", "Slice covers REQ-001.\n");
+    writeFile(tp, "tests/feature.test.ts", "// REQ-001\n");
+
+    const res = runCoverageCheck(tp.paths);
+    expect(res.ok).toBe(true);
+    // Only REQ-001 is checked (MVP filter applied).
+    expect(res.data?.total).toBe(1);
+    expect(res.data?.covered).toBe(1);
+    expect(res.human).toContain("MVP filter: applied");
+  });
+
+  it("falls back to all REQ-IDs when no ## MVP Scope section exists", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/01-requirements.md", "REQ-001 and REQ-002.\n");
+    writeFile(tp, "docs/02-scope.md", "# Scope\n\nNo MVP section here.\n");
+    writeFile(tp, "docs/09-implementation-plan.md", "REQ-001 REQ-002.\n");
+    writeFile(tp, "tests/feature.test.ts", "// REQ-001 REQ-002\n");
+
+    const res = runCoverageCheck(tp.paths);
+    expect(res.ok).toBe(true);
+    expect(res.data?.total).toBe(2);
+    expect(res.human).toContain("MVP filter: none");
+  });
+
+  it("falls back when scope file is absent", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
+    writeFile(tp, "docs/09-implementation-plan.md", "REQ-001.\n");
+    writeFile(tp, "tests/feature.test.ts", "// REQ-001\n");
+
+    const res = runCoverageCheck(tp.paths);
+    expect(res.ok).toBe(true);
+    expect(res.human).toContain("MVP filter: none");
+  });
+});
+
+describe("REQ-COVERAGE-008: multi-language test files are scanned (full recursion)", () => {
+  it("Python test file (test_*.py) is scanned for REQ-IDs", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
+    writeFile(tp, "docs/09-implementation-plan.md", "REQ-001.\n");
+    // Python test file.
+    writeFile(tp, "tests/test_req001_feature.py", "# REQ-001 is tested here\n");
+
+    const res = runCoverageCheck(tp.paths);
+    expect(res.ok).toBe(true);
+    expect(res.data?.covered).toBe(1);
+  });
+
+  it("Go test file (*_test.go) is scanned for REQ-IDs", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
+    writeFile(tp, "docs/09-implementation-plan.md", "REQ-001.\n");
+    // Go test file.
+    writeFile(tp, "tests/feature_test.go", "// REQ-001 tested\n");
+
+    const res = runCoverageCheck(tp.paths);
+    expect(res.ok).toBe(true);
+    expect(res.data?.covered).toBe(1);
+  });
+
+  it("deeply nested test file (tests/a/b/c.test.ts) is scanned (full recursion)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
+    writeFile(tp, "docs/09-implementation-plan.md", "REQ-001.\n");
+    // Deeply nested test.
+    writeFile(tp, "tests/a/b/c.test.ts", "// REQ-001\n");
+
+    const res = runCoverageCheck(tp.paths);
+    expect(res.ok).toBe(true);
+    expect(res.data?.covered).toBe(1);
+  });
+});

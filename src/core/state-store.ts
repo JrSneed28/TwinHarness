@@ -43,9 +43,9 @@ export function readState(paths: ProjectPaths): ReadStateResult {
  * observed and is *replaced, not duplicated* on resume (spec §18 idempotency).
  */
 export function writeState(paths: ProjectPaths, state: TwinHarnessState): void {
-  fs.mkdirSync(paths.agenticDir, { recursive: true });
+  fs.mkdirSync(paths.stateDir, { recursive: true });
   const serialized = serializeState(state);
-  const tmp = path.join(paths.agenticDir, `state.json.tmp-${process.pid}`);
+  const tmp = path.join(paths.stateDir, `state.json.tmp-${process.pid}`);
   fs.writeFileSync(tmp, serialized, "utf8");
   fs.renameSync(tmp, paths.stateFile);
 }

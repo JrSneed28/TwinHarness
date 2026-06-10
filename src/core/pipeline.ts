@@ -21,9 +21,9 @@ export const ARTIFACT_PIPELINE: string[] = [
   "docs/05-adrs",
   "docs/06-technical-design.md",
   "docs/07-contracts.md",
-  "docs/08-test-strategy.md",
   "docs/08a-security-threat-model.md",
   "docs/08b-failure-edge-cases.md",
+  "docs/08-test-strategy.md",
   "docs/09-implementation-plan.md",
   "docs/10-verification-report.md",
 ];

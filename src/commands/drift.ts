@@ -56,6 +56,8 @@ export interface DriftAddOptions {
   discovery?: string;
   action?: string;
   escalation?: string;
+  /** Who is logging this entry (default "Builder"). Orchestrator, human, etc. */
+  source?: string;
 }
 
 /** Read drift-log.md, creating it from the header if absent. */
@@ -113,6 +115,7 @@ export function runDriftAdd(paths: ProjectPaths, opts: DriftAddOptions): Command
     discovery: opts.discovery ?? "",
     action: opts.action ?? "",
     escalation,
+    source: opts.source,
   });
   appendDriftLog(paths, block);
 
@@ -153,9 +156,14 @@ export function runDriftList(paths: ProjectPaths): CommandResult {
 }
 
 /**
- * `th drift resolve <id>` — append an append-only resolution note AND decrement
- * `state.drift_open_blocking` (floor 0). This is how the human clears a §10
- * blocking escalation so the stop-gate unblocks.
+ * `th drift resolve <id>` — append an append-only resolution note. Only
+ * decrements `state.drift_open_blocking` when the resolved entry is a
+ * `requirement`-layer entry (derived entries get the note but no counter change).
+ *
+ * Hardened validations:
+ * - The id must match an existing drift entry (no unknown ids).
+ * - Double-resolving (a `## <id> — resolved` note already present) is rejected.
+ * - Derived-layer entries: counter unchanged, human output says so explicitly.
  */
 export function runDriftResolve(paths: ProjectPaths, id?: string): CommandResult {
   if (!id) return failure({ human: "usage: th drift resolve <DRIFT-NNN>" });
@@ -169,14 +177,44 @@ export function runDriftResolve(paths: ProjectPaths, id?: string): CommandResult
     });
   }
 
+  // Parse the drift log to validate the id and detect double-resolves.
+  const text = fs.existsSync(paths.driftLog) ? fs.readFileSync(paths.driftLog, "utf8") : "";
+  const entries = parseDriftEntries(text);
+
+  const entry = entries.find((e) => e.id === id);
+  if (!entry) {
+    return failure({
+      human: `Drift entry not found: ${id}. Known entries: ${entries.map((e) => e.id).join(", ") || "(none)"}`,
+      data: { error: "drift_not_found", id },
+    });
+  }
+
+  // Check for a pre-existing resolution note (double-resolve guard).
+  const alreadyResolved = text
+    .split(/\r?\n/)
+    .some((line) => line.trim() === `## ${id} — resolved`);
+  if (alreadyResolved) {
+    return failure({
+      human: `${id} is already resolved. Double-resolving is not allowed.`,
+      data: { error: "already_resolved", id },
+    });
+  }
+
   appendDriftLog(paths, `## ${id} — resolved\n`);
 
-  const driftOpenBlocking = Math.max(0, r.state.drift_open_blocking - 1);
-  writeState(paths, { ...r.state, drift_open_blocking: driftOpenBlocking });
+  const isBlocking = entry.layer === "requirement";
+  let driftOpenBlocking = r.state.drift_open_blocking;
+  if (isBlocking) {
+    driftOpenBlocking = Math.max(0, driftOpenBlocking - 1);
+    writeState(paths, { ...r.state, drift_open_blocking: driftOpenBlocking });
+  }
 
-  structuredLog({ cmd: "drift resolve", id, drift_open_blocking: driftOpenBlocking });
+  structuredLog({ cmd: "drift resolve", id, layer: entry.layer, drift_open_blocking: driftOpenBlocking });
+  const human = isBlocking
+    ? `${id} marked resolved (requirement layer, blocking cleared). Open blocking drift: ${driftOpenBlocking}.`
+    : `${id} marked resolved (derived layer — no blocking counter change). Open blocking drift: ${driftOpenBlocking}.`;
   return success({
-    data: { id, drift_open_blocking: driftOpenBlocking },
-    human: `${id} marked resolved. Open blocking drift: ${driftOpenBlocking}.`,
+    data: { id, layer: entry.layer, drift_open_blocking: driftOpenBlocking },
+    human,
   });
 }

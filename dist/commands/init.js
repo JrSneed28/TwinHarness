@@ -65,14 +65,14 @@ function runInit(paths, opts) {
         fs.mkdirSync(paths.docsDir, { recursive: true });
         created.push("docs/");
     }
-    fs.mkdirSync(paths.agenticDir, { recursive: true });
+    fs.mkdirSync(paths.stateDir, { recursive: true });
     const existing = (0, state_store_1.readState)(paths);
     if (existing.exists && !opts.force) {
-        skipped.push(".agentic-sdlc/state.json (already exists; use --force to reset)");
+        skipped.push(".twinharness/state.json (already exists; use --force to reset)");
     }
     else {
         (0, state_store_1.writeState)(paths, (0, state_schema_1.initialState)());
-        created.push(".agentic-sdlc/state.json");
+        created.push(".twinharness/state.json");
     }
     if (!fs.existsSync(paths.driftLog)) {
         fs.writeFileSync(paths.driftLog, DRIFT_LOG_HEADER, "utf8");

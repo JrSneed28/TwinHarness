@@ -111,6 +111,47 @@ describe("REQ-TRACE-005: nothing is persisted — rendered on demand (§17)", ()
   });
 });
 
+describe("REQ-TRACE-007: per-REQ SLICE/TASK association (not all tokens for every row)", () => {
+  it("REQ-001 only gets SLICE/TASK tokens from its own line, not from unrelated slices", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/01-requirements.md", "REQ-001 first.\nREQ-002 second.\n");
+
+    // Plan: SLICE-1 mentions REQ-001; SLICE-2 mentions REQ-002; SLICE-3 not tied to REQ-001.
+    const plan = [
+      "### SLICE-1 — Feature A",
+      "- **REQ-IDs satisfied:** REQ-001",
+      "- **Components touched:** `api-layer`",
+      "",
+      "### SLICE-2 — Feature B",
+      "- **REQ-IDs satisfied:** REQ-002",
+      "- **Components touched:** `ui-layer`",
+      "",
+      "### SLICE-3 — Feature C",
+      "- **REQ-IDs satisfied:** REQ-001, REQ-002",
+      "- **Components touched:** `db-layer`",
+      "",
+    ].join("\n");
+    writeFile(tp, "docs/09-implementation-plan.md", plan);
+
+    const res = runTraceRender(tp.paths);
+    expect(res.ok).toBe(true);
+    const rows = res.data?.rows as import("../src/commands/trace").TraceRow[];
+    const row1 = rows.find((r) => r.req === "REQ-001")!;
+    const row2 = rows.find((r) => r.req === "REQ-002")!;
+
+    // REQ-001 is in SLICE-1 and SLICE-3, NOT SLICE-2.
+    expect(row1.sliceTask).toContain("SLICE-1");
+    expect(row1.sliceTask).toContain("SLICE-3");
+    expect(row1.sliceTask).not.toContain("SLICE-2");
+
+    // REQ-002 is in SLICE-2 and SLICE-3, NOT SLICE-1.
+    expect(row2.sliceTask).toContain("SLICE-2");
+    expect(row2.sliceTask).toContain("SLICE-3");
+    expect(row2.sliceTask).not.toContain("SLICE-1");
+  });
+});
+
 describe("REQ-TRACE-006: missing requirements file fails clearly", () => {
   it("no requirements file → failure no_requirements", () => {
     tp = makeTempProject();

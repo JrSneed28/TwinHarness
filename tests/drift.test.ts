@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runDriftAdd, runDriftList, runDriftResolve } from "../src/commands/drift";
+import { parseDriftEntries } from "../src/core/drift-log";
 import { readState } from "../src/core/state-store";
 
 let tp: TempProject | undefined;
@@ -103,11 +104,14 @@ describe("REQ-DRIFT-005: resolve decrements drift_open_blocking (floor 0) and ap
     expect(driftLog(tp)).toContain("## DRIFT-001 — resolved");
   });
 
-  it("resolve floors at 0 (never negative)", () => {
+  it("resolving a non-existent id returns drift_not_found (hardened validation)", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
+    // No drift entries exist → DRIFT-001 is not found.
     const res = runDriftResolve(tp.paths, "DRIFT-001");
-    expect(res.data?.drift_open_blocking).toBe(0);
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("drift_not_found");
+    // State unchanged.
     expect(readState(tp.paths).state?.drift_open_blocking).toBe(0);
   });
 });
@@ -124,6 +128,81 @@ describe("REQ-DRIFT-006: the log is append-only — earlier entries survive late
     expect(log).toContain("first discovery");
     expect(log).toContain("## DRIFT-002");
     expect(log).toContain("second discovery");
+  });
+});
+
+describe("REQ-DRIFT-008: drift resolve hardening — unknown id, double-resolve, derived layer", () => {
+  it("resolving a derived entry does NOT change drift_open_blocking", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runDriftAdd(tp.paths, { layer: "derived", action: "auto-applied" });
+
+    const before = readState(tp.paths).state!.drift_open_blocking;
+    const res = runDriftResolve(tp.paths, "DRIFT-001");
+    expect(res.ok).toBe(true);
+    // Derived entries do not affect the blocking counter.
+    expect(readState(tp.paths).state?.drift_open_blocking).toBe(before);
+    expect(res.human).toContain("derived layer");
+  });
+
+  it("double-resolve is rejected with already_resolved", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runDriftAdd(tp.paths, { layer: "requirement", action: "blocked" });
+    runDriftResolve(tp.paths, "DRIFT-001");
+
+    const res = runDriftResolve(tp.paths, "DRIFT-001");
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("already_resolved");
+  });
+
+  it("resolving a requirement entry decrements the blocking counter", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runDriftAdd(tp.paths, { layer: "requirement", action: "blocked" });
+    expect(readState(tp.paths).state?.drift_open_blocking).toBe(1);
+
+    const res = runDriftResolve(tp.paths, "DRIFT-001");
+    expect(res.ok).toBe(true);
+    expect(readState(tp.paths).state?.drift_open_blocking).toBe(0);
+    expect(res.human).toContain("requirement layer");
+  });
+});
+
+describe("REQ-DRIFT-009: drift add --source", () => {
+  it("custom source appears in the drift log heading", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const res = runDriftAdd(tp.paths, {
+      layer: "derived",
+      ref: "SLICE-1 / TASK-001",
+      source: "Orchestrator",
+    });
+    expect(res.ok).toBe(true);
+    const log = fs.readFileSync(tp.paths.driftLog, "utf8");
+    expect(log).toContain(", Orchestrator)");
+  });
+
+  it("default source (no --source) uses Builder in heading", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runDriftAdd(tp.paths, { layer: "derived", ref: "SLICE-1 / TASK-001" });
+    const log = fs.readFileSync(tp.paths.driftLog, "utf8");
+    expect(log).toContain(", Builder)");
+  });
+
+  it("parseDriftEntries strips the source to keep only the ref", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runDriftAdd(tp.paths, {
+      layer: "derived",
+      ref: "SLICE-2 / TASK-012",
+      source: "Human",
+      discovery: "found it",
+    });
+    const log = fs.readFileSync(tp.paths.driftLog, "utf8");
+    const entries = parseDriftEntries(log);
+    expect(entries[0]!.ref).toBe("SLICE-2 / TASK-012");
   });
 });
 

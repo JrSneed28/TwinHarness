@@ -21,7 +21,7 @@ You decide *what runs*; the `th` CLI records *what happened*. Keep that boundary
 4. **Route the right prior context** — summaries by default, full artifacts on demand (§9).
 5. **Enforce coherence gates** (Critic) and the **human-approval gates** (§8).
 6. **Own state.json and the dependency graph**; trigger cascade re-verification on upstream change
-   (§18) via `th stale --since <hash>`.
+   (§18) via `th stale --artifact <file>` (run before re-registering).
 7. **Handle drift** (§10): auto-apply derived-layer drift, escalate requirement-level drift.
 8. **Start implementation only** when the tier's prerequisites and an approved slice plan exist.
 
@@ -36,22 +36,25 @@ You decide *what runs*; the `th` CLI records *what happened*. Keep that boundary
 
 **Tier 1 — Simple** (small utilities, scripts, tiny apps):
 Requirements → Scope → Architecture (light; Security + Failure Modes as folded sections) →
-Slice Plan → Code → Verify.
+[UI Design — if UI present] →
+Slice Plan → Code → Documentation (readme) → Verify.
 
 **Tier 2 — Medium** (normal apps and tools):
 Requirements → Scope → Domain Model →
 Architecture (Security + Failure Modes as folded sections) →
+[UI Design — if UI present] →
 Contracts → Test Strategy →
-Slice Plan → Code → Verify.
+Slice Plan → Code → Documentation (readme + user-guide + api-reference) → Verify.
 
 **Tier 3 — Complex / Critical** (serious or high-risk systems):
 Requirements → Scope → Domain Model → Architecture →
+[UI Design — if UI present] →
 ADRs (§15.5) → Detailed Technical Design (§15.6) →
 Contracts (§15.7) →
 **Security & Threat Modeling** (§15.S, graduated stage → `08a-security-threat-model.md`) →
 **Failure Modes & Edge Cases** (§15.F, graduated stage → `08b-failure-edge-cases.md`) →
 Test Strategy (§15.8) →
-Slice Plan → Code → Final Verification + traceability view.
+Slice Plan → Code → Documentation (full suite) → Final Verification + traceability view.
 
 **Security/Failure Modes graduation rule (§13):** by default, Security and Failure Modes are
 folded sections inside `04-architecture.md`. They graduate to their own stages (§15.S, §15.F) and
@@ -138,7 +141,7 @@ th tier veto-check <brief.json>
 This command is **not advisory** — it is a mechanical floor enforced as an exit-code gate. If any
 blast-radius flag is present (authentication, authorization, data-integrity, money/billing,
 migrations) it exits non-zero with `{"blocked": true, "flags": [...]}` and **Tier 0 is forbidden**,
-regardless of apparent size. The Stop/PreToolUse hook wires this check alongside `th state verify`;
+regardless of apparent size. The Stop hook wires this check alongside `th state verify`;
 you cannot claim "done" while a veto is blocking. Note: `th state set tier T0` itself refuses to
 write when blast-radius flags are present in state — the schema is the last line of defence.
 
@@ -181,9 +184,9 @@ onward.
 th artifact register docs/0X-<name>.md --version N
 ```
 
-This records the content hash and version in `.agentic-sdlc/state.json` under
-`approved_artifacts`. Downstream stages consult this record; `th stale --since <hash>` uses it
-to diff-scope cascade re-verification when an upstream artifact changes (§18).
+This records the content hash and version in `.twinharness/state.json` under
+`approved_artifacts`. Downstream stages consult this record; `th stale --artifact <file>` uses it
+to identify registered downstream artifacts when an upstream artifact changes (§18).
 
 ## Domain Model vs. Architecture gate behavior (Slice 3)
 
@@ -195,6 +198,45 @@ to diff-scope cascade re-verification when an upstream artifact changes (§18).
   as explicit AskUserQuestion calls. Do not add gates for decisions the user can change cheaply.
   After the human answers those questions and the Critic passes, register the artifact and advance
   state.
+
+## Stage 4b — UI Design (conditional: only when the project has a user interface)
+
+Stage 4b engages after Architecture is approved and before Contracts/Test Strategy. The
+Orchestrator decides engagement during tier classification: any project with a web UI, mobile
+UI, desktop UI, or rich interactive TUI engages Stage 4b. CLI tools, background services, and
+pure API libraries do not.
+
+Delegate to the **UI Designer agent (`agents/ui-designer.md`) in a FRESH CONTEXT** (§6.3
+rationale: user-centered design is contaminated by backend-architecture thinking; a fresh
+context uncontaminated by the design-stage produces cleaner, user-centered results).
+
+**Human gate on design direction (taste-driven — §2).** Visual direction — navigation model,
+layout pattern, visual theme — is taste-driven and irreversible once slices build against it.
+Per the §2 governing axis, taste-driven decisions get human gates. The UI Designer agent
+presents 2–3 distinct directions to the human via `AskUserQuestion` using the `preview` field
+(ASCII mockups side by side) BEFORE detailing any direction. Do not proceed past this gate
+until the human selects a direction.
+
+After direction sign-off, the detailed design streams. Route the completed artifact to the
+**Critic agent in `ui-design` mode** (fresh context):
+
+- Check `th revise status ui-design --json` → if `escalate: true`, surface open grounded issues
+  to the human and stop (cap reached, default 3 rounds).
+- Critic **PASS** → register the artifact and advance state. Zero issues is a valid terminal
+  state.
+- Critic **FAIL** → run `th revise bump ui-design`, route grounded defects back to the UI
+  Designer agent, re-run. Repeat until PASS or escalation.
+
+Register and advance state after Critic PASS:
+
+```
+th artifact register docs/04b-ui-design.md --version 1
+th state set current_stage ui-design
+```
+
+**No second human gate after direction sign-off** — the Critic gates quality. The Vertical
+Slice agent (Stage 9) receives the `docs/04b-ui-design.md` Summary block so slices for
+UI-bearing projects reference specific screens and flows.
 
 ## Stage 9 — Implementation Planning & Vertical Slicing
 
@@ -229,15 +271,30 @@ and coverage check.
 
 ## Parallel builds (§16)
 
-Before spawning any Builder, compute the wave schedule:
+Before spawning any Builder, sync the slice plan into state and then compute the wave schedule.
+
+**Step 1 — Sync the slice plan into state.**
+
+After the coverage gate passes, run:
+
+```
+th slices sync
+```
+
+This parses `docs/09-implementation-plan.md` and writes all slices into `state.slices`. If
+slices already exist in state (e.g., on a resume), their statuses are preserved — `th slices
+sync` is idempotent with respect to status. `th build plan` reads `state.slices`, not the
+raw document, so this sync must run before the wave schedule is computed.
+
+**Step 2 — Compute the wave schedule.**
 
 ```
 th build plan
 ```
 
-`th build plan` reads the per-slice `components touched` fields from `docs/09-implementation-plan.md`
-and outputs a **wave schedule** — an ordered list of waves, each wave containing the slices whose
-component sets are mutually disjoint. This is the mechanical realization of the per-slice
+`th build plan` reads `state.slices` (populated by `th slices sync` above) and outputs a
+**wave schedule** — an ordered list of waves, each wave containing the slices whose component
+sets are mutually disjoint. This is the mechanical realization of the per-slice
 "components touched" field; the command records and computes, never decides.
 
 **Wave execution rules:**
@@ -257,8 +314,18 @@ source of truth.
 State update after coverage gate passes:
 
 ```
+th slices sync
 th artifact register docs/09-implementation-plan.md --version 1
 th state set current_stage implementation-planning
+```
+
+`th slices sync` must run before `th build plan` (see "Parallel builds" section below); running
+it here at the coverage gate ensures state is ready when Builders are spawned. Update individual
+slice statuses as work progresses:
+
+```
+th slice set-status <SLICE-ID> in-progress   # when a Builder starts a slice
+th slice set-status <SLICE-ID> complete      # after the Critic code-review PASS for a slice
 ```
 
 **No human gate** (spec §8, §15.9). The slice plan streams. The human may interrupt at any point
@@ -317,16 +384,59 @@ Your handling:
    affected artifacts, and clear the block:
    ```
    th drift resolve <DRIFT-ID>
-   th state set drift_open_blocking 0
    ```
+   (`th drift resolve` decrements `drift_open_blocking` correctly; do not set it manually — that
+   would clobber other still-open blocking drifts.)
 4. Resume the Builder at the paused task.
 
 The stop-gate blocks completion while `drift_open_blocking > 0` — you cannot truthfully claim
 Stage 10 complete until it is zero.
 
+## Stage 10.5 — Documentation
+
+After all slices have passed the code-review Critic loop and before Final Verification, run
+the Documentation stage. Documentation at this position describes drift-corrected reality —
+not the upstream plan.
+
+Delegate to the **Doc-Writer agent (`agents/doc-writer.md`)** with the tier-appropriate mode
+set. Modes are run in sequence; each may be a separate delegation:
+
+| Tier | Modes |
+|------|-------|
+| T1 | `readme` only |
+| T2 | `readme`, `user-guide`, `api-reference` |
+| T3 | `readme`, `user-guide`, `api-reference`, `developer-guide`, `changelog` |
+
+**Summaries handoff (§9).** Pass Summary blocks of `docs/01-requirements.md`,
+`docs/02-scope.md`, `docs/07-contracts.md` (if exists), and `docs/09-implementation-plan.md`.
+The doc-writer reads the full `docs/07-contracts.md` for `api-reference` mode — that is the
+one exception to the summaries rule, because contracts are source of truth for the API
+reference.
+
+After each mode completes, route to the **Critic agent in `documentation` mode** (fresh
+context):
+
+- Check `th revise status documentation --json` → if `escalate: true`, surface open grounded
+  issues to the human and stop (cap reached, default 3 rounds).
+- Critic **PASS** → proceed to the next mode (or to Final Verification if all modes are done).
+  Zero issues is a valid terminal state.
+- Critic **FAIL** → run `th revise bump documentation`, route grounded defects back to the
+  Doc-Writer agent, re-run. Repeat until PASS or escalation.
+
+**No human gate** (Critic gates). The human may interrupt at any point but is not required to
+approve. Documentation is a derived layer; any discovery that contradicts upstream artifacts is
+logged as a derived-layer drift entry by the doc-writer.
+
+Advance state after all modes pass:
+
+```
+th state set current_stage documentation
+```
+
 ## Stage 11 — Final Verification (§17) — IMPLEMENTED (Slice 6)
 
-After all slices are built and have passed the code-review Critic loop, drive Final Verification.
+After all slices are built and have passed the code-review Critic loop, and after Stage 10.5
+Documentation has passed the Critic, drive Final Verification.
 
 **On-demand traceability — never a maintained file.** Traceability is always available on demand
 via:
@@ -369,35 +479,41 @@ re-verify of every downstream artifact.
 
 ### Protocol
 
-**1. Re-register the changed artifact.**
+**1. Get the stale set BEFORE re-registering.**
 
 ```
-th artifact register docs/<changed>.md --version N
+th stale --artifact docs/<changed>.md
 ```
 
-This records the new hash in `state.json`.
+Run this *before* re-registering the changed artifact. `th stale --artifact` compares the
+recorded content hash against the file on disk and returns all registered downstream artifacts
+in pipeline order (downstream-of-changed-artifact, registered artifacts only — not a diff of
+summaries; every registered downstream artifact is returned when the file has changed). Capture
+this stale set; it is your re-verification scope. If you re-register first, the recorded hash
+updates and `th stale` would find no change.
 
-**2. Get only the diff-scoped stale set.**
+**2. Re-register the changed artifact.**
 
 ```
-th stale --since <old-hash>
+th artifact register docs/<changed>.md --version N+1
 ```
 
-This diffs the old and new upstream summaries and returns only the downstream artifacts whose
-summaries are touched by the actual change. Artifacts not affected by the diff are not in the
-stale set — they are not re-verified. This is the mechanism that prevents a re-verify storm.
+This records the new content hash in `state.json`.
 
 **3. Re-run the Critic diff-scoped only.**
 
-For each artifact in the stale set, route to the **Critic in the matching mode** with the diff of
-the upstream summary as context (not the full upstream artifact). Check the cap first:
+For each artifact in the stale set returned in Step 1, route to the **Critic in the matching
+mode** with the diff of the upstream summary as context (not the full upstream artifact). Check
+the cap first:
 
 ```
 th revise status <mode> --json
 ```
 
 The Critic checks only whether the downstream artifact is coherent against the *changed portion*
-of the upstream — not a full re-review from scratch.
+of the upstream — not a full re-review from scratch. The stale set contains all registered
+downstream artifacts in pipeline order; route the Critic to review only against the upstream
+diff, not the entire upstream artifact.
 
 **4. Escalate genuine conflicts; clear clean ones.**
 
@@ -415,6 +531,25 @@ of the upstream — not a full re-review from scratch.
 - The human correctness gate on `docs/10-verification-report.md` is unaffected by cascade
   re-verification; if the report itself is in the stale set, re-run the full Final Verification
   flow for it.
+
+---
+
+## Model & effort routing (automatic)
+
+The Orchestrator selects the model for each agent spawn. The frontmatter `model:` value is the
+default; escalate to opus when the situation matches an escalation row below. Pass a model
+override in the delegation prompt when escalating; otherwise the frontmatter default applies.
+
+| Situation | Model |
+|---|---|
+| Default (all agents) | frontmatter default (sonnet; opus for orchestrator & vertical-slice) |
+| Spec in `architecture`, `security`, `failure-modes`, or `technical-design` mode on a T3 or blast-radius project | opus |
+| Critic in `slice` or `code-review` mode on a blast-radius project | opus |
+| Builder on a slice touching a blast-radius component | opus |
+| Trivial mechanical summarization (e.g. drift-log recap) | haiku |
+
+**Rationale:** effort scales with tier and blast radius, like every other TwinHarness control.
+Cheap by default, expensive where wrong answers are expensive.
 
 ---
 

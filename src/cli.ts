@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { resolveProjectPaths } from "./core/paths";
-import { type CommandResult, renderResult, failure } from "./core/output";
+import { type CommandResult, renderResult, failure, success } from "./core/output";
 import { runInit } from "./commands/init";
 import { runStateGet, runStateSet, runStateStatus, runStateVerify } from "./commands/state";
 import { runReviseBump, runReviseStatus, runReviseReset } from "./commands/revise";
@@ -14,13 +15,14 @@ import { runDriftAdd, runDriftList, runDriftResolve } from "./commands/drift";
 import { runTraceRender } from "./commands/trace";
 import { runStale } from "./commands/stale";
 import { runHookStopGate, type StopHookInput } from "./commands/hook";
+import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
 
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
-  th init [--force]                 Scaffold docs/, .agentic-sdlc/state.json, drift-log.md
+  th init [--force]                 Scaffold docs/, .twinharness/state.json, drift-log.md
   th state get [dotted.path]        Print state.json (or one value)
-  th state set <dotted.key> <value> Patch state.json (refuses invalid results)
+  th state set <dotted.key> <value> Patch state.json (refuses invalid results; rejects unknown keys)
   th state status                   Human-readable tier/stage/gate snapshot
   th state verify                   Validate state.json (exit 0 = valid)
   th revise bump <mode> [--cap N]   Increment revise-loop count (computes escalate = count >= cap)
@@ -30,15 +32,22 @@ Usage:
   th tier veto-check <brief.json>   Mechanical veto gate (exit 3 when a blast-radius flag forbids T0)
   th artifact register <file> --version <n>  Content-hash a file and record it in approved_artifacts
   th artifact list                  List recorded approved artifacts (file, version, hash)
-  th coverage check [--reqs F] [--plan F] [--tests D]  Verify every REQ-ID maps to ≥1 slice and ≥1 test
+  th coverage check [--reqs F] [--plan F] [--tests D] [--scope F]
+                                    Verify every (MVP) REQ-ID maps to ≥1 slice and ≥1 test
   th build plan [--include-done]    Schedule slices into conflict-free build waves (§16: disjoint parallelize, shared serialize)
   th anchors scan [--scan-reqs] [--scan-tests] [--scan-code] [--strict]  Map REQ-anchors across docs/tests/src; report orphans
   th trace render                   Render the §17 traceability view from anchors (on demand; never stored)
   th stale --since <hash>           Compute the diff-scoped downstream artifacts made stale by an upstream change (§18)
-  th drift add --layer <derived|requirement> [--ref ...] [--discovery ...] [--action ...] [--escalation ...]  Append a §10 drift entry
+  th stale --artifact <file>        Same as --since but look up the artifact by file key (safe after re-register)
+  th slices sync [--plan F] [--dry-run] [--remove-missing]
+                                    Upsert state.slices from the implementation plan
+  th slice set-status <SLICE-ID> <status>  Set a single slice's status (pending|in-progress|done|blocked)
+  th drift add --layer <derived|requirement> [--ref ...] [--discovery ...] [--action ...] [--escalation ...] [--source ...]
+                                    Append a §10 drift entry
   th drift list                     List drift entries + open blocking count
-  th drift resolve <DRIFT-NNN>      Append a resolution note and clear one blocking drift
+  th drift resolve <DRIFT-NNN>      Append a resolution note; decrement blocking counter only for requirement-layer entries
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
+  th version                        Print the CLI version
   th help                           Show this help
 
 Global flags:
@@ -47,19 +56,24 @@ Global flags:
   --cap <n>         (revise) Override the revise-loop cap (default 3)
   --version <n>     (artifact register) Artifact version (positive integer)
   --reqs <file>     (coverage) Requirements file (default docs/01-requirements.md)
-  --plan <file>     (coverage) Implementation-plan file (default docs/09-implementation-plan.md)
+  --plan <file>     (coverage, slices sync) Implementation-plan file (default docs/09-implementation-plan.md)
   --tests <dir>     (coverage) Tests directory (default tests)
+  --scope <file>    (coverage) Scope file for MVP filtering (default docs/02-scope.md)
   --include-done    (build plan) Include slices with status done (default: only unfinished)
   --scan-reqs       (anchors) Scan docs/ for REQ-anchors
   --scan-tests      (anchors) Scan tests/ for REQ-anchors
   --scan-code       (anchors) Scan src/ for REQ-anchors
   --strict          (anchors) Exit 1 when orphan anchors are found
-  --since <hash>    (stale) Recorded hash of the upstream artifact to check (required)
+  --since <hash>    (stale) Recorded hash of the upstream artifact to check
+  --artifact <file> (stale) Root-relative file key of the artifact to check
   --layer <l>       (drift add) derived | requirement (required)
   --ref <s>         (drift add) SLICE-x / TASK-y reference
   --discovery <s>   (drift add) What was discovered
   --action <s>      (drift add) Action taken
   --escalation <s>  (drift add) Escalation status
+  --source <s>      (drift add) Who logged the entry (default: Builder)
+  --dry-run         (slices sync) Compute without writing state
+  --remove-missing  (slices sync) Remove slices absent from the plan
   --force           (init) Reset existing state.json`;
 
 interface ParsedArgs {
@@ -73,17 +87,22 @@ interface ParsedArgs {
     reqs?: string;
     plan?: string;
     tests?: string;
+    scope?: string;
     includeDone: boolean;
     scanReqs: boolean;
     scanTests: boolean;
     scanCode: boolean;
     strict: boolean;
     since?: string;
+    artifact?: string;
     layer?: string;
     ref?: string;
     discovery?: string;
     action?: string;
     escalation?: string;
+    source?: string;
+    dryRun: boolean;
+    removeMissing: boolean;
   };
 }
 
@@ -97,17 +116,22 @@ function parseArgs(argv: string[]): ParsedArgs {
   let reqs: string | undefined;
   let plan: string | undefined;
   let tests: string | undefined;
+  let scope: string | undefined;
   let includeDone = false;
   let scanReqs = false;
   let scanTests = false;
   let scanCode = false;
   let strict = false;
   let since: string | undefined;
+  let artifact: string | undefined;
   let layer: string | undefined;
   let ref: string | undefined;
   let discovery: string | undefined;
   let action: string | undefined;
   let escalation: string | undefined;
+  let source: string | undefined;
+  let dryRun = false;
+  let removeMissing = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "--json") json = true;
@@ -124,6 +148,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (a.startsWith("--plan=")) plan = a.slice("--plan=".length);
     else if (a === "--tests") tests = argv[++i];
     else if (a.startsWith("--tests=")) tests = a.slice("--tests=".length);
+    else if (a === "--scope") scope = argv[++i];
+    else if (a.startsWith("--scope=")) scope = a.slice("--scope=".length);
     else if (a === "--include-done") includeDone = true;
     else if (a === "--scan-reqs") scanReqs = true;
     else if (a === "--scan-tests") scanTests = true;
@@ -131,6 +157,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (a === "--strict") strict = true;
     else if (a === "--since") since = argv[++i];
     else if (a.startsWith("--since=")) since = a.slice("--since=".length);
+    else if (a === "--artifact") artifact = argv[++i];
+    else if (a.startsWith("--artifact=")) artifact = a.slice("--artifact=".length);
     else if (a === "--layer") layer = argv[++i];
     else if (a.startsWith("--layer=")) layer = a.slice("--layer=".length);
     else if (a === "--ref") ref = argv[++i];
@@ -141,6 +169,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (a.startsWith("--action=")) action = a.slice("--action=".length);
     else if (a === "--escalation") escalation = argv[++i];
     else if (a.startsWith("--escalation=")) escalation = a.slice("--escalation=".length);
+    else if (a === "--source") source = argv[++i];
+    else if (a.startsWith("--source=")) source = a.slice("--source=".length);
+    else if (a === "--dry-run") dryRun = true;
+    else if (a === "--remove-missing") removeMissing = true;
     else positionals.push(a);
   }
   return {
@@ -154,19 +186,51 @@ function parseArgs(argv: string[]): ParsedArgs {
       reqs,
       plan,
       tests,
+      scope,
       includeDone,
       scanReqs,
       scanTests,
       scanCode,
       strict,
       since,
+      artifact,
       layer,
       ref,
       discovery,
       action,
       escalation,
+      source,
+      dryRun,
+      removeMissing,
     },
   };
+}
+
+/**
+ * Read the CLI version from package.json. Tries `__dirname/../package.json`
+ * (dist/cli.js → ../package.json) then `__dirname/../../package.json`
+ * (src/cli.ts in ts-node/test context). Returns "unknown" if neither is found
+ * or parsing fails.
+ */
+function readCliVersion(): string {
+  const candidates = [
+    path.join(__dirname, "..", "package.json"),
+    path.join(__dirname, "..", "..", "package.json"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        const json = JSON.parse(fs.readFileSync(candidate, "utf8")) as unknown;
+        if (typeof json === "object" && json !== null && "version" in json) {
+          const v = (json as Record<string, unknown>).version;
+          if (typeof v === "string") return v;
+        }
+      }
+    } catch {
+      // Try next candidate.
+    }
+  }
+  return "unknown";
 }
 
 function dispatch(parsed: ParsedArgs): CommandResult {
@@ -177,6 +241,10 @@ function dispatch(parsed: ParsedArgs): CommandResult {
       return failure({ human: HELP });
     case "help":
       return { ok: true, exitCode: 0, human: HELP };
+    case "version": {
+      const ver = readCliVersion();
+      return success({ data: { version: ver }, human: ver });
+    }
     case "init":
       return runInit(paths, { force: parsed.flags.force });
     case "state":
@@ -218,6 +286,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
             reqsFile: parsed.flags.reqs,
             planFile: parsed.flags.plan,
             testsDir: parsed.flags.tests,
+            scopeFile: parsed.flags.scope,
           });
         default:
           return failure({ human: `unknown 'coverage' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
@@ -249,7 +318,25 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           return failure({ human: `unknown 'trace' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
     case "stale":
-      return runStale(paths, parsed.flags.since);
+      return runStale(paths, parsed.flags.since, parsed.flags.artifact);
+    case "slices":
+      switch (sub) {
+        case "sync":
+          return runSlicesSync(paths, {
+            planFile: parsed.flags.plan,
+            dryRun: parsed.flags.dryRun,
+            removeMissing: parsed.flags.removeMissing,
+          });
+        default:
+          return failure({ human: `unknown 'slices' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    case "slice":
+      switch (sub) {
+        case "set-status":
+          return runSliceSetStatus(paths, rest[0], rest[1]);
+        default:
+          return failure({ human: `unknown 'slice' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
     case "drift":
       switch (sub) {
         case "add":
@@ -259,6 +346,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
             discovery: parsed.flags.discovery,
             action: parsed.flags.action,
             escalation: parsed.flags.escalation,
+            source: parsed.flags.source,
           });
         case "list":
           return runDriftList(paths);

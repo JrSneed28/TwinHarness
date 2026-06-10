@@ -11,7 +11,8 @@ const state_store_1 = require("../core/state-store");
  * - Open BLOCKING drift (§10) → block.
  * - Otherwise → allow.
  *
- * Later slices extend this with `tier veto-check` and coverage-gap gating.
+ * The gate checks state validity and open blocking drift. That is the complete
+ * set of mechanical stop conditions; no additional gating is wired here.
  */
 function evaluateStopGate(paths) {
     const r = (0, state_store_1.readState)(paths);

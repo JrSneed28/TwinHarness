@@ -52,8 +52,8 @@ function runBuildPlan(paths, opts = {}) {
         ? waves.map((w, i) => `Wave ${i + 1} (parallel): ${w.join(", ")}`)
         : ["(no slices to schedule)"];
     const conflictLines = conflicts.length
-        ? ["Serialized conflicts:", ...conflicts.map((c) => `  ${c.a} ⟂ ${c.b} (shared: ${c.shared.join(", ")})`)]
-        : ["Serialized conflicts: (none)"];
+        ? ["Serialized conflicts (shared components):", ...conflicts.map((c) => `  ${c.a} × ${c.b} (shared: ${c.shared.join(", ")})`)]
+        : ["Serialized conflicts (shared components): (none)"];
     const human = [
         ...waveLines,
         "",

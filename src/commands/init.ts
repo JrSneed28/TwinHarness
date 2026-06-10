@@ -33,14 +33,14 @@ export function runInit(paths: ProjectPaths, opts: { force?: boolean }): Command
     fs.mkdirSync(paths.docsDir, { recursive: true });
     created.push("docs/");
   }
-  fs.mkdirSync(paths.agenticDir, { recursive: true });
+  fs.mkdirSync(paths.stateDir, { recursive: true });
 
   const existing = readState(paths);
   if (existing.exists && !opts.force) {
-    skipped.push(".agentic-sdlc/state.json (already exists; use --force to reset)");
+    skipped.push(".twinharness/state.json (already exists; use --force to reset)");
   } else {
     writeState(paths, initialState());
-    created.push(".agentic-sdlc/state.json");
+    created.push(".twinharness/state.json");
   }
 
   if (!fs.existsSync(paths.driftLog)) {

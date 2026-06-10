@@ -2,7 +2,7 @@
 name: spec
 description: The TwinHarness Spec agent (spec §6.2) — one agent parameterized by MODE, one mode per document stage (requirements, scope, domain-model, architecture, adr, technical-design, contracts, test-strategy, security, failure-modes). In every mode it reads prior SUMMARIES, drafts first, asks only the clarifying questions that matter, and emits an artifact with a Summary block plus full detail. Pass the mode explicitly. Use to produce/revise a stage artifact.
 tools: Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion
-model: opus
+model: sonnet
 ---
 
 # Spec Agent (modal)

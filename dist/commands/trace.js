@@ -89,14 +89,55 @@ function indexByReq(map, prefix, exclude) {
     }
     return out;
 }
-/** Best-effort SLICE-/TASK- tokens found anywhere in the plan, unique + stable. */
-function planSliceTaskTokens(planContent) {
-    const seen = new Set();
-    const out = [];
-    for (const m of planContent.matchAll(SLICE_TASK_PATTERN)) {
-        if (!seen.has(m[0])) {
-            seen.add(m[0]);
-            out.push(m[0]);
+/**
+ * Build a per-REQ-ID map of SLICE-/TASK- tokens from the plan.
+ *
+ * For each line that mentions a given REQ-ID, collect:
+ * 1. All SLICE-/TASK- tokens on that same line.
+ * 2. The SLICE-N token from the nearest preceding heading line that contains a
+ *    SLICE-N token (section context).
+ *
+ * Returns a Map<REQ-ID, string[]> of unique, stable-order tokens.
+ */
+function planSliceTaskByReq(planContent) {
+    const REQ_ID_RE = /REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*/g;
+    const HEADING_RE = /^#{1,6}\s+/;
+    const out = new Map();
+    const lines = planContent.split(/\r?\n/);
+    // Track the nearest preceding heading slice token.
+    let headingSliceToken;
+    for (const line of lines) {
+        const sliceTaskTokens = [];
+        for (const m of line.matchAll(new RegExp(SLICE_TASK_PATTERN.source, "g"))) {
+            if (!sliceTaskTokens.includes(m[0]))
+                sliceTaskTokens.push(m[0]);
+        }
+        // Update heading slice context.
+        if (HEADING_RE.test(line)) {
+            const headSlice = sliceTaskTokens.find((t) => t.startsWith("SLICE-"));
+            if (headSlice)
+                headingSliceToken = headSlice;
+        }
+        // Collect REQ-IDs on this line.
+        const reqIds = [];
+        for (const m of line.matchAll(REQ_ID_RE)) {
+            if (!reqIds.includes(m[0]))
+                reqIds.push(m[0]);
+        }
+        if (reqIds.length === 0)
+            continue;
+        for (const req of reqIds) {
+            const list = out.get(req) ?? [];
+            // Add same-line tokens.
+            for (const tok of sliceTaskTokens) {
+                if (!list.includes(tok))
+                    list.push(tok);
+            }
+            // Add heading slice context token.
+            if (headingSliceToken && !list.includes(headingSliceToken)) {
+                list.push(headingSliceToken);
+            }
+            out.set(req, list);
         }
     }
     return out;
@@ -145,11 +186,11 @@ function runTraceRender(paths) {
         for (const id of (0, anchors_1.extractReqIds)(contractContent))
             contractIdx.set(id, [CONTRACTS_FILE]);
     }
-    // Slice / Task = the REQ-ID appearing in the plan, plus best-effort SLICE-/TASK-
-    // tokens surfaced from the plan as a convenience (§17 "Slice / Task").
+    // Slice / Task = the REQ-ID appearing in the plan, plus per-REQ SLICE-/TASK-
+    // tokens (same line or nearest heading context) surfaced as a convenience (§17).
     const planContent = readFileOrUndefined(path.resolve(paths.root, PLAN_FILE));
     const planReqs = planContent === undefined ? new Set() : new Set((0, anchors_1.extractReqIds)(planContent));
-    const planTokens = planContent === undefined ? [] : planSliceTaskTokens(planContent);
+    const planTokenMap = planContent === undefined ? new Map() : planSliceTaskByReq(planContent);
     // Test = REQ-ID anchors under tests/; Code = REQ-ID anchors under src/ (§17).
     const testIdx = indexByReq((0, anchors_1.scanDirForReqIds)(path.join(paths.root, "tests")), "tests");
     const codeIdx = indexByReq((0, anchors_1.scanDirForReqIds)(path.join(paths.root, "src")), "src");
@@ -157,8 +198,11 @@ function runTraceRender(paths) {
         const sliceTask = [];
         if (planReqs.has(req)) {
             sliceTask.push(PLAN_FILE);
-            for (const tok of planTokens)
-                sliceTask.push(tok);
+            const tokens = planTokenMap.get(req) ?? [];
+            for (const tok of tokens) {
+                if (!sliceTask.includes(tok))
+                    sliceTask.push(tok);
+            }
         }
         return {
             req,

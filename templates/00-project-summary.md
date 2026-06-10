@@ -28,7 +28,7 @@ this via `state.json` (see Artifact Versions below).
 
 ## Artifact Versions
 
-Artifact versions (v1, v2, …) and content hashes are tracked in `.agentic-sdlc/state.json` via
+Artifact versions (v1, v2, …) and content hashes are tracked in `.twinharness/state.json` via
 `th artifact register` — they are **not** duplicated here. Consult `state.json` to check whether
 a downstream artifact is still coherent with the version of an upstream document it was derived
 from.
@@ -45,6 +45,7 @@ from.
 | [02-scope.md](02-scope.md) | Stage 2 — Scope Definition | MVP vs. V1 vs. future vs. out-of-scope. Confirmed user decisions. **Sticky — human-gated.** |
 | [03-domain-model.md](03-domain-model.md) | Stage 3 — Domain Modeling | Entities, relationships, attributes, state models, domain rules, events, glossary. Streams. |
 | [04-architecture.md](04-architecture.md) | Stage 4 — System Architecture | Components, responsibilities, boundaries, data/runtime flow, deployment shape. Human gate on irreversible decisions only. |
+| [04b-ui-design.md](04b-ui-design.md) | Stage 4b — UI Design (only when the project has a UI) | Screens, flows, wireframes, design tokens, interaction states, accessibility. Human gate on design direction (taste-driven — §2). |
 | [05-adrs/](05-adrs/) | Stage 5 — Architecture Decision Records | One ADR per significant irreversible decision. Each links to REQ-IDs and components. |
 | [06-technical-design.md](06-technical-design.md) | Stage 6 — Detailed Technical Design | Internal behavior, algorithms, state machines, error handling, concurrency. |
 | [07-contracts.md](07-contracts.md) | Stage 7 — Contracts | API, module, and data-schema interfaces between components. The testable boundary. |

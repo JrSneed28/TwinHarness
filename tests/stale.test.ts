@@ -127,13 +127,69 @@ describe("REQ-STALE-005: input + lookup failures", () => {
   });
 });
 
+describe("REQ-STALE-007: --artifact mode looks up by file key (§18)", () => {
+  it("--artifact: unchanged file → changed=false", () => {
+    tp = makeTempProject();
+    setupRegistered(tp);
+
+    // File on disk matches the registered hash → unchanged.
+    const res = runStale(tp.paths, undefined, "docs/01-requirements.md");
+    expect(res.ok).toBe(true);
+    expect(res.data?.changed).toBe(false);
+    expect(res.data?.upstream).toBe("docs/01-requirements.md");
+  });
+
+  it("--artifact: modified file → changed=true with downstream stale set", () => {
+    tp = makeTempProject();
+    setupRegistered(tp);
+
+    // Modify the file on disk after registration.
+    writeFile(tp, "docs/01-requirements.md", "REQ-001 revised content.\n");
+
+    const res = runStale(tp.paths, undefined, "docs/01-requirements.md");
+    expect(res.ok).toBe(true);
+    expect(res.data?.changed).toBe(true);
+    expect((res.data?.stale as string[]).length).toBeGreaterThan(0);
+  });
+
+  it("--artifact: unregistered file → failure unregistered_artifact", () => {
+    tp = makeTempProject();
+    setupRegistered(tp);
+
+    const res = runStale(tp.paths, undefined, "docs/02-scope.md");
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("unregistered_artifact");
+  });
+
+  it("--artifact: missing file (deleted) → changed=true", () => {
+    tp = makeTempProject();
+    setupRegistered(tp);
+
+    // Delete the registered file.
+    fs.rmSync(path.join(tp.root, "docs", "01-requirements.md"));
+
+    const res = runStale(tp.paths, undefined, "docs/01-requirements.md");
+    expect(res.ok).toBe(true);
+    expect(res.data?.changed).toBe(true);
+  });
+
+  it("--since and --artifact are mutually exclusive", () => {
+    tp = makeTempProject();
+    setupRegistered(tp);
+    const res = runStale(tp.paths, "somehash", "docs/01-requirements.md");
+    expect(res.ok).toBe(false);
+    expect(res.human).toContain("mutually exclusive");
+  });
+});
+
 describe("REQ-STALE-006: downstreamOf is the strict pipeline suffix (§18)", () => {
   it("returns everything strictly after a file in ARTIFACT_PIPELINE", () => {
     expect(downstreamOf("docs/01-requirements.md")).toEqual(ARTIFACT_PIPELINE.slice(1));
+    // Correct T3 stage order: Contracts → Security (08a) → Failure Modes (08b) → Test Strategy (08).
     expect(downstreamOf("docs/07-contracts.md")).toEqual([
-      "docs/08-test-strategy.md",
       "docs/08a-security-threat-model.md",
       "docs/08b-failure-edge-cases.md",
+      "docs/08-test-strategy.md",
       "docs/09-implementation-plan.md",
       "docs/10-verification-report.md",
     ]);

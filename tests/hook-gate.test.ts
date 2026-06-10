@@ -17,7 +17,7 @@ describe("REQ-GATE-001: stop-gate blocks premature completion (pre-mortem #2)", 
 
   it("blocks when state.json is present but invalid", () => {
     tp = makeTempProject();
-    fs.mkdirSync(tp.paths.agenticDir, { recursive: true });
+    fs.mkdirSync(tp.paths.stateDir, { recursive: true });
     fs.writeFileSync(tp.paths.stateFile, "{ broken", "utf8");
     const d = evaluateStopGate(tp.paths);
     expect(d.block).toBe(true);

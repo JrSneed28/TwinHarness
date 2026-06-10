@@ -40,8 +40,9 @@ CLI — never hand-edit `state.json`, never eyeball traceability, never "remembe
 | Emit a stop-gate decision | `th hook stop-gate` |
 
 > Also available (all implemented): `th artifact register|list`, `th anchors scan`, `th trace render`,
-> `th coverage check`, `th drift add|list|resolve`, `th stale --since`, `th tier classify`,
-> `th tier veto-check`, `th build plan`, `th revise bump|status|reset`.
+> `th coverage check`, `th drift add|list|resolve`, `th stale --artifact`, `th tier classify`,
+> `th tier veto-check`, `th build plan`, `th revise bump|status|reset`, `th slices sync`,
+> `th slice set-status`, `th version`.
 
 Run `th` with `--json` whenever you need to parse the result. The CLI **records and computes; it
 never decides** which stage/agent/tier runs — those are your calls.
@@ -50,7 +51,7 @@ never decides** which stage/agent/tier runs — those are your calls.
 
 ### 1. Init
 
-Run `th init` in the project root (creates `docs/`, `.agentic-sdlc/state.json`, `drift-log.md`).
+Run `th init` in the project root (creates `docs/`, `.twinharness/state.json`, `drift-log.md`).
 
 ### 2. Requirements stage
 
@@ -100,7 +101,7 @@ th tier veto-check <brief.json>
 
 This is **not advisory**. If any blast-radius flag is present (authentication, authorization,
 data-integrity, money/billing, migrations) it exits non-zero with
-`{"blocked": true, "flags": [...]}`. The Stop/PreToolUse hook enforces this alongside
+`{"blocked": true, "flags": [...]}`. The Stop hook enforces this alongside
 `th state verify`. Note: the state schema itself refuses `tier T0` when blast-radius flags are
 recorded — the mechanical refusal is the last line of defence.
 
@@ -216,8 +217,43 @@ th state set current_stage architecture
 ```
 
 **Artifact registration.** After every stage's artifact is approved and registered, its content
-hash and version are recorded in `.agentic-sdlc/state.json` under `approved_artifacts`. Downstream
-stages use this record to detect staleness (`th stale --since <hash>` — §18).
+hash and version are recorded in `.twinharness/state.json` under `approved_artifacts`. Downstream
+stages use this record to detect staleness (`th stale --artifact <file>` — §18).
+
+### 7b. Stage 4b — UI Design (conditional: only when the project has a user interface)
+
+Skip this stage for projects without a user interface (CLIs, background services, pure API
+libraries). For any project with a web UI, mobile UI, desktop UI, or rich TUI, engage Stage 4b
+after Architecture is approved and before Contracts/Test Strategy.
+
+Delegate to the **UI Designer agent (`agents/ui-designer.md`) in a FRESH CONTEXT** (§6.3
+rationale: user-centered design is contaminated by backend-architecture thinking; fresh context
+produces cleaner, user-centered results).
+
+**Human gate on design direction (taste-driven — §2).** The UI Designer presents 2–3 distinct
+design directions to the human via `AskUserQuestion` with the `preview` field containing ASCII
+mockups side by side. Do not proceed until the human selects a direction. After direction
+sign-off, the detailed design streams.
+
+**Critic loop (ui-design mode).** Route the draft to the **Critic agent in `ui-design` mode**,
+fresh context:
+
+- Check `th revise status ui-design --json` → if `escalate: true`, surface open grounded issues
+  to the human and stop (cap reached, default 3 rounds).
+- Critic **PASS** → proceed to artifact registration. Zero issues is a valid terminal state.
+- Critic **FAIL** → run `th revise bump ui-design`, route grounded defects back to the UI
+  Designer agent, re-run. Repeat until PASS or escalation.
+
+Once the Critic passes, register and advance state:
+
+```
+th artifact register docs/04b-ui-design.md --version 1
+th state set current_stage ui-design
+```
+
+**No second human gate after direction sign-off** — the Critic gates quality. The Vertical
+Slice agent (Stage 9) receives the `docs/04b-ui-design.md` Summary block so slices for
+UI-bearing projects reference specific screens and flows.
 
 ### 8. Stage 9 — Implementation Planning & Vertical Slicing (all engaged tiers)
 
@@ -351,24 +387,34 @@ When a discovery contradicts `docs/01-requirements.md` or `docs/02-scope.md`:
 
 The source-of-truth rule (§4): **code wins on behavior; requirements win on intent.**
 
-**Parallel builds (§16).** Before spawning any Builders, run:
+**Parallel builds (§16).** After the coverage gate passes, sync the slice plan into state and
+then compute the wave schedule:
 
 ```
+th slices sync
 th build plan
 ```
 
-This command reads the per-slice `components touched` fields from `docs/09-implementation-plan.md`
-and computes a **wave schedule**: slices whose component sets are disjoint are grouped into the
-same wave and may be built concurrently; slices that share any component are placed in separate
-waves and serialized to prevent merge conflicts and drift races.
+`th slices sync` parses `docs/09-implementation-plan.md` and writes all slices into
+`state.slices` (statuses preserved on re-sync). `th build plan` reads `state.slices` — not the
+raw document — and computes a **wave schedule**: slices whose component sets are disjoint are
+grouped into the same wave and may be built concurrently; slices that share any component are
+placed in separate waves and serialized to prevent merge conflicts and drift races.
 
-- **Within a wave:** spawn one Builder per slice concurrently. These Builder invocations may run
-  in parallel — their component sets are guaranteed disjoint by `th build plan`.
+- **Within a wave:** spawn one Builder per slice concurrently. Component sets are guaranteed
+  disjoint by `th build plan`.
 - **Across waves:** wait for all slices in wave N to pass the code-review Critic loop before
   spawning wave N+1. Shared components are the serialization boundary.
 
-The `components touched` field and the `th build plan` output are the mechanical inputs to this
-decision — not a judgment call. Apply the wave schedule exactly as computed.
+Update slice statuses as work progresses:
+
+```
+th slice set-status <SLICE-ID> in-progress
+th slice set-status <SLICE-ID> complete
+```
+
+The wave schedule from `th build plan` is the mechanical input — not a judgment call. Apply it
+exactly as computed.
 
 After each slice's Critic PASS, register the slice artifact and advance state:
 
@@ -377,10 +423,46 @@ th artifact register docs/09-implementation-plan.md --version N
 th state set current_stage implementation
 ```
 
-### 10. Stage 11 — Final Verification (T1 light → T3 full) — IMPLEMENTED (Slice 6)
+### 10. Stage 10.5 — Documentation
 
-After all slices have passed the Builder + code-review Critic loop, run Final Verification to
-produce `docs/10-verification-report.md`.
+After all slices have passed the code-review Critic loop and before Final Verification, run the
+Documentation stage. Documentation at this position describes drift-corrected reality.
+
+Delegate to the **Doc-Writer agent (`agents/doc-writer.md`)** with the tier-appropriate mode
+set:
+
+| Tier | Modes |
+|------|-------|
+| T1 | `readme` only |
+| T2 | `readme`, `user-guide`, `api-reference` |
+| T3 | `readme`, `user-guide`, `api-reference`, `developer-guide`, `changelog` |
+
+**Summaries handoff (§9).** Pass Summary blocks of `docs/01-requirements.md`,
+`docs/02-scope.md`, `docs/07-contracts.md` (if exists), and `docs/09-implementation-plan.md`.
+The doc-writer reads the full `docs/07-contracts.md` for `api-reference` mode (contracts are
+source of truth for the API reference).
+
+**Critic loop (documentation mode).** After each mode, route to the **Critic agent in
+`documentation` mode**, fresh context:
+
+- Check `th revise status documentation --json` → if `escalate: true`, surface open grounded
+  issues to the human and stop (cap reached, default 3 rounds).
+- Critic **PASS** → proceed to the next mode or to Final Verification. Zero issues is a valid
+  terminal state.
+- Critic **FAIL** → run `th revise bump documentation`, route grounded defects back to the
+  Doc-Writer agent, re-run. Repeat until PASS or escalation.
+
+**No human gate** (Critic gates). Advance state after all modes pass:
+
+```
+th state set current_stage documentation
+```
+
+### 11. Stage 11 — Final Verification (T1 light → T3 full) — IMPLEMENTED (Slice 6)
+
+After all slices have passed the Builder + code-review Critic loop, and after Stage 10.5
+Documentation has passed the Critic, run Final Verification to produce
+`docs/10-verification-report.md`.
 
 **Step 1 — Render the traceability view (on demand, never stored).**
 
@@ -455,24 +537,25 @@ When an upstream artifact is revised and re-registered (its content changes, pro
 hash), downstream artifacts that depended on it are stale and may be incoherent against the new
 version.
 
-**Step 1 — Re-register the changed upstream artifact.**
+**Step 1 — Get the stale set BEFORE re-registering.**
 
 ```
-th artifact register docs/<changed-artifact>.md --version N
+th stale --artifact docs/<changed-artifact>.md
+```
+
+Run this *before* re-registering. `th stale --artifact` compares the recorded content hash
+against the file on disk and returns all registered downstream artifacts in pipeline order
+(downstream-of-changed-artifact, registered artifacts only — not a diff of summaries; every
+registered downstream artifact is returned when the file has changed). Capture this stale set.
+If you re-register first, the recorded hash updates and `th stale` would find no change.
+
+**Step 2 — Re-register the changed upstream artifact.**
+
+```
+th artifact register docs/<changed-artifact>.md --version N+1
 ```
 
 This records the new content hash in `state.json`.
-
-**Step 2 — Get the diff-scoped downstream stale set.**
-
-```
-th stale --since <old-hash>
-```
-
-This command diffs the upstream artifact's old and new summaries and returns only the downstream
-artifacts whose summaries are affected by the diff. It does **not** return every downstream
-artifact — only those touched by the actual change. This prevents a small upstream edit from
-triggering a full re-verify storm (spec §18).
 
 **Step 3 — Re-run the Critic diff-scoped, not full.**
 
@@ -717,9 +800,9 @@ th state set current_stage test-strategy
 
 | Tier | Stage sequence |
 |------|---------------|
-| **T1** | Requirements → Scope → Architecture (light, folded Security + Failure Modes sections) → Slice Plan → Code → Verify |
-| **T2** | Requirements → Scope → Domain Model → Architecture (folded Security + Failure Modes sections) → Contracts → Test Strategy → Slice Plan → Code → Verify |
-| **T3** | Requirements → Scope → Domain Model → Architecture → ADRs → Detailed Technical Design → Contracts → **Security** (graduated, §15.S) → **Failure Modes** (graduated, §15.F) → Test Strategy → Slice Plan → Code → Final Verification + traceability view |
+| **T1** | Requirements → Scope → Architecture (light, folded Security + Failure Modes) → [UI Design if UI present] → Slice Plan → Code → Documentation (readme) → Verify |
+| **T2** | Requirements → Scope → Domain Model → Architecture (folded Security + Failure Modes) → [UI Design if UI present] → Contracts → Test Strategy → Slice Plan → Code → Documentation (readme + user-guide + api-reference) → Verify |
+| **T3** | Requirements → Scope → Domain Model → Architecture → [UI Design if UI present] → ADRs → Detailed Technical Design → Contracts → **Security** (graduated, §15.S) → **Failure Modes** (graduated, §15.F) → Test Strategy → Slice Plan → Code → Documentation (full suite) → Final Verification + traceability view |
 
 The Vertical Slicing stage (Stage 9) follows the full pre-build pipeline in every engaged tier.
 Stage 10 (implementation) and Stage 11 (final verification) are described above in §8–10.
@@ -734,12 +817,31 @@ Stage 10 (implementation) and Stage 11 (final verification) are described above 
 - **Critic** (`agents/critic.md`) — modal coherence reviewer (fresh context). All modes
   implemented: `requirements`, `scope`, `domain-model`, `architecture`, `adr`, `technical-design`,
   `contracts`, `test-strategy`, `security`, `failure-modes`, `slice`, `code-review`,
-  `final-verification`.
+  `final-verification`, `documentation`, `ui-design`.
 - **Vertical Slice** (`agents/vertical-slice.md`) — fresh-context slice decomposition (Stage 9).
 - **Builder** (`agents/builder.md`) — write code + tests, run checks, drift write-back (Stage 10).
+- **UI Designer** (`agents/ui-designer.md`) — user-centered UI design in fresh context (Stage 4b, conditional on project having a UI).
+- **Doc-Writer** (`agents/doc-writer.md`) — tier-scaled documentation generation from contracts and implementation (Stage 10.5).
 - **Orchestrator** (`agents/orchestrator.md`) — your own playbook for tiering, routing, gates, state.
+
+## Model & effort routing (automatic)
+
+The Orchestrator selects the model for each agent spawn. The frontmatter `model:` value is the
+default; escalate to opus when the situation matches an escalation row below. Pass a model
+override in the delegation prompt when escalating; otherwise the frontmatter default applies.
+
+| Situation | Model |
+|---|---|
+| Default (all agents) | frontmatter default (sonnet; opus for orchestrator & vertical-slice) |
+| Spec in `architecture`, `security`, `failure-modes`, or `technical-design` mode on a T3 or blast-radius project | opus |
+| Critic in `slice` or `code-review` mode on a blast-radius project | opus |
+| Builder on a slice touching a blast-radius component | opus |
+| Trivial mechanical summarization (e.g. drift-log recap) | haiku |
+
+**Rationale:** effort scales with tier and blast radius, like every other TwinHarness control.
+Cheap by default, expensive where wrong answers are expensive.
 
 ## Resume
 
-If `.agentic-sdlc/state.json` already exists, read it (`th state status`) and re-enter at
+If `.twinharness/state.json` already exists, read it (`th state status`) and re-enter at
 `current_stage` instead of starting over (spec §18 idempotent resume).

@@ -24,7 +24,7 @@ describe("REQ-STATE-001: state round-trips through disk", () => {
 
   it("reports issues for present-but-invalid JSON", () => {
     tp = makeTempProject();
-    fs.mkdirSync(tp.paths.agenticDir, { recursive: true });
+    fs.mkdirSync(tp.paths.stateDir, { recursive: true });
     fs.writeFileSync(tp.paths.stateFile, "{ not json", "utf8");
     const r = readState(tp.paths);
     expect(r.exists).toBe(true);
@@ -40,7 +40,7 @@ describe("REQ-STATE-002: idempotent write (replaced, not duplicated)", () => {
     writeState(tp.paths, { ...initialState(), current_stage: "scope" });
     const r = readState(tp.paths);
     expect(r.state?.current_stage).toBe("scope");
-    const leftovers = fs.readdirSync(tp.paths.agenticDir).filter((f) => f.includes(".tmp-"));
+    const leftovers = fs.readdirSync(tp.paths.stateDir).filter((f) => f.includes(".tmp-"));
     expect(leftovers).toEqual([]);
     expect(() => JSON.parse(fs.readFileSync(tp.paths.stateFile, "utf8"))).not.toThrow();
   });

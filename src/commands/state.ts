@@ -1,7 +1,7 @@
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState, writeState } from "../core/state-store";
-import { type ValidationIssue, validateState } from "../core/state-schema";
+import { type ValidationIssue, validateState, STATE_FIELD_ORDER } from "../core/state-schema";
 import { structuredLog } from "../core/log";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -75,6 +75,16 @@ export function runStateGet(paths: ProjectPaths, dottedPath?: string): CommandRe
 
 /** `th state set <dotted.key> <value>` — refuses to persist an invalid result. */
 export function runStateSet(paths: ProjectPaths, key: string, rawValue: string): CommandResult {
+  // Reject paths whose first segment is not a known state field (catches typos
+  // like `implementaton_allowed` that would silently write nothing).
+  const firstSegment = key.split(".")[0] as string;
+  if (!(STATE_FIELD_ORDER as string[]).includes(firstSegment)) {
+    return failure({
+      human: `Unknown state field: "${firstSegment}". Valid top-level keys: ${STATE_FIELD_ORDER.join(", ")}`,
+      data: { error: "unknown_field", field: firstSegment, validFields: STATE_FIELD_ORDER },
+    });
+  }
+
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
   if (!r.state) return failure({ human: `Existing state.json is invalid; fix it before setting values:\n${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });

@@ -10,7 +10,7 @@ Start (or resume) a **TwinHarness** orchestration run for: **$ARGUMENTS**
 
 Follow the `twinharness` skill (the Orchestrator playbook). In brief:
 
-1. If `.agentic-sdlc/state.json` exists, run `th state status` and **resume** from `current_stage`.
+1. If `.twinharness/state.json` exists, run `th state status` and **resume** from `current_stage`.
    Otherwise run `th init`.
 2. Classify the tier and blast radius (spec §5). Record it with `th state set` — never hand-edit state.
 3. Run the engaged stages for the tier, delegating each artifact to the **Spec agent** (by mode),

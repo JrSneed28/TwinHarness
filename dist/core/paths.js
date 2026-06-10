@@ -34,14 +34,37 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveProjectPaths = resolveProjectPaths;
+const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
-/** Resolve all project paths from a root directory (defaults are caller-supplied). */
+/**
+ * Resolve all project paths from a root directory.
+ *
+ * Directory selection for the state directory (cheap fs existence checks —
+ * acceptable because this is called once per CLI invocation):
+ * 1. If `<root>/.twinharness` exists → use it.
+ * 2. Else if `<root>/.agentic-sdlc/state.json` exists → legacy fallback, keep
+ *    using `.agentic-sdlc` so the existing project is not broken.
+ * 3. Otherwise → default to `.twinharness` (fresh projects).
+ */
 function resolveProjectPaths(root) {
     const abs = path.resolve(root);
+    let stateDir;
+    const newDir = path.join(abs, ".twinharness");
+    const legacyStateFile = path.join(abs, ".agentic-sdlc", "state.json");
+    if (fs.existsSync(newDir)) {
+        stateDir = newDir;
+    }
+    else if (fs.existsSync(legacyStateFile)) {
+        // Legacy project: `.agentic-sdlc/state.json` present — stay in legacy dir.
+        stateDir = path.join(abs, ".agentic-sdlc");
+    }
+    else {
+        stateDir = newDir;
+    }
     return {
         root: abs,
-        agenticDir: path.join(abs, ".agentic-sdlc"),
-        stateFile: path.join(abs, ".agentic-sdlc", "state.json"),
+        stateDir,
+        stateFile: path.join(stateDir, "state.json"),
         docsDir: path.join(abs, "docs"),
         driftLog: path.join(abs, "drift-log.md"),
     };

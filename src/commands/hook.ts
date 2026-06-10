@@ -19,7 +19,8 @@ export interface StopGateDecision {
  * - Open BLOCKING drift (§10) → block.
  * - Otherwise → allow.
  *
- * Later slices extend this with `tier veto-check` and coverage-gap gating.
+ * The gate checks state validity and open blocking drift. That is the complete
+ * set of mechanical stop conditions; no additional gating is wired here.
  */
 export function evaluateStopGate(paths: ProjectPaths): StopGateDecision {
   const r = readState(paths);

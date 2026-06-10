@@ -13,6 +13,32 @@ function init(): TempProject {
   return t;
 }
 
+describe("REQ-STATE-CMD-UNKNOWN-KEY: set rejects unknown top-level keys", () => {
+  it("typo 'implementaton_allowed' → failure unknown_field", () => {
+    tp = init();
+    const res = runStateSet(tp.paths, "implementaton_allowed", "true");
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("unknown_field");
+    expect(res.data?.field).toBe("implementaton_allowed");
+    // State must be unchanged.
+    expect(readState(tp.paths).state?.implementation_allowed).toBe(false);
+  });
+
+  it("nested path with valid first segment is accepted", () => {
+    tp = init();
+    const res = runStateSet(tp.paths, "revise_loop_counts.design", "2");
+    expect(res.ok).toBe(true);
+    expect(readState(tp.paths).state?.revise_loop_counts.design).toBe(2);
+  });
+
+  it("nested path with invalid first segment is rejected", () => {
+    tp = init();
+    const res = runStateSet(tp.paths, "bogus_field.sub", "1");
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("unknown_field");
+  });
+});
+
 describe("REQ-STATE-CMD: state get/set/verify/status", () => {
   it("get returns a dotted value", () => {
     tp = init();

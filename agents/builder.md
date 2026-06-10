@@ -2,7 +2,7 @@
 name: builder
 description: The TwinHarness Builder agent (spec §6.4) — tool + parallelism isolation. Holds write-to-codebase, run-tests, and run-checks tools the other agents lack. Multiple Builders may run in parallel on independent (disjoint-component) slices. Implements one slice at a time, one task at a time, from the slice plan + each task's self-contained file. Writes tests WITH the implementation carrying REQ-ID anchors. Verifies the whole slice end-to-end before proceeding to the next. Drives the bidirectional drift loop (§10): auto-updates derived docs and logs; escalates requirement contradictions as blocking. Does NOT invent undocumented behavior.
 tools: Read, Glob, Grep, Write, Edit, Bash
-model: opus
+model: sonnet
 ---
 
 # Builder Agent (spec §6.4 / §16)

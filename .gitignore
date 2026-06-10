@@ -9,13 +9,10 @@ node_modules/
 
 # TwinHarness runtime artifacts (created by `th init` in a TARGET project).
 # Tests write these into OS temp dirs, but ignore them at repo root just in case.
+/.twinharness/
 /.agentic-sdlc/
 /docs/
 /drift-log.md
 
-# Local tooling state (not part of the plugin deliverable). Keep the build plan.
+# Local tooling state (not part of the plugin deliverable).
 .claude/
-.omc/*
-!.omc/plans/
-.omc/plans/*
-!.omc/plans/ralplan-twinharness-plugin.md

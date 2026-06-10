@@ -29,14 +29,44 @@ const NOT_INIT = failure({
 });
 
 /**
- * `th stale --since <hash>` — find the registered artifact whose recorded hash is
- * `sinceHash`, recompute its current file hash, and report the downstream
- * registered artifacts that are now stale. Exit 0 (computation only); failure
- * (exit 1) when `--since` is missing, the project is not initialized, or no
- * registered artifact has that hash.
+ * Normalize a path to a root-relative forward-slash key, matching the shape
+ * stored in artifact.file (same as artifact.ts toRelKey).
  */
-export function runStale(paths: ProjectPaths, sinceHash?: string): CommandResult {
-  if (!sinceHash) return failure({ human: "usage: th stale --since <hash>" });
+function toRelKey(root: string, file: string): string {
+  const abs = path.resolve(root, file);
+  return path.relative(root, abs).split(path.sep).join("/");
+}
+
+export interface StaleOptions {
+  sinceHash?: string;
+  artifactFile?: string;
+}
+
+/**
+ * `th stale --since <hash> | --artifact <file>` — diff-scoped cascade
+ * re-verification (spec §18). Exactly one of `--since`/`--artifact` must be
+ * provided.
+ *
+ * `--since <hash>`: existing behavior — find the registered artifact whose
+ *   recorded hash is `sinceHash` and report downstream stale registered artifacts.
+ *
+ * `--artifact <file>`: look up the registered artifact by its root-relative
+ *   forward-slash key, compare recorded hash vs current disk hash, and report
+ *   `changed` + downstream registered stale set. Safe after re-registering
+ *   (which replaces the hash), unlike `--since` which would return
+ *   "unknown hash" after re-registration.
+ */
+export function runStale(paths: ProjectPaths, sinceHash?: string, artifactFile?: string): CommandResult {
+  // Validate that exactly one mode is provided.
+  const hasSince = sinceHash !== undefined && sinceHash !== "";
+  const hasArtifact = artifactFile !== undefined && artifactFile !== "";
+
+  if (!hasSince && !hasArtifact) {
+    return failure({ human: "usage: th stale --since <hash> | --artifact <file>" });
+  }
+  if (hasSince && hasArtifact) {
+    return failure({ human: "--since and --artifact are mutually exclusive; use exactly one." });
+  }
 
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
@@ -48,12 +78,28 @@ export function runStale(paths: ProjectPaths, sinceHash?: string): CommandResult
   }
 
   const artifacts = r.state.approved_artifacts;
-  const upstream = artifacts.find((a) => a.hash === sinceHash);
-  if (!upstream) {
-    return failure({
-      human: `unknown hash: no registered artifact has hash ${sinceHash}.`,
-      data: { error: "unknown_hash", since: sinceHash },
-    });
+
+  // Resolve the upstream artifact entry depending on mode.
+  let upstream: (typeof artifacts)[number] | undefined;
+
+  if (hasSince) {
+    upstream = artifacts.find((a) => a.hash === sinceHash);
+    if (!upstream) {
+      return failure({
+        human: `unknown hash: no registered artifact has hash ${sinceHash}.`,
+        data: { error: "unknown_hash", since: sinceHash },
+      });
+    }
+  } else {
+    // --artifact mode: look up by root-relative forward-slash file key.
+    const relKey = toRelKey(paths.root, artifactFile!);
+    upstream = artifacts.find((a) => a.file === relKey);
+    if (!upstream) {
+      return failure({
+        human: `Unregistered artifact: ${relKey} is not in approved_artifacts.`,
+        data: { error: "unregistered_artifact", file: relKey },
+      });
+    }
   }
 
   // Recompute the upstream file's CURRENT hash. A missing file is treated as a
@@ -63,7 +109,10 @@ export function runStale(paths: ProjectPaths, sinceHash?: string): CommandResult
   if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
     currentHash = shortHash(fs.readFileSync(abs, "utf8"));
   }
-  const changed = currentHash !== sinceHash;
+  // In --since mode compare current hash against sinceHash (the recorded snapshot).
+  // In --artifact mode compare current hash against the stored artifact hash.
+  const recordedHash = hasSince ? sinceHash! : upstream.hash;
+  const changed = currentHash !== recordedHash;
 
   // Downstream registered artifacts only — an unregistered downstream file has no
   // approved version to be stale against (§18).

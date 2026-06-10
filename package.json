@@ -1,7 +1,7 @@
 {
   "name": "twinharness",
-  "version": "0.1.1",
-  "description": "TwinHarness — Agentic SDLC Orchestrator. A Claude Code plugin: prompt orchestration (5 agents + Spec/Critic modes) plus a deterministic `th` CLI for all mechanical enforcement (state, hashing, anchors, traceability, coverage, drift, cascade-staleness).",
+  "version": "0.2.0",
+  "description": "TwinHarness — Agentic SDLC Orchestrator. A Claude Code plugin: prompt orchestration (7 agents + Spec/Critic modes) plus a deterministic `th` CLI for all mechanical enforcement (state, hashing, anchors, traceability, coverage, drift, cascade-staleness).",
   "type": "commonjs",
   "bin": {
     "th": "dist/cli.js"
