@@ -14,5 +14,7 @@ node_modules/
 /docs/
 /drift-log.md
 
-# Local tooling state (not part of the plugin deliverable).
+# Local tooling state (not part of the plugin deliverable). .omc/ is session
+# state recreated at runtime by local tooling — never commit it.
 .claude/
+.omc/
