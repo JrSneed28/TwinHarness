@@ -2,9 +2,7 @@
 
 **Turns "build me X" into working, tested software** by forcing the idea through requirements, scope, design, and slice-by-slice implementation with verification gates — as a Claude Code plugin.
 
-[![version](https://img.shields.io/badge/version-0.2.0-blue)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![status](https://img.shields.io/badge/status-early%20development-orange)
-
-> **Early development notice.** TwinHarness is at v0.2.x. The pipeline has been exercised end-to-end and ships 206 passing tests, but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
+> **Early development notice.** TwinHarness is at v0.3.x. The pipeline has been exercised end-to-end and ships 254 passing tests, but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
 
 ---
 
@@ -150,6 +148,7 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 - **Bidirectional drift log.** Discoveries during the build flow back into the governing artifacts. Non-blocking changes auto-apply; requirement-layer changes increment a counter that the Stop hook reads to refuse premature completion.
 - **Vertical slices with a walking skeleton.** Each slice is a thin, end-to-end capability. `th build plan` schedules slices into conflict-free parallel waves: disjoint component sets run in the same wave, overlapping components serialize to prevent drift races.
 - **Stop hook.** Claude cannot claim completion while `state.json` is invalid or a blocking drift entry is open. The gate is code (`th hook stop-gate`), not a prompt reminder.
+- **PreToolUse write-gate.** File writes to implementation paths are intercepted before the pre-build gates clear, preventing any code from being written before the design is approved. Once the build begins, writes that cross into a component owned by a slice that is not in-progress are flagged automatically. The gate is fail-open (non-TwinHarness projects are completely unaffected), configurable (`ask` / `deny` / `off`, default `ask`), and one click to allow in a manual session.
 - **Conditional UI-design stage.** Present only when the project has a user interface. The UI-Designer presents 2–3 distinct design directions and asks you to pick one before streaming the detailed design.
 - **Tier-scaled documentation.** T1 gets a readme; T2 adds a user guide and API reference; T3 gets the full suite. A Critic reviews the docs; no human gate required.
 - **Automatic model routing.** Cheap models handle routine work; expensive ones (Opus) handle high-risk stages, blast-radius reviews, and the Orchestrator. Haiku handles trivial summarization. The full routing policy is in `skills/twinharness/SKILL.md`.
@@ -173,6 +172,7 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 | `th drift add\|list\|resolve` | Append, list, and resolve bidirectional drift entries |
 | `th revise bump\|status\|reset` | Manage revise-loop counts and escalation |
 | `th hook stop-gate` | Emit the Claude Code Stop-hook decision |
+| `th hook pretool-gate` | Emit the Claude Code PreToolUse-hook decision (write-gate) |
 
 All commands accept `--json` for machine-readable output. The full reference is in [USAGE.md](./USAGE.md) Part 3.
 
@@ -183,13 +183,13 @@ All commands accept `--json` for machine-readable output. The full reference is 
 **What works today:**
 
 - Full T0–T3 pipeline, all 7 agents, all stages.
-- `th` CLI with 206 passing tests covering CLI behavior and plugin-packaging integrity.
+- `th` CLI with passing tests covering CLI behavior and plugin-packaging integrity.
 - Validated Claude Code plugin packaging (`claude plugin validate` + `--plugin-dir` load pass).
+- PreToolUse write-gate: file writes intercepted before gates clear and across slice-component boundaries during the build (v0.3.0).
 - A complete worked example: `examples/autocoder/` — a T3 run producing an autocoder CLI tool, 11 slices, Stage 11 verified and human-signed.
 
 **Not yet done:**
 
-- **PreToolUse write-gate** — designed (see [`spec/write-gate-design.md`](./spec/write-gate-design.md)), not yet implemented. The Stop hook catches a false "done" after the fact; the write-gate would prevent any implementation file from being written before gates clear. Targeted for v0.3.0.
 - **Limited real-world mileage.** The pipeline has been exercised on internal examples but not yet validated across a broad range of real projects.
 - **Breaking changes before 1.0.** Artifact schemas, state fields, and CLI flags may change.
 
@@ -242,5 +242,9 @@ MIT
 - [USAGE.md](./USAGE.md) — full usage guide, from install through advanced CLI reference
 - [CHANGELOG.md](./CHANGELOG.md) — version history
 - [spec/TwinHarness-Plan.md](./spec/TwinHarness-Plan.md) — design spec
-- [spec/write-gate-design.md](./spec/write-gate-design.md) — PreToolUse write-gate design (v0.3.0 roadmap)
+- [spec/write-gate-design.md](./spec/write-gate-design.md) — PreToolUse write-gate design (implemented in v0.3.0)
 - [GitHub issues](https://github.com/JrSneed28/TwinHarness/issues)
+
+---
+
+[![version](https://img.shields.io/badge/version-0.3.0-blue)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-7c3aed) ![node](https://img.shields.io/badge/node-%E2%89%A5%2018-339933)

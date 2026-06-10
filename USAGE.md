@@ -243,6 +243,38 @@ with a visible warning instead — because a blocking drift needs *your* decisio
 forever would just spin the model. Projects with no `.twinharness/state.json` are never gated; the
 hook is inert outside TwinHarness runs.
 
+### The write-gate
+
+A PreToolUse hook runs `th hook pretool-gate` before every `Write`, `Edit`, `MultiEdit`, or
+`NotebookEdit` call. Its job: prevent implementation files from being written before the gates
+clear, and police component boundaries during the build.
+
+**Phase A — pre-implementation** (`implementation_allowed: false`): any write to a path that is
+not a doc or state path fires the gate with the configured semantics. Doc/state paths
+(`docs/**`, `.twinharness/**`, `.claude/**`, `drift-log.md`, root `*.md`, `.gitignore`) are
+always allowed regardless of phase — spec writers, Critic, and doc-writers keep working through
+every pre-build stage.
+
+**Phase B — mid-build** (once `implementation_allowed` is true and slices exist): writes to paths
+owned by a slice whose status is not `in-progress` are flagged — a likely component-boundary
+violation. Writes to in-progress slices' paths and to paths owned by no slice are allowed.
+
+**Gate semantics** are controlled by the optional `write_gate` state field:
+
+| Value | Behaviour |
+|---|---|
+| `ask` (default) | Claude Code presents an allow/deny prompt. Human sessions proceed with one click; headless agents are effectively blocked. |
+| `deny` | Writes are hard-blocked. Use for strict runs where no slip-through is acceptable. |
+| `off` | Gate disabled. Equivalent to setting `TH_DISABLE_WRITE_GATE=1`. |
+
+Set it with `th state set write_gate deny` (or `ask`, `off`). The field is absent by default (behaves as `ask`).
+
+**Env escape hatch:** `TH_DISABLE_WRITE_GATE=1` disables the gate for the current session without
+touching state.
+
+**Fail-open by design:** no `state.json` → instant allow (non-TwinHarness projects are completely
+unaffected); invalid state → allow with a system-message warning; tool has no `file_path` → allow.
+
 ### Resuming
 
 Runs are idempotent to re-enter. If `.twinharness/state.json` exists, `/twinharness:th-run`
@@ -289,6 +321,7 @@ unwritable. Attempts to set an unknown top-level key exit with `unknown_field`.
 | `summaries_index` | string | Index doc for summary handoffs |
 | `slices` | {id, status, components}[] | Slice ledger; `status` ∈ pending/in-progress/done/blocked; `components` drives wave scheduling |
 | `implementation_allowed` | boolean | Set true only after the slice plan + tier prerequisites clear |
+| `write_gate` | `"ask"` \| `"deny"` \| `"off"` \| absent | PreToolUse write-gate semantics; absent = `ask`; use `th state set write_gate <value>` to configure |
 | `open_questions` | string[] | Unresolved questions blocking advancement |
 | `drift_open_blocking` | number | Open requirement-layer escalations; stop-gate blocks while > 0 |
 | `revise_loop_counts` | {mode: count} | Critic-loop round counters per mode |
@@ -423,7 +456,7 @@ Prints the CLI version from `package.json`. Useful for confirming which plugin v
 | 1 | General failure (invalid state, unknown command, missing args, `unknown_field` on `state set`, `drift_not_found` / `already_resolved` on `drift resolve`) |
 | 3 | Blast-radius veto (`th tier veto-check` blocked) |
 
-### The hook
+### The hooks
 
 ```
 th hook stop-gate
@@ -434,7 +467,16 @@ Speaks the Claude Code Stop-hook protocol on stdout: `{}` to allow;
 `stop_hook_active` (see Part 2). Always exits 0 — the JSON carries the decision. You rarely run
 this by hand except to debug why a session refuses to finish.
 
-There is only a **Stop hook** — there is no PreToolUse hook in TwinHarness.
+```
+th hook pretool-gate
+```
+
+Speaks the Claude Code PreToolUse-hook protocol on stdout. Reads the tool name and `file_path`
+from stdin. Returns `{}` to allow; `{"hookSpecificOutput":{"hookEventName":"PreToolUse",
+"permissionDecision":"ask","permissionDecisionReason":"..."}}` to ask; or the same shape with
+`"deny"` for hard blocks. Always exits 0. Runs only on `Write`, `Edit`, `MultiEdit`, and
+`NotebookEdit` calls — Read, Grep, and Bash are never intercepted. See Part 2 — "The write-gate"
+for semantics.
 
 ### Using `th` in CI
 
@@ -523,6 +565,7 @@ repo — they survive uninstall and contain everything needed to resume after a 
 | Commands not found after install | Restart the session (plugins load at startup). Verify with `claude plugin list`. |
 | Hook errors about a missing `dist/cli.js` | The installed copy predates a fix, or a dev clone wasn't rebuilt: update the marketplace + plugin, or `npm run build` in the clone. |
 | `.agentic-sdlc` directory not recognized | Upgrade to v0.2.0+ which reads `.agentic-sdlc` automatically as a legacy fallback. Or rename the folder to `.twinharness`. |
+| Edit or write was blocked / asked about by the write-gate | You are in a project with an active TwinHarness run. If you haven't finished the pre-build gates, the write-gate is doing its job: either finish the design stages and let the Orchestrator set `implementation_allowed true`, or run `th state set write_gate off` to disable gating for this run, or set `TH_DISABLE_WRITE_GATE=1` in your shell to bypass for the current session only. If you're mid-build and the gate fired, it is a component-boundary signal: a file you are editing belongs to a slice that is not `in-progress`. Check `th state status` and ensure the Orchestrator called `th slice set-status <SLICE-ID> in-progress` before your Builder started. |
 
 ### FAQ
 

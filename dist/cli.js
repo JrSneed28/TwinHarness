@@ -81,6 +81,7 @@ Usage:
   th drift list                     List drift entries + open blocking count
   th drift resolve <DRIFT-NNN>      Append a resolution note; decrement blocking counter only for requirement-layer entries
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
+  th hook pretool-gate              Emit a Claude Code PreToolUse write-gate decision
   th version                        Print the CLI version
   th help                           Show this help
 
@@ -426,6 +427,7 @@ function dispatch(parsed) {
  * Best-effort read of the Claude Code hook payload from stdin. Hooks always
  * receive piped JSON; a TTY means a human ran the command by hand, so skip
  * reading rather than hang waiting for EOF. Malformed/absent input → undefined.
+ * The type parameter lets callers narrow the returned object for their hook.
  */
 function readHookStdin() {
     if (process.stdin.isTTY)
@@ -446,11 +448,23 @@ function readHookStdin() {
 function main() {
     const parsed = parseArgs(process.argv.slice(2));
     // Hook commands speak the Claude Code hook protocol on stdout (not --json).
-    if (parsed.positionals[0] === "hook" && parsed.positionals[1] === "stop-gate") {
-        const paths = (0, paths_1.resolveProjectPaths)(parsed.flags.cwd);
-        const out = (0, hook_1.runHookStopGate)(paths, readHookStdin());
-        process.stdout.write(out.stdout + "\n");
-        process.exit(out.exitCode);
+    if (parsed.positionals[0] === "hook") {
+        if (parsed.positionals[1] === "stop-gate") {
+            const paths = (0, paths_1.resolveProjectPaths)(parsed.flags.cwd);
+            const out = (0, hook_1.runHookStopGate)(paths, readHookStdin());
+            process.stdout.write(out.stdout + "\n");
+            process.exit(out.exitCode);
+        }
+        if (parsed.positionals[1] === "pretool-gate") {
+            // Prefer the payload's cwd for path resolution when --cwd was not explicitly passed.
+            const stdinPayload = readHookStdin();
+            const cwdFromStdin = stdinPayload?.cwd;
+            const effectiveCwd = cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : parsed.flags.cwd;
+            const paths = (0, paths_1.resolveProjectPaths)(effectiveCwd);
+            const out = (0, hook_1.runHookPretoolGate)(paths, stdinPayload);
+            process.stdout.write(out.stdout + "\n");
+            process.exit(out.exitCode);
+        }
     }
     const result = dispatch(parsed);
     process.stdout.write((0, output_1.renderResult)(result, parsed.flags.json) + "\n");

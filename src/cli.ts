@@ -14,7 +14,7 @@ import { runAnchorsScan } from "./commands/anchors";
 import { runDriftAdd, runDriftList, runDriftResolve } from "./commands/drift";
 import { runTraceRender } from "./commands/trace";
 import { runStale } from "./commands/stale";
-import { runHookStopGate, type StopHookInput } from "./commands/hook";
+import { runHookStopGate, runHookPretoolGate, type StopHookInput, type PreToolHookInput } from "./commands/hook";
 import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
 
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
@@ -47,6 +47,7 @@ Usage:
   th drift list                     List drift entries + open blocking count
   th drift resolve <DRIFT-NNN>      Append a resolution note; decrement blocking counter only for requirement-layer entries
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
+  th hook pretool-gate              Emit a Claude Code PreToolUse write-gate decision
   th version                        Print the CLI version
   th help                           Show this help
 
@@ -382,15 +383,16 @@ function dispatch(parsed: ParsedArgs): CommandResult {
  * Best-effort read of the Claude Code hook payload from stdin. Hooks always
  * receive piped JSON; a TTY means a human ran the command by hand, so skip
  * reading rather than hang waiting for EOF. Malformed/absent input → undefined.
+ * The type parameter lets callers narrow the returned object for their hook.
  */
-function readHookStdin(): StopHookInput | undefined {
+function readHookStdin<T extends object>(): T | undefined {
   if (process.stdin.isTTY) return undefined;
   try {
     const raw = fs.readFileSync(0, "utf8");
     if (!raw.trim()) return undefined;
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return undefined;
-    return parsed as StopHookInput;
+    return parsed as T;
   } catch {
     return undefined;
   }
@@ -400,11 +402,24 @@ function main(): void {
   const parsed = parseArgs(process.argv.slice(2));
 
   // Hook commands speak the Claude Code hook protocol on stdout (not --json).
-  if (parsed.positionals[0] === "hook" && parsed.positionals[1] === "stop-gate") {
-    const paths = resolveProjectPaths(parsed.flags.cwd);
-    const out = runHookStopGate(paths, readHookStdin());
-    process.stdout.write(out.stdout + "\n");
-    process.exit(out.exitCode);
+  if (parsed.positionals[0] === "hook") {
+    if (parsed.positionals[1] === "stop-gate") {
+      const paths = resolveProjectPaths(parsed.flags.cwd);
+      const out = runHookStopGate(paths, readHookStdin<StopHookInput>());
+      process.stdout.write(out.stdout + "\n");
+      process.exit(out.exitCode);
+    }
+    if (parsed.positionals[1] === "pretool-gate") {
+      // Prefer the payload's cwd for path resolution when --cwd was not explicitly passed.
+      const stdinPayload = readHookStdin<PreToolHookInput>();
+      const cwdFromStdin = stdinPayload?.cwd;
+      const effectiveCwd =
+        cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : parsed.flags.cwd;
+      const paths = resolveProjectPaths(effectiveCwd);
+      const out = runHookPretoolGate(paths, stdinPayload);
+      process.stdout.write(out.stdout + "\n");
+      process.exit(out.exitCode);
+    }
   }
 
   const result = dispatch(parsed);

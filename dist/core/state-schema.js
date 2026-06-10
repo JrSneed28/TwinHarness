@@ -7,7 +7,7 @@
  * `th state verify` and the stop-gate can explain *what* is wrong.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.STATE_FIELD_ORDER = exports.SLICE_STATUSES = exports.BLAST_RADIUS_FLAGS = exports.TIERS = void 0;
+exports.STATE_FIELD_ORDER = exports.WRITE_GATE_VALUES = exports.SLICE_STATUSES = exports.BLAST_RADIUS_FLAGS = exports.TIERS = void 0;
 exports.initialState = initialState;
 exports.validateState = validateState;
 exports.serializeState = serializeState;
@@ -21,6 +21,8 @@ exports.BLAST_RADIUS_FLAGS = [
     "migrations",
 ];
 exports.SLICE_STATUSES = ["pending", "in-progress", "done", "blocked"];
+/** Valid values for the optional write-gate field (design doc §State schema change). */
+exports.WRITE_GATE_VALUES = ["ask", "deny", "off"];
 /** Canonical field order → deterministic serialization → stable content hashes. */
 exports.STATE_FIELD_ORDER = [
     "tier",
@@ -34,6 +36,7 @@ exports.STATE_FIELD_ORDER = [
     "open_questions",
     "drift_open_blocking",
     "revise_loop_counts",
+    "write_gate",
 ];
 /** Fresh state written by `th init` — unclassified, implementation not yet allowed. */
 function initialState() {
@@ -145,6 +148,12 @@ function validateState(value) {
             }
         }
     }
+    // Optional write_gate field (design doc §State schema change).
+    if (v.write_gate !== undefined) {
+        if (typeof v.write_gate !== "string" || !exports.WRITE_GATE_VALUES.includes(v.write_gate)) {
+            issues.push({ path: "write_gate", message: `must be one of ${exports.WRITE_GATE_VALUES.join(", ")} or absent` });
+        }
+    }
     // Cross-field invariant — the veto FLOOR (spec §5): Tier 0 is forbidden when
     // any blast-radius flag is present. This makes `th state set tier T0`
     // mechanically refuse with flags set, and makes the stop-gate block such a
@@ -159,11 +168,18 @@ function validateState(value) {
         return { ok: false, issues };
     return { ok: true, issues: [], state: value };
 }
-/** Deterministic serialization in canonical field order, trailing newline. */
+/**
+ * Deterministic serialization in canonical field order, trailing newline.
+ * Optional fields (e.g. write_gate) are omitted when undefined so that existing
+ * state files serialize byte-identically — preserving content-hash stability (§18).
+ */
 function serializeState(state) {
     const ordered = {};
     for (const key of exports.STATE_FIELD_ORDER) {
-        ordered[key] = state[key];
+        const val = state[key];
+        if (val !== undefined) {
+            ordered[key] = val;
+        }
     }
     return JSON.stringify(ordered, null, 2) + "\n";
 }

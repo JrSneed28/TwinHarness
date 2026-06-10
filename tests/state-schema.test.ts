@@ -50,10 +50,43 @@ describe("REQ-STATE-SERIALIZE: deterministic serialization", () => {
   it("serializes in canonical field order with a trailing newline", () => {
     const out = serializeState(initialState());
     expect(out.endsWith("\n")).toBe(true);
-    expect(Object.keys(JSON.parse(out))).toEqual(STATE_FIELD_ORDER);
+    // Only required fields appear (optional write_gate is absent from initialState()).
+    const requiredOrder = STATE_FIELD_ORDER.filter((k) => k !== "write_gate");
+    expect(Object.keys(JSON.parse(out))).toEqual(requiredOrder);
   });
 
   it("is stable across calls (clock-free)", () => {
     expect(serializeState(initialState())).toBe(serializeState(initialState()));
+  });
+
+  it("REQ-WRITE-GATE-SCHEMA: omits write_gate from serialization when absent (hash-stability)", () => {
+    const out = serializeState(initialState());
+    expect(Object.keys(JSON.parse(out))).not.toContain("write_gate");
+  });
+
+  it("REQ-WRITE-GATE-SCHEMA: includes write_gate in serialization when present", () => {
+    const state = { ...initialState(), write_gate: "deny" as const };
+    const out = serializeState(state);
+    const parsed = JSON.parse(out) as Record<string, unknown>;
+    expect(parsed["write_gate"]).toBe("deny");
+    // write_gate should be the last key (end of STATE_FIELD_ORDER).
+    const keys = Object.keys(parsed);
+    expect(keys[keys.length - 1]).toBe("write_gate");
+  });
+
+  it("REQ-WRITE-GATE-SCHEMA: validates accepted write_gate values", () => {
+    for (const v of ["ask", "deny", "off"] as const) {
+      expect(validateState({ ...initialState(), write_gate: v }).ok).toBe(true);
+    }
+  });
+
+  it("REQ-WRITE-GATE-SCHEMA: validates absence of write_gate", () => {
+    expect(validateState(initialState()).ok).toBe(true);
+  });
+
+  it("REQ-WRITE-GATE-SCHEMA: rejects bogus write_gate values", () => {
+    const r = validateState({ ...initialState(), write_gate: "never" });
+    expect(r.ok).toBe(false);
+    expect(r.issues.some((i) => i.path === "write_gate")).toBe(true);
   });
 });

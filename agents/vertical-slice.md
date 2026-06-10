@@ -67,7 +67,7 @@ Each slice after Slice 0 must have all of these fields:
 | **Name** | Short human-readable identifier (e.g. `SLICE-1 — User registration`) |
 | **REQ-IDs satisfied** | Which REQ-IDs this slice fully or partially satisfies; must be non-empty |
 | **User-demonstrable capability** | The behavior a human can observe and verify when this slice is done |
-| **Components touched (end-to-end)** | Every layer/component the slice exercises, from interface to data — this field drives §16 parallel-build serialization; two slices with overlapping component sets are serialized |
+| **Components touched (end-to-end)** | Every layer/component the slice exercises, from interface to data — this field drives §16 parallel-build serialization; two slices with overlapping component sets are serialized. Express tokens as root-relative paths wherever possible (e.g. `src/sync/`, `src/cli.ts`) — path-like tokens power both wave scheduling and the mid-build write-gate; abstract names (e.g. `"SyncEngine"`) still schedule waves correctly but contribute nothing to write-gate enforcement. |
 | **Anchored acceptance tests** | The specific tests from the Stage 8 test strategy that gate this slice as done |
 | **Dependencies and order** | Which prior slices must be done before this one can start |
 | **Definition of done** | Concrete, mechanical: acceptance tests pass + `th state verify` clean + any required Critic PASS |

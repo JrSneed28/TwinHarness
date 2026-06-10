@@ -35,6 +35,10 @@ export interface SliceState {
   components: string[];
 }
 
+/** Valid values for the optional write-gate field (design doc §State schema change). */
+export const WRITE_GATE_VALUES = ["ask", "deny", "off"] as const;
+export type WriteGate = (typeof WRITE_GATE_VALUES)[number];
+
 export interface TwinHarnessState {
   tier: Tier | null;
   complexity_rationale: string;
@@ -47,6 +51,11 @@ export interface TwinHarnessState {
   open_questions: string[];
   drift_open_blocking: number;
   revise_loop_counts: Record<string, number>;
+  /**
+   * Controls the PreToolUse write-gate behaviour (design doc §State schema change).
+   * Absent ⇒ "ask" semantics applied in gate logic; never written to initialState().
+   */
+  write_gate?: WriteGate;
 }
 
 export interface ValidationIssue {
@@ -73,6 +82,7 @@ export const STATE_FIELD_ORDER: (keyof TwinHarnessState)[] = [
   "open_questions",
   "drift_open_blocking",
   "revise_loop_counts",
+  "write_gate",
 ];
 
 /** Fresh state written by `th init` — unclassified, implementation not yet allowed. */
@@ -196,6 +206,13 @@ export function validateState(value: unknown): ValidationResult {
     }
   }
 
+  // Optional write_gate field (design doc §State schema change).
+  if (v.write_gate !== undefined) {
+    if (typeof v.write_gate !== "string" || !(WRITE_GATE_VALUES as readonly string[]).includes(v.write_gate)) {
+      issues.push({ path: "write_gate", message: `must be one of ${WRITE_GATE_VALUES.join(", ")} or absent` });
+    }
+  }
+
   // Cross-field invariant — the veto FLOOR (spec §5): Tier 0 is forbidden when
   // any blast-radius flag is present. This makes `th state set tier T0`
   // mechanically refuse with flags set, and makes the stop-gate block such a
@@ -213,11 +230,18 @@ export function validateState(value: unknown): ValidationResult {
   return { ok: true, issues: [], state: value as unknown as TwinHarnessState };
 }
 
-/** Deterministic serialization in canonical field order, trailing newline. */
+/**
+ * Deterministic serialization in canonical field order, trailing newline.
+ * Optional fields (e.g. write_gate) are omitted when undefined so that existing
+ * state files serialize byte-identically — preserving content-hash stability (§18).
+ */
 export function serializeState(state: TwinHarnessState): string {
   const ordered: Record<string, unknown> = {};
   for (const key of STATE_FIELD_ORDER) {
-    ordered[key] = state[key];
+    const val = state[key];
+    if (val !== undefined) {
+      ordered[key] = val;
+    }
   }
   return JSON.stringify(ordered, null, 2) + "\n";
 }

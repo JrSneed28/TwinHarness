@@ -1,6 +1,6 @@
 # PreToolUse Write-Gate — Design (target: v0.3.0)
 
-> Status: **Accepted** (design decisions resolved 2026-06-10; not yet implemented).
+> Status: **Implemented in v0.3.0 (2026-06-10)**.
 > The Stop hook catches a false "done" *after the fact*. This gate makes "no implementation
 > before the gates clear" *physically enforced* — the strongest expression of the project's
 > own principle: instructions don't enforce, code does (spec §11).

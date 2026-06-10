@@ -409,12 +409,19 @@ placed in separate waves and serialized to prevent merge conflicts and drift rac
 Update slice statuses as work progresses:
 
 ```
-th slice set-status <SLICE-ID> in-progress
-th slice set-status <SLICE-ID> complete
+th slice set-status <SLICE-ID> in-progress   # before spawning the Builder
+th slice set-status <SLICE-ID> complete      # after the Critic code-review PASS
 ```
 
 The wave schedule from `th build plan` is the mechanical input — not a judgment call. Apply it
 exactly as computed.
+
+**Write-gate.** Setting slice status to `in-progress` before spawning each Builder is also what
+the write-gate (`th hook pretool-gate`) relies on for Phase-B component-boundary enforcement:
+writes to paths owned by a slice that is not `in-progress` are flagged automatically. The gate is
+always active when `state.json` exists and is fail-open throughout. Configure it with
+`th state set write_gate ask|deny|off` (default `ask`). If a Builder reports the gate fired, treat
+it as a component-boundary escalation — not a retry. See `spec/write-gate-design.md`.
 
 After each slice's Critic PASS, register the slice artifact and advance state:
 

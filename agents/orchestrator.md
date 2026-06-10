@@ -353,6 +353,21 @@ section above). Spawn the **Builder agent (`agents/builder.md`)** one per slice,
 wave schedule exactly: slices within the same wave run concurrently; slices in different waves are
 serialized. The wave schedule is the mechanical input — not a judgment call.
 
+**Write-gate and slice lifecycle.** Before spawning a Builder for a slice, set the slice
+`in-progress` — the write-gate uses slice status to police component boundaries during Phase B:
+
+```
+th slice set-status <SLICE-ID> in-progress   # before spawning the Builder
+th slice set-status <SLICE-ID> done          # after the Critic code-review PASS
+```
+
+The write-gate (`th hook pretool-gate`) is automatic: it activates whenever `state.json` exists,
+requires no orchestrator setup, and is fail-open (no state → allow; invalid state → allow with
+warning). Its semantics are configurable via `th state set write_gate ask|deny|off` (default
+`ask`). If a Builder reports the gate fired on one of its writes, that is a component-boundary
+signal — surface it as an escalation, not a retry. See `spec/write-gate-design.md` for the full
+decision ladder.
+
 ### After each slice — Critic code-review loop
 
 Route the Builder's completed slice to the **Critic agent in `code-review` mode**, fresh context:

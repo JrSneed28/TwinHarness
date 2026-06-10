@@ -171,6 +171,19 @@ for staying within your assigned slice's component boundary:
 - Component ownership comes from the `components touched` field in `docs/09-implementation-plan.md`.
   Read that field for your assigned slice at the start of each slice.
 
+### Write-gate and component boundaries
+
+The write-gate (`th hook pretool-gate`) mechanically enforces component boundaries during the
+build. Before you begin writing any file, the Orchestrator must have called
+`th slice set-status <SLICE-N> in-progress` for your slice. If it hasn't, writes to
+implementation paths will be intercepted.
+
+If the gate fires an "ask" on a write you are making — particularly to a path outside your
+assigned components — treat it as a **component-boundary signal**: stop and escalate to the
+Orchestrator rather than retrying or bypassing the gate. This is the mechanical expression of the
+"do not modify files owned by another slice" rule above; the gate firing is confirmation that you
+are about to cross a component boundary. Do not retry.
+
 ## What you do NOT do
 
 - You do not re-plan slices or tasks. The slice plan is an approved artifact (spec §15.9).
