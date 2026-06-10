@@ -1,0 +1,7 @@
+# Rust build output (created once SLICE-0 scaffolds the cargo workspace).
+/target/
+**/*.rs.bk
+
+# Cargo.lock IS committed: TwinRunner is a binary application, not a library.
+
+*.log

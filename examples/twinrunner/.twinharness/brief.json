@@ -1,0 +1,8 @@
+{
+  "description": "TwinRunner — a simulated-backend Rust/ratatui+crossterm TUI recreation of the J-Runner-with-Extras Xbox 360 NAND/RGH-JTAG modding & repair workflow. Four MVP capability areas (NAND dump read + console-info extraction with binary format parsing; CPU-key library; simulated build/patch image incl. ECC/XeLL/timing; simulated flashing + guided RGH/JTAG troubleshooting). Trait-abstracted build/flash backends with deterministic simulator; real backends are no-op stubs; source dumps are never modified in place (operate on copies). New crate dependencies (ratatui, crossterm, serde, etc.). Public surface: CLI subcommands + library trait APIs + persisted key-library/config schemas.",
+  "single_file_or_local": false,
+  "changes_public_interface": true,
+  "adds_dependency": true,
+  "obvious_testable_answer": false,
+  "blast_radius_flags": []
+}
