@@ -277,12 +277,26 @@ approval: enum("auto-approved","approved-by-user") — how the Edits were permit
 ```
 
 **Preconditions:** every file target resolves inside the root; **all** hunks across **all** files
-dry-run cleanly (context lines match at stated/fuzzed offset).
+dry-run cleanly (context lines match at the stated offset — EXACT line context in the MVP; fuzzed
+offset is a V1 refinement, out of scope).
 **Postconditions:** **atomic** — either all hunks apply and all Edits are persisted, or **zero**
 Edits are produced and nothing is written (RULE-013, INV-007). Diffs exist for every applied Edit
 (RULE-002).
 **Side effects:** writes one+ files on success; emits `edit-proposed`/`edit-applied` per file, or a
 `patch-rejected` entry on rejection.
+
+> **SLICE-6 realization note (pinned):** the fixed protocol is a
+> dry-run-EVERYTHING-then-write barrier: (1) `parsePatch` → `PATCH_MALFORMED`; (2)
+> `path-sandbox.checkWrite` on EVERY target → any escape → `PATH_ESCAPE`, whole patch
+> rejected before any write; (3) `diff-engine.applyHunks` DRY-RUN on EVERY file/hunk →
+> any failure → `PATCH_NOT_APPLICABLE`, zero Edits, a `patch-rejected` entry; (4) only
+> if all targets are in-root AND all hunks dry-run cleanly: a per-file Diff
+> (`generateDiff`) is generated and a **single** `approval-gate.resolveEdit` gates the
+> WHOLE patch — the gate's single-Edit surface is fed a synthetic patch-Edit whose
+> `diff` is every per-file diff concatenated (so the prompt shows the full blast
+> radius) — then every file is persisted. Re-applying an already-applied patch is
+> rejected at step 3 (its context no longer matches). Like the other mutating tools, a
+> user-abort propagates as `UserAbortError` (clean Stopped, re-raised by the registry).
 
 #### Error responses
 
@@ -368,10 +382,14 @@ run(command, cwd, timeoutMs):
 
 ```
 {
-  exitCode: integer  — process exit status (any integer; non-zero is valid, not an error)
-  stdout:   string   — captured standard output
-  stderr:   string   — captured standard error
-  timedOut: boolean  — true if the process was killed at timeoutMs
+  exitCode:    integer  — process exit status (any integer; non-zero is valid, not an error)
+  stdout:      string   — captured standard output
+  stderr:      string   — captured standard error
+  timedOut:    boolean  — true if the process was killed at timeoutMs
+  spawnFailed?: boolean — SLICE-5 additive (ADR-002): true iff the process NEVER STARTED (spawn
+                          failure — e.g. executable not found). The caller maps spawnFailed:true to
+                          COMMAND_FAILED (ERR-010), distinct from a process that ran and exited
+                          non-zero (a valid result). Optional/absent = ran normally.
 }
 ```
 
@@ -450,11 +468,35 @@ resolveCommand(command, policy, allowlist):
 #### Response / Output
 
 ```
+resolveEdit    → Promise<ApprovalDecision>   (async: the confirm-each prompt is an async seam)
+resolveCommand → Promise<ApprovalDecision>   (async since SLICE-5: a non-allowlisted command prompts via the same injectable async confirm seam)
 ApprovalDecision: enum("auto-approved","approved-by-user","denied","user-abort")
 ```
 
-**Preconditions:** for `resolveEdit`, a Diff exists. The matcher tokenizes the command (argv) and
-treats each entry as a **token-sequence prefix** (ADR-006).
+> **SLICE-4 realization note (pinned):** `resolveEdit` is **async** (`Promise<ApprovalDecision>`)
+> because the confirm-each prompt is an **injectable async seam** (`confirm: (prompt) =>
+> Promise<"approve"|"deny"|"abort">`, default reads stdin) so the decision is deterministically
+> testable without real stdin (REQ-NFR-002). `auto` editMode auto-approves WITHOUT prompting;
+> `confirm-each` (the default) prompts. On `user-abort` the calling tool raises a non-fatal
+> `UserAbortError` (code `USER_ABORT`) — distinct from `FatalToolError` — that the registry
+> re-raises (rather than normalizing) so the run terminates as a CLEAN `user-abort` StopCondition
+> (Stopped, NOT Failed); the full StopCondition classification is SLICE-7. A diff-less Edit reaching
+> the gate is an INV-003 breach → fatal (`EDIT_WITHOUT_DIFF`).
+>
+> **SLICE-5 realization note (pinned):** `resolveCommand(command, policy, allowlist)` is now **async**
+> (`Promise<ApprovalDecision>`) — a non-allowlisted command **prompts** via an **injectable async
+> command-confirm seam** (`confirmCommand: (prompt) => Promise<"approve"|"deny"|"abort">`, default
+> reads stdin) so the decision is deterministically testable without real stdin (REQ-NFR-002). `policy`
+> is `{ commandMode: "allowlist-confirm" | "auto" }`; `allowlist` is the `allowlist` component's matcher
+> (`isAllowed(command)` — token-sequence prefix, ADR-006). `auto` commandMode auto-approves WITHOUT
+> prompting; `allowlist-confirm` (the default) auto-runs an allowlisted command and prompts everything
+> else. **Chained/redirected commands** (`;`, `&&`, `||`, `|`, `>`, `<`, `` ` ``, `$(`, newline) are
+> never auto-run (the matcher returns false → they fall through to the prompt; INV-010). On `user-abort`
+> the calling tool raises the same non-fatal `UserAbortError` → clean Stopped.
+
+**Preconditions:** for `resolveEdit`, a Diff exists (a diff-less Edit fails closed as a fatal
+invariant breach — INV-003). The matcher tokenizes the command (argv) and treats each entry as a
+**token-sequence prefix** (ADR-006).
 **Postconditions:** `auto-approved` / `approved-by-user` permit the action; `denied` yields an error
 ToolResult (`APPROVAL_DENIED`); `user-abort` raises a `user-abort` StopCondition (classified
 Stopped). **Chained/redirected commands** (`;`, `&&`, `||`, `|`, `>`, `` ` ``, `$(`) are never
@@ -615,6 +657,31 @@ parsePatch   → { files: { path: string, hunks: Hunk[] }[] }  — typed per-fil
 applyHunks   → { applicable: boolean, result?: string, failedHunkIndex?: integer } — per-hunk applicability
 ```
 
+> **SLICE-4 realization note (pinned):** `generateDiff` emits a two-line file header
+> (`--- a/<path>` / `+++ b/<path>`) followed by `@@ -aStart,aCount +bStart,bCount @@` hunks with
+> ` ` (context) / `-` (removed) / `+` (added) line prefixes and 3 lines of context, always ending
+> with a trailing newline. The degenerate Edits are explicit: `before === null` → new file (`---`
+> side is `/dev/null`, `@@ -0,0 +1,N @@`); `after === ""` → deletion (`+++` side is `/dev/null`).
+> It is PURE/deterministic (LCS line diff, fixed tie-break) so the same inputs are byte-identical.
+
+> **SLICE-6 realization note (pinned):** the read side is realized PURE / IO-free.
+> `parsePatch(patchText)` returns a DISCRIMINATED result rather than throwing, so the
+> tool maps a malformed patch to a `status:"error"` ToolResult with NO try/catch
+> (RULE-008): `{ ok: true, patch: { files: { path, hunks }[] } } | { ok: false, reason: string }`.
+> A parsed `Hunk` is `{ aStart, aCount, bStart, bCount, lines: string[] }` (each `lines`
+> element keeps its ` `/`-`/`+` prefix; a `\ No newline at end of file` marker is
+> tolerated and dropped). The target path is the `+++ b/<path>` side (or, for a deletion,
+> the `--- a/<path>` side). Malformed = no file headers, a `@@` before any header, a
+> `+++` with no preceding `---`, a file with zero hunks, or a hunk whose body line
+> counts disagree with its header. `applyHunks(file, hunks)` applies the hunks against
+> the CURRENT contents using EXACT line-context matching at the stated 1-based anchor
+> (no fuzzy offset in the MVP — AST/git-aware refinement is V1, out of scope); it returns
+> `{ applicable: true, result }` (a FRESH string; inputs never mutated — the dry-run has
+> zero internal/disk drift) or `{ applicable: false, failedHunkIndex }` for the first
+> bad hunk. A new-file target uses `file === ""` with an all-`+` hunk anchored at 0.
+> The TOOL (`apply_patch`) — not the engine — enforces all-or-none atomicity across
+> files (RULE-013 / INV-007).
+
 **Preconditions:** none (pure deterministic).
 **Postconditions:** every Edit is representable as a Diff (RULE-002, INV-003); per-hunk
 applicability is reported (the **tool** enforces all-or-none atomicity, RULE-013).
@@ -755,6 +822,15 @@ run-completed        payload: { status: enum("succeeded","stopped","failed"), ex
 allowlist-changed    payload: { op: enum("add","remove"), pattern: string }           — AllowlistChanged
 ```
 
+> **SLICE-9 realization note (pinned, REQ-025 / RULE-014):** the `allowlist-changed` row is a
+> per-RUN audit entry keyed to a `runId`. The `autocoder allowlist <add|remove>` subcommand starts
+> NO agent loop and opens NO transcript (Architecture §Secondary flow), so there is no run context to
+> append this row to. In that no-loop mode the mutating op surfaces the change through the **Reporter**
+> instead — carrying the SAME `{ op, pattern }` data this payload defines — per the secondary flow's
+> "Reporter confirms" step. The `allowlist-changed` transcript row is therefore reserved for any
+> in-RUN allowlist mutation (a future capability); the SLICE-9 subcommand path is Reporter-confirmed,
+> not transcript-recorded. (DRIFT-018.)
+
 **Validation rules:**
 - `payload` shape is determined by `type` (discriminated union).
 - `seq` is gap-free and strictly increasing per run; entries are append-only (INV-009).
@@ -789,6 +865,15 @@ schemaVersion:  string  [required] — `--json` schema version for additive CI-s
   stable** for CI consumers — fields are never removed or retyped within a `schemaVersion`; new
   optional fields may be added. CI may rely on `status`, `exitCode`, `stopCondition` permanently.
 
+> **SLICE-8 realization note (pinned, REQ-018 redaction):** the `reporter` renders this object from
+> a SINGLE classified `RunOutcome` (status/exitCode/stopCondition REUSED from the SLICE-7 `budget-stop`
+> classification — never recomputed): the human form (REQ-019) and the `--json` form (REQ-024) are the
+> same data rendered twice. The reporter writes EVERY stdout byte (human stream + summary + `--json`)
+> through a redaction seam that replaces any occurrence of the configured secret (`ANTHROPIC_API_KEY`)
+> with `[REDACTED]` — so the key can appear in NEITHER the human stream, the `--json` object, NOR (via
+> TASK-016 emitters that never serialize it) the Transcript. The optional `estimated:boolean` token
+> flag (ODQ-005) is carried as a top-level field alongside `tokensUsed`.
+
 ### Config (IF-017)
 
 **Domain entity:** `Config` (from `03-domain-model.md`)
@@ -819,6 +904,15 @@ pattern: string [required] — a command token-sequence prefix that auto-runs (e
   validated before AgentRun is constructed.
 - `--yes`/`--auto` sets both `editMode` and `commandMode` to `"auto"`.
 - Allowlist add/remove is idempotent on set membership and persists to the config file (RULE-014).
+
+> **SLICE-9 realization note (pinned, REQ-025 / RULE-014):** the `allowlist <list|add|remove>`
+> subcommand resolves its config-file TARGET as `--config <path>` when supplied, else a default
+> `.autocoder.json` in the working directory (the resolved path is absolute). `list` inspects without
+> mutating; `add`/`remove` mutate set membership and re-persist the WHOLE config object (every
+> unrelated field preserved) as pretty-printed JSON. A persistence write FAILURE raises
+> `ALLOWLIST_PERSIST_FAILED` (FAIL-004) → stderr + non-zero exit; the confirmation ("saved") is
+> emitted ONLY after the write succeeds, so a failed persist can never print a false success. Set
+> management + write-back live in `config.ts`; the `allowlist.ts` MATCHER (SLICE-5) is untouched.
 
 ---
 

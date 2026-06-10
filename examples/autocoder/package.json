@@ -1,0 +1,26 @@
+{
+  "name": "autocoder",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Autocoder — autonomous coding-agent CLI (mini Claude Code). Walking-skeleton build.",
+  "type": "module",
+  "bin": {
+    "autocoder": "dist/cli.js"
+  },
+  "main": "dist/cli.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "license": "MIT"
+}

@@ -4,7 +4,7 @@
   "blast_radius_flags": [
     "data-integrity"
   ],
-  "current_stage": "implementation-planning",
+  "current_stage": "final-verification",
   "approved_artifacts": [
     {
       "file": "docs/01-requirements.md",
@@ -73,8 +73,8 @@
     },
     {
       "file": "docs/07-contracts.md",
-      "version": 1,
-      "hash": "7829c75bd0de"
+      "version": 2,
+      "hash": "f0fcb001c825"
     },
     {
       "file": "docs/08a-security-threat-model.md",
@@ -95,12 +95,147 @@
       "file": "docs/09-implementation-plan.md",
       "version": 1,
       "hash": "0cb3aa17949c"
+    },
+    {
+      "file": "docs/10-verification-report.md",
+      "version": 1,
+      "hash": "17c60bae220e"
     }
   ],
   "summaries_index": "00-project-summary.md",
-  "slices": [],
-  "implementation_allowed": false,
+  "slices": [
+    {
+      "id": "SLICE-0",
+      "status": "done",
+      "components": [
+        "cli",
+        "config",
+        "repo-context",
+        "agent-run",
+        "llm-client",
+        "tool-registry",
+        "tool-read",
+        "path-sandbox",
+        "approval-gate",
+        "transcript",
+        "reporter"
+      ]
+    },
+    {
+      "id": "SLICE-1",
+      "status": "done",
+      "components": [
+        "cli",
+        "config",
+        "path-sandbox"
+      ]
+    },
+    {
+      "id": "SLICE-2",
+      "status": "done",
+      "components": [
+        "repo-context",
+        "agent-run",
+        "llm-client",
+        "tool-registry"
+      ]
+    },
+    {
+      "id": "SLICE-3",
+      "status": "done",
+      "components": [
+        "tool-read",
+        "tool-search",
+        "path-sandbox"
+      ]
+    },
+    {
+      "id": "SLICE-4",
+      "status": "done",
+      "components": [
+        "tool-writeedit",
+        "diff-engine",
+        "approval-gate",
+        "path-sandbox"
+      ]
+    },
+    {
+      "id": "SLICE-5",
+      "status": "done",
+      "components": [
+        "tool-runcommand",
+        "command-runner",
+        "approval-gate",
+        "allowlist",
+        "path-sandbox"
+      ]
+    },
+    {
+      "id": "SLICE-6",
+      "status": "done",
+      "components": [
+        "tool-applypatch",
+        "diff-engine",
+        "path-sandbox",
+        "approval-gate"
+      ]
+    },
+    {
+      "id": "SLICE-7",
+      "status": "done",
+      "components": [
+        "budget-stop",
+        "agent-run"
+      ]
+    },
+    {
+      "id": "SLICE-8",
+      "status": "done",
+      "components": [
+        "transcript",
+        "reporter"
+      ]
+    },
+    {
+      "id": "SLICE-9",
+      "status": "done",
+      "components": [
+        "cli",
+        "allowlist",
+        "config",
+        "reporter"
+      ]
+    },
+    {
+      "id": "SLICE-10",
+      "status": "done",
+      "components": [
+        "cli",
+        "config",
+        "repo-context",
+        "agent-run",
+        "llm-client",
+        "tool-registry",
+        "tool-read",
+        "tool-search",
+        "tool-writeedit",
+        "tool-applypatch",
+        "tool-runcommand",
+        "command-runner",
+        "path-sandbox",
+        "approval-gate",
+        "allowlist",
+        "diff-engine",
+        "budget-stop",
+        "transcript",
+        "reporter"
+      ]
+    }
+  ],
+  "implementation_allowed": true,
   "open_questions": [],
   "drift_open_blocking": 0,
-  "revise_loop_counts": {}
+  "revise_loop_counts": {
+    "code-review": 0
+  }
 }
