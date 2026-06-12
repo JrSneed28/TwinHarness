@@ -100,11 +100,12 @@ export function runHookStopGate(
 /**
  * The subset of the Claude Code PreToolUse stdin payload the write-gate cares about.
  * `tool_name` lets the hook identify which tool is firing; `tool_input.file_path`
- * is the path being written; `cwd` is the session's project directory.
+ * is the path being written (Write/Edit); `tool_input.notebook_path` is used by
+ * NotebookEdit; `cwd` is the session's project directory.
  */
 export interface PreToolHookInput {
   tool_name?: string;
-  tool_input?: { file_path?: string };
+  tool_input?: { file_path?: string; notebook_path?: string };
   cwd?: string;
 }
 
@@ -183,7 +184,7 @@ function findOwningSlices(
  * a. No state.json → allow ({}).
  * b. TH_DISABLE_WRITE_GATE=1 or write_gate=off → allow.
  * c. state.json invalid → allow + systemMessage warning.
- * d. No tool_input.file_path → allow.
+ * d. No tool_input.file_path (or notebook_path for NotebookEdit) → allow.
  * e. Target outside project root → allow.
  * f. Doc/state allowlist path → allow.
  * g. Phase A (implementation_allowed=false) → ask|deny per write_gate (default ask).
@@ -238,8 +239,8 @@ export function runHookPretoolGate(
   // Step b (state check): write_gate=off → allow.
   if (state.write_gate === "off") return allow();
 
-  // Step d: No file_path → allow.
-  const filePath = input?.tool_input?.file_path;
+  // Step d: No file_path (or notebook_path for NotebookEdit) → allow.
+  const filePath = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path;
   if (!filePath) return allow();
 
   // Step e: Resolve target. Relative paths are resolved against input.cwd ?? paths.root.

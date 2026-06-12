@@ -325,7 +325,7 @@ slice statuses as work progresses:
 
 ```
 th slice set-status <SLICE-ID> in-progress   # when a Builder starts a slice
-th slice set-status <SLICE-ID> complete      # after the Critic code-review PASS for a slice
+th slice set-status <SLICE-ID> done          # after the Critic code-review PASS for a slice
 ```
 
 **No human gate** (spec §8, §15.9). The slice plan streams. The human may interrupt at any point

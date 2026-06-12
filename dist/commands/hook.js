@@ -172,7 +172,7 @@ function findOwningSlices(relFwd, slices, root) {
  * a. No state.json → allow ({}).
  * b. TH_DISABLE_WRITE_GATE=1 or write_gate=off → allow.
  * c. state.json invalid → allow + systemMessage warning.
- * d. No tool_input.file_path → allow.
+ * d. No tool_input.file_path (or notebook_path for NotebookEdit) → allow.
  * e. Target outside project root → allow.
  * f. Doc/state allowlist path → allow.
  * g. Phase A (implementation_allowed=false) → ask|deny per write_gate (default ask).
@@ -211,8 +211,8 @@ function runHookPretoolGate(paths, input, env = process.env) {
     // Step b (state check): write_gate=off → allow.
     if (state.write_gate === "off")
         return allow();
-    // Step d: No file_path → allow.
-    const filePath = input?.tool_input?.file_path;
+    // Step d: No file_path (or notebook_path for NotebookEdit) → allow.
+    const filePath = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path;
     if (!filePath)
         return allow();
     // Step e: Resolve target. Relative paths are resolved against input.cwd ?? paths.root.

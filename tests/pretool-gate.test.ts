@@ -389,6 +389,37 @@ describe("REQ-WGATE-006: path resolution edge cases", () => {
 });
 
 // ---------------------------------------------------------------------------
+// REQ-WGATE-008: NotebookEdit — notebook_path is read by the write-gate
+// ---------------------------------------------------------------------------
+
+describe("REQ-WGATE-008: NotebookEdit tool uses notebook_path, not file_path", () => {
+  it("Phase A: notebook_path to an implementation path → gate FIRES (ask)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { current_stage: "stage-05" });
+    const input: PreToolHookInput = {
+      tool_name: "NotebookEdit",
+      tool_input: { notebook_path: "src/analysis.ipynb" },
+      cwd: tp.root,
+    };
+    const out = runHookPretoolGate(tp.paths, input);
+    expect(out.exitCode).toBe(0);
+    expect(permissionDecision(out)).toBe("ask");
+  });
+
+  it("Phase A: notebook_path under docs/ → allow (doc allowlist)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { current_stage: "stage-05" });
+    const input: PreToolHookInput = {
+      tool_name: "NotebookEdit",
+      tool_input: { notebook_path: "docs/exploration.ipynb" },
+      cwd: tp.root,
+    };
+    const out = runHookPretoolGate(tp.paths, input);
+    expect(isAllow(out)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // REQ-WGATE-007: legacy .agentic-sdlc project — identical behaviour
 // ---------------------------------------------------------------------------
 

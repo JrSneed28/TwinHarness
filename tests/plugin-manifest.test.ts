@@ -81,7 +81,7 @@ describe("REQ-PLUGIN-002: the compiled CLI ships with the plugin", () => {
     expect(stop?.command).toContain("hook stop-gate");
   });
 
-  it("hooks.json contains a PreToolUse entry for Write|Edit|MultiEdit|NotebookEdit that invokes th hook pretool-gate", () => {
+  it("hooks.json contains a PreToolUse entry for Write|Edit|NotebookEdit that invokes th hook pretool-gate", () => {
     const hooks = readJson("hooks/hooks.json") as {
       hooks: {
         PreToolUse: Array<{
@@ -95,7 +95,7 @@ describe("REQ-PLUGIN-002: the compiled CLI ships with the plugin", () => {
     expect(Array.isArray(preToolUseEntries)).toBe(true);
 
     const writeGateEntry = preToolUseEntries.find(
-      (entry) => entry.matcher === "Write|Edit|MultiEdit|NotebookEdit",
+      (entry) => entry.matcher === "Write|Edit|NotebookEdit",
     );
     expect(writeGateEntry).toBeDefined();
 

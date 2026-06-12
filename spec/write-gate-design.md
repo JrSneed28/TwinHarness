@@ -1,9 +1,11 @@
 # PreToolUse Write-Gate — Design (target: v0.3.0)
 
 > Status: **Implemented in v0.3.0 (2026-06-10)**.
-> The Stop hook catches a false "done" *after the fact*. This gate makes "no implementation
-> before the gates clear" *physically enforced* — the strongest expression of the project's
-> own principle: instructions don't enforce, code does (spec §11).
+> The Stop hook catches a false "done" *after the fact*. This gate provides a strong default
+> guardrail for the Write/Edit path — "no implementation before the gates clear" enforced on
+> the standard write tools — consistent with the project's own principle: instructions don't
+> enforce, code does (spec §11). Bash-mediated writes are deliberately out of scope (see
+> "Deliberately out of scope" below).
 
 ## Resolved design decisions
 

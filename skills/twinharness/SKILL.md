@@ -334,8 +334,13 @@ The Builder:
 
 1. Reads only the task file (SLICE-N / TASK-MMM) + relevant artifact Summary blocks — not the
    full corpus (§9).
-2. Implements production code + writes anchored tests (`test_REQ<###>_<capability_slug>`) in the
-   **same change** (§11).
+2. Implements production code + writes anchored tests in the **same change** (§11). Every test
+   MUST carry its requirement's anchor in the canonical hyphenated form — `REQ-001`,
+   `REQ-NFR-002` — in the `describe`/`it` description string or a `// Anchor: REQ-XXX` comment
+   immediately above the test. This is the literal string `th anchors scan` and
+   `th coverage check` look for. Because identifiers cannot contain hyphens, the matchable
+   anchor lives in the description/comment (e.g. `it("REQ-001: offline sync queues a write", ...)`)
+   not only in the bare function name (e.g. `test_req001_offline_sync_queues_write`).
 3. Runs `th anchors scan --scan-tests --scan-code` to confirm REQ-ID anchors are present.
 4. A **task** is complete only when its anchored tests pass and checks are green — not when the
    Builder asserts it (§11).
@@ -410,7 +415,7 @@ Update slice statuses as work progresses:
 
 ```
 th slice set-status <SLICE-ID> in-progress   # before spawning the Builder
-th slice set-status <SLICE-ID> complete      # after the Critic code-review PASS
+th slice set-status <SLICE-ID> done          # after the Critic code-review PASS
 ```
 
 The wave schedule from `th build plan` is the mechanical input — not a judgment call. Apply it
@@ -485,8 +490,8 @@ Do not create or maintain a separate traceability matrix file — it would rot.
 Rendered view shape:
 
 ```
-Requirement | Design ref      | Contract | Slice / Task        | Test          | Code
-REQ-001      | tech-design §2  | API §3    | SLICE-2 / TASK-014  | test_REQ001_* | src/sync.ts
+Requirement | Design ref      | Contract | Slice / Task        | Test (anchor in description/comment) | Code
+REQ-001      | tech-design §2  | API §3    | SLICE-2 / TASK-014  | it("REQ-001: …") / test_req001_*     | src/sync.ts
 ```
 
 **Step 2 — Confirm coverage is clean.**
