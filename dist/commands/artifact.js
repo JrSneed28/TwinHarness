@@ -69,6 +69,9 @@ function toRelKey(root, file) {
  * Re-registering the same file REPLACES its entry (version bump, no duplicate).
  */
 function runArtifactRegister(paths, file, version) {
+    return (0, state_store_1.withStateLock)(paths, () => runArtifactRegisterLocked(paths, file, version));
+}
+function runArtifactRegisterLocked(paths, file, version) {
     if (!file)
         return (0, output_1.failure)({ human: "usage: th artifact register <file> --version <n>" });
     if (version === undefined || !Number.isInteger(version) || version < 1) {

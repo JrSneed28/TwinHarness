@@ -83,6 +83,9 @@ function runStateGet(paths, dottedPath) {
 }
 /** `th state set <dotted.key> <value>` — refuses to persist an invalid result. */
 function runStateSet(paths, key, rawValue) {
+    return (0, state_store_1.withStateLock)(paths, () => runStateSetLocked(paths, key, rawValue));
+}
+function runStateSetLocked(paths, key, rawValue) {
     // Reject paths whose first segment is not a known state field (catches typos
     // like `implementaton_allowed` that would silently write nothing).
     const segments = key.split(".");

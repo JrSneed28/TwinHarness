@@ -124,6 +124,9 @@ const NOT_INIT = (0, output_1.failure)({
  * `--remove-missing`). `--dry-run` computes but does not write.
  */
 function runSlicesSync(paths, opts = {}) {
+    return (0, state_store_1.withStateLock)(paths, () => runSlicesSyncLocked(paths, opts));
+}
+function runSlicesSyncLocked(paths, opts = {}) {
     const planAbs = path.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
     if (!fs.existsSync(planAbs) || !fs.statSync(planAbs).isFile()) {
         const rel = path.relative(paths.root, planAbs).split(path.sep).join("/");
@@ -204,6 +207,9 @@ function runSlicesSync(paths, opts = {}) {
  * Validates the slice exists and status is one of pending|in-progress|done|blocked.
  */
 function runSliceSetStatus(paths, sliceId, status) {
+    return (0, state_store_1.withStateLock)(paths, () => runSliceSetStatusLocked(paths, sliceId, status));
+}
+function runSliceSetStatusLocked(paths, sliceId, status) {
     if (!sliceId) {
         return (0, output_1.failure)({ human: "usage: th slice set-status <SLICE-ID> <status>" });
     }

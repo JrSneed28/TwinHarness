@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
-import { readState, writeState } from "../core/state-store";
+import { readState, writeState, withStateLock } from "../core/state-store";
 import { type ValidationIssue } from "../core/state-schema";
 import {
   type DriftEntry,
@@ -85,6 +85,10 @@ function appendDriftLog(paths: ProjectPaths, block: string): void {
  * escalation to "awaiting human decision".
  */
 export function runDriftAdd(paths: ProjectPaths, opts: DriftAddOptions): CommandResult {
+  return withStateLock(paths, () => runDriftAddLocked(paths, opts));
+}
+
+function runDriftAddLocked(paths: ProjectPaths, opts: DriftAddOptions): CommandResult {
   const layer = opts.layer;
   if (layer !== "derived" && layer !== "requirement") {
     return failure({
@@ -169,6 +173,10 @@ export function runDriftList(paths: ProjectPaths): CommandResult {
  * - Derived-layer entries: counter unchanged, human output says so explicitly.
  */
 export function runDriftResolve(paths: ProjectPaths, id?: string): CommandResult {
+  return withStateLock(paths, () => runDriftResolveLocked(paths, id));
+}
+
+function runDriftResolveLocked(paths: ProjectPaths, id?: string): CommandResult {
   if (!id) return failure({ human: "usage: th drift resolve <DRIFT-NNN>" });
 
   const r = readState(paths);

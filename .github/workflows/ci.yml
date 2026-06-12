@@ -22,11 +22,14 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
-      - name: Test
-        run: npm test
-
+      # Build before test: the committed dist/ is the shipped artifact, and the
+      # concurrency test spawns the real `node dist/cli.js` to exercise the
+      # cross-process state lock.
       - name: Build
         run: npm run build
 
       - name: Assert dist/ is in sync with build
         run: git diff --exit-code dist/
+
+      - name: Test
+        run: npm test

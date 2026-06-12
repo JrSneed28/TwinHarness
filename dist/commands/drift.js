@@ -99,6 +99,9 @@ function appendDriftLog(paths, block) {
  * escalation to "awaiting human decision".
  */
 function runDriftAdd(paths, opts) {
+    return (0, state_store_1.withStateLock)(paths, () => runDriftAddLocked(paths, opts));
+}
+function runDriftAddLocked(paths, opts) {
     const layer = opts.layer;
     if (layer !== "derived" && layer !== "requirement") {
         return (0, output_1.failure)({
@@ -174,6 +177,9 @@ function runDriftList(paths) {
  * - Derived-layer entries: counter unchanged, human output says so explicitly.
  */
 function runDriftResolve(paths, id) {
+    return (0, state_store_1.withStateLock)(paths, () => runDriftResolveLocked(paths, id));
+}
+function runDriftResolveLocked(paths, id) {
     if (!id)
         return (0, output_1.failure)({ human: "usage: th drift resolve <DRIFT-NNN>" });
     const r = (0, state_store_1.readState)(paths);

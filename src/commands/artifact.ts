@@ -3,7 +3,7 @@ import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { resolveWithinRoot } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
-import { readState, writeState } from "../core/state-store";
+import { readState, writeState, withStateLock } from "../core/state-store";
 import { type ValidationIssue, type ApprovedArtifact } from "../core/state-schema";
 import { shortHash } from "../core/hash";
 import { structuredLog } from "../core/log";
@@ -39,6 +39,14 @@ function toRelKey(root: string, file: string): string {
  * Re-registering the same file REPLACES its entry (version bump, no duplicate).
  */
 export function runArtifactRegister(
+  paths: ProjectPaths,
+  file?: string,
+  version?: number,
+): CommandResult {
+  return withStateLock(paths, () => runArtifactRegisterLocked(paths, file, version));
+}
+
+function runArtifactRegisterLocked(
   paths: ProjectPaths,
   file?: string,
   version?: number,

@@ -38,6 +38,9 @@ function invalidState(issues) {
  * orchestrator decides whether to escalate.
  */
 function runReviseBump(paths, mode, cap = exports.DEFAULT_REVISE_CAP) {
+    return (0, state_store_1.withStateLock)(paths, () => runReviseBumpLocked(paths, mode, cap));
+}
+function runReviseBumpLocked(paths, mode, cap = exports.DEFAULT_REVISE_CAP) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
         return NOT_INIT;
@@ -83,6 +86,9 @@ function runReviseStatus(paths, mode, cap = exports.DEFAULT_REVISE_CAP) {
  * stage passes / zero issues), persist, and report.
  */
 function runReviseReset(paths, mode) {
+    return (0, state_store_1.withStateLock)(paths, () => runReviseResetLocked(paths, mode));
+}
+function runReviseResetLocked(paths, mode) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
         return NOT_INIT;
