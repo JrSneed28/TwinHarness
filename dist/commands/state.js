@@ -8,6 +8,13 @@ const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const state_schema_1 = require("../core/state-schema");
 const log_1 = require("../core/log");
+const ledger_1 = require("../core/ledger");
+/** Key segments that must never be written through a dotted path (proto-pollution guard, S3). */
+const UNSAFE_KEY_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
+/** Fields owned by a dedicated command; `state set` refuses them to keep the owning invariant. */
+const MANAGED_FIELDS = {
+    drift_open_blocking: "Use `th drift add` / `th drift resolve` — this counter is owned by the drift flow.",
+};
 function isRecord(v) {
     return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -80,13 +87,35 @@ function runStateGet(paths, dottedPath) {
 }
 /** `th state set <dotted.key> <value>` — refuses to persist an invalid result. */
 function runStateSet(paths, key, rawValue) {
+    return (0, state_store_1.withStateLock)(paths, () => runStateSetLocked(paths, key, rawValue));
+}
+function runStateSetLocked(paths, key, rawValue) {
     // Reject paths whose first segment is not a known state field (catches typos
     // like `implementaton_allowed` that would silently write nothing).
-    const firstSegment = key.split(".")[0];
+    const segments = key.split(".");
+    const firstSegment = segments[0];
     if (!state_schema_1.STATE_FIELD_ORDER.includes(firstSegment)) {
         return (0, output_1.failure)({
             human: `Unknown state field: "${firstSegment}". Valid top-level keys: ${state_schema_1.STATE_FIELD_ORDER.join(", ")}`,
             data: { error: "unknown_field", field: firstSegment, validFields: state_schema_1.STATE_FIELD_ORDER },
+        });
+    }
+    // Proto-pollution guard (S3): refuse any dotted segment that could walk into
+    // an object's prototype, even under an otherwise-valid first key (e.g.
+    // `revise_loop_counts.__proto__.x`). setByPath runs before validation, so this
+    // must be rejected up front.
+    if (segments.some((s) => UNSAFE_KEY_SEGMENTS.has(s))) {
+        return (0, output_1.failure)({
+            human: `Refusing to write: unsafe key segment in "${key}".`,
+            data: { error: "unsafe_key", key },
+        });
+    }
+    // Managed-field guard: refuse writes to fields owned by a dedicated command.
+    // These fields have an owning invariant that `state set` would silently bypass.
+    if (Object.prototype.hasOwnProperty.call(MANAGED_FIELDS, firstSegment)) {
+        return (0, output_1.failure)({
+            human: `Refusing to set managed field "${firstSegment}". ${MANAGED_FIELDS[firstSegment]}`,
+            data: { error: "managed_field", field: firstSegment },
         });
     }
     const r = (0, state_store_1.readState)(paths);
@@ -106,6 +135,12 @@ function runStateSet(paths, key, rawValue) {
     }
     (0, state_store_1.writeState)(paths, validation.state);
     (0, log_1.structuredLog)({ cmd: "state set", key });
+    // Audit ledger (F5): record gate-relevant mutations so a human can review when
+    // implementation_allowed, the tier, the blast-radius flags, the write_gate, or
+    // the blocking-drift count changed. Observability only — never blocks.
+    if (ledger_1.GATE_LEDGER_KEYS.has(firstSegment)) {
+        (0, ledger_1.appendLedger)(paths, { event: "gate-state-change", key, value });
+    }
     return (0, output_1.success)({ data: { key, value }, human: `Set ${key} = ${JSON.stringify(value)}` });
 }
 /** `th state status` — human-readable snapshot of tier/stage/gates. */

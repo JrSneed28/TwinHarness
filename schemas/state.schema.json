@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/JrSneed28/TwinHarness/schemas/state.schema.json",
+  "title": "TwinHarness state.json",
+  "description": "The mechanical run state owned by the th CLI. This published schema mirrors the hand-rolled validator in src/core/state-schema.ts (kept in sync by tests/schemas.test.ts). The CLI itself does not depend on a JSON-schema engine (zero runtime dependencies).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tier",
+    "complexity_rationale",
+    "blast_radius_flags",
+    "current_stage",
+    "approved_artifacts",
+    "summaries_index",
+    "slices",
+    "implementation_allowed",
+    "open_questions",
+    "drift_open_blocking",
+    "revise_loop_counts"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "State-schema version. Absent on legacy files (implicitly v1); stamped by th init / th migrate."
+    },
+    "tier": {
+      "type": ["string", "null"],
+      "enum": ["T0", "T1", "T2", "T3", null],
+      "description": "Project tier, or null until classified."
+    },
+    "complexity_rationale": { "type": "string" },
+    "blast_radius_flags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["authentication", "authorization", "data-integrity", "money", "migrations"]
+      }
+    },
+    "current_stage": { "type": "string", "minLength": 1 },
+    "approved_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "version", "hash"],
+        "properties": {
+          "file": { "type": "string", "minLength": 1 },
+          "version": { "type": "integer", "minimum": 1 },
+          "hash": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "summaries_index": { "type": "string" },
+    "slices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "components"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "enum": ["pending", "in-progress", "done", "blocked"] },
+          "components": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "implementation_allowed": { "type": "boolean" },
+    "open_questions": { "type": "array", "items": { "type": "string" } },
+    "drift_open_blocking": { "type": "integer", "minimum": 0 },
+    "revise_loop_counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "write_gate": {
+      "type": "string",
+      "enum": ["ask", "deny", "off"],
+      "description": "PreToolUse write-gate mode. Absent ⇒ ask semantics."
+    }
+  }
+}

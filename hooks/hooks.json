@@ -12,7 +12,16 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/cli.js\" hook pretool-gate"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",

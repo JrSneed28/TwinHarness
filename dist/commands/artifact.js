@@ -37,6 +37,7 @@ exports.runArtifactRegister = runArtifactRegister;
 exports.runArtifactList = runArtifactList;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+const paths_1 = require("../core/paths");
 const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const hash_1 = require("../core/hash");
@@ -68,12 +69,18 @@ function toRelKey(root, file) {
  * Re-registering the same file REPLACES its entry (version bump, no duplicate).
  */
 function runArtifactRegister(paths, file, version) {
+    return (0, state_store_1.withStateLock)(paths, () => runArtifactRegisterLocked(paths, file, version));
+}
+function runArtifactRegisterLocked(paths, file, version) {
     if (!file)
         return (0, output_1.failure)({ human: "usage: th artifact register <file> --version <n>" });
     if (version === undefined || !Number.isInteger(version) || version < 1) {
         return (0, output_1.failure)({ human: "usage: th artifact register <file> --version <n>" });
     }
-    const abs = path.resolve(paths.root, file);
+    const abs = (0, paths_1.resolveWithinRoot)(paths.root, file);
+    if (abs === null) {
+        return (0, output_1.failure)({ human: `Path outside project root: ${file}`, data: { error: "path_outside_root", file } });
+    }
     if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
         return (0, output_1.failure)({ human: `File not found: ${file}`, data: { error: "file_not_found", file } });
     }

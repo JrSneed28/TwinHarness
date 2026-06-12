@@ -5,6 +5,54 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Schema versioning + `th migrate`:** `state.json` now carries an optional `schema_version` (stamped by `th init`; legacy files are treated as v1). `th migrate` upgrades a legacy/old file forward and refuses to downgrade one written by a newer `th`.
+- **`th doctor`:** self-diagnostic for environment and project health (Node version, plugin layout, state validity, schema currency, stale state-lock, open blocking drift, audit-ledger size). Exit non-zero only on a hard failure.
+- **`th context estimate`:** approximates the prompt-surface token cost (~4 chars/token) across skill/agent/command files and flags any over Claude Code's ~500-line / ~5,000-token guidance — visibility for the context-budget work (F7).
+- **`th stage current|describe|list`:** a mechanical per-stage contract (produces / Critic mode / human-gate) derived from the pipeline table, so the orchestrator can re-derive a stage's obligations without depending on the prose playbook surviving the context window (F7).
+- **`th manifest export`:** a deterministic run snapshot aggregating state, drift entries, and the gate ledger into one stable JSON (ledger timestamps dropped) for review, diffing, archival, or golden-fixture assertions.
+- **Published JSON Schemas:** `schemas/state.schema.json` and `schemas/brief.schema.json` (draft-07) for editor validation, kept in sync with the hand-rolled validators by `tests/schemas.test.ts` (no runtime JSON-schema dependency added).
+- **`SECURITY.md`** (threat model: gates bind only a compliant agent, Bash bypass, global hook firing, prompt injection, path containment) and **`CONTRIBUTING.md`** (the committed-`dist/` invariant, plugin-packaging invariants, dev loop).
+
+### Changed
+
+- **Right-sized the orchestrator playbook (F7):** `skills/twinharness/SKILL.md` (854 → ~210 lines) and `agents/critic.md` (797 → ~110 lines) were split into a lean always-loaded core plus on-demand reference files under `skills/twinharness/reference/` (`pipeline-stages.md`, `build-and-verify.md`, `critic-modes.md`). The cores now fit inside Claude Code's ~500-line / ~5,000-token post-compaction re-attach window, so long runs no longer lose the tail of the playbook; the lean files point to the reference files, which load only when a given stage/mode is active. No behavioral content was dropped (relocated verbatim); `tests/prompt-references.test.ts` enforces the size limits and reference-link integrity.
+- **Deduplicated the remaining oversized agent prompts (F7 follow-up):** `agents/orchestrator.md` (575 → ~210 lines) now points at the same `reference/` files instead of carrying a second copy of the stage pipeline, and `agents/spec.md` (446 → ~46 lines) keeps its universal rules plus a mode-index table, with the 10 per-mode section lists moved verbatim to `skills/twinharness/reference/spec-modes.md`. Every always-loaded prompt file is now within the ~500-line/~5,000-token guidance (`th context estimate` flags only the on-demand reference files, by design).
+- Plugin/marketplace/package author metadata set to a real maintainer (`JrSneed28`) instead of the `TwinHarness` placeholder.
+
+### Security
+
+- **Path-traversal containment (S1):** `th artifact register`, `th coverage check` (`--reqs/--plan/--tests/--scope`), and `th tier classify|veto-check` now reject file/brief paths that resolve outside the project root (new `resolveWithinRoot` helper) instead of reading and content-hashing arbitrary files like `../../etc/hostname`.
+- **Prototype-pollution guard (S3):** `th state set` refuses dotted keys containing `__proto__`, `prototype`, or `constructor` segments (e.g. `revise_loop_counts.__proto__.x`) before any assignment runs.
+- **Bash-write defense-in-depth (F8):** a second `PreToolUse` matcher (`Bash`) heuristically catches obvious shell writes (`> file`, `>>`, `tee`, `dd of=`, `sed -i`) into in-root implementation paths during Phase A (pre-implementation). Conservative and fail-open — it never gates Bash in Phase B and allows anything it can't clearly parse; it narrows, but does not close, the documented Bash bypass.
+- **Managed `drift_open_blocking` (F5 follow-up):** `th state set` now refuses the blocking-drift counter — it is owned by `th drift add` / `th drift resolve`. This closes the bypass where an agent could clear the stop-gate's blocking condition (`state set drift_open_blocking 0`) without resolving the underlying requirement-layer drift.
+
+### Added
+
+- **Gate-mutation audit ledger (F5):** an append-only `.twinharness/gate-ledger.jsonl` records every gate-relevant state change (`implementation_allowed`, `tier`, `blast_radius_flags`, `write_gate`, `drift_open_blocking`) and blocking-drift open/resolve, with timestamps. The gates only bind a compliant agent; this makes overrides auditable after the fact. Observability only — it never blocks a mutation and makes no provenance claim (the CLI cannot tell who invoked it).
+
+### Fixed
+
+- **Invalid slice status in the orchestrator playbook (F1):** `SKILL.md` and `agents/orchestrator.md` instructed `th slice set-status <SLICE-ID> complete`, but `complete` is not a valid status (`pending|in-progress|done|blocked`) and the CLI rejected it — leaving the slice un-advanced and the Phase-B write-gate flagging it. Corrected to `done`. A new `tests/prompt-contract.test.ts` scans the prompts and fails if any documented `set-status` value is not a real status.
+- **Test-anchor convention could not match the REQ-ID extractor (F2):** the documented `test_REQ001_<slug>` naming has no hyphen, so the `REQ-[A-Z0-9]…` extractor (and therefore `th anchors scan` / `th coverage check`) never matched it. `agents/builder.md` and `SKILL.md` now require the canonical hyphenated anchor (`REQ-001`, `REQ-NFR-002`) in the test description/comment, with a descriptive function name for readability. New `tests/anchor-convention.test.ts` pins the round-trip.
+- **NotebookEdit writes bypassed the write-gate (F3):** the PreToolUse gate matched `NotebookEdit` but read only `tool_input.file_path`; NotebookEdit passes `notebook_path`, so notebook writes were always allowed. The gate now falls back to `notebook_path`. New pretool-gate tests cover the Phase-A notebook case and the doc-path allow case.
+- **Stop-gate completion check at final-verification (F6):** the Stop hook now also blocks completion when `current_stage` is `final-verification` and any slice is not yet `done`/`blocked` — catching a claimed-complete run with unbuilt slices. Deliberately narrow: it fires only at `final-verification`, never at earlier stages, so legitimate mid-build pauses are not interrupted. The human correctness gate on the verification report still applies.
+- **Lost updates under parallel builds (F10):** every `th` invocation is a separate process, and parallel Builders doing concurrent `drift add` / `slice set-status` / `artifact register` / `state set` could lose a read-modify-write — a dropped requirement-layer `drift add` would leave the stop-gate able to pass a run it should block. State mutations now run under a cross-process advisory lock (`withStateLock`, atomic `mkdir` on `<stateDir>/.state.lock`, with timeout and stale-lock stealing). New `tests/concurrency.test.ts` spawns 20 parallel `drift add` processes and asserts no increment or DRIFT-id is lost; CI now builds before testing so the test exercises the shipped CLI.
+
+### Changed
+
+- **Removed the dead `MultiEdit` matcher token (F4):** MultiEdit was removed from Claude Code in 2.0; the PreToolUse matcher is now `Write|Edit|NotebookEdit`.
+- **Calibrated over-stated enforcement language (F5/F8):** the README and `spec/write-gate-design.md` no longer describe the write-gate as "physically enforced" / code that "cannot" be bypassed. Both gates are strong defaults on the Write/Edit path; Bash-mediated writes (`echo >`, `sed -i`) are explicitly out of scope, and the orchestrating agent can set state fields directly.
+
+### Added
+
+- **Continuous integration:** `.github/workflows/ci.yml` runs `npm ci`, `npm run typecheck`, `npm test`, `npm run build`, and `git diff --exit-code dist/` on every push and pull request — enforcing the committed-`dist/` invariant on PRs (previously checked only by a unit test).
+
+---
+
 ## [0.3.0] — 2026-06-10
 
 ### Added

@@ -1,8 +1,17 @@
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
-import { readState, writeState } from "../core/state-store";
+import { readState, writeState, withStateLock } from "../core/state-store";
 import { type ValidationIssue, validateState, STATE_FIELD_ORDER } from "../core/state-schema";
 import { structuredLog } from "../core/log";
+import { appendLedger, GATE_LEDGER_KEYS } from "../core/ledger";
+
+/** Key segments that must never be written through a dotted path (proto-pollution guard, S3). */
+const UNSAFE_KEY_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
+
+/** Fields owned by a dedicated command; `state set` refuses them to keep the owning invariant. */
+const MANAGED_FIELDS: Record<string, string> = {
+  drift_open_blocking: "Use `th drift add` / `th drift resolve` — this counter is owned by the drift flow.",
+};
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -75,13 +84,38 @@ export function runStateGet(paths: ProjectPaths, dottedPath?: string): CommandRe
 
 /** `th state set <dotted.key> <value>` — refuses to persist an invalid result. */
 export function runStateSet(paths: ProjectPaths, key: string, rawValue: string): CommandResult {
+  return withStateLock(paths, () => runStateSetLocked(paths, key, rawValue));
+}
+
+function runStateSetLocked(paths: ProjectPaths, key: string, rawValue: string): CommandResult {
   // Reject paths whose first segment is not a known state field (catches typos
   // like `implementaton_allowed` that would silently write nothing).
-  const firstSegment = key.split(".")[0] as string;
+  const segments = key.split(".");
+  const firstSegment = segments[0] as string;
   if (!(STATE_FIELD_ORDER as string[]).includes(firstSegment)) {
     return failure({
       human: `Unknown state field: "${firstSegment}". Valid top-level keys: ${STATE_FIELD_ORDER.join(", ")}`,
       data: { error: "unknown_field", field: firstSegment, validFields: STATE_FIELD_ORDER },
+    });
+  }
+
+  // Proto-pollution guard (S3): refuse any dotted segment that could walk into
+  // an object's prototype, even under an otherwise-valid first key (e.g.
+  // `revise_loop_counts.__proto__.x`). setByPath runs before validation, so this
+  // must be rejected up front.
+  if (segments.some((s) => UNSAFE_KEY_SEGMENTS.has(s))) {
+    return failure({
+      human: `Refusing to write: unsafe key segment in "${key}".`,
+      data: { error: "unsafe_key", key },
+    });
+  }
+
+  // Managed-field guard: refuse writes to fields owned by a dedicated command.
+  // These fields have an owning invariant that `state set` would silently bypass.
+  if (Object.prototype.hasOwnProperty.call(MANAGED_FIELDS, firstSegment)) {
+    return failure({
+      human: `Refusing to set managed field "${firstSegment}". ${MANAGED_FIELDS[firstSegment]}`,
+      data: { error: "managed_field", field: firstSegment },
     });
   }
 
@@ -102,6 +136,12 @@ export function runStateSet(paths: ProjectPaths, key: string, rawValue: string):
   }
   writeState(paths, validation.state!);
   structuredLog({ cmd: "state set", key });
+  // Audit ledger (F5): record gate-relevant mutations so a human can review when
+  // implementation_allowed, the tier, the blast-radius flags, the write_gate, or
+  // the blocking-drift count changed. Observability only — never blocks.
+  if (GATE_LEDGER_KEYS.has(firstSegment)) {
+    appendLedger(paths, { event: "gate-state-change", key, value });
+  }
   return success({ data: { key, value }, human: `Set ${key} = ${JSON.stringify(value)}` });
 }
 

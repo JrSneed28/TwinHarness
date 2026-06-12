@@ -21,8 +21,9 @@ you do not re-architect, you do not make scope decisions.
 - Read only the **relevant Summary blocks + the task file** before each task — not the full
   corpus (§9). Fetch a full artifact only when a specific detail cannot be resolved from the
   summary.
-- Write **tests with the implementation** — not after. Tests carry REQ-ID anchors in their
-  names (`test_REQ001_<capability_slug>` — §11).
+- Write **tests with the implementation** — not after. Tests carry the REQ-ID anchor in their
+  description or a comment in the canonical hyphenated form (`REQ-001`, `REQ-NFR-002` — §11),
+  so `th anchors scan` and `th coverage check` can match them.
 - A **task** is done only when its anchored tests pass and checks are green — not when you assert
   it. A **slice** is done only when its end-to-end acceptance tests pass.
 - Do **not** invent undocumented behavior. If a behavior is not specified in the task file, the
@@ -38,10 +39,16 @@ For each task in the current slice (ordered):
      Do NOT load the full corpus.
 
   2. Implement the production code + write the anchored tests in the same change.
-     Test names must follow the convention: test_REQ<###>_<capability_slug>
+     Every test MUST carry its requirement's anchor in the canonical hyphenated form —
+     `REQ-001`, `REQ-NFR-002` — in the `describe`/`it` description string or in a
+     `// Anchor: REQ-XXX` comment immediately above the test. This is the literal string
+     `th anchors scan` and `th coverage check` look for. Because identifiers cannot
+     contain hyphens, the matchable anchor lives in the description/comment, not the
+     bare function name. Use a descriptive test name for readability, e.g.
+     `test_req001_offline_sync_queues_write` or `it("REQ-001: offline sync queues a write", ...)`.
 
   3. Run th anchors scan --scan-tests --scan-code
-     Confirm REQ-ID anchors are present in both test names and code.
+     Confirm REQ-ID anchors are present in both test descriptions/comments and code.
      If any anchor is missing, add it before proceeding.
 
   4. Run the task's acceptance tests.
@@ -135,17 +142,34 @@ If code and a requirement disagree about intent → stop; escalate; only a human
 
 ## REQ-ID anchors and the tests-as-contract rule (§11)
 
-Every test you write **must** carry a REQ-ID in its name. The naming convention is:
+Every test you write **must** carry its requirement's anchor in the canonical hyphenated form
+(`REQ-001`, `REQ-NFR-002`) somewhere in the test file — in the `describe`/`it` description
+string or in a `// Anchor: REQ-XXX` comment immediately above the test. This is the exact
+string that `th anchors scan` and `th coverage check` look for using the regex
+`REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*`. A bare identifier like `REQ001` has **no hyphen after `REQ`**
+and will never match — which is why the anchor must appear in the description or comment, not
+only in the function name (identifiers cannot contain hyphens).
 
-```
-test_REQ<###>_<capability_slug>
+The test **name** (function name or `it`/`test` label) should be descriptive and reference the
+requirement for readability. Use lowercase with underscores for function names (since hyphens
+are not valid identifiers), and put the matchable anchor in the label or comment:
+
+```typescript
+// Anchor: REQ-001
+it("REQ-001: offline sync queues a write", () => { /* ... */ });
+
+// Anchor: REQ-007
+it("REQ-007: export CSV produces valid header", () => { /* ... */ });
+
+// Anchor: REQ-012
+it("REQ-012: auth rejects expired token", () => { /* ... */ });
 ```
 
-Examples:
-```
-test_REQ001_offline_sync_queues_write
-test_REQ007_export_csv_produces_valid_header
-test_REQ012_auth_rejects_expired_token
+Or equivalently, with the anchor only in the `it` description (no separate comment needed):
+
+```typescript
+it("REQ-001 — offline sync queues a write when offline", () => { /* ... */ });
+it("REQ-NFR-002 — determinism: same input always same output", () => { /* ... */ });
 ```
 
 After writing tests, confirm anchors are present:
@@ -154,9 +178,9 @@ After writing tests, confirm anchors are present:
 th anchors scan --scan-tests --scan-code
 ```
 
-A test without a REQ-ID anchor is not a contract — it is noise. A task is not done until its
-anchored tests pass; a slice is not done until its end-to-end acceptance tests pass. Neither
-you nor the Orchestrator may override this (§11).
+A test without a REQ-ID anchor in its description or comment is not a contract — it is noise.
+A task is not done until its anchored tests pass; a slice is not done until its end-to-end
+acceptance tests pass. Neither you nor the Orchestrator may override this (§11).
 
 ## Parallel build constraints (§16)
 

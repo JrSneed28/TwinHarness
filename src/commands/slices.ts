@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
-import { readState, writeState } from "../core/state-store";
+import { readState, writeState, withStateLock } from "../core/state-store";
 import {
   type SliceState,
   type ValidationIssue,
@@ -127,6 +127,10 @@ const NOT_INIT = failure({
  * `--remove-missing`). `--dry-run` computes but does not write.
  */
 export function runSlicesSync(paths: ProjectPaths, opts: SlicesSyncOptions = {}): CommandResult {
+  return withStateLock(paths, () => runSlicesSyncLocked(paths, opts));
+}
+
+function runSlicesSyncLocked(paths: ProjectPaths, opts: SlicesSyncOptions = {}): CommandResult {
   const planAbs = path.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
 
   if (!fs.existsSync(planAbs) || !fs.statSync(planAbs).isFile()) {
@@ -222,6 +226,14 @@ export function runSlicesSync(paths: ProjectPaths, opts: SlicesSyncOptions = {})
  * Validates the slice exists and status is one of pending|in-progress|done|blocked.
  */
 export function runSliceSetStatus(
+  paths: ProjectPaths,
+  sliceId?: string,
+  status?: string,
+): CommandResult {
+  return withStateLock(paths, () => runSliceSetStatusLocked(paths, sliceId, status));
+}
+
+function runSliceSetStatusLocked(
   paths: ProjectPaths,
   sliceId?: string,
   status?: string,

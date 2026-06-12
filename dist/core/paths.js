@@ -33,9 +33,26 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.resolveWithinRoot = resolveWithinRoot;
 exports.resolveProjectPaths = resolveProjectPaths;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+/**
+ * Resolve `p` (absolute, or relative to `root`) to an absolute path, but ONLY
+ * if it stays within `root`. Returns null when the path escapes the project
+ * root (callers reject these — TwinHarness commands never operate outside the
+ * project they govern). Mirrors the write-gate's root-containment check.
+ */
+function resolveWithinRoot(root, p) {
+    const absRoot = path.resolve(root);
+    const abs = path.isAbsolute(p) ? p : path.resolve(absRoot, p);
+    const rel = path.relative(absRoot, abs);
+    if (rel === "")
+        return abs; // the root itself
+    if (rel.startsWith("..") || path.isAbsolute(rel))
+        return null;
+    return abs;
+}
 /**
  * Resolve all project paths from a root directory.
  *

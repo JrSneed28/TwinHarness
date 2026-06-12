@@ -7,6 +7,7 @@
     "th": "dist/cli.js"
   },
   "main": "dist/cli.js",
+  "author": "JrSneed28 (https://github.com/JrSneed28)",
   "files": [
     "dist",
     "skills",
@@ -14,6 +15,7 @@
     "commands",
     "templates",
     "hooks",
+    "schemas",
     ".claude-plugin"
   ],
   "scripts": {

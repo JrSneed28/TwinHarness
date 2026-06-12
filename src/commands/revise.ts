@@ -1,6 +1,6 @@
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
-import { readState, writeState } from "../core/state-store";
+import { readState, writeState, withStateLock } from "../core/state-store";
 import { type ValidationIssue, validateState } from "../core/state-schema";
 import { structuredLog } from "../core/log";
 
@@ -39,6 +39,10 @@ function invalidState(issues: ValidationIssue[] | undefined): CommandResult {
  * orchestrator decides whether to escalate.
  */
 export function runReviseBump(paths: ProjectPaths, mode: string, cap = DEFAULT_REVISE_CAP): CommandResult {
+  return withStateLock(paths, () => runReviseBumpLocked(paths, mode, cap));
+}
+
+function runReviseBumpLocked(paths: ProjectPaths, mode: string, cap = DEFAULT_REVISE_CAP): CommandResult {
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
   if (!r.state) return invalidState(r.issues);
@@ -86,6 +90,10 @@ export function runReviseStatus(paths: ProjectPaths, mode: string, cap = DEFAULT
  * stage passes / zero issues), persist, and report.
  */
 export function runReviseReset(paths: ProjectPaths, mode: string): CommandResult {
+  return withStateLock(paths, () => runReviseResetLocked(paths, mode));
+}
+
+function runReviseResetLocked(paths: ProjectPaths, mode: string): CommandResult {
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
   if (!r.state) return invalidState(r.issues);

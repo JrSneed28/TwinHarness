@@ -81,7 +81,7 @@ describe("REQ-PLUGIN-002: the compiled CLI ships with the plugin", () => {
     expect(stop?.command).toContain("hook stop-gate");
   });
 
-  it("hooks.json contains a PreToolUse entry for Write|Edit|MultiEdit|NotebookEdit that invokes th hook pretool-gate", () => {
+  it("hooks.json contains a PreToolUse entry for Write|Edit|NotebookEdit that invokes th hook pretool-gate", () => {
     const hooks = readJson("hooks/hooks.json") as {
       hooks: {
         PreToolUse: Array<{
@@ -95,11 +95,33 @@ describe("REQ-PLUGIN-002: the compiled CLI ships with the plugin", () => {
     expect(Array.isArray(preToolUseEntries)).toBe(true);
 
     const writeGateEntry = preToolUseEntries.find(
-      (entry) => entry.matcher === "Write|Edit|MultiEdit|NotebookEdit",
+      (entry) => entry.matcher === "Write|Edit|NotebookEdit",
     );
     expect(writeGateEntry).toBeDefined();
 
     const hook = writeGateEntry?.hooks[0];
+    expect(hook?.type).toBe("command");
+    expect(hook?.command).toContain(CLI_INVOCATION);
+    expect(hook?.command).toContain("hook pretool-gate");
+  });
+
+  it("hooks.json contains a PreToolUse entry with matcher 'Bash' that invokes th hook pretool-gate", () => {
+    const hooks = readJson("hooks/hooks.json") as {
+      hooks: {
+        PreToolUse: Array<{
+          matcher: string;
+          hooks: Array<{ type: string; command: string }>;
+        }>;
+      };
+    };
+    const preToolUseEntries = hooks.hooks.PreToolUse;
+    expect(preToolUseEntries).toBeDefined();
+    expect(Array.isArray(preToolUseEntries)).toBe(true);
+
+    const bashEntry = preToolUseEntries.find((entry) => entry.matcher === "Bash");
+    expect(bashEntry).toBeDefined();
+
+    const hook = bashEntry?.hooks[0];
     expect(hook?.type).toBe("command");
     expect(hook?.command).toContain(CLI_INVOCATION);
     expect(hook?.command).toContain("hook pretool-gate");

@@ -147,8 +147,8 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 - **REQ-ID traceability.** Every requirement gets a stable ID (`REQ-001`, `REQ-002`, …) that anchors to slices, tests, and source code. `th anchors scan` maps the full picture; `th trace render` produces the traceability view on demand without maintaining a stored matrix.
 - **Bidirectional drift log.** Discoveries during the build flow back into the governing artifacts. Non-blocking changes auto-apply; requirement-layer changes increment a counter that the Stop hook reads to refuse premature completion.
 - **Vertical slices with a walking skeleton.** Each slice is a thin, end-to-end capability. `th build plan` schedules slices into conflict-free parallel waves: disjoint component sets run in the same wave, overlapping components serialize to prevent drift races.
-- **Stop hook.** Claude cannot claim completion while `state.json` is invalid or a blocking drift entry is open. The gate is code (`th hook stop-gate`), not a prompt reminder.
-- **PreToolUse write-gate.** File writes to implementation paths are intercepted before the pre-build gates clear, preventing any code from being written before the design is approved. Once the build begins, writes that cross into a component owned by a slice that is not in-progress are flagged automatically. The gate is fail-open (non-TwinHarness projects are completely unaffected), configurable (`ask` / `deny` / `off`, default `ask`), and one click to allow in a manual session.
+- **Stop hook.** Claude is blocked by default from claiming completion while `state.json` is invalid or a blocking drift entry is open. The gate is code (`th hook stop-gate`), not a prompt reminder.
+- **PreToolUse write-gate.** Blocks the standard Write/Edit path by default — before the pre-build gates clear and across slice-component boundaries during the build. Note: Bash-mediated writes (`echo >`, `sed -i`) are out of scope for this hook (see `spec/write-gate-design.md`). The gate is fail-open (non-TwinHarness projects are completely unaffected), configurable (`ask` / `deny` / `off`, default `ask`), and one click to allow in a manual session.
 - **Conditional UI-design stage.** Present only when the project has a user interface. The UI-Designer presents 2–3 distinct design directions and asks you to pick one before streaming the detailed design.
 - **Tier-scaled documentation.** T1 gets a readme; T2 adds a user guide and API reference; T3 gets the full suite. A Critic reviews the docs; no human gate required.
 - **Automatic model routing.** Cheap models handle routine work; expensive ones (Opus) handle high-risk stages, blast-radius reviews, and the Orchestrator. Haiku handles trivial summarization. The full routing policy is in `skills/twinharness/SKILL.md`.
@@ -185,7 +185,7 @@ All commands accept `--json` for machine-readable output. The full reference is 
 - Full T0–T3 pipeline, all 7 agents, all stages.
 - `th` CLI with passing tests covering CLI behavior and plugin-packaging integrity.
 - Validated Claude Code plugin packaging (`claude plugin validate` + `--plugin-dir` load pass).
-- PreToolUse write-gate: file writes intercepted before gates clear and across slice-component boundaries during the build (v0.3.0).
+- PreToolUse write-gate: blocks the Write/Edit path by default before gates clear and across slice-component boundaries during the build; Bash-mediated writes are out of scope (v0.3.0).
 - A complete worked example: `examples/autocoder/` — a T3 run producing an autocoder CLI tool, 11 slices, Stage 11 verified and human-signed.
 
 **Not yet done:**

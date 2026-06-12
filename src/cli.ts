@@ -16,6 +16,11 @@ import { runTraceRender } from "./commands/trace";
 import { runStale } from "./commands/stale";
 import { runHookStopGate, runHookPretoolGate, type StopHookInput, type PreToolHookInput } from "./commands/hook";
 import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
+import { runMigrate } from "./commands/migrate";
+import { runDoctor } from "./commands/doctor";
+import { runContextEstimate } from "./commands/context";
+import { runStageCurrent, runStageDescribe, runStageList } from "./commands/stage";
+import { runManifestExport } from "./commands/manifest";
 
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
@@ -48,6 +53,11 @@ Usage:
   th drift resolve <DRIFT-NNN>      Append a resolution note; decrement blocking counter only for requirement-layer entries
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
   th hook pretool-gate              Emit a Claude Code PreToolUse write-gate decision
+  th migrate                        Upgrade state.json to the current schema version
+  th doctor                         Self-diagnostic: environment + project health
+  th context estimate               Approximate the prompt-surface token cost (flags oversized files)
+  th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
+  th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
   th version                        Print the CLI version
   th help                           Show this help
 
@@ -248,6 +258,35 @@ function dispatch(parsed: ParsedArgs): CommandResult {
     }
     case "init":
       return runInit(paths, { force: parsed.flags.force });
+    case "migrate":
+      return runMigrate(paths);
+    case "doctor":
+      return runDoctor(paths);
+    case "context":
+      switch (sub) {
+        case "estimate":
+          return runContextEstimate();
+        default:
+          return failure({ human: `unknown 'context' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    case "stage":
+      switch (sub) {
+        case "current":
+          return runStageCurrent(paths);
+        case "describe":
+          return runStageDescribe(rest[0]);
+        case "list":
+          return runStageList();
+        default:
+          return failure({ human: `unknown 'stage' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    case "manifest":
+      switch (sub) {
+        case "export":
+          return runManifestExport(paths);
+        default:
+          return failure({ human: `unknown 'manifest' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
     case "state":
       switch (sub) {
         case "get":

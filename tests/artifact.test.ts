@@ -134,6 +134,20 @@ describe("REQ-ARTIFACT-005: list reports recorded entries", () => {
   });
 });
 
+describe("REQ-ARTIFACT-SEC-001: path traversal outside project root is rejected", () => {
+  it("path escaping root → failure with error path_outside_root, state unchanged", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const res = runArtifactRegister(tp.paths, "../../etc/hostname", 1);
+    expect(res.ok).toBe(false);
+    expect(res.exitCode).toBe(1);
+    expect(res.data?.error).toBe("path_outside_root");
+    // State must not be modified — approved_artifacts remains empty.
+    const r = readState(tp.paths);
+    expect(r.state?.approved_artifacts).toEqual([]);
+  });
+});
+
 describe("REQ-ARTIFACT-006: not_initialized on an empty project", () => {
   it("register before init → failure not_initialized", () => {
     tp = makeTempProject();

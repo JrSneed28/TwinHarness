@@ -51,6 +51,11 @@ const trace_1 = require("./commands/trace");
 const stale_1 = require("./commands/stale");
 const hook_1 = require("./commands/hook");
 const slices_1 = require("./commands/slices");
+const migrate_1 = require("./commands/migrate");
+const doctor_1 = require("./commands/doctor");
+const context_1 = require("./commands/context");
+const stage_1 = require("./commands/stage");
+const manifest_1 = require("./commands/manifest");
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
@@ -82,6 +87,11 @@ Usage:
   th drift resolve <DRIFT-NNN>      Append a resolution note; decrement blocking counter only for requirement-layer entries
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
   th hook pretool-gate              Emit a Claude Code PreToolUse write-gate decision
+  th migrate                        Upgrade state.json to the current schema version
+  th doctor                         Self-diagnostic: environment + project health
+  th context estimate               Approximate the prompt-surface token cost (flags oversized files)
+  th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
+  th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
   th version                        Print the CLI version
   th help                           Show this help
 
@@ -291,6 +301,35 @@ function dispatch(parsed) {
         }
         case "init":
             return (0, init_1.runInit)(paths, { force: parsed.flags.force });
+        case "migrate":
+            return (0, migrate_1.runMigrate)(paths);
+        case "doctor":
+            return (0, doctor_1.runDoctor)(paths);
+        case "context":
+            switch (sub) {
+                case "estimate":
+                    return (0, context_1.runContextEstimate)();
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'context' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "stage":
+            switch (sub) {
+                case "current":
+                    return (0, stage_1.runStageCurrent)(paths);
+                case "describe":
+                    return (0, stage_1.runStageDescribe)(rest[0]);
+                case "list":
+                    return (0, stage_1.runStageList)();
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'stage' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "manifest":
+            switch (sub) {
+                case "export":
+                    return (0, manifest_1.runManifestExport)(paths);
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'manifest' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
         case "state":
             switch (sub) {
                 case "get":

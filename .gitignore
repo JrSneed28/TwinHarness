@@ -18,3 +18,11 @@ node_modules/
 # state recreated at runtime by local tooling — never commit it.
 .claude/
 .omc/
+
+# Harness-development artifacts: audit/review reports and session scratch
+# produced while developing TwinHarness itself. They are working documents,
+# not part of the plugin deliverable (plugin installs copy the repo as-is).
+AUDIT.md
+/audit*.md
+/*-report.md
+/scratch/

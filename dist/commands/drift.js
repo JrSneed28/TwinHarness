@@ -41,6 +41,7 @@ const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const drift_log_1 = require("../core/drift-log");
 const log_1 = require("../core/log");
+const ledger_1 = require("../core/ledger");
 /**
  * `th drift` — append-only access to the bidirectional drift log (spec §10).
  * Mechanical only (plan §3 boundary rule): the CLI records discoveries and tracks
@@ -98,6 +99,9 @@ function appendDriftLog(paths, block) {
  * escalation to "awaiting human decision".
  */
 function runDriftAdd(paths, opts) {
+    return (0, state_store_1.withStateLock)(paths, () => runDriftAddLocked(paths, opts));
+}
+function runDriftAddLocked(paths, opts) {
     const layer = opts.layer;
     if (layer !== "derived" && layer !== "requirement") {
         return (0, output_1.failure)({
@@ -132,6 +136,8 @@ function runDriftAdd(paths, opts) {
     if (blocking) {
         driftOpenBlocking += 1;
         (0, state_store_1.writeState)(paths, { ...r.state, drift_open_blocking: driftOpenBlocking });
+        // Audit ledger (F5): a requirement-layer drift opens a blocking gate.
+        (0, ledger_1.appendLedger)(paths, { event: "drift-blocking-opened", id, ref: opts.ref ?? "", drift_open_blocking: driftOpenBlocking });
     }
     (0, log_1.structuredLog)({ cmd: "drift add", id, layer, blocking, drift_open_blocking: driftOpenBlocking });
     return (0, output_1.success)({
@@ -171,6 +177,9 @@ function runDriftList(paths) {
  * - Derived-layer entries: counter unchanged, human output says so explicitly.
  */
 function runDriftResolve(paths, id) {
+    return (0, state_store_1.withStateLock)(paths, () => runDriftResolveLocked(paths, id));
+}
+function runDriftResolveLocked(paths, id) {
     if (!id)
         return (0, output_1.failure)({ human: "usage: th drift resolve <DRIFT-NNN>" });
     const r = (0, state_store_1.readState)(paths);
@@ -208,6 +217,8 @@ function runDriftResolve(paths, id) {
     if (isBlocking) {
         driftOpenBlocking = Math.max(0, driftOpenBlocking - 1);
         (0, state_store_1.writeState)(paths, { ...r.state, drift_open_blocking: driftOpenBlocking });
+        // Audit ledger (F5): a requirement-layer resolution clears a blocking gate.
+        (0, ledger_1.appendLedger)(paths, { event: "drift-blocking-resolved", id, drift_open_blocking: driftOpenBlocking });
     }
     (0, log_1.structuredLog)({ cmd: "drift resolve", id, layer: entry.layer, drift_open_blocking: driftOpenBlocking });
     const human = isBlocking

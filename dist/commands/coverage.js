@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runCoverageCheck = runCoverageCheck;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+const paths_1 = require("../core/paths");
 const output_1 = require("../core/output");
 const anchors_1 = require("../core/anchors");
 const log_1 = require("../core/log");
@@ -110,6 +111,19 @@ function runCoverageCheck(paths, opts = {}) {
     const planAbs = path.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
     const testsAbs = path.resolve(paths.root, opts.testsDir ?? "tests");
     const scopeAbs = path.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
+    // Path-traversal containment: reject any user-supplied path that escapes the project root.
+    if (opts.reqsFile !== undefined && (0, paths_1.resolveWithinRoot)(paths.root, opts.reqsFile) === null) {
+        return (0, output_1.failure)({ human: `Path outside project root: ${opts.reqsFile}`, data: { error: "path_outside_root", file: opts.reqsFile } });
+    }
+    if (opts.planFile !== undefined && (0, paths_1.resolveWithinRoot)(paths.root, opts.planFile) === null) {
+        return (0, output_1.failure)({ human: `Path outside project root: ${opts.planFile}`, data: { error: "path_outside_root", file: opts.planFile } });
+    }
+    if (opts.testsDir !== undefined && (0, paths_1.resolveWithinRoot)(paths.root, opts.testsDir) === null) {
+        return (0, output_1.failure)({ human: `Path outside project root: ${opts.testsDir}`, data: { error: "path_outside_root", file: opts.testsDir } });
+    }
+    if (opts.scopeFile !== undefined && (0, paths_1.resolveWithinRoot)(paths.root, opts.scopeFile) === null) {
+        return (0, output_1.failure)({ human: `Path outside project root: ${opts.scopeFile}`, data: { error: "path_outside_root", file: opts.scopeFile } });
+    }
     const reqsContent = readFileOrUndefined(reqsAbs);
     if (reqsContent === undefined) {
         const rel = path.relative(paths.root, reqsAbs).split(path.sep).join("/");

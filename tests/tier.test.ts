@@ -96,6 +96,24 @@ describe("REQ-VETO-001: veto-check is a mechanical exit-code gate (§5)", () => 
   });
 });
 
+describe("REQ-TIER-SEC-001: path traversal outside project root is rejected", () => {
+  it("classify: brief path escaping root → failure with error path_outside_root", () => {
+    tp = makeTempProject();
+    const res = runTierClassify(tp.paths, "../../etc/hostname");
+    expect(res.ok).toBe(false);
+    expect(res.exitCode).toBe(1);
+    expect(res.data?.error).toBe("path_outside_root");
+  });
+
+  it("veto-check: brief path escaping root → failure with error path_outside_root", () => {
+    tp = makeTempProject();
+    const res = runTierVetoCheck(tp.paths, "../../etc/hostname");
+    expect(res.ok).toBe(false);
+    expect(res.exitCode).toBe(1);
+    expect(res.data?.error).toBe("path_outside_root");
+  });
+});
+
 describe("REQ-BRIEF-001: brief loading + validation", () => {
   it("missing file returns issues", () => {
     tp = makeTempProject();
