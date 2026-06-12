@@ -217,7 +217,9 @@ Scope` section of `docs/02-scope.md`.
 **Parallel waves.** Before building, `th slices sync` parses the implementation plan into
 `state.slices`, then `th build plan` reads `state.slices` and schedules slices into waves: disjoint
 component sets build concurrently, overlapping ones serialize. `th build plan` works from the
-state data — not the raw plan document. This is computed, not judged.
+state data — not the raw plan document. This is computed, not judged. Concurrent `th` mutations
+(e.g. two Builders calling `th drift add` simultaneously) are serialized by a cross-process
+advisory lock on `.twinharness/.state.lock`, so no update is silently lost.
 
 **Bidirectional drift** is what keeps documents honest during the build:
 
@@ -234,8 +236,11 @@ The source-of-truth rule: **code wins on behavior; requirements win on intent.**
 ### The stop-gate
 
 A Stop hook runs `th hook stop-gate` whenever Claude tries to end its turn. It blocks the stop —
-forcing Claude to keep working or surface the problem — when `.twinharness/state.json` is invalid
-or any blocking drift is open. So "done" cannot be truthfully claimed over a broken run.
+forcing Claude to keep working or surface the problem — when any of these conditions hold:
+
+1. `.twinharness/state.json` is present but invalid (must be repaired before completion can be claimed).
+2. Any blocking requirement-layer drift is open (`drift_open_blocking > 0`).
+3. `current_stage` is `final-verification` and any slice's status is not `done` or `blocked` — this catches a claimed-complete run with unbuilt slices. **This check fires only at `final-verification`**; at every earlier stage the gate never tests slice completeness, so legitimate mid-build pauses are never interrupted.
 
 Loop protection: the gate blocks **at most once per stop sequence**. If Claude is already
 continuing because of a prior block and the gate is *still* unsatisfied, it lets the stop through
@@ -245,9 +250,20 @@ hook is inert outside TwinHarness runs.
 
 ### The write-gate
 
-A PreToolUse hook runs `th hook pretool-gate` before every `Write`, `Edit`, `MultiEdit`, or
-`NotebookEdit` call. Its job: prevent implementation files from being written before the gates
-clear, and police component boundaries during the build.
+A PreToolUse hook runs `th hook pretool-gate` before every `Write`, `Edit`, or `NotebookEdit`
+call. A second matcher fires on `Bash` as defense-in-depth (see below). Its job: prevent
+implementation files from being written before the gates clear, and police component boundaries
+during the build.
+
+**Matcher details:**
+- `Write|Edit|NotebookEdit` — the primary matcher. For `NotebookEdit`, the gate reads
+  `notebook_path` (not `file_path`) because that is the field NotebookEdit supplies.
+  (`MultiEdit` was removed from Claude Code in v2.0 and is no longer listed.)
+- `Bash` (Phase A only) — a second, conservative matcher heuristically detects obvious
+  shell-mediated writes (`>`, `>>`, `tee`, `dd of=`, `sed -i`) into in-root implementation paths
+  during Phase A. It is fail-open: if the command cannot be clearly parsed, the gate allows it
+  through. This matcher never fires in Phase B to avoid false-positives. Bash-mediated writes
+  remain out of scope as a guarantee — this is defense-in-depth, not a closed gate.
 
 **Phase A — pre-implementation** (`implementation_allowed: false`): any write to a path that is
 not a doc or state path fires the gate with the configured semantics. Doc/state paths
@@ -274,6 +290,18 @@ touching state.
 
 **Fail-open by design:** no `state.json` → instant allow (non-TwinHarness projects are completely
 unaffected); invalid state → allow with a system-message warning; tool has no `file_path` → allow.
+
+### Gate-mutation audit ledger
+
+Every gate-relevant state change is appended to `.twinharness/gate-ledger.jsonl` — an append-only
+JSONL file recording mutations to `implementation_allowed`, `tier`, `blast_radius_flags`,
+`write_gate`, and `drift_open_blocking`, as well as blocking-drift open and resolve events, each
+with an ISO-8601 UTC timestamp.
+
+The ledger is **observability only** — it never blocks a mutation, and makes no provenance claim
+(the CLI cannot tell who invoked it). Writes are best-effort and never crash the triggering
+command. The ledger is reviewable via `th manifest export` (timestamps are dropped in the
+deterministic manifest to ensure byte-stability; use the raw file for forensics).
 
 ### Resuming
 
@@ -315,6 +343,7 @@ unwritable. Attempts to set an unknown top-level key exit with `unknown_field`. 
 
 | Field | Type | Meaning |
 |---|---|---|
+| `schema_version` | number \| absent | Schema version stamped by `th init` and upgraded by `th migrate`. Absent on legacy files (treated as v1). |
 | `tier` | `"T0".."T3"` \| null | Classified tier (null until classified) |
 | `complexity_rationale` | string | Why that tier |
 | `blast_radius_flags` | string[] | Subset of the five veto flags |
@@ -381,7 +410,10 @@ th stale --artifact <file>                  Same lookup, by file key (safe befor
   `--reqs docs/01-requirements.md --plan docs/09-implementation-plan.md --tests tests`.
 - **Anchors** maps each REQ-ID to the files it appears in across `docs/`, `tests/`, and `src/`, and
   flags **orphans** — anchors in tests/code with no defined requirement. `--strict` makes an orphan
-  exit 1. Tests anchor by naming convention: `test_REQ001_<capability_slug>`.
+  exit 1. Tests anchor by placing the canonical hyphenated REQ-ID (e.g. `REQ-001`,
+  `REQ-NFR-002`) in the test description or comment — the extractor matches `REQ-[A-Z0-9…]`; use
+  a descriptive function name for readability. (The old `test_REQ001_` convention has no hyphen
+  and does not match the extractor — use the hyphenated form.)
 - **Trace render** produces the requirement → design → contract → slice/task → test → code table
   fresh on every call. Associates SLICE/TASK tokens per-REQ. It is deliberately **never stored** —
   a maintained traceability matrix would rot; anchors that live next to the code cannot.
@@ -450,6 +482,84 @@ th version
 
 Prints the CLI version from `package.json`. Useful for confirming which plugin version is active.
 
+### Diagnostics & run inspection
+
+```
+th doctor
+```
+
+Self-diagnostic for environment and project health. Reports:
+
+- **Node version** — fails hard if below 18 (the minimum requirement).
+- **Plugin CLI** — whether `dist/cli.js` is present next to the running binary.
+- **Plugin version** — from `package.json`.
+- **state.json validity** — valid + tier/stage summary; or a precise issue list if invalid.
+- **Schema version** — whether `state.json` is at the current `schema_version`; warns and
+  suggests `th migrate` if behind.
+- **Blocking drift** — count of open requirement-layer escalations; warns if any are open.
+- **Stale state lock** — warns if `.twinharness/.state.lock` is present with age (a crashed `th`
+  left the lock behind; safe to remove if no `th` process is running).
+- **Audit ledger size** — number of entries in `gate-ledger.jsonl`.
+
+Exit non-zero only on hard failures (unsupported Node version, invalid `state.json`). Informational
+warnings (outdated schema, open drift, stale lock) exit 0. Never mutates anything.
+
+```
+th context estimate
+```
+
+Approximates the prompt-surface token cost of the plugin's skill, agent, and command files
+(heuristic: ~4 chars/token). Flags any file exceeding Claude Code's ~500-line / ~5,000-token
+re-attach guidance — these are the files that risk losing their tail after context compaction on
+long runs. The on-demand `skills/twinharness/reference/` files are expected to exceed the threshold
+by design (they load only when needed for a given stage or mode, not on every turn). All
+always-loaded core files are within the guidance.
+
+### Schema migration
+
+```
+th migrate
+```
+
+Upgrades `state.json` to the current `schema_version`. Legacy files written before schema
+versioning was introduced have no `schema_version` field and are treated as v1. Migration is
+**forward-only**: it stamps or upgrades the version, applying any per-version field migrations, but
+refuses to touch a file written by a newer `th` (exits with `schema_too_new`). Running `th migrate`
+on an already-current file is a no-op (idempotent).
+
+### Stage contracts
+
+```
+th stage current
+th stage describe <stage>
+th stage list
+```
+
+Derives the mechanical per-stage contract — what the stage produces, which Critic mode reviews it,
+and whether a human gate is required — directly from the pipeline table. Useful when the Orchestrator
+needs to re-derive a stage's obligations without depending on the prose playbook surviving the
+context window.
+
+- `th stage current` — contract for `state.current_stage`. Pre-pipeline stages (`init` and other
+  stages before the pipeline begins) have no contract; the command reports that plainly and
+  suggests `th stage list`.
+- `th stage describe <stage>` — contract for any named stage.
+- `th stage list` — all pipeline stages in order with their tier scope, gate flag, and artifact.
+
+### Run manifests
+
+```
+th manifest export [--json]
+```
+
+Produces a deterministic run snapshot aggregating `state.json`, `drift-log.md` entries, and the
+gate ledger into a single, stable JSON. Ledger timestamps are dropped so the same run state always
+produces byte-identical output — suitable for golden-fixture assertions in CI or archival.
+
+Without `--json`, prints a human-readable summary (tier, stage, artifact/slice/drift counts, gate
+ledger size). With `--json`, emits the full manifest. Useful for review, diffing across runs, and
+comparing against archived golden fixtures.
+
 ### Exit codes
 
 | Code | Meaning |
@@ -473,12 +583,22 @@ this by hand except to debug why a session refuses to finish.
 th hook pretool-gate
 ```
 
-Speaks the Claude Code PreToolUse-hook protocol on stdout. Reads the tool name and `file_path`
-from stdin. Returns `{}` to allow; `{"hookSpecificOutput":{"hookEventName":"PreToolUse",
+Speaks the Claude Code PreToolUse-hook protocol on stdout. Reads the tool name and path from
+stdin. For `Write`/`Edit` calls the path comes from `tool_input.file_path`; for `NotebookEdit`
+the gate falls back to `tool_input.notebook_path` (the field NotebookEdit actually supplies).
+Returns `{}` to allow; `{"hookSpecificOutput":{"hookEventName":"PreToolUse",
 "permissionDecision":"ask","permissionDecisionReason":"..."}}` to ask; or the same shape with
-`"deny"` for hard blocks. Always exits 0. Runs only on `Write`, `Edit`, `MultiEdit`, and
-`NotebookEdit` calls — Read, Grep, and Bash are never intercepted. See Part 2 — "The write-gate"
-for semantics.
+`"deny"` for hard blocks. Always exits 0.
+
+The hook fires on two matchers:
+- `Write|Edit|NotebookEdit` — the primary path-based matcher (`MultiEdit` was removed from Claude
+  Code v2.0 and is not listed).
+- `Bash` — a conservative Phase-A-only heuristic that catches obvious shell writes (`>`, `>>`,
+  `tee`, `dd of=`, `sed -i`) into in-root implementation paths. Fail-open: anything the heuristic
+  cannot clearly parse is allowed through. Never fires in Phase B. Bash-mediated writes remain out
+  of scope as a guarantee.
+
+See Part 2 — "The write-gate" for full semantics.
 
 ### Using `th` in CI
 
@@ -501,17 +621,25 @@ process.
 
 ```
 .claude-plugin/   plugin manifest + marketplace.json (installation wiring)
+.github/          CI workflow (ci.yml — typecheck, build, dist-sync, test on every push/PR)
 agents/           7 agent prompt files
 commands/         4 Claude Code command files (th-run, th-status, th-drift, th-escalate)
 dist/             compiled CLI — committed on purpose; no build step at install time
 hooks/            Stop hook wiring (hooks.json → th hook stop-gate)
-skills/           twinharness/ SKILL.md — full Orchestrator playbook + model routing
+schemas/          published JSON Schemas for state.json and brief.json (draft-07; editor validation)
+skills/           twinharness/ SKILL.md (lean core) + reference/ (on-demand playbook references)
 spec/             frozen spec (TwinHarness-Plan.md) + build plan (build-plan.md)
 src/              TypeScript source for the th CLI
 templates/        artifact skeletons for each SDLC stage (01 through 10 + task-file.md)
 tests/            REQ-anchored vitest suite
 examples/         example TwinHarness runs
+CONTRIBUTING.md   dev loop, committed-dist/ invariant, plugin-packaging invariants
+SECURITY.md       threat model (gate scope, Bash bypass, global hook, prompt injection, path containment)
 ```
+
+CI (`npm ci` → `npm run typecheck` → `npm test` → `npm run build` → `git diff --exit-code dist/`)
+runs on every push and pull request, enforcing the committed-`dist/` invariant. See
+`CONTRIBUTING.md` for the full developer setup and plugin-packaging rules.
 
 ### Templates
 
@@ -557,7 +685,7 @@ repo — they survive uninstall and contain everything needed to resume after a 
 
 | Symptom | Cause / fix |
 |---|---|
-| Session "can't finish" — keeps getting pushed back to work | The stop-gate is blocking: run `/twinharness:th-escalate`. Either `state.json` is invalid (`th state verify` lists exactly what's wrong) or blocking drift is open (`th drift list`, then decide and `th drift resolve DRIFT-NNN`). |
+| Session "can't finish" — keeps getting pushed back to work | The stop-gate is blocking: run `/twinharness:th-escalate`. Either `state.json` is invalid (`th state verify` lists exactly what's wrong), blocking drift is open (`th drift list`, then decide and `th drift resolve DRIFT-NNN`), or the run is at `final-verification` with incomplete slices (`th state status` shows which; use `th slice set-status <SLICE-ID> done` or `blocked` for each). |
 | `{"error":"not_initialized"}` | No run in this directory. Start one (`/twinharness:th-run <idea>`) or pass `--cwd` to point at the right project. |
 | `th state set tier T0` refused | A blast-radius flag is recorded — that's the veto floor working. Clear the flags only if they are genuinely wrong, or accept Tier ≥ 1. |
 | `th state set <key> <value>` → `unknown_field` | The key is not a recognized top-level state field. Check `th state status` for the valid schema. |
@@ -569,6 +697,9 @@ repo — they survive uninstall and contain everything needed to resume after a 
 | Hook errors about a missing `dist/cli.js` | The installed copy predates a fix, or a dev clone wasn't rebuilt: update the marketplace + plugin, or `npm run build` in the clone. |
 | `.agentic-sdlc` directory not recognized | Upgrade to v0.2.0+ which reads `.agentic-sdlc` automatically as a legacy fallback. Or rename the folder to `.twinharness`. |
 | Edit or write was blocked / asked about by the write-gate | You are in a project with an active TwinHarness run. If you haven't finished the pre-build gates, the write-gate is doing its job: either finish the design stages and let the Orchestrator set `implementation_allowed true`, or run `th state set write_gate off` to disable gating for this run, or set `TH_DISABLE_WRITE_GATE=1` in your shell to bypass for the current session only. If you're mid-build and the gate fired, it is a component-boundary signal: a file you are editing belongs to a slice that is not `in-progress`. Check `th state status` and ensure the Orchestrator called `th slice set-status <SLICE-ID> in-progress` before your Builder started. |
+| Bash command blocked by write-gate in Phase A | The Bash defense-in-depth matcher detected a shell-mediated write (e.g. `>`, `tee`, `sed -i`) into an implementation path during Phase A. Same unlock paths as above: finish upstream gates and let the Orchestrator set `implementation_allowed true`, disable the gate with `th state set write_gate off`, or bypass for the session with `TH_DISABLE_WRITE_GATE=1`. |
+| `th migrate` → `schema_too_new` | `state.json` was written by a newer version of `th`. Upgrade the plugin to match; `th` never downgrades a state file. |
+| `state lock timeout` error | A previous `th` invocation crashed while holding the cross-process lock (`.twinharness/.state.lock`). Run `th doctor` to confirm the lock is stale, then remove `.twinharness/.state.lock` if no `th` process is currently running. |
 
 ### FAQ
 

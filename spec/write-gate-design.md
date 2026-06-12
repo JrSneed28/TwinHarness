@@ -100,3 +100,9 @@ path-like component → ask · abstract component names → no Phase-B effect ·
 - Gating Bash-mediated file writes (`echo > file`): PreToolUse on Bash would need command
   parsing — high false-positive risk. The Builders' write path is Write/Edit; Bash writes are
   accepted leakage, consistent with fail-open.
+
+  > **Status update (post-v0.3.0 hardening):** a *conservative* Bash matcher now ships as
+  > defense-in-depth — Phase A only, catching obvious redirections (`>`, `>>`), `tee`,
+  > `dd of=`, and `sed -i` into in-root implementation paths, fail-open on anything it
+  > cannot clearly parse. The position above still holds as a *guarantee*: Bash writes
+  > remain out of scope; the matcher narrows the gap, it does not close it (see SECURITY.md).
