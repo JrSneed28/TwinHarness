@@ -20,6 +20,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Changed
 
 - **Right-sized the orchestrator playbook (F7):** `skills/twinharness/SKILL.md` (854 → ~210 lines) and `agents/critic.md` (797 → ~110 lines) were split into a lean always-loaded core plus on-demand reference files under `skills/twinharness/reference/` (`pipeline-stages.md`, `build-and-verify.md`, `critic-modes.md`). The cores now fit inside Claude Code's ~500-line / ~5,000-token post-compaction re-attach window, so long runs no longer lose the tail of the playbook; the lean files point to the reference files, which load only when a given stage/mode is active. No behavioral content was dropped (relocated verbatim); `tests/prompt-references.test.ts` enforces the size limits and reference-link integrity.
+- **Deduplicated the remaining oversized agent prompts (F7 follow-up):** `agents/orchestrator.md` (575 → ~210 lines) now points at the same `reference/` files instead of carrying a second copy of the stage pipeline, and `agents/spec.md` (446 → ~46 lines) keeps its universal rules plus a mode-index table, with the 10 per-mode section lists moved verbatim to `skills/twinharness/reference/spec-modes.md`. Every always-loaded prompt file is now within the ~500-line/~5,000-token guidance (`th context estimate` flags only the on-demand reference files, by design).
 - Plugin/marketplace/package author metadata set to a real maintainer (`JrSneed28`) instead of the `TwinHarness` placeholder.
 
 ### Security
