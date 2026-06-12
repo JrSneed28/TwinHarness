@@ -7,10 +7,17 @@
  * `th state verify` and the stop-gate can explain *what* is wrong.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.STATE_FIELD_ORDER = exports.WRITE_GATE_VALUES = exports.SLICE_STATUSES = exports.BLAST_RADIUS_FLAGS = exports.TIERS = void 0;
+exports.STATE_FIELD_ORDER = exports.WRITE_GATE_VALUES = exports.SLICE_STATUSES = exports.BLAST_RADIUS_FLAGS = exports.TIERS = exports.CURRENT_SCHEMA_VERSION = void 0;
 exports.initialState = initialState;
 exports.validateState = validateState;
 exports.serializeState = serializeState;
+/**
+ * Current state-schema version (Phase 4 — schema versioning). New projects stamp
+ * this in `state.json`; legacy files without the field are treated as v1 and can
+ * be upgraded with `th migrate`. Bump this (and add a migration step) whenever a
+ * breaking state-shape change ships.
+ */
+exports.CURRENT_SCHEMA_VERSION = 1;
 exports.TIERS = ["T0", "T1", "T2", "T3"];
 /** The blast-radius set (spec §5): these can never be Tier 0. */
 exports.BLAST_RADIUS_FLAGS = [
@@ -25,6 +32,7 @@ exports.SLICE_STATUSES = ["pending", "in-progress", "done", "blocked"];
 exports.WRITE_GATE_VALUES = ["ask", "deny", "off"];
 /** Canonical field order → deterministic serialization → stable content hashes. */
 exports.STATE_FIELD_ORDER = [
+    "schema_version",
     "tier",
     "complexity_rationale",
     "blast_radius_flags",
@@ -41,6 +49,7 @@ exports.STATE_FIELD_ORDER = [
 /** Fresh state written by `th init` — unclassified, implementation not yet allowed. */
 function initialState() {
     return {
+        schema_version: exports.CURRENT_SCHEMA_VERSION,
         tier: null,
         complexity_rationale: "",
         blast_radius_flags: [],
@@ -67,6 +76,12 @@ function validateState(value) {
         return { ok: false, issues: [{ path: "$", message: "state must be a JSON object" }] };
     }
     const v = value;
+    // Optional schema_version: absent ⇒ legacy v1. When present it must be a
+    // positive integer. A version newer than CURRENT is still structurally valid
+    // here; `th migrate` is responsible for refusing to downgrade.
+    if (v.schema_version !== undefined && (!isInteger(v.schema_version) || v.schema_version < 1)) {
+        issues.push({ path: "schema_version", message: "must be a positive integer or absent" });
+    }
     if (!(v.tier === null || (typeof v.tier === "string" && exports.TIERS.includes(v.tier)))) {
         issues.push({ path: "tier", message: `must be null or one of ${exports.TIERS.join(", ")}` });
     }

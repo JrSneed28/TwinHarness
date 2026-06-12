@@ -2,7 +2,8 @@
   "name": "twinharness",
   "description": "Single-plugin marketplace for TwinHarness, the Agentic SDLC Orchestrator.",
   "owner": {
-    "name": "TwinHarness"
+    "name": "JrSneed28",
+    "url": "https://github.com/JrSneed28"
   },
   "plugins": [
     {

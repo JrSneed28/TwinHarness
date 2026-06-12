@@ -6,6 +6,14 @@
  * `th state verify` and the stop-gate can explain *what* is wrong.
  */
 
+/**
+ * Current state-schema version (Phase 4 — schema versioning). New projects stamp
+ * this in `state.json`; legacy files without the field are treated as v1 and can
+ * be upgraded with `th migrate`. Bump this (and add a migration step) whenever a
+ * breaking state-shape change ships.
+ */
+export const CURRENT_SCHEMA_VERSION = 1;
+
 export const TIERS = ["T0", "T1", "T2", "T3"] as const;
 export type Tier = (typeof TIERS)[number];
 
@@ -40,6 +48,12 @@ export const WRITE_GATE_VALUES = ["ask", "deny", "off"] as const;
 export type WriteGate = (typeof WRITE_GATE_VALUES)[number];
 
 export interface TwinHarnessState {
+  /**
+   * State-schema version. Absent on legacy files (implicitly v1); stamped by
+   * `th init` and `th migrate`. Written first so it is visible at the top of
+   * state.json. (Phase 4 — schema versioning.)
+   */
+  schema_version?: number;
   tier: Tier | null;
   complexity_rationale: string;
   blast_radius_flags: BlastRadiusFlag[];
@@ -71,6 +85,7 @@ export interface ValidationResult {
 
 /** Canonical field order → deterministic serialization → stable content hashes. */
 export const STATE_FIELD_ORDER: (keyof TwinHarnessState)[] = [
+  "schema_version",
   "tier",
   "complexity_rationale",
   "blast_radius_flags",
@@ -88,6 +103,7 @@ export const STATE_FIELD_ORDER: (keyof TwinHarnessState)[] = [
 /** Fresh state written by `th init` — unclassified, implementation not yet allowed. */
 export function initialState(): TwinHarnessState {
   return {
+    schema_version: CURRENT_SCHEMA_VERSION,
     tier: null,
     complexity_rationale: "",
     blast_radius_flags: [],
@@ -117,6 +133,13 @@ export function validateState(value: unknown): ValidationResult {
     return { ok: false, issues: [{ path: "$", message: "state must be a JSON object" }] };
   }
   const v = value;
+
+  // Optional schema_version: absent ⇒ legacy v1. When present it must be a
+  // positive integer. A version newer than CURRENT is still structurally valid
+  // here; `th migrate` is responsible for refusing to downgrade.
+  if (v.schema_version !== undefined && (!isInteger(v.schema_version) || (v.schema_version as number) < 1)) {
+    issues.push({ path: "schema_version", message: "must be a positive integer or absent" });
+  }
 
   if (!(v.tier === null || (typeof v.tier === "string" && (TIERS as readonly string[]).includes(v.tier)))) {
     issues.push({ path: "tier", message: `must be null or one of ${TIERS.join(", ")}` });
