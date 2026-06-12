@@ -2,7 +2,7 @@
 
 **Turns "build me X" into working, tested software** by forcing the idea through requirements, scope, design, and slice-by-slice implementation with verification gates — as a Claude Code plugin.
 
-> **Early development notice.** TwinHarness is at v0.3.x. The pipeline has been exercised end-to-end and ships 254 passing tests, but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
+> **Early development notice.** TwinHarness is at v0.3.x. The pipeline has been exercised end-to-end and ships 336 passing tests, but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
 
 ---
 
@@ -74,7 +74,7 @@ flowchart TD
     Verify --> SignOff([Human sign-off])
 
     CLI["th CLI — mechanical spine<br/>state.json · hashes · REQ anchors<br/>coverage · drift log · blast-radius veto"]
-    StopHook[Stop hook — blocks done<br/>while state invalid or drift open]
+    StopHook[Stop hook — blocks done<br/>while state invalid, drift open,<br/>or final-verify slices unfinished]
 
     CLI -. gates .-> Orch
     CLI -. gates .-> Build
@@ -147,8 +147,11 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 - **REQ-ID traceability.** Every requirement gets a stable ID (`REQ-001`, `REQ-002`, …) that anchors to slices, tests, and source code. `th anchors scan` maps the full picture; `th trace render` produces the traceability view on demand without maintaining a stored matrix.
 - **Bidirectional drift log.** Discoveries during the build flow back into the governing artifacts. Non-blocking changes auto-apply; requirement-layer changes increment a counter that the Stop hook reads to refuse premature completion.
 - **Vertical slices with a walking skeleton.** Each slice is a thin, end-to-end capability. `th build plan` schedules slices into conflict-free parallel waves: disjoint component sets run in the same wave, overlapping components serialize to prevent drift races.
-- **Stop hook.** Claude is blocked by default from claiming completion while `state.json` is invalid or a blocking drift entry is open. The gate is code (`th hook stop-gate`), not a prompt reminder.
-- **PreToolUse write-gate.** Blocks the standard Write/Edit path by default — before the pre-build gates clear and across slice-component boundaries during the build. Note: Bash-mediated writes (`echo >`, `sed -i`) are out of scope for this hook (see `spec/write-gate-design.md`). The gate is fail-open (non-TwinHarness projects are completely unaffected), configurable (`ask` / `deny` / `off`, default `ask`), and one click to allow in a manual session.
+- **Stop hook.** Claude is blocked by default from claiming completion while `state.json` is invalid, a blocking drift entry is open, or — at the final-verification stage — any slice is not yet `done`/`blocked`. The completion check fires only at final-verification, so mid-build pauses are never interrupted. The gate is code (`th hook stop-gate`), not a prompt reminder.
+- **PreToolUse write-gate.** Blocks the standard Write/Edit/NotebookEdit path by default — before the pre-build gates clear and across slice-component boundaries during the build. A second, conservative `Bash` matcher catches obvious shell writes (`>`, `>>`, `tee`, `dd of=`, `sed -i`) into implementation paths pre-implementation; Bash writes remain out of scope as a *guarantee* (see `spec/write-gate-design.md` and `SECURITY.md`). The gate is fail-open (non-TwinHarness projects are completely unaffected), configurable (`ask` / `deny` / `off`, default `ask`), and one click to allow in a manual session.
+- **Gate-mutation audit ledger.** Every gate-relevant state change (`implementation_allowed`, tier, blast-radius flags, write-gate mode, blocking drift opened/resolved) is appended to `.twinharness/gate-ledger.jsonl` with a timestamp. The gates bind a compliant agent; the ledger makes any override reviewable after the fact. `drift_open_blocking` is additionally a *managed field*: `th state set` refuses it — only `th drift add`/`th drift resolve` move it.
+- **Safe parallel builds.** Concurrent `th` invocations (parallel Builders in a wave) serialize their state mutations under a cross-process lock, so no `drift add` or slice-status update is ever lost to a race.
+- **Self-diagnostics and run inspection.** `th doctor` checks environment and run health; `th stage current` returns the mechanical contract of the current stage (produces / Critic mode / human gate); `th manifest export` emits a deterministic snapshot of the whole run (state + drift + ledger); `th context estimate` reports the prompt-surface token cost; `th migrate` upgrades `state.json` across schema versions.
 - **Conditional UI-design stage.** Present only when the project has a user interface. The UI-Designer presents 2–3 distinct design directions and asks you to pick one before streaming the detailed design.
 - **Tier-scaled documentation.** T1 gets a readme; T2 adds a user guide and API reference; T3 gets the full suite. A Critic reviews the docs; no human gate required.
 - **Automatic model routing.** Cheap models handle routine work; expensive ones (Opus) handle high-risk stages, blast-radius reviews, and the Orchestrator. Haiku handles trivial summarization. The full routing policy is in `skills/twinharness/SKILL.md`.
@@ -172,7 +175,12 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 | `th drift add\|list\|resolve` | Append, list, and resolve bidirectional drift entries |
 | `th revise bump\|status\|reset` | Manage revise-loop counts and escalation |
 | `th hook stop-gate` | Emit the Claude Code Stop-hook decision |
-| `th hook pretool-gate` | Emit the Claude Code PreToolUse-hook decision (write-gate) |
+| `th hook pretool-gate` | Emit the Claude Code PreToolUse-hook decision (write-gate, incl. the Bash matcher) |
+| `th stage current\|describe\|list` | The mechanical per-stage contract: produces / Critic mode / human gate |
+| `th doctor` | Self-diagnostic: environment, state validity, schema version, stale locks, ledger |
+| `th manifest export` | Deterministic run snapshot (state + drift + gate ledger) for review or golden CI checks |
+| `th context estimate` | Approximate prompt-surface token cost; flags files over the context-budget guidance |
+| `th migrate` | Upgrade `state.json` to the current schema version (forward-only) |
 
 All commands accept `--json` for machine-readable output. The full reference is in [USAGE.md](./USAGE.md) Part 3.
 
@@ -183,9 +191,11 @@ All commands accept `--json` for machine-readable output. The full reference is 
 **What works today:**
 
 - Full T0–T3 pipeline, all 7 agents, all stages.
-- `th` CLI with passing tests covering CLI behavior and plugin-packaging integrity.
+- `th` CLI with 336 passing tests covering CLI behavior, plugin-packaging integrity, security containment (path traversal, proto-pollution), and a real cross-process concurrency race test; CI runs typecheck, build, a dist-sync assertion, and the full suite on every push and PR.
 - Validated Claude Code plugin packaging (`claude plugin validate` + `--plugin-dir` load pass).
-- PreToolUse write-gate: blocks the Write/Edit path by default before gates clear and across slice-component boundaries during the build; Bash-mediated writes are out of scope (v0.3.0).
+- PreToolUse write-gate: blocks the Write/Edit/NotebookEdit path by default before gates clear and across slice-component boundaries during the build, plus a conservative pre-implementation Bash matcher; Bash writes remain out of scope as a guarantee (v0.3.0+).
+- Gate-mutation audit ledger, managed drift counter, schema-versioned state with `th migrate`, and run inspection via `th doctor` / `th stage` / `th manifest export` / `th context estimate`.
+- Context-budgeted prompts: every always-loaded skill/agent file fits Claude Code's ~500-line / ~5k-token guidance; per-stage and per-mode detail loads on demand from `skills/twinharness/reference/`.
 - A complete worked example: `examples/autocoder/` — a T3 run producing an autocoder CLI tool, 11 slices, Stage 11 verified and human-signed.
 
 **Not yet done:**
@@ -199,12 +209,14 @@ All commands accept `--json` for machine-readable output. The full reference is 
 
 ```
 .claude-plugin/   plugin manifest and marketplace.json
-agents/           7 agent prompt files
+.github/          CI (typecheck, build, dist-sync assertion, full test suite)
+agents/           7 agent prompt files (lean cores; detail lives in skills/twinharness/reference/)
 commands/         4 slash command definitions
 dist/             compiled CLI — ships in git (no build step at install time)
-hooks/            Stop hook wiring (hooks.json → th hook stop-gate)
-skills/           twinharness/SKILL.md — full Orchestrator playbook
-spec/             design spec (TwinHarness-Plan.md) and roadmap items (write-gate-design.md)
+hooks/            hook wiring (hooks.json → th hook stop-gate / pretool-gate)
+schemas/          published JSON Schemas for state.json and brief.json
+skills/           twinharness/SKILL.md (lean Orchestrator core) + reference/ (on-demand playbook detail)
+spec/             design spec (TwinHarness-Plan.md) and the write-gate design
 src/              TypeScript source for the th CLI
 templates/        artifact skeletons for each SDLC stage
 tests/            REQ-anchored vitest suite
@@ -225,7 +237,9 @@ npm run build
 npm test
 ```
 
-`dist/` ships in git because plugin installs copy the repo as-is with no build step. If you change anything in `src/`, run `npm run build` and commit `dist/` together with the source — `tests/plugin-manifest.test.ts` enforces this mechanically.
+`dist/` ships in git because plugin installs copy the repo as-is with no build step. If you change anything in `src/`, run `npm run build` and commit `dist/` together with the source — `tests/plugin-manifest.test.ts` enforces this mechanically, and CI asserts `git diff --exit-code dist/` on every push.
+
+The full contributor guide (packaging invariants, conventions, where things live) is in [CONTRIBUTING.md](./CONTRIBUTING.md); the threat model and vulnerability-reporting process are in [SECURITY.md](./SECURITY.md).
 
 Issues and pull requests are welcome: [github.com/JrSneed28/TwinHarness/issues](https://github.com/JrSneed28/TwinHarness/issues).
 
@@ -241,6 +255,8 @@ MIT
 
 - [USAGE.md](./USAGE.md) — full usage guide, from install through advanced CLI reference
 - [CHANGELOG.md](./CHANGELOG.md) — version history
+- [SECURITY.md](./SECURITY.md) — threat model, trust boundaries, vulnerability reporting
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — dev setup and packaging invariants
 - [spec/TwinHarness-Plan.md](./spec/TwinHarness-Plan.md) — design spec
 - [spec/write-gate-design.md](./spec/write-gate-design.md) — PreToolUse write-gate design (implemented in v0.3.0)
 - [GitHub issues](https://github.com/JrSneed28/TwinHarness/issues)
