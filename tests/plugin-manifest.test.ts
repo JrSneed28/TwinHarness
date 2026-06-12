@@ -104,6 +104,28 @@ describe("REQ-PLUGIN-002: the compiled CLI ships with the plugin", () => {
     expect(hook?.command).toContain(CLI_INVOCATION);
     expect(hook?.command).toContain("hook pretool-gate");
   });
+
+  it("hooks.json contains a PreToolUse entry with matcher 'Bash' that invokes th hook pretool-gate", () => {
+    const hooks = readJson("hooks/hooks.json") as {
+      hooks: {
+        PreToolUse: Array<{
+          matcher: string;
+          hooks: Array<{ type: string; command: string }>;
+        }>;
+      };
+    };
+    const preToolUseEntries = hooks.hooks.PreToolUse;
+    expect(preToolUseEntries).toBeDefined();
+    expect(Array.isArray(preToolUseEntries)).toBe(true);
+
+    const bashEntry = preToolUseEntries.find((entry) => entry.matcher === "Bash");
+    expect(bashEntry).toBeDefined();
+
+    const hook = bashEntry?.hooks[0];
+    expect(hook?.type).toBe("command");
+    expect(hook?.command).toContain(CLI_INVOCATION);
+    expect(hook?.command).toContain("hook pretool-gate");
+  });
 });
 
 describe("REQ-PLUGIN-003: every component resolves `th` without relying on PATH", () => {

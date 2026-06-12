@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
+import { resolveWithinRoot } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { extractReqIds, scanDirForReqIds } from "../core/anchors";
 import { structuredLog } from "../core/log";
@@ -101,6 +102,20 @@ export function runCoverageCheck(paths: ProjectPaths, opts: CoverageOptions = {}
   const planAbs = path.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
   const testsAbs = path.resolve(paths.root, opts.testsDir ?? "tests");
   const scopeAbs = path.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
+
+  // Path-traversal containment: reject any user-supplied path that escapes the project root.
+  if (opts.reqsFile !== undefined && resolveWithinRoot(paths.root, opts.reqsFile) === null) {
+    return failure({ human: `Path outside project root: ${opts.reqsFile}`, data: { error: "path_outside_root", file: opts.reqsFile } });
+  }
+  if (opts.planFile !== undefined && resolveWithinRoot(paths.root, opts.planFile) === null) {
+    return failure({ human: `Path outside project root: ${opts.planFile}`, data: { error: "path_outside_root", file: opts.planFile } });
+  }
+  if (opts.testsDir !== undefined && resolveWithinRoot(paths.root, opts.testsDir) === null) {
+    return failure({ human: `Path outside project root: ${opts.testsDir}`, data: { error: "path_outside_root", file: opts.testsDir } });
+  }
+  if (opts.scopeFile !== undefined && resolveWithinRoot(paths.root, opts.scopeFile) === null) {
+    return failure({ human: `Path outside project root: ${opts.scopeFile}`, data: { error: "path_outside_root", file: opts.scopeFile } });
+  }
 
   const reqsContent = readFileOrUndefined(reqsAbs);
   if (reqsContent === undefined) {

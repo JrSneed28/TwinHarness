@@ -41,6 +41,7 @@ const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const drift_log_1 = require("../core/drift-log");
 const log_1 = require("../core/log");
+const ledger_1 = require("../core/ledger");
 /**
  * `th drift` — append-only access to the bidirectional drift log (spec §10).
  * Mechanical only (plan §3 boundary rule): the CLI records discoveries and tracks
@@ -132,6 +133,8 @@ function runDriftAdd(paths, opts) {
     if (blocking) {
         driftOpenBlocking += 1;
         (0, state_store_1.writeState)(paths, { ...r.state, drift_open_blocking: driftOpenBlocking });
+        // Audit ledger (F5): a requirement-layer drift opens a blocking gate.
+        (0, ledger_1.appendLedger)(paths, { event: "drift-blocking-opened", id, ref: opts.ref ?? "", drift_open_blocking: driftOpenBlocking });
     }
     (0, log_1.structuredLog)({ cmd: "drift add", id, layer, blocking, drift_open_blocking: driftOpenBlocking });
     return (0, output_1.success)({
@@ -208,6 +211,8 @@ function runDriftResolve(paths, id) {
     if (isBlocking) {
         driftOpenBlocking = Math.max(0, driftOpenBlocking - 1);
         (0, state_store_1.writeState)(paths, { ...r.state, drift_open_blocking: driftOpenBlocking });
+        // Audit ledger (F5): a requirement-layer resolution clears a blocking gate.
+        (0, ledger_1.appendLedger)(paths, { event: "drift-blocking-resolved", id, drift_open_blocking: driftOpenBlocking });
     }
     (0, log_1.structuredLog)({ cmd: "drift resolve", id, layer: entry.layer, drift_open_blocking: driftOpenBlocking });
     const human = isBlocking

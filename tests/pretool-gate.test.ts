@@ -420,6 +420,88 @@ describe("REQ-WGATE-008: NotebookEdit tool uses notebook_path, not file_path", (
 });
 
 // ---------------------------------------------------------------------------
+// REQ-WGATE-009: Phase A Bash-mediated write defense-in-depth
+// ---------------------------------------------------------------------------
+
+describe("REQ-WGATE-009: Phase A Bash-mediated write defense-in-depth", () => {
+  it("Phase A + echo redirect into src/ → gate FIRES (ask)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { current_stage: "stage-05" });
+    const input: PreToolHookInput = {
+      tool_name: "Bash",
+      tool_input: { command: "echo hi > src/foo.ts" },
+      cwd: tp.root,
+    };
+    const out = runHookPretoolGate(tp.paths, input);
+    expect(out.exitCode).toBe(0);
+    expect(permissionDecision(out)).toBe("ask");
+  });
+
+  it("Phase A + echo redirect into docs/ → allow (doc allowlist)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { current_stage: "stage-05" });
+    const input: PreToolHookInput = {
+      tool_name: "Bash",
+      tool_input: { command: "echo hi > docs/notes.md" },
+      cwd: tp.root,
+    };
+    const out = runHookPretoolGate(tp.paths, input);
+    expect(isAllow(out)).toBe(true);
+  });
+
+  it("Phase A + no write redirection → allow (fail-open)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { current_stage: "stage-05" });
+    const input: PreToolHookInput = {
+      tool_name: "Bash",
+      tool_input: { command: "npm test && ls" },
+      cwd: tp.root,
+    };
+    const out = runHookPretoolGate(tp.paths, input);
+    expect(isAllow(out)).toBe(true);
+  });
+
+  it("Phase A + redirect to /etc/passwd (outside root) → allow (fail-open, not our concern)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { current_stage: "stage-05" });
+    const input: PreToolHookInput = {
+      tool_name: "Bash",
+      tool_input: { command: "echo hi > /etc/passwd" },
+      cwd: tp.root,
+    };
+    const out = runHookPretoolGate(tp.paths, input);
+    expect(isAllow(out)).toBe(true);
+  });
+
+  it("Phase B (implementation_allowed=true) + echo redirect into src/ → allow (no Bash gating in Phase B)", () => {
+    tp = makeTempProject();
+    writePostImplState(tp.paths, {
+      slices: [{ id: "SLICE-1", status: "in-progress", components: ["src/"] }],
+    });
+    const input: PreToolHookInput = {
+      tool_name: "Bash",
+      tool_input: { command: "echo hi > src/foo.ts" },
+      cwd: tp.root,
+    };
+    const out = runHookPretoolGate(tp.paths, input);
+    expect(isAllow(out)).toBe(true);
+  });
+
+  it("write_gate=deny + Phase A + sed -i on src/foo.ts → fires with deny", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { current_stage: "stage-05", write_gate: "deny" });
+    const input: PreToolHookInput = {
+      tool_name: "Bash",
+      tool_input: { command: "sed -i s/a/b/ src/foo.ts" },
+      cwd: tp.root,
+    };
+    const out = runHookPretoolGate(tp.paths, input);
+    expect(out.exitCode).toBe(0);
+    expect(permissionDecision(out)).toBe("deny");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // REQ-WGATE-007: legacy .agentic-sdlc project — identical behaviour
 // ---------------------------------------------------------------------------
 

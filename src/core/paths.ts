@@ -27,6 +27,21 @@ export interface ProjectPaths {
 }
 
 /**
+ * Resolve `p` (absolute, or relative to `root`) to an absolute path, but ONLY
+ * if it stays within `root`. Returns null when the path escapes the project
+ * root (callers reject these — TwinHarness commands never operate outside the
+ * project they govern). Mirrors the write-gate's root-containment check.
+ */
+export function resolveWithinRoot(root: string, p: string): string | null {
+  const absRoot = path.resolve(root);
+  const abs = path.isAbsolute(p) ? p : path.resolve(absRoot, p);
+  const rel = path.relative(absRoot, abs);
+  if (rel === "") return abs; // the root itself
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  return abs;
+}
+
+/**
  * Resolve all project paths from a root directory.
  *
  * Directory selection for the state directory (cheap fs existence checks —

@@ -39,6 +39,23 @@ describe("REQ-STATE-CMD-UNKNOWN-KEY: set rejects unknown top-level keys", () => 
   });
 });
 
+describe("REQ-STATE-CMD-PROTO: set refuses prototype-polluting key segments (S3)", () => {
+  it.each([
+    "revise_loop_counts.__proto__.polluted",
+    "revise_loop_counts.constructor.x",
+    "revise_loop_counts.prototype.y",
+  ])("rejects %s with error unsafe_key", (key) => {
+    tp = init();
+    const res = runStateSet(tp.paths, key, "1");
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("unsafe_key");
+    // No prototype was polluted.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    // State remains valid.
+    expect(runStateVerify(tp.paths).ok).toBe(true);
+  });
+});
+
 describe("REQ-STATE-CMD: state get/set/verify/status", () => {
   it("get returns a dotted value", () => {
     tp = init();

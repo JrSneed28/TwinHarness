@@ -1,42 +1,9 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.VETO_EXIT_CODE = void 0;
 exports.runTierClassify = runTierClassify;
 exports.runTierVetoCheck = runTierVetoCheck;
-const path = __importStar(require("node:path"));
+const paths_1 = require("../core/paths");
 const output_1 = require("../core/output");
 const brief_1 = require("../core/brief");
 const log_1 = require("../core/log");
@@ -97,7 +64,10 @@ function runTierClassify(paths, briefPath) {
     if (!briefPath)
         return (0, output_1.failure)({ human: "usage: th tier classify <brief.json>" });
     // Resolve the brief path against the project root (--cwd), like `th artifact register`.
-    const briefFile = path.isAbsolute(briefPath) ? briefPath : path.join(paths.root, briefPath);
+    const briefFile = (0, paths_1.resolveWithinRoot)(paths.root, briefPath);
+    if (briefFile === null) {
+        return (0, output_1.failure)({ human: `Brief path outside project root: ${briefPath}`, data: { error: "path_outside_root", file: briefPath } });
+    }
     const loaded = (0, brief_1.loadBriefFromFile)(briefFile);
     if (!loaded.ok || !loaded.brief)
         return briefLoadFailure(briefFile, loaded.issues);
@@ -127,7 +97,10 @@ function runTierVetoCheck(paths, briefPath) {
     if (!briefPath)
         return (0, output_1.failure)({ human: "usage: th tier veto-check <brief.json>" });
     // Resolve the brief path against the project root (--cwd), like `th artifact register`.
-    const briefFile = path.isAbsolute(briefPath) ? briefPath : path.join(paths.root, briefPath);
+    const briefFile = (0, paths_1.resolveWithinRoot)(paths.root, briefPath);
+    if (briefFile === null) {
+        return (0, output_1.failure)({ human: `Brief path outside project root: ${briefPath}`, data: { error: "path_outside_root", file: briefPath } });
+    }
     const loaded = (0, brief_1.loadBriefFromFile)(briefFile);
     if (!loaded.ok || !loaded.brief)
         return briefLoadFailure(briefFile, loaded.issues);

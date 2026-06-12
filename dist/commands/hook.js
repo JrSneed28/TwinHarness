@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.evaluateStopGate = evaluateStopGate;
 exports.runHookStopGate = runHookStopGate;
+exports.extractBashWriteTargets = extractBashWriteTargets;
 exports.runHookPretoolGate = runHookPretoolGate;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
@@ -105,6 +106,50 @@ function runHookStopGate(paths, input) {
     return { stdout: JSON.stringify({}), exitCode: 0 };
 }
 /**
+ * Extract candidate write-target path tokens from a Bash command string using
+ * conservative heuristics. Covers redirections (> / >>), tee, dd of=, and
+ * sed -i. Returns deduplicated non-empty non-flag tokens. Never throws.
+ *
+ * Patterns:
+ *   - `>` or `>>` followed by optional spaces then a path token.
+ *   - `tee` (optionally `-a`) followed by a path token.
+ *   - `dd ... of=PATH`.
+ *   - `sed -i` in-place: last bareword token of the command.
+ */
+function extractBashWriteTargets(command) {
+    const seen = new Set();
+    const add = (token) => {
+        if (token && !token.startsWith("-"))
+            seen.add(token);
+    };
+    // Redirections: > or >> followed by optional whitespace then a path token.
+    const redirectRe = /(?:>>?)\s*("?)([^\s"'|;&<>]+)\1/g;
+    let m;
+    while ((m = redirectRe.exec(command)) !== null) {
+        if (m[2])
+            add(m[2]);
+    }
+    // tee (optionally -a): `tee [-a] PATH`
+    const teeRe = /\btee\b\s+(?:-a\s+)?("?)([^\s"'|;&<>]+)\1/g;
+    while ((m = teeRe.exec(command)) !== null) {
+        if (m[2])
+            add(m[2]);
+    }
+    // dd of=PATH
+    const ddRe = /\bof=("?)([^\s"'|;&<>]+)\1/g;
+    while ((m = ddRe.exec(command)) !== null) {
+        if (m[2])
+            add(m[2]);
+    }
+    // sed -i in-place: capture last bareword token of the command as the file.
+    if (/\bsed\b/.test(command) && /\s-i\b/.test(command)) {
+        const lastToken = /([^\s"'|;&<>]+)\s*$/.exec(command);
+        if (lastToken && lastToken[1])
+            add(lastToken[1]);
+    }
+    return Array.from(seen);
+}
+/**
  * Helper: convert an absolute path to a root-relative forward-slash string,
  * or null if the path is outside the project root (caller should allow it).
  */
@@ -172,6 +217,9 @@ function findOwningSlices(relFwd, slices, root) {
  * a. No state.json → allow ({}).
  * b. TH_DISABLE_WRITE_GATE=1 or write_gate=off → allow.
  * c. state.json invalid → allow + systemMessage warning.
+ * c2. Phase A + Bash tool: heuristically detect shell-mediated writes into in-root
+ *     implementation paths and fire the gate on the first offending target (fail-open:
+ *     if no offending target is found, fall through). NOT applied in Phase B.
  * d. No tool_input.file_path (or notebook_path for NotebookEdit) → allow.
  * e. Target outside project root → allow.
  * f. Doc/state allowlist path → allow.
@@ -211,6 +259,35 @@ function runHookPretoolGate(paths, input, env = process.env) {
     // Step b (state check): write_gate=off → allow.
     if (state.write_gate === "off")
         return allow();
+    // Effective gate mode: use write_gate field, defaulting to "ask" when absent.
+    const gateMode = state.write_gate === "deny" ? "deny" : "ask";
+    // Step c2: Phase A Bash-mediated write defense-in-depth (fail-open).
+    // Only fires during Phase A (implementation_allowed=false). Heuristically detect
+    // shell-mediated writes into in-root implementation paths. If no offending target
+    // is found, fall through (allow). Never fires in Phase B to avoid false-positives.
+    const bashCommand = input?.tool_input?.command;
+    if (bashCommand && !state.implementation_allowed) {
+        const base0 = input?.cwd ?? paths.root;
+        const targets = extractBashWriteTargets(bashCommand);
+        for (const token of targets) {
+            const absT = path.isAbsolute(token) ? token : path.resolve(base0, token);
+            const rel0 = toRootRelative(absT, paths.root);
+            if (rel0 !== null && !isAllowedDocOrStatePath(rel0)) {
+                const reason = `TwinHarness write-gate (Bash defense-in-depth) blocked this Bash-mediated write ` +
+                    `(Phase A — pre-implementation). ` +
+                    `Target path: ${rel0}. ` +
+                    `Current stage: ${state.current_stage}. ` +
+                    `Bash-mediated writes (e.g. echo/sed/tee redirections) are not permitted during Phase A ` +
+                    `because implementation_allowed is false. ` +
+                    `Legitimate unlock: clear all upstream gates, then set ` +
+                    `implementation_allowed true via \`th state set implementation_allowed true\`. ` +
+                    `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1. ` +
+                    `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision.`;
+                return fireGate(gateMode, reason);
+            }
+        }
+        // No offending target found → fall through (fail-open).
+    }
     // Step d: No file_path (or notebook_path for NotebookEdit) → allow.
     const filePath = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path;
     if (!filePath)
@@ -224,9 +301,7 @@ function runHookPretoolGate(paths, input, env = process.env) {
     // Step f: Doc/state allowlist → allow.
     if (isAllowedDocOrStatePath(relFwd))
         return allow();
-    // Effective gate mode: use write_gate field, defaulting to "ask" when absent.
-    const gateMode = state.write_gate === "deny" ? "deny" : "ask";
-    // Step g: Phase A — implementation not yet allowed.
+    // Step g: Phase A — implementation not yet allowed (file_path/notebook_path path).
     if (!state.implementation_allowed) {
         const reason = `TwinHarness write-gate blocked this write (Phase A — pre-implementation). ` +
             `Current stage: ${state.current_stage}. ` +

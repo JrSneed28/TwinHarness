@@ -19,6 +19,15 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/cli.js\" hook pretool-gate"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/cli.js\" hook pretool-gate"
+          }
+        ]
       }
     ]
   }

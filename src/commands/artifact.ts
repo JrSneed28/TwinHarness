@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
+import { resolveWithinRoot } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState, writeState } from "../core/state-store";
 import { type ValidationIssue, type ApprovedArtifact } from "../core/state-schema";
@@ -47,7 +48,10 @@ export function runArtifactRegister(
     return failure({ human: "usage: th artifact register <file> --version <n>" });
   }
 
-  const abs = path.resolve(paths.root, file);
+  const abs = resolveWithinRoot(paths.root, file);
+  if (abs === null) {
+    return failure({ human: `Path outside project root: ${file}`, data: { error: "path_outside_root", file } });
+  }
   if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
     return failure({ human: `File not found: ${file}`, data: { error: "file_not_found", file } });
   }

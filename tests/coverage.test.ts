@@ -177,6 +177,17 @@ describe("REQ-COVERAGE-007: MVP scope filtering via docs/02-scope.md", () => {
   });
 });
 
+describe("REQ-COVERAGE-SEC-001: path traversal outside project root is rejected", () => {
+  it("reqsFile escaping root → failure with error path_outside_root", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const res = runCoverageCheck(tp.paths, { reqsFile: "../../etc/passwd" });
+    expect(res.ok).toBe(false);
+    expect(res.exitCode).toBe(1);
+    expect(res.data?.error).toBe("path_outside_root");
+  });
+});
+
 describe("REQ-COVERAGE-008: multi-language test files are scanned (full recursion)", () => {
   it("Python test file (test_*.py) is scanned for REQ-IDs", () => {
     tp = makeTempProject();

@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
+import { resolveWithinRoot } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { type ValidationIssue } from "../core/state-schema";
 import { loadBriefFromFile, type TaskBrief } from "../core/brief";
@@ -70,7 +71,10 @@ function classifyBrief(brief: TaskBrief): {
 export function runTierClassify(paths: ProjectPaths, briefPath?: string): CommandResult {
   if (!briefPath) return failure({ human: "usage: th tier classify <brief.json>" });
   // Resolve the brief path against the project root (--cwd), like `th artifact register`.
-  const briefFile = path.isAbsolute(briefPath) ? briefPath : path.join(paths.root, briefPath);
+  const briefFile = resolveWithinRoot(paths.root, briefPath);
+  if (briefFile === null) {
+    return failure({ human: `Brief path outside project root: ${briefPath}`, data: { error: "path_outside_root", file: briefPath } });
+  }
   const loaded = loadBriefFromFile(briefFile);
   if (!loaded.ok || !loaded.brief) return briefLoadFailure(briefFile, loaded.issues);
 
@@ -102,7 +106,10 @@ export function runTierClassify(paths: ProjectPaths, briefPath?: string): Comman
 export function runTierVetoCheck(paths: ProjectPaths, briefPath?: string): CommandResult {
   if (!briefPath) return failure({ human: "usage: th tier veto-check <brief.json>" });
   // Resolve the brief path against the project root (--cwd), like `th artifact register`.
-  const briefFile = path.isAbsolute(briefPath) ? briefPath : path.join(paths.root, briefPath);
+  const briefFile = resolveWithinRoot(paths.root, briefPath);
+  if (briefFile === null) {
+    return failure({ human: `Brief path outside project root: ${briefPath}`, data: { error: "path_outside_root", file: briefPath } });
+  }
   const loaded = loadBriefFromFile(briefFile);
   if (!loaded.ok || !loaded.brief) return briefLoadFailure(briefFile, loaded.issues);
 

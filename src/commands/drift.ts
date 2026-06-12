@@ -10,6 +10,7 @@ import {
   nextDriftId,
 } from "../core/drift-log";
 import { structuredLog } from "../core/log";
+import { appendLedger } from "../core/ledger";
 
 /**
  * `th drift` — append-only access to the bidirectional drift log (spec §10).
@@ -123,6 +124,8 @@ export function runDriftAdd(paths: ProjectPaths, opts: DriftAddOptions): Command
   if (blocking) {
     driftOpenBlocking += 1;
     writeState(paths, { ...r.state, drift_open_blocking: driftOpenBlocking });
+    // Audit ledger (F5): a requirement-layer drift opens a blocking gate.
+    appendLedger(paths, { event: "drift-blocking-opened", id, ref: opts.ref ?? "", drift_open_blocking: driftOpenBlocking });
   }
 
   structuredLog({ cmd: "drift add", id, layer, blocking, drift_open_blocking: driftOpenBlocking });
@@ -207,6 +210,8 @@ export function runDriftResolve(paths: ProjectPaths, id?: string): CommandResult
   if (isBlocking) {
     driftOpenBlocking = Math.max(0, driftOpenBlocking - 1);
     writeState(paths, { ...r.state, drift_open_blocking: driftOpenBlocking });
+    // Audit ledger (F5): a requirement-layer resolution clears a blocking gate.
+    appendLedger(paths, { event: "drift-blocking-resolved", id, drift_open_blocking: driftOpenBlocking });
   }
 
   structuredLog({ cmd: "drift resolve", id, layer: entry.layer, drift_open_blocking: driftOpenBlocking });
