@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runStateGet, runStateSet, runStateVerify, runStateStatus } from "../src/commands/state";
+import { runDriftAdd, runDriftResolve } from "../src/commands/drift";
 import { readState } from "../src/core/state-store";
 
 let tp: TempProject | undefined;
@@ -105,5 +106,55 @@ describe("REQ-STATE-CMD: state get/set/verify/status", () => {
   it("status renders without throwing", () => {
     tp = init();
     expect(runStateStatus(tp.paths).ok).toBe(true);
+  });
+});
+
+describe("REQ-STATE-CMD-MANAGED: state set refuses managed fields", () => {
+  it("drift_open_blocking 0 → failure managed_field, counter unchanged", () => {
+    tp = init();
+    const before = readState(tp.paths).state?.drift_open_blocking;
+    const res = runStateSet(tp.paths, "drift_open_blocking", "0");
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("managed_field");
+    expect(res.data?.field).toBe("drift_open_blocking");
+    expect(readState(tp.paths).state?.drift_open_blocking).toBe(before);
+  });
+
+  it("drift_open_blocking 5 → failure managed_field, counter unchanged", () => {
+    tp = init();
+    const before = readState(tp.paths).state?.drift_open_blocking;
+    const res = runStateSet(tp.paths, "drift_open_blocking", "5");
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("managed_field");
+    expect(res.data?.field).toBe("drift_open_blocking");
+    expect(readState(tp.paths).state?.drift_open_blocking).toBe(before);
+  });
+
+  it("implementation_allowed (non-managed gate field) still succeeds", () => {
+    tp = init();
+    const res = runStateSet(tp.paths, "implementation_allowed", "true");
+    expect(res.ok).toBe(true);
+    expect(readState(tp.paths).state?.implementation_allowed).toBe(true);
+  });
+
+  it("th drift add / th drift resolve own the counter without interference", () => {
+    tp = init();
+    expect(readState(tp.paths).state?.drift_open_blocking).toBe(0);
+
+    // drift add --layer requirement increments the counter.
+    const addRes = runDriftAdd(tp.paths, {
+      layer: "requirement",
+      ref: "SLICE-1 / TASK-001",
+      discovery: "Managed-field guard test",
+      action: "build paused",
+    });
+    expect(addRes.ok).toBe(true);
+    expect(readState(tp.paths).state?.drift_open_blocking).toBe(1);
+
+    // drift resolve decrements the counter.
+    const id = (addRes.data as { id: string }).id;
+    const resolveRes = runDriftResolve(tp.paths, id);
+    expect(resolveRes.ok).toBe(true);
+    expect(readState(tp.paths).state?.drift_open_blocking).toBe(0);
   });
 });

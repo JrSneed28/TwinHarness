@@ -7,6 +7,7 @@ import * as fs from "node:fs";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runStateSet } from "../src/commands/state";
+import { runDriftAdd } from "../src/commands/drift";
 import { runMigrate } from "../src/commands/migrate";
 import { readState, writeState } from "../src/core/state-store";
 import { runDoctor } from "../src/commands/doctor";
@@ -57,7 +58,8 @@ describe("REQ-DOCTOR-001: environment + project health", () => {
   it("warns on open blocking drift", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "drift_open_blocking", "2");
+    // drift_open_blocking is a managed field — open it through the owning flow.
+    runDriftAdd(tp.paths, { layer: "requirement", ref: "SLICE-1 / TASK-001", discovery: "x", action: "paused" });
     const res = runDoctor(tp.paths);
     expect(byName(res.data, "blocking drift")?.status).toBe("warn");
   });

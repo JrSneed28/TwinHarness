@@ -66,4 +66,44 @@ describe("REQ-GATE-001: stop-gate blocks premature completion (pre-mortem #2)", 
     runInit(tp.paths, {});
     expect(JSON.parse(runHookStopGate(tp.paths, { stop_hook_active: true }).stdout)).toEqual({});
   });
+
+  // F6: final-verification slice-completion gate
+  it("blocks at final-verification when a slice is still pending", () => {
+    tp = makeTempProject();
+    writeState(tp.paths, {
+      ...initialState(),
+      current_stage: "final-verification",
+      slices: [{ id: "SLICE-1", status: "pending", components: [] }],
+    });
+    const d = evaluateStopGate(tp.paths);
+    expect(d.block).toBe(true);
+    expect(d.reasons[0]).toContain("SLICE-1");
+    expect(d.reasons[0]).toContain("final-verification");
+  });
+
+  it("allows at final-verification when all slices are done or blocked", () => {
+    tp = makeTempProject();
+    writeState(tp.paths, {
+      ...initialState(),
+      current_stage: "final-verification",
+      slices: [
+        { id: "SLICE-1", status: "done", components: [] },
+        { id: "SLICE-2", status: "blocked", components: [] },
+      ],
+    });
+    expect(evaluateStopGate(tp.paths).block).toBe(false);
+  });
+
+  it("does NOT block at a non-final stage even with pending slices", () => {
+    tp = makeTempProject();
+    writeState(tp.paths, {
+      ...initialState(),
+      current_stage: "implementation",
+      slices: [
+        { id: "SLICE-1", status: "pending", components: [] },
+        { id: "SLICE-2", status: "in-progress", components: [] },
+      ],
+    });
+    expect(evaluateStopGate(tp.paths).block).toBe(false);
+  });
 });

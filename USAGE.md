@@ -307,7 +307,9 @@ th state verify                    Exit 0 = valid; non-zero with a precise issue
 `state set` JSON-parses the value (`true` → boolean, `3` → number, `["a"]` → array) and falls back
 to a bare string. Dotted paths support array indices. Because every write is re-validated against
 the schema, illegal states — e.g. `tier T0` while a blast-radius flag is set — are mechanically
-unwritable. Attempts to set an unknown top-level key exit with `unknown_field`.
+unwritable. Attempts to set an unknown top-level key exit with `unknown_field`. Attempts to set a
+**managed field** (one owned by a dedicated command) exit with `managed_field` — see the
+`drift_open_blocking` row in the schema table below.
 
 `state.json` schema (canonical field order; spec §18):
 
@@ -323,7 +325,7 @@ unwritable. Attempts to set an unknown top-level key exit with `unknown_field`.
 | `implementation_allowed` | boolean | Set true only after the slice plan + tier prerequisites clear |
 | `write_gate` | `"ask"` \| `"deny"` \| `"off"` \| absent | PreToolUse write-gate semantics; absent = `ask`; use `th state set write_gate <value>` to configure |
 | `open_questions` | string[] | Unresolved questions blocking advancement |
-| `drift_open_blocking` | number | Open requirement-layer escalations; stop-gate blocks while > 0 |
+| `drift_open_blocking` | number | Open requirement-layer escalations; stop-gate blocks while > 0. **Managed field** — `state set` refuses writes; use `th drift add` / `th drift resolve` to modify. |
 | `revise_loop_counts` | {mode: count} | Critic-loop round counters per mode |
 
 ### Tiering
@@ -559,6 +561,7 @@ repo — they survive uninstall and contain everything needed to resume after a 
 | `{"error":"not_initialized"}` | No run in this directory. Start one (`/twinharness:th-run <idea>`) or pass `--cwd` to point at the right project. |
 | `th state set tier T0` refused | A blast-radius flag is recorded — that's the veto floor working. Clear the flags only if they are genuinely wrong, or accept Tier ≥ 1. |
 | `th state set <key> <value>` → `unknown_field` | The key is not a recognized top-level state field. Check `th state status` for the valid schema. |
+| `th state set drift_open_blocking <n>` → `managed_field` | `drift_open_blocking` is owned by the drift flow. Use `th drift add --layer requirement` to increment and `th drift resolve DRIFT-NNN` to decrement; do not bypass the owning command. |
 | `th drift resolve DRIFT-NNN` fails | Either the ID doesn't exist (`drift_not_found`) or it was already resolved (`already_resolved`). Run `th drift list` to see current entries. |
 | `coverage check` fails before build | An MVP REQ-ID has no slice or no test. Re-enter the Vertical Slice stage; do not hand-wave the gap. |
 | Critic loop stuck at the cap | By design: round 3 reached with open grounded issues. The open issues are now yours to decide — `/twinharness:th-escalate` lists them. |

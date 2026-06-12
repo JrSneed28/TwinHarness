@@ -46,10 +46,13 @@ const state_store_1 = require("../core/state-store");
  * - No state.json  → no TwinHarness run active in this project → allow.
  * - Invalid state  → block (the orchestrator must repair state first).
  * - Open BLOCKING drift (§10) → block.
+ * - At `final-verification` stage: block when any slice is not yet done or
+ *   blocked (i.e. status is "pending" or "in-progress"). This catches the
+ *   most intuitive false-"done" — a run that claims completion while slices
+ *   are still unbuilt. The check is ONLY applied at the final-verification
+ *   stage so that legitimate mid-build pauses (the Stop hook fires on every
+ *   turn-end) are never interrupted.
  * - Otherwise → allow.
- *
- * The gate checks state validity and open blocking drift. That is the complete
- * set of mechanical stop conditions; no additional gating is wired here.
  */
 function evaluateStopGate(paths) {
     const r = (0, state_store_1.readState)(paths);
@@ -71,6 +74,24 @@ function evaluateStopGate(paths) {
             block: true,
             reasons: [`${n} open BLOCKING drift escalation${n === 1 ? "" : "s"} (§10) must be resolved before completing.`],
         };
+    }
+    if (r.state.current_stage === "final-verification") {
+        const incomplete = r.state.slices.filter((s) => s.status !== "done" && s.status !== "blocked");
+        if (incomplete.length > 0) {
+            const ids = incomplete.map((s) => s.id).join(", ");
+            const n = incomplete.length;
+            return {
+                block: true,
+                reasons: [
+                    `Stop-gate (final-verification slice check): the run is at stage final-verification but ` +
+                        `${n} slice${n === 1 ? "" : "s"} ${n === 1 ? "is" : "are"} not yet done/blocked ` +
+                        `(${ids}). ` +
+                        `Completion requires finishing or explicitly blocking all slices before the run may stop. ` +
+                        `Use \`th slice set-status <SLICE-ID> done|blocked\` for each remaining slice. ` +
+                        `Note: the human correctness gate on the verification report still applies after all slices are resolved.`,
+                ],
+            };
+        }
     }
     return { block: false, reasons: [] };
 }

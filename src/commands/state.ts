@@ -8,6 +8,11 @@ import { appendLedger, GATE_LEDGER_KEYS } from "../core/ledger";
 /** Key segments that must never be written through a dotted path (proto-pollution guard, S3). */
 const UNSAFE_KEY_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
 
+/** Fields owned by a dedicated command; `state set` refuses them to keep the owning invariant. */
+const MANAGED_FIELDS: Record<string, string> = {
+  drift_open_blocking: "Use `th drift add` / `th drift resolve` — this counter is owned by the drift flow.",
+};
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -102,6 +107,15 @@ function runStateSetLocked(paths: ProjectPaths, key: string, rawValue: string): 
     return failure({
       human: `Refusing to write: unsafe key segment in "${key}".`,
       data: { error: "unsafe_key", key },
+    });
+  }
+
+  // Managed-field guard: refuse writes to fields owned by a dedicated command.
+  // These fields have an owning invariant that `state set` would silently bypass.
+  if (Object.prototype.hasOwnProperty.call(MANAGED_FIELDS, firstSegment)) {
+    return failure({
+      human: `Refusing to set managed field "${firstSegment}". ${MANAGED_FIELDS[firstSegment]}`,
+      data: { error: "managed_field", field: firstSegment },
     });
   }
 

@@ -234,6 +234,12 @@ demonstrate, is a grounded defect the Critic will return (spec §11, §17).
 report to the human via AskUserQuestion. The human is the final authority on correctness (§11).
 Do not claim the project complete until the human has reviewed.
 
+**Mechanical stop-gate at final-verification.** In addition to the human gate, the stop-gate
+(`th hook stop-gate`) enforces a mechanical condition at this stage: it blocks completion while
+any slice in `state.slices` has a status other than `done` or `blocked`. Finish or explicitly
+block all remaining slices with `th slice set-status <SLICE-ID> done|blocked` before the run
+may stop cleanly.
+
 Register the artifact after human sign-off:
 
 ```
