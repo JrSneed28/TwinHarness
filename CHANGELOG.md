@@ -5,6 +5,45 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.6.0] — 2026-06-13
+
+### Added
+
+- **Debugger agent (`agents/debugger.md`) + `th debug`:** an on-demand, fresh-context, evidence-first defect tracer invoked on a failing suite, an ungrounded Critic defect, or a behavior↔contract contradiction. `th debug pack [--slice ID | --req REQ]` assembles a deterministic evidence bundle (failing commands + output tails, slice/REQ anchors, recent drift, open findings); `th debug log add|list` is an append-only evidence ledger (`debug-log.md`, mirroring `drift-log.md`). New Critic mode `debug-review` rejects an unanchored root cause, a fix that crosses component boundaries, or a silent requirement contradiction. The Debugger proposes and proves; the Builder fixes; tests + human certify correctness.
+- **Researcher agent (`agents/researcher.md`):** an on-demand, **conditional** information-gatherer the Orchestrator invokes only when a project needs unfamiliar external knowledge. It scopes questions to REQ-IDs, gathers via web search/fetch, cites every claim, separates fact from opinion, adversarially verifies, and emits `docs/00-research/<topic>.md` (a directory artifact). New Critic mode `research` fails uncited/fabricated claims, stale version-sensitive facts, and findings that bear on no REQ-ID. Fetched content is treated as untrusted data (see SECURITY.md).
+- **Live build coordination — `th build next-wave|claim|release|leases`:** `next-wave` is the live oracle for the slices dispatchable in parallel *right now* (status pending, `depends_on` done, components free of in-progress slices and active leases). `claim`/`release` are dynamic **component leases** (`build-leases.jsonl`); `claim` refuses an overlapping claim (exit 1) — the collision guard that closes the race the static plan can't see when drift expands a slice's component set mid-build. Serialized under the existing cross-process state lock.
+- **Slice `depends_on`:** an optional slice field (parsed from a `Depends on: SLICE-x` line by `th slices sync`) so the wave-runner respects true ordering (walking-skeleton-then-features) beyond component disjointness. Optional and omitted when empty, so existing slices serialize byte-identically.
+
+### Changed
+
+- **`th next` extended** with three build-time obligations: a failing `th verify run` report → `investigate-failure` (engage the Debugger); the implementation stage with pending slices → `dispatch-wave`; with only in-flight Builders → `await-builders`.
+
+### Security
+
+- The Researcher fetches **untrusted external content** (a prompt-injection surface): it treats pages as data, never follows embedded instructions, never runs commands they suggest, and the `research` Critic mode flags unsupported/fabricated claims. Documented in SECURITY.md.
+
+## [0.5.0] — 2026-06-13
+
+### Fixed
+
+- **ADR artifact registration (directory artifacts):** `th artifact register` now accepts a **directory** and hashes its contents deterministically, so the T3 ADR set registers as one entry keyed `docs/05-adrs` — exactly what the stage contract (`produces: docs/05-adrs/`) and the playbook already instruct (`th artifact register docs/05-adrs/ --version 1`). Previously the command rejected anything that wasn't a single file, so that documented step failed and the worked example had to register eight ADR files one by one. `th stale --artifact docs/05-adrs` now round-trips on the directory too.
+
+### Added
+
+- **`th coverage report`:** the planned / implemented / tested / passing breakdown per REQ-ID (a read-only status view; the hard gate stays `th coverage check`). `planned` = the REQ is in a slice, `implemented` = it is anchored in the code dir (`--code`, default `src`), `tested` = it is anchored in a test, `passing` = whole-suite, sourced from the optional `th verify run` report (`—` when none exists).
+- **`th verify add|list|clear|run`:** configure and run the project's own test/check commands. `th verify run` is the single, deliberately-quarantined command that executes operator-authored commands (everything else still only records and computes); it writes a report under the state dir that `th coverage report` and `th doctor` read for the "suite green/failing" signal. Commands live in `.twinharness/verify.json`, never in `state.json`, so the state schema and its content-hash stability are untouched.
+- **`th context pack [--slice <ID>]`:** mechanically assembles the §9 handoff bundle — the Summary block of every approved artifact, plus (with `--slice`) that slice's record, components, and the other slices it shares components with (§16 conflict awareness). Computes a candidate bundle; routing is still the Orchestrator's call.
+- **`th next`:** the next-action **oracle** — given durable state + on-disk anchors it returns the single highest-priority mechanical obligation the run owes next (resolve blocking drift → escalate a capped revise loop → re-register a silently-changed artifact → classify the tier → produce/register the current stage's artifact → coverage gate → finish slices → human sign-off → advance the stage). Like `th stage current`, it reports a mechanical obligation; it never chooses strategy (F7 — the playbook can fall out of the post-compaction context window).
+
+### Changed
+
+- **`th doctor` is now a full run-health audit:** beyond environment + state validity it audits the live run — artifact integrity (on-disk hash vs the recorded approved hash, surfacing silently-edited governed docs), slice progress, coverage status, the test-suite signal, and revise-loop escalations. Findings are warnings (they inform); only a hard environment/state failure exits non-zero.
+- Shared a single run-health core (`src/core/health.ts`, `src/core/coverage.ts`) behind `th doctor`, `th next`, and `th coverage report` so the audit and the oracle can never disagree about drift, slice state, or revise caps.
+
+### Security
+
+- **`th verify run` executes operator-authored commands** (with the shell, in the project root) — the one exception to the "records and computes; never re-runs" boundary, quarantined in `src/core/verify.ts`. It only ever runs commands a human added via `th verify add`; it never sources commands from artifact content. See `SECURITY.md`.
+
 ## [0.4.0] — 2026-06-12
 
 ### Added

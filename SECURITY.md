@@ -41,6 +41,37 @@ The **gate-mutation audit ledger** (`.twinharness/gate-ledger.jsonl`) records
 every gate-relevant state change, making such overrides reviewable after the
 fact. This is the primary accountability mechanism — not prevention.
 
+### `th verify run` executes configured commands
+
+`th verify run` is the **only** `th` command that executes project commands. It
+runs the list configured via `th verify add` (stored in `.twinharness/verify.json`)
+with the shell, in the project root, with full user privileges — exactly like the
+test/lint scripts a developer would run by hand. Every other `th` command only
+records and computes.
+
+Two boundaries keep this narrow:
+
+- **Operator-authored only.** `th verify run` sources commands solely from
+  `verify.json`. It never reads commands from artifact content, drift entries, or
+  any other model-written or repository data — so prompt-injection into a
+  governed document cannot introduce a command here.
+- **Review before running.** Treat `verify.json` like any executable script: a
+  command added by a compromised or confused agent would run with your
+  privileges. `th verify list` shows exactly what will run; review it on an
+  untrusted project before invoking `th verify run`.
+
+### The Researcher agent fetches untrusted external content
+
+The on-demand Researcher agent (`agents/researcher.md`, invoked only when a
+project needs unfamiliar external knowledge) uses web search/fetch. Fetched pages
+are an **injection surface**: the agent is instructed to treat them strictly as
+data — extract facts, never follow instructions embedded in a page, never run
+commands a page suggests — and the `research` Critic mode flags unsupported or
+fabricated claims. Research is conditional and skipped entirely when not
+warranted, so most runs have no external-fetch surface at all. As with any
+network-using tool, the environment's network policy governs whether egress is
+available.
+
 ### Prompt-injection
 
 The orchestrator reads the user's idea text and the **existing files in the

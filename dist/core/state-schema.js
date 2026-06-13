@@ -142,6 +142,9 @@ function validateState(value) {
             if (!Array.isArray(s.components) || s.components.some((c) => typeof c !== "string")) {
                 issues.push({ path: `slices[${i}].components`, message: "must be an array of strings" });
             }
+            if (s.depends_on !== undefined && (!Array.isArray(s.depends_on) || s.depends_on.some((d) => typeof d !== "string"))) {
+                issues.push({ path: `slices[${i}].depends_on`, message: "must be an array of strings or absent" });
+            }
         });
     }
     if (typeof v.implementation_allowed !== "boolean") {

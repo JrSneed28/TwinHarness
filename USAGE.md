@@ -395,19 +395,29 @@ decides what to do about it.
 ### Artifacts, coverage, traceability
 
 ```
-th artifact register <file> --version <n>   Hash + record in approved_artifacts
+th artifact register <path> --version <n>   Hash + record in approved_artifacts (file OR directory)
 th artifact list                            What's registered (file, version, hash)
 th coverage check [--reqs F] [--plan F] [--tests D] [--scope F]
+th coverage report [--reqs F] [--plan F] [--tests D] [--scope F] [--code D]
 th anchors scan [--scan-reqs] [--scan-tests] [--scan-code] [--strict]
 th trace render                             The full traceability view, rendered on demand
 th stale --since <hash>                     Diff-scoped downstream staleness (look up by recorded hash)
 th stale --artifact <file>                  Same lookup, by file key (safe before re-registering)
 ```
 
+- **Artifact register accepts a directory.** A path that is a directory (e.g. the T3 ADR set
+  `docs/05-adrs/`) is hashed deterministically over its contents and recorded as one entry keyed
+  `docs/05-adrs` (trailing slash normalized away). `th stale --artifact docs/05-adrs` round-trips
+  on it. Single files behave exactly as before.
 - **Coverage** asserts every MVP REQ-ID maps to ≥ 1 slice *and* ≥ 1 test. Non-zero exit = the
   build may not start. Scans tests/ **fully recursively** in any language; applies MVP filter from
   `docs/02-scope.md`'s `## MVP Scope` section (or `--scope <file>` override). Defaults:
   `--reqs docs/01-requirements.md --plan docs/09-implementation-plan.md --tests tests`.
+- **`th coverage report`** is the read-only breakdown (it is **not** a gate — `th coverage check`
+  stays the gate). Per REQ-ID it reports four dimensions: **planned** (in a slice), **implemented**
+  (anchored in the code dir — `--code`, default `src`), **tested** (anchored in a test), and
+  **passing** (whole-suite, from the last `th verify run`; shown as `—` when no verify report
+  exists).
 - **Anchors** maps each REQ-ID to the files it appears in across `docs/`, `tests/`, and `src/`, and
   flags **orphans** — anchors in tests/code with no defined requirement. `--strict` makes an orphan
   exit 1. Tests anchor by placing the canonical hyphenated REQ-ID (e.g. `REQ-001`,
@@ -474,6 +484,65 @@ component sets → same wave (safe to run Builders concurrently), shared compone
 (serialized). By default only unfinished slices are scheduled. `th build plan` does NOT read the
 raw plan file — always run `th slices sync` first.
 
+### Live build coordination — parallel Builders without collisions
+
+```
+th build next-wave               Slices dispatchable in parallel right now (live)
+th build claim <SLICE-ID>        Take a live component lease (refuses an overlapping claim)
+th build release <SLICE-ID>      Release the slice's lease
+th build leases                  List active component leases
+```
+
+`th build plan` schedules from the *static* plan; these commands coordinate the *live* build. The
+flow for each wave:
+
+1. `th build next-wave` → the slices ready now: status `pending`, every `depends_on` slice `done`,
+   and components free of in-progress slices, active leases, and each other. Held slices are listed
+   with the reason (`dependency` or `component-conflict`).
+2. For each dispatched slice: `th slice set-status <ID> in-progress`, then `th build claim <ID>`,
+   then spawn its Builder. `claim` is the **collision guard** — it refuses (exit 1) if any of the
+   slice's components are already leased to a different slice, even when the static plan thought them
+   disjoint (drift can grow a component set mid-build). Claims serialize under the state lock.
+3. On Critic PASS: `th slice set-status <ID> done` and `th build release <ID>`, then re-run
+   `th build next-wave`. On failure: set the slice `blocked`, release, and engage the Debugger.
+
+Slices may declare `depends_on` (parsed by `th slices sync` from a `Depends on: SLICE-1, SLICE-2`
+line) so a feature slice waits for the walking skeleton even when their components are disjoint. One
+coordinator (the Orchestrator) drives N Builders — there is no second controller to collide with.
+
+### Debug — evidence-first defect tracing (the Debugger agent)
+
+```
+th debug pack [--slice <ID> | --req <REQ-ID>]   Assemble a read-only failure-evidence bundle
+th debug log add --ref "REQ-007 / SLICE-2" --symptom "…" [--evidence "…"] [--root-cause "…"] [--status open|resolved]
+th debug log list                                List evidence entries + open count
+```
+
+`th debug pack` gives the Debugger facts to start from: the failing `th verify run` commands +
+output tails, the target slice's components (or a REQ-ID's code/test anchors), recent drift, and any
+open findings. `th debug log` is the append-only evidence ledger (`debug-log.md`, mirroring
+`drift-log.md`) — each entry anchors a symptom/evidence/root-cause to a REQ-ID/slice. A root cause
+that contradicts a requirement is opened as **blocking** drift through `th drift add --layer
+requirement` so the stop-gate sees it. The Debugger proposes the minimal fix; the Builder applies it;
+tests and the human certify correctness (§11).
+
+### Verify — run the project's own tests/checks
+
+```
+th verify add "<command>"        Append a project test/check command (e.g. "npm test")
+th verify list                   Show configured commands
+th verify clear                  Remove all configured commands
+th verify run                    Run every command in order; exit 1 on any failure
+```
+
+`th verify run` is the **one** `th` command that executes — it runs operator-authored commands
+(configured via `th verify add`, stored in `.twinharness/verify.json`) with the shell, in the
+project root, and writes a report (`.twinharness/verify-report.json`). Every other `th` command
+only records and computes. The report feeds the **passing** column of `th coverage report` and the
+suite signal in `th doctor`. Commands live outside `state.json`, so the state schema and its
+content-hash stability are untouched. See `SECURITY.md` — `th verify run` only ever runs commands a
+human added; it never sources commands from artifact content.
+
 ### Version
 
 ```
@@ -488,7 +557,7 @@ Prints the CLI version from `package.json`. Useful for confirming which plugin v
 th doctor
 ```
 
-Self-diagnostic for environment and project health. Reports:
+Self-diagnostic **plus a full run-health audit**. Reports:
 
 - **Node version** — fails hard if below 18 (the minimum requirement).
 - **Plugin CLI** — whether `dist/cli.js` is present next to the running binary.
@@ -500,20 +569,46 @@ Self-diagnostic for environment and project health. Reports:
 - **Stale state lock** — warns if `.twinharness/.state.lock` is present with age (a crashed `th`
   left the lock behind; safe to remove if no `th` process is running).
 - **Audit ledger size** — number of entries in `gate-ledger.jsonl`.
+- **Artifact integrity** — recomputes each approved artifact's on-disk hash (file or directory) and
+  warns on any that **changed** (a governed doc edited without re-registration) or went **missing**.
+- **Slice progress** — done / blocked / in-progress / pending counts; warns while any are unfinished.
+- **Coverage** — planned+tested vs total, implemented count, and the suite signal (green/failing/
+  unknown) from the last `th verify run`.
+- **Revise loops** — warns on any mode that has reached its cap (a human decision is owed).
 
-Exit non-zero only on hard failures (unsupported Node version, invalid `state.json`). Informational
-warnings (outdated schema, open drift, stale lock) exit 0. Never mutates anything.
+Exit non-zero only on hard failures (unsupported Node version, invalid `state.json`). All
+run-health findings are warnings — they inform; they never fail the process. Never mutates anything.
+
+```
+th next
+```
+
+The next-action **oracle**: given durable state + on-disk anchors, it returns the single
+highest-priority **mechanical** obligation the run owes next, in this priority order — fix invalid
+state → resolve blocking drift → escalate a capped revise loop → re-register a silently-changed
+artifact → classify the tier → produce/register the current stage's artifact → clear the coverage
+gate → finish/block remaining slices (at final verification) → human sign-off → advance to the next
+engaged stage. The JSON form carries a stable `kind` token plus the human `action`. Like `th stage
+current`, it reports a mechanical obligation; it never chooses strategy — consult it when unsure
+what the run owes next, especially after a long context window (F7).
 
 ```
 th context estimate
+th context pack [--slice <SLICE-ID>]
 ```
 
-Approximates the prompt-surface token cost of the plugin's skill, agent, and command files
-(heuristic: ~4 chars/token). Flags any file exceeding Claude Code's ~500-line / ~5,000-token
-re-attach guidance — these are the files that risk losing their tail after context compaction on
-long runs. The on-demand `skills/twinharness/reference/` files are expected to exceed the threshold
-by design (they load only when needed for a given stage or mode, not on every turn). All
-always-loaded core files are within the guidance.
+`th context estimate` approximates the prompt-surface token cost of the plugin's skill, agent, and
+command files (heuristic: ~4 chars/token). Flags any file exceeding Claude Code's ~500-line /
+~5,000-token re-attach guidance — these are the files that risk losing their tail after context
+compaction on long runs. The on-demand `skills/twinharness/reference/` files are expected to exceed
+the threshold by design (they load only when needed for a given stage or mode, not on every turn).
+All always-loaded core files are within the guidance.
+
+`th context pack` assembles the §9 **handoff bundle**: the Summary block of every approved artifact
+(the handoff currency — full artifacts are fetched only on demand), with a token estimate. With
+`--slice <SLICE-ID>` it adds that slice's record, the components it touches, and the other slices it
+shares components with (§16 conflict awareness — which slices must serialize). It **computes** a
+candidate bundle; deciding what to actually route remains the Orchestrator's call.
 
 ### Schema migration
 
@@ -622,7 +717,7 @@ process.
 ```
 .claude-plugin/   plugin manifest + marketplace.json (installation wiring)
 .github/          CI workflow (ci.yml — typecheck, build, dist-sync, test on every push/PR)
-agents/           7 agent prompt files
+agents/           9 agent prompt files
 commands/         4 Claude Code command files (th-run, th-status, th-drift, th-escalate)
 dist/             compiled CLI — committed on purpose; no build step at install time
 hooks/            Stop hook wiring (hooks.json → th hook stop-gate)
@@ -664,7 +759,7 @@ Three invariants are enforced by `tests/plugin-manifest.test.ts` — do not figh
 - **Components never call a bare `th`.** Every skill/command/agent resolves the CLI via
   `${CLAUDE_PLUGIN_ROOT}/dist/cli.js` (substituted by Claude Code at load time), because installed
   users don't have `th` on PATH.
-- **7 agents, 4 commands, 1 skill.** The manifest test verifies these counts automatically via
+- **9 agents, 4 commands, 1 skill.** The manifest test verifies these counts automatically via
   `readdirSync` — adding or removing agents will surface immediately.
 - **Version sync.** `plugin.json` version must equal `package.json` version.
 

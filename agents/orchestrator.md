@@ -206,6 +206,37 @@ Cheap by default, expensive where wrong answers are expensive.
 
 ---
 
+## On-demand agents: Researcher and Debugger
+
+Two agents are **not** pipeline stages — you invoke them when the situation calls for it, in fresh
+context, like the Critic.
+
+- **Researcher (`agents/researcher.md`) — conditional.** Spawn it only when a real knowledge gap
+  blocks a design decision: an unfamiliar external API/library, an algorithm/approach with genuine
+  tradeoffs, a regulatory/domain area, or an explicit ask. Most projects don't need it — skipping it
+  is the correct outcome. It emits source-cited `docs/00-research/<topic>.md` (register the directory
+  with `th artifact register docs/00-research/ --version N`), Critic-reviewed in `research` mode. It
+  gathers facts; you and the design stages decide.
+- **Debugger (`agents/debugger.md`) — on a defect.** Spawn it when a slice's tests fail, `th verify
+  run` reports a failing suite, a Critic `code-review` finds a defect it can't ground, or behavior
+  contradicts a contract. It starts from `th debug pack`, records anchored evidence via `th debug
+  log`, and is reviewed in `debug-review` mode. It proposes the minimal fix; the owning slice's
+  Builder applies it; a requirement contradiction becomes blocking drift.
+
+## Parallel build coordination (§16)
+
+During implementation, drive the Builders mechanically — you are the sole coordinator, so there is
+no second controller to collide with:
+
+1. `th build next-wave` → the slices dispatchable in parallel now (deps done, components free).
+2. For each: set it in-progress, `th build claim <SLICE-ID>` (refuses an overlapping claim — the
+   collision guard), then spawn its Builder. Builders on a blast-radius component → opus.
+3. On Critic PASS: set the slice done and `th build release <SLICE-ID>`; on failure, set it blocked,
+   release, and engage the Debugger. Re-run `th build next-wave`.
+
+`th next` will tell you which of these you owe at any moment (`dispatch-wave` / `await-builders` /
+`investigate-failure`).
+
 ## Refuse vague mega-briefs
 
 Do not produce a thin, useless spec from "build me a SaaS dashboard." Narrow through targeted

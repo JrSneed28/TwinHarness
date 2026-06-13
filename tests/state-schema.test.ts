@@ -18,6 +18,14 @@ describe("REQ-STATE-SCHEMA: state.json validation (§18)", () => {
     expect(r.issues.some((i) => i.path.startsWith("slices[0]"))).toBe(true);
   });
 
+  it("accepts a slice with a valid depends_on, rejects a non-string-array one", () => {
+    const ok = validateState({ ...initialState(), slices: [{ id: "SLICE-1", status: "pending", components: [], depends_on: ["SLICE-0"] }] });
+    expect(ok.ok).toBe(true);
+    const bad = validateState({ ...initialState(), slices: [{ id: "SLICE-1", status: "pending", components: [], depends_on: [3] }] });
+    expect(bad.ok).toBe(false);
+    expect(bad.issues.some((i) => i.path === "slices[0].depends_on")).toBe(true);
+  });
+
   it("rejects a negative drift_open_blocking", () => {
     expect(validateState({ ...initialState(), drift_open_blocking: -1 }).ok).toBe(false);
   });

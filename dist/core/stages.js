@@ -14,6 +14,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.STAGE_PIPELINE = void 0;
 exports.stageContract = stageContract;
+exports.engagedStages = engagedStages;
+exports.nextStageAfter = nextStageAfter;
 /** The engaged-tier pipeline in canonical order (spec §5/§13). */
 exports.STAGE_PIPELINE = [
     { stage: "requirements", tiers: ["T1", "T2", "T3"], produces: "docs/01-requirements.md", criticMode: "requirements", humanGate: true, summary: "Turn the idea into REQ-ID'd intent; sticky human sign-off." },
@@ -36,4 +38,25 @@ exports.STAGE_PIPELINE = [
 function stageContract(stage) {
     const key = stage.toLowerCase();
     return exports.STAGE_PIPELINE.find((s) => s.stage === key);
+}
+/** The engaged stages for a tier, in pipeline order. T0 bypasses everything → []. */
+function engagedStages(tier) {
+    if (!tier || tier === "T0")
+        return [];
+    return exports.STAGE_PIPELINE.filter((s) => s.tiers.includes(tier));
+}
+/**
+ * The next engaged stage strictly after `currentStage` for `tier`. Pre-pipeline
+ * stages (e.g. "init") map to the first engaged stage. Returns undefined when
+ * the current stage is the last engaged stage, or the tier engages nothing.
+ */
+function nextStageAfter(currentStage, tier) {
+    const engaged = engagedStages(tier);
+    if (engaged.length === 0)
+        return undefined;
+    const key = currentStage.toLowerCase();
+    const idx = engaged.findIndex((s) => s.stage === key);
+    if (idx < 0)
+        return engaged[0]; // pre-pipeline (init/bypass) → first engaged stage
+    return engaged[idx + 1];
 }

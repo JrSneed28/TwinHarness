@@ -39,10 +39,21 @@ CLI — never hand-edit `state.json`, never eyeball traceability, never "remembe
 | Read/patch/validate state | `th state get\|set\|status\|verify` |
 | Emit a stop-gate decision | `th hook stop-gate` |
 
-> Also available (all implemented): `th artifact register|list`, `th anchors scan`, `th trace render`,
-> `th coverage check`, `th drift add|list|resolve`, `th stale --artifact`, `th tier classify`,
-> `th tier veto-check`, `th build plan`, `th revise bump|status|reset`, `th slices sync`,
-> `th slice set-status`, `th version`.
+> Also available (all implemented): `th artifact register|list` (accepts a directory, e.g. `docs/05-adrs/`),
+> `th anchors scan`, `th trace render`, `th coverage check|report`, `th verify add|list|clear|run`,
+> `th drift add|list|resolve`, `th stale --artifact`, `th tier classify`, `th tier veto-check`,
+> `th build plan|next-wave|claim|release|leases`, `th debug pack|log`, `th revise bump|status|reset`,
+> `th slices sync`, `th slice set-status`, `th doctor`, `th next`, `th context estimate|pack`,
+> `th stage current|describe|list`, `th manifest export`, `th version`.
+>
+> **`th next`** is the mechanical next-action oracle: when unsure what the run owes next (or after a
+> long context window), run it for the single highest-priority obligation. It computes; you still decide.
+>
+> **On-demand agents** (you invoke when the situation calls for it, like the Critic): the **Researcher**
+> (`agents/researcher.md`) — conditional, only when a project needs unfamiliar external knowledge; emits
+> source-cited `docs/00-research/`. The **Debugger** (`agents/debugger.md`) — fresh-context, evidence-first,
+> on a failing suite or grounded defect; starts from `th debug pack`, records via `th debug log`. During
+> the build, dispatch parallel Builders with `th build next-wave` and guard collisions with `th build claim`.
 
 Run `th` with `--json` whenever you need to parse the result. The CLI **records and computes; it
 never decides** which stage/agent/tier runs — those are your calls.

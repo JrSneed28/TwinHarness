@@ -204,6 +204,12 @@ This command asserts every MVP REQ-ID maps to ≥1 slice and ≥1 test. It is a 
 non-zero exit means the verification report cannot be produced until the gaps are resolved. Return
 to the Vertical Slice agent or Builder as needed, then re-run.
 
+For the planned/implemented/tested/passing breakdown, run `th coverage report`. If the project's
+test commands are configured (`th verify add "<command>"`), run `th verify run` here so the
+report's **passing** column and `th doctor` reflect a genuinely green suite — coverage anchoring is
+necessary but not sufficient for correctness. `th verify run` is the only command that executes;
+the suite passing is a correctness signal, certified by the human, not the Critic (§11).
+
 **Step 3 — Produce the verification report.**
 
 - **T1 light:** the Orchestrator (Spec agent in a lightweight pass) writes

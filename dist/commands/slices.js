@@ -74,6 +74,7 @@ function parsePlanSlices(planContent) {
     // Normalize "Slice N" → "SLICE-N" so the id is canonical.
     const SLICE_HEADING_RE = /^#{1,6}\s+(?:SLICE-(\d+)|Slice\s+(\d+))(?:\s|—|$)/i;
     const COMPONENTS_RE = /components?\s+touched/i;
+    const DEPENDS_RE = /depends?\s+on/i;
     const lines = planContent.split(/\r?\n/);
     const slices = [];
     // First pass: collect the line index of each slice heading + its id.
@@ -90,9 +91,10 @@ function parsePlanSlices(planContent) {
         const { lineIdx, id } = headings[hi];
         const sectionEnd = headings[hi + 1]?.lineIdx ?? lines.length;
         let components = [];
+        let dependsOn = [];
         for (let li = lineIdx + 1; li < sectionEnd; li++) {
             const line = lines[li];
-            if (COMPONENTS_RE.test(line)) {
+            if (components.length === 0 && COMPONENTS_RE.test(line)) {
                 // The line itself may contain the component names after a colon.
                 const afterColon = line.replace(COMPONENTS_RE, "").replace(/^[^:]*:\s*/, "").trim();
                 if (afterColon) {
@@ -102,10 +104,14 @@ function parsePlanSlices(planContent) {
                     // Try the immediately following line (list item or table cell).
                     components = parseComponentTokens(lines[li + 1]);
                 }
-                break;
+            }
+            else if (dependsOn.length === 0 && DEPENDS_RE.test(line)) {
+                // Capture canonical SLICE-N tokens from a "Depends on: SLICE-1, SLICE-2" line.
+                for (const m of line.matchAll(/SLICE-\d+/gi))
+                    dependsOn.push(m[0].toUpperCase());
             }
         }
-        slices.push({ id, components });
+        slices.push({ id, components, dependsOn });
     }
     return slices;
 }
@@ -156,11 +162,16 @@ function runSlicesSyncLocked(paths, opts = {}) {
     // Build the upserted slice list.
     const upserted = planSlices.map((ps) => {
         const existing = stateById.get(ps.id);
-        return {
+        const slice = {
             id: ps.id,
             status: existing?.status ?? "pending",
             components: ps.components,
         };
+        // Only attach depends_on when the plan declares one, so slices without
+        // dependencies serialize byte-identically to pre-feature state (§18).
+        if (ps.dependsOn.length > 0)
+            slice.depends_on = ps.dependsOn;
+        return slice;
     });
     // If not removing missing, append them unchanged.
     let finalSlices;

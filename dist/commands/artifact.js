@@ -64,9 +64,12 @@ function toRelKey(root, file) {
     return path.relative(root, abs).split(path.sep).join("/");
 }
 /**
- * `th artifact register <file> --version <n>` — compute the content hash of a
- * file (relative to the project root) and upsert it into `approved_artifacts`.
- * Re-registering the same file REPLACES its entry (version bump, no duplicate).
+ * `th artifact register <path> --version <n>` — compute the content hash of a
+ * file OR directory (relative to the project root) and upsert it into
+ * `approved_artifacts`. Directories (e.g. the T3 ADR set `docs/05-adrs/`) are
+ * hashed deterministically over their contents (§15.S; stage contract
+ * `produces: docs/05-adrs/`). Re-registering the same path REPLACES its entry
+ * (version bump, no duplicate).
  */
 function runArtifactRegister(paths, file, version) {
     return (0, state_store_1.withStateLock)(paths, () => runArtifactRegisterLocked(paths, file, version));
@@ -81,8 +84,12 @@ function runArtifactRegisterLocked(paths, file, version) {
     if (abs === null) {
         return (0, output_1.failure)({ human: `Path outside project root: ${file}`, data: { error: "path_outside_root", file } });
     }
-    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+    if (!fs.existsSync(abs)) {
         return (0, output_1.failure)({ human: `File not found: ${file}`, data: { error: "file_not_found", file } });
+    }
+    const stat = fs.statSync(abs);
+    if (!stat.isFile() && !stat.isDirectory()) {
+        return (0, output_1.failure)({ human: `Not a file or directory: ${file}`, data: { error: "not_a_file_or_dir", file } });
     }
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
@@ -93,8 +100,7 @@ function runArtifactRegisterLocked(paths, file, version) {
             data: { error: "invalid_state", issues: r.issues },
         });
     }
-    const content = fs.readFileSync(abs, "utf8");
-    const hash = (0, hash_1.shortHash)(content);
+    const hash = (0, hash_1.shortHashPath)(abs);
     const relKey = toRelKey(paths.root, file);
     const entry = { file: relKey, version, hash };
     const next = { ...r.state, approved_artifacts: [...r.state.approved_artifacts] };

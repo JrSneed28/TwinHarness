@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runArtifactRegister, runArtifactList } from "../src/commands/artifact";
-import { shortHash } from "../src/core/hash";
+import { shortHash, shortHashPath } from "../src/core/hash";
 import { readState } from "../src/core/state-store";
 
 let tp: TempProject | undefined;
@@ -145,6 +145,46 @@ describe("REQ-ARTIFACT-SEC-001: path traversal outside project root is rejected"
     // State must not be modified — approved_artifacts remains empty.
     const r = readState(tp.paths);
     expect(r.state?.approved_artifacts).toEqual([]);
+  });
+});
+
+describe("REQ-ARTIFACT-DIR-001: a DIRECTORY artifact (docs/05-adrs/) registers as one entry", () => {
+  it("registers the ADR directory → single entry keyed docs/05-adrs with the directory hash", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/05-adrs/ADR-001-foo.md", "# ADR 1\nREQ-001 decision.\n");
+    writeFile(tp, "docs/05-adrs/ADR-002-bar.md", "# ADR 2\nREQ-002 decision.\n");
+
+    // The playbook (pipeline-stages.md) instructs the trailing-slash form.
+    const res = runArtifactRegister(tp.paths, "docs/05-adrs/", 1);
+    expect(res.ok).toBe(true);
+    // Stored key is normalized without the trailing slash (matches the pipeline key).
+    expect(res.data?.file).toBe("docs/05-adrs");
+
+    const r = readState(tp.paths);
+    expect(r.state?.approved_artifacts).toHaveLength(1);
+    const dirAbs = path.join(tp.root, "docs", "05-adrs");
+    expect(r.state?.approved_artifacts[0]).toEqual({
+      file: "docs/05-adrs",
+      version: 1,
+      hash: shortHashPath(dirAbs),
+    });
+  });
+
+  it("the directory hash is order-independent and changes when an ADR's content changes", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/05-adrs/ADR-001-foo.md", "alpha\n");
+    writeFile(tp, "docs/05-adrs/ADR-002-bar.md", "beta\n");
+    const before = runArtifactRegister(tp.paths, "docs/05-adrs", 1).data?.hash;
+
+    // Adding a new ADR changes the directory hash.
+    writeFile(tp, "docs/05-adrs/ADR-003-baz.md", "gamma\n");
+    const after = runArtifactRegister(tp.paths, "docs/05-adrs", 2).data?.hash;
+    expect(after).not.toBe(before);
+
+    // Still exactly one entry (re-register replaces).
+    expect(readState(tp.paths).state?.approved_artifacts).toHaveLength(1);
   });
 });
 

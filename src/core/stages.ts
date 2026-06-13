@@ -50,3 +50,23 @@ export function stageContract(stage: string): StageContract | undefined {
   const key = stage.toLowerCase();
   return STAGE_PIPELINE.find((s) => s.stage === key);
 }
+
+/** The engaged stages for a tier, in pipeline order. T0 bypasses everything → []. */
+export function engagedStages(tier: string | null): StageContract[] {
+  if (!tier || tier === "T0") return [];
+  return STAGE_PIPELINE.filter((s) => s.tiers.includes(tier));
+}
+
+/**
+ * The next engaged stage strictly after `currentStage` for `tier`. Pre-pipeline
+ * stages (e.g. "init") map to the first engaged stage. Returns undefined when
+ * the current stage is the last engaged stage, or the tier engages nothing.
+ */
+export function nextStageAfter(currentStage: string, tier: string | null): StageContract | undefined {
+  const engaged = engagedStages(tier);
+  if (engaged.length === 0) return undefined;
+  const key = currentStage.toLowerCase();
+  const idx = engaged.findIndex((s) => s.stage === key);
+  if (idx < 0) return engaged[0]; // pre-pipeline (init/bypass) → first engaged stage
+  return engaged[idx + 1];
+}

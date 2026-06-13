@@ -1,6 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type CommandResult, success } from "../core/output";
+import type { ProjectPaths } from "../core/paths";
+import { type CommandResult, success, failure } from "../core/output";
+import { readState } from "../core/state-store";
+import { extractSummary } from "../core/summary";
+import { structuredLog } from "../core/log";
 
 /**
  * `th context estimate` — approximate the context/token cost of the plugin's
@@ -87,6 +91,114 @@ export function runContextEstimate(): CommandResult {
 
   return success({
     data: { files, totalTokens, flagged: flagged.map((f) => f.file), lineWarn: LINE_WARN, tokenWarn: TOKEN_WARN },
+    human,
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * `th context pack` — assemble a slice/agent handoff bundle (spec §9). *
+ * ------------------------------------------------------------------ */
+
+export interface ContextPackOptions {
+  /** Limit/annotate the pack for a specific slice (SLICE-ID). */
+  slice?: string;
+}
+
+interface PackedArtifact {
+  file: string;
+  version: number;
+  summary: string | null;
+  /** The text actually included (Summary block, head fallback, or directory note). */
+  text: string;
+  tokens: number;
+  exists: boolean;
+  isDir: boolean;
+}
+
+/**
+ * `th context pack [--slice <SLICE-ID>]` — mechanically assemble the §9 handoff
+ * bundle: the Summary block of every approved artifact (the handoff currency),
+ * plus, when `--slice` is given, that slice's record, its components, and the
+ * other slices that share those components (conflict awareness for §16).
+ *
+ * It COMPUTES a candidate bundle from durable state + artifact summaries; it does
+ * NOT decide what to route — the Orchestrator still owns that call. Read-only.
+ */
+export function runContextPack(paths: ProjectPaths, opts: ContextPackOptions = {}): CommandResult {
+  const r = readState(paths);
+  if (!r.exists) return failure({ human: "No state.json found. Run `th init` first.", data: { error: "not_initialized" } });
+  if (!r.state) return failure({ human: "state.json is invalid.", data: { error: "invalid_state", issues: r.issues } });
+  const s = r.state;
+
+  const packed: PackedArtifact[] = s.approved_artifacts.map((a) => {
+    const abs = path.resolve(paths.root, a.file);
+    let exists = false;
+    let isDir = false;
+    let content = "";
+    if (fs.existsSync(abs)) {
+      const stat = fs.statSync(abs);
+      if (stat.isFile()) {
+        exists = true;
+        content = fs.readFileSync(abs, "utf8");
+      } else if (stat.isDirectory()) {
+        // Directory artifacts (e.g. docs/05-adrs/) have no single Summary block.
+        exists = true;
+        isDir = true;
+      }
+    }
+    const { summary, head } = extractSummary(content);
+    const text = isDir ? `(directory artifact — read ${a.file}/ on demand)` : summary ?? head;
+    return { file: a.file, version: a.version, summary, text, tokens: Math.round(text.length / 4), exists, isDir };
+  });
+
+  // Slice-specific framing.
+  let sliceBlock: { id: string; status: string; components: string[]; sharesWith: Array<{ id: string; shared: string[] }> } | undefined;
+  if (opts.slice) {
+    const target = s.slices.find((sl) => sl.id === opts.slice);
+    if (!target) {
+      return failure({
+        human: `Unknown slice: ${opts.slice}. Known: ${s.slices.map((sl) => sl.id).join(", ") || "(none)"}`,
+        data: { error: "unknown_slice", slice: opts.slice },
+      });
+    }
+    const components = new Set(target.components);
+    const sharesWith = s.slices
+      .filter((sl) => sl.id !== target.id)
+      .map((sl) => ({ id: sl.id, shared: sl.components.filter((c) => components.has(c)) }))
+      .filter((x) => x.shared.length > 0);
+    sliceBlock = { id: target.id, status: target.status, components: target.components, sharesWith };
+  }
+
+  const totalTokens = packed.reduce((sum, p) => sum + p.tokens, 0);
+  structuredLog({ cmd: "context pack", slice: opts.slice ?? null, artifacts: packed.length, tokens: totalTokens });
+
+  const header = opts.slice
+    ? `Context pack for ${opts.slice} — ${packed.length} artifact summary block(s), ~${totalTokens} tokens`
+    : `Context pack — ${packed.length} artifact summary block(s), ~${totalTokens} tokens`;
+
+  const sliceLines = sliceBlock
+    ? [
+        "",
+        `Slice ${sliceBlock.id} [${sliceBlock.status}] — components: ${sliceBlock.components.join(", ") || "(none)"}`,
+        sliceBlock.sharesWith.length
+          ? `  Shares components with (serialize per §16): ${sliceBlock.sharesWith.map((x) => `${x.id} (${x.shared.join(", ")})`).join("; ")}`
+          : "  No component overlap with other slices (safe to parallelize).",
+      ]
+    : [];
+
+  const artifactLines =
+    packed.length === 0
+      ? ["", "(no approved artifacts yet — nothing to pack)"]
+      : packed.flatMap((p) => [
+          "",
+          `### ${p.file} (v${p.version})${p.exists ? "" : " — MISSING ON DISK"}${p.summary === null && p.exists && !p.isDir ? " — no Summary block (head shown)" : ""}`,
+          p.text || "(empty)",
+        ]);
+
+  const human = [header, ...sliceLines, ...artifactLines].join("\n");
+
+  return success({
+    data: { slice: sliceBlock ?? null, artifacts: packed, totalTokens },
     human,
   });
 }
