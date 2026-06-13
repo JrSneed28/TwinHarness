@@ -4,7 +4,7 @@ import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState } from "../core/state-store";
 import { type ValidationIssue } from "../core/state-schema";
-import { shortHash } from "../core/hash";
+import { shortHashPath } from "../core/hash";
 import { downstreamOf } from "../core/pipeline";
 import { structuredLog } from "../core/log";
 
@@ -102,12 +102,13 @@ export function runStale(paths: ProjectPaths, sinceHash?: string, artifactFile?:
     }
   }
 
-  // Recompute the upstream file's CURRENT hash. A missing file is treated as a
-  // change (its content no longer matches the recorded version).
+  // Recompute the upstream artifact's CURRENT hash. A missing path is treated as
+  // a change (its content no longer matches the recorded version). Handles both
+  // file and directory artifacts (e.g. docs/05-adrs/).
   const abs = path.resolve(paths.root, upstream.file);
   let currentHash: string | undefined;
-  if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
-    currentHash = shortHash(fs.readFileSync(abs, "utf8"));
+  if (fs.existsSync(abs)) {
+    currentHash = shortHashPath(abs);
   }
   // In --since mode compare current hash against sinceHash (the recorded snapshot).
   // In --artifact mode compare current hash against the stored artifact hash.

@@ -1,0 +1,97 @@
+/**
+ * `th verify` — configure + run project test/check commands (the one command
+ * that executes; see core/verify.ts) — REQ-anchored.
+ */
+
+import { describe, it, expect, afterEach } from "vitest";
+import * as fs from "node:fs";
+import { makeTempProject, type TempProject } from "./helpers";
+import { runInit } from "../src/commands/init";
+import { runVerifyAdd, runVerifyList, runVerifyClear, runVerifyRun } from "../src/commands/verify";
+import { readVerifyConfig, readVerifyReport, runCommands } from "../src/core/verify";
+
+let tp: TempProject | undefined;
+afterEach(() => tp?.cleanup());
+
+describe("REQ-VERIFY-001: add/list/clear manage the command list (outside state.json)", () => {
+  it("add appends; list reflects; clear empties — and state.json is untouched", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const before = fs.readFileSync(tp.paths.stateFile, "utf8");
+
+    expect(runVerifyAdd(tp.paths, "npm test").ok).toBe(true);
+    expect(runVerifyAdd(tp.paths, "npm run lint").ok).toBe(true);
+    expect(readVerifyConfig(tp.paths).commands).toEqual(["npm test", "npm run lint"]);
+
+    const list = runVerifyList(tp.paths);
+    expect(list.data?.commands).toEqual(["npm test", "npm run lint"]);
+
+    expect(runVerifyClear(tp.paths).ok).toBe(true);
+    expect(readVerifyConfig(tp.paths).commands).toEqual([]);
+
+    // The verify config never touches state.json (schema stability).
+    expect(fs.readFileSync(tp.paths.stateFile, "utf8")).toBe(before);
+  });
+
+  it("add with no command → usage failure", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    expect(runVerifyAdd(tp.paths, "  ").ok).toBe(false);
+  });
+});
+
+describe("REQ-VERIFY-002: run executes configured commands and records a report", () => {
+  it("all green → success, report.ok true, exit 0", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runVerifyAdd(tp.paths, "true");
+    runVerifyAdd(tp.paths, "true");
+
+    const res = runVerifyRun(tp.paths);
+    expect(res.ok).toBe(true);
+    expect(res.exitCode).toBe(0);
+    expect(res.data?.ok).toBe(true);
+
+    const report = readVerifyReport(tp.paths);
+    expect(report?.ok).toBe(true);
+    expect(report?.results).toHaveLength(2);
+  });
+
+  it("a failing command → failure, report.ok false, exit 1, but all commands still ran", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runVerifyAdd(tp.paths, "true");
+    runVerifyAdd(tp.paths, "false");
+
+    const res = runVerifyRun(tp.paths);
+    expect(res.ok).toBe(false);
+    expect(res.exitCode).toBe(1);
+
+    const report = readVerifyReport(tp.paths);
+    expect(report?.ok).toBe(false);
+    expect(report?.results).toHaveLength(2);
+    expect(report?.results[0]?.ok).toBe(true);
+    expect(report?.results[1]?.ok).toBe(false);
+  });
+});
+
+describe("REQ-VERIFY-003: run with no configured commands is a usage failure", () => {
+  it("no commands → failure no_verify_commands, no report written", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const res = runVerifyRun(tp.paths);
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("no_verify_commands");
+    expect(readVerifyReport(tp.paths)).toBeNull();
+  });
+});
+
+describe("REQ-VERIFY-004: runCommands timestamp is injectable (clock-free testing)", () => {
+  it("ranAt uses the injected clock", () => {
+    tp = makeTempProject();
+    const fixed = new Date("2026-01-01T00:00:00.000Z");
+    const report = runCommands(tp.root, ["true"], () => fixed);
+    expect(report.ranAt).toBe("2026-01-01T00:00:00.000Z");
+    expect(report.ok).toBe(true);
+  });
+});

@@ -5,6 +5,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.5.0] — 2026-06-13
+
+### Fixed
+
+- **ADR artifact registration (directory artifacts):** `th artifact register` now accepts a **directory** and hashes its contents deterministically, so the T3 ADR set registers as one entry keyed `docs/05-adrs` — exactly what the stage contract (`produces: docs/05-adrs/`) and the playbook already instruct (`th artifact register docs/05-adrs/ --version 1`). Previously the command rejected anything that wasn't a single file, so that documented step failed and the worked example had to register eight ADR files one by one. `th stale --artifact docs/05-adrs` now round-trips on the directory too.
+
+### Added
+
+- **`th coverage report`:** the planned / implemented / tested / passing breakdown per REQ-ID (a read-only status view; the hard gate stays `th coverage check`). `planned` = the REQ is in a slice, `implemented` = it is anchored in the code dir (`--code`, default `src`), `tested` = it is anchored in a test, `passing` = whole-suite, sourced from the optional `th verify run` report (`—` when none exists).
+- **`th verify add|list|clear|run`:** configure and run the project's own test/check commands. `th verify run` is the single, deliberately-quarantined command that executes operator-authored commands (everything else still only records and computes); it writes a report under the state dir that `th coverage report` and `th doctor` read for the "suite green/failing" signal. Commands live in `.twinharness/verify.json`, never in `state.json`, so the state schema and its content-hash stability are untouched.
+- **`th context pack [--slice <ID>]`:** mechanically assembles the §9 handoff bundle — the Summary block of every approved artifact, plus (with `--slice`) that slice's record, components, and the other slices it shares components with (§16 conflict awareness). Computes a candidate bundle; routing is still the Orchestrator's call.
+- **`th next`:** the next-action **oracle** — given durable state + on-disk anchors it returns the single highest-priority mechanical obligation the run owes next (resolve blocking drift → escalate a capped revise loop → re-register a silently-changed artifact → classify the tier → produce/register the current stage's artifact → coverage gate → finish slices → human sign-off → advance the stage). Like `th stage current`, it reports a mechanical obligation; it never chooses strategy (F7 — the playbook can fall out of the post-compaction context window).
+
+### Changed
+
+- **`th doctor` is now a full run-health audit:** beyond environment + state validity it audits the live run — artifact integrity (on-disk hash vs the recorded approved hash, surfacing silently-edited governed docs), slice progress, coverage status, the test-suite signal, and revise-loop escalations. Findings are warnings (they inform); only a hard environment/state failure exits non-zero.
+- Shared a single run-health core (`src/core/health.ts`, `src/core/coverage.ts`) behind `th doctor`, `th next`, and `th coverage report` so the audit and the oracle can never disagree about drift, slice state, or revise caps.
+
+### Security
+
+- **`th verify run` executes operator-authored commands** (with the shell, in the project root) — the one exception to the "records and computes; never re-runs" boundary, quarantined in `src/core/verify.ts`. It only ever runs commands a human added via `th verify add`; it never sources commands from artifact content. See `SECURITY.md`.
+
 ## [0.4.0] — 2026-06-12
 
 ### Added

@@ -1,9 +1,15 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { resolveWithinRoot } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
-import { extractReqIds, scanDirForReqIds } from "../core/anchors";
+import { extractReqIds } from "../core/anchors";
+import {
+  readFileOrUndefined,
+  resolveReqSet,
+  collectDirReqIds,
+  computeBreakdown,
+} from "../core/coverage";
+import { readVerifyReport } from "../core/verify";
 import { structuredLog } from "../core/log";
 
 /**
@@ -12,6 +18,10 @@ import { structuredLog } from "../core/log";
  * test"). Pure traceability arithmetic over REQ-ID anchors: it never decides
  * *whether* a requirement is correct, only whether each one is anchored in the
  * implementation plan (a slice) and in a test file.
+ *
+ * `th coverage report` adds the planned / implemented / tested / passing
+ * breakdown (the gate stays slice+test). "passing" is whole-suite, sourced from
+ * the optional `th verify run` report — the CLI never runs tests itself.
  */
 
 export interface CoverageOptions {
@@ -20,6 +30,8 @@ export interface CoverageOptions {
   testsDir?: string;
   /** Path to the scope file for MVP filtering (default docs/02-scope.md). */
   scopeFile?: string;
+  /** Code directory scanned for the `implemented` dimension (report only; default src). */
+  codeDir?: string;
 }
 
 /** A REQ-ID that is missing from a slice and/or a test. */
@@ -29,60 +41,21 @@ interface CoverageGap {
   inTest: boolean;
 }
 
-/** Read a file as UTF-8, or return undefined if it is absent / not a file. */
-function readFileOrUndefined(abs: string): string | undefined {
-  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return undefined;
-  return fs.readFileSync(abs, "utf8");
-}
-
-/**
- * Extract REQ-IDs from the MVP Scope section of a scope file. If the file
- * lacks an `## MVP Scope` heading (case-insensitive) or the section is empty,
- * returns undefined (caller falls back to no-filter behaviour).
- *
- * The MVP section runs from the `## MVP Scope` heading until the next `## `
- * heading (or end of file).
- */
-function extractMvpScopeReqIds(scopeContent: string): string[] | undefined {
-  const lines = scopeContent.split(/\r?\n/);
-  const MVP_HEADING_RE = /^##\s+MVP\s+Scope\b/i;
-  const NEXT_H2_RE = /^##\s+/;
-
-  let inSection = false;
-  const sectionLines: string[] = [];
-
-  for (const line of lines) {
-    if (!inSection) {
-      if (MVP_HEADING_RE.test(line)) {
-        inSection = true;
-      }
-    } else {
-      if (NEXT_H2_RE.test(line)) break;
-      sectionLines.push(line);
+/** Validate that every supplied path override stays within the project root. */
+function rejectEscapingPath(paths: ProjectPaths, opts: CoverageOptions): CommandResult | undefined {
+  const fields: Array<[keyof CoverageOptions, string | undefined]> = [
+    ["reqsFile", opts.reqsFile],
+    ["planFile", opts.planFile],
+    ["testsDir", opts.testsDir],
+    ["scopeFile", opts.scopeFile],
+    ["codeDir", opts.codeDir],
+  ];
+  for (const [, value] of fields) {
+    if (value !== undefined && resolveWithinRoot(paths.root, value) === null) {
+      return failure({ human: `Path outside project root: ${value}`, data: { error: "path_outside_root", file: value } });
     }
   }
-
-  if (!inSection) return undefined;
-  const ids = extractReqIds(sectionLines.join("\n"));
-  return ids.length > 0 ? ids : undefined;
-}
-
-/**
- * Collect all REQ-IDs referenced by any file in `testsDir` (full recursion,
- * all files, same skip-dirs as scanDirForReqIds). Returns unique union.
- * Missing dir → empty array.
- */
-function collectTestReqIds(testsAbs: string): string[] {
-  const scanMap = scanDirForReqIds(testsAbs);
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const id of scanMap.keys()) {
-    if (!seen.has(id)) {
-      seen.add(id);
-      out.push(id);
-    }
-  }
-  return out;
+  return undefined;
 }
 
 /**
@@ -90,32 +63,15 @@ function collectTestReqIds(testsAbs: string): string[] {
  * that every (MVP) requirement REQ-ID is mapped to at least one slice
  * (implementation plan) and at least one test. Success (exit 0) when there are
  * zero gaps; failure (exit 1) listing each gap otherwise.
- *
- * MVP filtering: if docs/02-scope.md (or `--scope`) exists and contains a
- * `## MVP Scope` heading, the checked requirement set is the intersection of
- * (REQ-IDs in requirements file) ∩ (REQ-IDs in the MVP Scope section). When
- * the filter produces an empty set or the scope file / section is absent,
- * falls back to checking all REQ-IDs.
  */
 export function runCoverageCheck(paths: ProjectPaths, opts: CoverageOptions = {}): CommandResult {
+  const escaped = rejectEscapingPath(paths, opts);
+  if (escaped) return escaped;
+
   const reqsAbs = path.resolve(paths.root, opts.reqsFile ?? "docs/01-requirements.md");
   const planAbs = path.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
   const testsAbs = path.resolve(paths.root, opts.testsDir ?? "tests");
   const scopeAbs = path.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
-
-  // Path-traversal containment: reject any user-supplied path that escapes the project root.
-  if (opts.reqsFile !== undefined && resolveWithinRoot(paths.root, opts.reqsFile) === null) {
-    return failure({ human: `Path outside project root: ${opts.reqsFile}`, data: { error: "path_outside_root", file: opts.reqsFile } });
-  }
-  if (opts.planFile !== undefined && resolveWithinRoot(paths.root, opts.planFile) === null) {
-    return failure({ human: `Path outside project root: ${opts.planFile}`, data: { error: "path_outside_root", file: opts.planFile } });
-  }
-  if (opts.testsDir !== undefined && resolveWithinRoot(paths.root, opts.testsDir) === null) {
-    return failure({ human: `Path outside project root: ${opts.testsDir}`, data: { error: "path_outside_root", file: opts.testsDir } });
-  }
-  if (opts.scopeFile !== undefined && resolveWithinRoot(paths.root, opts.scopeFile) === null) {
-    return failure({ human: `Path outside project root: ${opts.scopeFile}`, data: { error: "path_outside_root", file: opts.scopeFile } });
-  }
 
   const reqsContent = readFileOrUndefined(reqsAbs);
   if (reqsContent === undefined) {
@@ -126,38 +82,12 @@ export function runCoverageCheck(paths: ProjectPaths, opts: CoverageOptions = {}
     });
   }
 
-  const allReqIds = extractReqIds(reqsContent);
+  const { allReqIds, reqSet, filterDescription } = resolveReqSet(reqsContent, readFileOrUndefined(scopeAbs));
+  void allReqIds;
 
-  // MVP filtering: try to extract the MVP Scope section from the scope file.
-  let mvpFilter: string[] | undefined;
-  const scopeContent = readFileOrUndefined(scopeAbs);
-  if (scopeContent !== undefined) {
-    mvpFilter = extractMvpScopeReqIds(scopeContent);
-  }
-
-  let reqSet: string[];
-  let filterDescription: string;
-  if (mvpFilter !== undefined && mvpFilter.length > 0) {
-    const mvpSet = new Set(mvpFilter);
-    reqSet = allReqIds.filter((id) => mvpSet.has(id));
-    if (reqSet.length === 0) {
-      // Intersection empty → fall back.
-      reqSet = allReqIds;
-      filterDescription = "MVP filter: intersection empty — checking all REQ-IDs";
-    } else {
-      filterDescription = `MVP filter: applied (${reqSet.length} of ${allReqIds.length} REQ-IDs)`;
-    }
-  } else {
-    reqSet = allReqIds;
-    filterDescription = "MVP filter: none — checking all REQ-IDs";
-  }
-
-  // Missing plan file → empty slice set (everything is a gap), but never crash.
   const planContent = readFileOrUndefined(planAbs);
   const sliceSet = planContent === undefined ? [] : extractReqIds(planContent);
-
-  // Missing tests dir → empty test set. Full recursion via scanDirForReqIds.
-  const testSet = collectTestReqIds(testsAbs);
+  const testSet = collectDirReqIds(testsAbs);
 
   const gaps: CoverageGap[] = [];
   for (const req of reqSet) {
@@ -186,5 +116,74 @@ export function runCoverageCheck(paths: ProjectPaths, opts: CoverageOptions = {}
   return failure({
     data: { gaps, total, covered, mvpFilter: filterDescription },
     human: `coverage gap: ${covered}/${total} REQ-IDs mapped; ${gaps.length} uncovered:\n${lines.join("\n")}\n${filterDescription}`,
+  });
+}
+
+/**
+ * `th coverage report [--reqs F] [--plan F] [--tests D] [--scope F] [--code D]`
+ * — the planned / implemented / tested / passing breakdown for every checked
+ * REQ-ID (read-only; never a gate). Always exits 0 when the requirements file is
+ * present — it is a status view, not the hard gate (`th coverage check`).
+ *
+ *   planned     → REQ-ID is in the implementation plan (a slice exists)
+ *   implemented → REQ-ID is anchored in the code dir (default src)
+ *   tested      → REQ-ID is anchored in a test file
+ *   passing     → tested AND the last `th verify run` reported a green suite
+ *                 (whole-suite signal; "—" when no verify report exists)
+ */
+export function runCoverageReport(paths: ProjectPaths, opts: CoverageOptions = {}): CommandResult {
+  const escaped = rejectEscapingPath(paths, opts);
+  if (escaped) return escaped;
+
+  const breakdown = computeBreakdown(paths.root, opts);
+  if ("error" in breakdown) {
+    return failure({
+      human: `Requirements file not found: ${breakdown.reqsFile}. Run \`th init\` and author requirements first.`,
+      data: { error: breakdown.error, reqsFile: breakdown.reqsFile },
+    });
+  }
+
+  const report = readVerifyReport(paths);
+  const suitePassing = report ? report.ok : null;
+  const passingCount = suitePassing === null ? null : breakdown.rows.filter((r) => r.tested && suitePassing).length;
+
+  structuredLog({
+    cmd: "coverage report",
+    total: breakdown.total,
+    planned: breakdown.planned,
+    implemented: breakdown.implemented,
+    tested: breakdown.tested,
+    passing: passingCount,
+  });
+
+  const cell = (b: boolean): string => (b ? "✓" : "·");
+  const passCell = (tested: boolean): string => (suitePassing === null ? "—" : tested && suitePassing ? "✓" : "·");
+  const rows = breakdown.rows.map(
+    (r) => `  ${r.req.padEnd(16)} ${cell(r.planned)} planned  ${cell(r.implemented)} implemented  ${cell(r.tested)} tested  ${passCell(r.tested)} passing`,
+  );
+  const passingSummary = passingCount === null ? "— (no verify report — run `th verify run`)" : `${passingCount}/${breakdown.total}`;
+  const human = [
+    `Coverage breakdown — ${breakdown.total} REQ-ID(s) checked`,
+    `  planned:     ${breakdown.planned}/${breakdown.total}`,
+    `  implemented: ${breakdown.implemented}/${breakdown.total}`,
+    `  tested:      ${breakdown.tested}/${breakdown.total}`,
+    `  passing:     ${passingSummary}`,
+    breakdown.filterDescription,
+    "",
+    ...(rows.length ? rows : ["  (no REQ-IDs found)"]),
+  ].join("\n");
+
+  return success({
+    data: {
+      total: breakdown.total,
+      planned: breakdown.planned,
+      implemented: breakdown.implemented,
+      tested: breakdown.tested,
+      passing: passingCount,
+      suitePassing,
+      rows: breakdown.rows,
+      mvpFilter: breakdown.filterDescription,
+    },
+    human,
   });
 }

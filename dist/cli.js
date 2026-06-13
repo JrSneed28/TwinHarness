@@ -44,6 +44,8 @@ const revise_1 = require("./commands/revise");
 const tier_1 = require("./commands/tier");
 const artifact_1 = require("./commands/artifact");
 const coverage_1 = require("./commands/coverage");
+const verify_1 = require("./commands/verify");
+const next_1 = require("./commands/next");
 const build_1 = require("./commands/build");
 const anchors_1 = require("./commands/anchors");
 const drift_1 = require("./commands/drift");
@@ -72,7 +74,13 @@ Usage:
   th artifact register <file> --version <n>  Content-hash a file and record it in approved_artifacts
   th artifact list                  List recorded approved artifacts (file, version, hash)
   th coverage check [--reqs F] [--plan F] [--tests D] [--scope F]
-                                    Verify every (MVP) REQ-ID maps to ≥1 slice and ≥1 test
+                                    Verify every (MVP) REQ-ID maps to ≥1 slice and ≥1 test (hard gate)
+  th coverage report [--reqs F] [--plan F] [--tests D] [--scope F] [--code D]
+                                    Planned/implemented/tested/passing breakdown per REQ-ID (status view)
+  th verify add "<command>"         Add a project test/check command to the verify list
+  th verify list                    Show configured verify commands
+  th verify clear                   Remove all configured verify commands
+  th verify run                     Run every configured verify command; writes a report; exit 1 on failure
   th build plan [--include-done]    Schedule slices into conflict-free build waves (§16: disjoint parallelize, shared serialize)
   th anchors scan [--scan-reqs] [--scan-tests] [--scan-code] [--strict]  Map REQ-anchors across docs/tests/src; report orphans
   th trace render                   Render the §17 traceability view from anchors (on demand; never stored)
@@ -88,8 +96,10 @@ Usage:
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
   th hook pretool-gate              Emit a Claude Code PreToolUse write-gate decision
   th migrate                        Upgrade state.json to the current schema version
-  th doctor                         Self-diagnostic: environment + project health
+  th doctor                         Self-diagnostic + run-health audit (env, state, artifacts, coverage, slices, revise loops)
+  th next                           The next mechanical obligation the run owes (next-action oracle)
   th context estimate               Approximate the prompt-surface token cost (flags oversized files)
+  th context pack [--slice <ID>]    Assemble the §9 handoff bundle (artifact Summary blocks + slice framing)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
   th version                        Print the CLI version
@@ -104,6 +114,8 @@ Global flags:
   --plan <file>     (coverage, slices sync) Implementation-plan file (default docs/09-implementation-plan.md)
   --tests <dir>     (coverage) Tests directory (default tests)
   --scope <file>    (coverage) Scope file for MVP filtering (default docs/02-scope.md)
+  --code <dir>      (coverage report) Code directory scanned for implemented (default src)
+  --slice <id>      (context pack) Frame the pack for a specific slice (SLICE-ID)
   --include-done    (build plan) Include slices with status done (default: only unfinished)
   --scan-reqs       (anchors) Scan docs/ for REQ-anchors
   --scan-tests      (anchors) Scan tests/ for REQ-anchors
@@ -131,6 +143,8 @@ function parseArgs(argv) {
     let plan;
     let tests;
     let scope;
+    let code;
+    let slice;
     let includeDone = false;
     let scanReqs = false;
     let scanTests = false;
@@ -180,6 +194,14 @@ function parseArgs(argv) {
             scope = argv[++i];
         else if (a.startsWith("--scope="))
             scope = a.slice("--scope=".length);
+        else if (a === "--code")
+            code = argv[++i];
+        else if (a.startsWith("--code="))
+            code = a.slice("--code=".length);
+        else if (a === "--slice")
+            slice = argv[++i];
+        else if (a.startsWith("--slice="))
+            slice = a.slice("--slice=".length);
         else if (a === "--include-done")
             includeDone = true;
         else if (a === "--scan-reqs")
@@ -241,6 +263,8 @@ function parseArgs(argv) {
             plan,
             tests,
             scope,
+            code,
+            slice,
             includeDone,
             scanReqs,
             scanTests,
@@ -305,10 +329,14 @@ function dispatch(parsed) {
             return (0, migrate_1.runMigrate)(paths);
         case "doctor":
             return (0, doctor_1.runDoctor)(paths);
+        case "next":
+            return (0, next_1.runNext)(paths);
         case "context":
             switch (sub) {
                 case "estimate":
                     return (0, context_1.runContextEstimate)();
+                case "pack":
+                    return (0, context_1.runContextPack)(paths, { slice: parsed.flags.slice });
                 default:
                     return (0, output_1.failure)({ human: `unknown 'context' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
@@ -372,8 +400,29 @@ function dispatch(parsed) {
                         testsDir: parsed.flags.tests,
                         scopeFile: parsed.flags.scope,
                     });
+                case "report":
+                    return (0, coverage_1.runCoverageReport)(paths, {
+                        reqsFile: parsed.flags.reqs,
+                        planFile: parsed.flags.plan,
+                        testsDir: parsed.flags.tests,
+                        scopeFile: parsed.flags.scope,
+                        codeDir: parsed.flags.code,
+                    });
                 default:
                     return (0, output_1.failure)({ human: `unknown 'coverage' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "verify":
+            switch (sub) {
+                case "run":
+                    return (0, verify_1.runVerifyRun)(paths);
+                case "add":
+                    return (0, verify_1.runVerifyAdd)(paths, rest.join(" "));
+                case "list":
+                    return (0, verify_1.runVerifyList)(paths);
+                case "clear":
+                    return (0, verify_1.runVerifyClear)(paths);
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'verify' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
         case "build":
             switch (sub) {

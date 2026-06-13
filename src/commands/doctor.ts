@@ -5,13 +5,22 @@ import { type CommandResult, success, failure } from "../core/output";
 import { readState } from "../core/state-store";
 import { CURRENT_SCHEMA_VERSION } from "../core/state-schema";
 import { readLedger } from "../core/ledger";
+import { artifactIntegrity, sliceProgress, reviseEscalations } from "../core/health";
+import { computeBreakdown } from "../core/coverage";
+import { readVerifyReport } from "../core/verify";
 
 /**
- * `th doctor` — self-diagnostic (Phase 3). Reports environment and project
- * health so a user/agent can tell at a glance whether TwinHarness is wired up
- * and whether the current run is in a healthy state. Read-only; never mutates.
+ * `th doctor` — self-diagnostic + run-health audit. Reports environment and
+ * project health so a user/agent can tell at a glance whether TwinHarness is
+ * wired up and whether the current run is in a healthy state. Read-only; never
+ * mutates and never runs anything.
  *
- * Exit 0 unless a hard failure is present (unsupported Node, invalid state).
+ * Beyond environment + state validity it audits the live run: artifact integrity
+ * (on-disk hash vs recorded), coverage status, slice progress, revise-loop
+ * escalations, blocking drift, stale locks, and the audit ledger.
+ *
+ * Exit 0 unless a hard failure is present (unsupported Node, invalid state). All
+ * run-health findings are warnings — they inform; they do not fail the process.
  */
 
 type CheckStatus = "ok" | "warn" | "fail";
@@ -107,6 +116,68 @@ export function runDoctor(paths: ProjectPaths): CommandResult {
 
     const ledgerCount = readLedger(paths).length;
     checks.push({ name: "audit ledger", status: "ok", detail: `${ledgerCount} gate-mutation entr${ledgerCount === 1 ? "y" : "ies"}` });
+
+    // --- Run health (read-only; warnings only) ---
+
+    // Artifact integrity: on-disk hash vs the recorded approved hash.
+    const integrity = artifactIntegrity(paths, s);
+    if (integrity.length === 0) {
+      checks.push({ name: "artifacts", status: "ok", detail: "no artifacts registered yet" });
+    } else {
+      const changed = integrity.filter((i) => i.status === "changed");
+      const missing = integrity.filter((i) => i.status === "missing");
+      const drifted = [...changed, ...missing];
+      checks.push({
+        name: "artifacts",
+        status: drifted.length > 0 ? "warn" : "ok",
+        detail:
+          drifted.length > 0
+            ? `${changed.length} changed, ${missing.length} missing — re-register or run \`th stale --artifact <file>\`: ${drifted.map((i) => i.file).join(", ")}`
+            : `${integrity.length} registered, all match recorded hashes`,
+      });
+    }
+
+    // Slice progress.
+    const prog = sliceProgress(s);
+    if (prog.total === 0) {
+      checks.push({ name: "slices", status: "ok", detail: "no slices synced yet" });
+    } else {
+      const unfinished = prog.pending + prog.inProgress;
+      checks.push({
+        name: "slices",
+        status: unfinished > 0 ? "warn" : "ok",
+        detail: `${prog.done} done / ${prog.blocked} blocked / ${prog.inProgress} in-progress / ${prog.pending} pending (of ${prog.total})`,
+      });
+    }
+
+    // Coverage status (best-effort; never a gate here).
+    const breakdown = computeBreakdown(paths.root);
+    if ("error" in breakdown) {
+      checks.push({ name: "coverage", status: "ok", detail: "requirements not authored yet" });
+    } else if (breakdown.total === 0) {
+      checks.push({ name: "coverage", status: "ok", detail: "no REQ-IDs found in requirements" });
+    } else {
+      const fullyMapped = breakdown.rows.filter((r) => r.planned && r.tested).length;
+      const report = readVerifyReport(paths);
+      const passing = report ? (report.ok ? "suite green" : "suite FAILING") : "suite unknown (run `th verify run`)";
+      checks.push({
+        name: "coverage",
+        status: fullyMapped < breakdown.total ? "warn" : "ok",
+        detail: `${fullyMapped}/${breakdown.total} planned+tested; ${breakdown.implemented}/${breakdown.total} implemented; ${passing}`,
+      });
+    }
+
+    // Revise-loop escalations (cap reached → human owes a decision).
+    const escalations = reviseEscalations(s);
+    if (escalations.length > 0) {
+      checks.push({
+        name: "revise loops",
+        status: "warn",
+        detail: `at cap (escalate to human): ${escalations.map((e) => `${e.mode} ${e.count}/${e.cap}`).join(", ")}`,
+      });
+    } else {
+      checks.push({ name: "revise loops", status: "ok", detail: "none at cap" });
+    }
   }
 
   const hasFail = checks.some((c) => c.status === "fail");

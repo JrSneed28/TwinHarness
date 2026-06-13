@@ -5,7 +5,7 @@ import { resolveWithinRoot } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState, writeState, withStateLock } from "../core/state-store";
 import { type ValidationIssue, type ApprovedArtifact } from "../core/state-schema";
-import { shortHash } from "../core/hash";
+import { shortHashPath } from "../core/hash";
 import { structuredLog } from "../core/log";
 
 /**
@@ -34,9 +34,12 @@ function toRelKey(root: string, file: string): string {
 }
 
 /**
- * `th artifact register <file> --version <n>` — compute the content hash of a
- * file (relative to the project root) and upsert it into `approved_artifacts`.
- * Re-registering the same file REPLACES its entry (version bump, no duplicate).
+ * `th artifact register <path> --version <n>` — compute the content hash of a
+ * file OR directory (relative to the project root) and upsert it into
+ * `approved_artifacts`. Directories (e.g. the T3 ADR set `docs/05-adrs/`) are
+ * hashed deterministically over their contents (§15.S; stage contract
+ * `produces: docs/05-adrs/`). Re-registering the same path REPLACES its entry
+ * (version bump, no duplicate).
  */
 export function runArtifactRegister(
   paths: ProjectPaths,
@@ -60,8 +63,12 @@ function runArtifactRegisterLocked(
   if (abs === null) {
     return failure({ human: `Path outside project root: ${file}`, data: { error: "path_outside_root", file } });
   }
-  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+  if (!fs.existsSync(abs)) {
     return failure({ human: `File not found: ${file}`, data: { error: "file_not_found", file } });
+  }
+  const stat = fs.statSync(abs);
+  if (!stat.isFile() && !stat.isDirectory()) {
+    return failure({ human: `Not a file or directory: ${file}`, data: { error: "not_a_file_or_dir", file } });
   }
 
   const r = readState(paths);
@@ -73,8 +80,7 @@ function runArtifactRegisterLocked(
     });
   }
 
-  const content = fs.readFileSync(abs, "utf8");
-  const hash = shortHash(content);
+  const hash = shortHashPath(abs);
   const relKey = toRelKey(paths.root, file);
 
   const entry: ApprovedArtifact = { file: relKey, version, hash };

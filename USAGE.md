@@ -395,19 +395,29 @@ decides what to do about it.
 ### Artifacts, coverage, traceability
 
 ```
-th artifact register <file> --version <n>   Hash + record in approved_artifacts
+th artifact register <path> --version <n>   Hash + record in approved_artifacts (file OR directory)
 th artifact list                            What's registered (file, version, hash)
 th coverage check [--reqs F] [--plan F] [--tests D] [--scope F]
+th coverage report [--reqs F] [--plan F] [--tests D] [--scope F] [--code D]
 th anchors scan [--scan-reqs] [--scan-tests] [--scan-code] [--strict]
 th trace render                             The full traceability view, rendered on demand
 th stale --since <hash>                     Diff-scoped downstream staleness (look up by recorded hash)
 th stale --artifact <file>                  Same lookup, by file key (safe before re-registering)
 ```
 
+- **Artifact register accepts a directory.** A path that is a directory (e.g. the T3 ADR set
+  `docs/05-adrs/`) is hashed deterministically over its contents and recorded as one entry keyed
+  `docs/05-adrs` (trailing slash normalized away). `th stale --artifact docs/05-adrs` round-trips
+  on it. Single files behave exactly as before.
 - **Coverage** asserts every MVP REQ-ID maps to ≥ 1 slice *and* ≥ 1 test. Non-zero exit = the
   build may not start. Scans tests/ **fully recursively** in any language; applies MVP filter from
   `docs/02-scope.md`'s `## MVP Scope` section (or `--scope <file>` override). Defaults:
   `--reqs docs/01-requirements.md --plan docs/09-implementation-plan.md --tests tests`.
+- **`th coverage report`** is the read-only breakdown (it is **not** a gate — `th coverage check`
+  stays the gate). Per REQ-ID it reports four dimensions: **planned** (in a slice), **implemented**
+  (anchored in the code dir — `--code`, default `src`), **tested** (anchored in a test), and
+  **passing** (whole-suite, from the last `th verify run`; shown as `—` when no verify report
+  exists).
 - **Anchors** maps each REQ-ID to the files it appears in across `docs/`, `tests/`, and `src/`, and
   flags **orphans** — anchors in tests/code with no defined requirement. `--strict` makes an orphan
   exit 1. Tests anchor by placing the canonical hyphenated REQ-ID (e.g. `REQ-001`,
@@ -474,6 +484,23 @@ component sets → same wave (safe to run Builders concurrently), shared compone
 (serialized). By default only unfinished slices are scheduled. `th build plan` does NOT read the
 raw plan file — always run `th slices sync` first.
 
+### Verify — run the project's own tests/checks
+
+```
+th verify add "<command>"        Append a project test/check command (e.g. "npm test")
+th verify list                   Show configured commands
+th verify clear                  Remove all configured commands
+th verify run                    Run every command in order; exit 1 on any failure
+```
+
+`th verify run` is the **one** `th` command that executes — it runs operator-authored commands
+(configured via `th verify add`, stored in `.twinharness/verify.json`) with the shell, in the
+project root, and writes a report (`.twinharness/verify-report.json`). Every other `th` command
+only records and computes. The report feeds the **passing** column of `th coverage report` and the
+suite signal in `th doctor`. Commands live outside `state.json`, so the state schema and its
+content-hash stability are untouched. See `SECURITY.md` — `th verify run` only ever runs commands a
+human added; it never sources commands from artifact content.
+
 ### Version
 
 ```
@@ -488,7 +515,7 @@ Prints the CLI version from `package.json`. Useful for confirming which plugin v
 th doctor
 ```
 
-Self-diagnostic for environment and project health. Reports:
+Self-diagnostic **plus a full run-health audit**. Reports:
 
 - **Node version** — fails hard if below 18 (the minimum requirement).
 - **Plugin CLI** — whether `dist/cli.js` is present next to the running binary.
@@ -500,20 +527,46 @@ Self-diagnostic for environment and project health. Reports:
 - **Stale state lock** — warns if `.twinharness/.state.lock` is present with age (a crashed `th`
   left the lock behind; safe to remove if no `th` process is running).
 - **Audit ledger size** — number of entries in `gate-ledger.jsonl`.
+- **Artifact integrity** — recomputes each approved artifact's on-disk hash (file or directory) and
+  warns on any that **changed** (a governed doc edited without re-registration) or went **missing**.
+- **Slice progress** — done / blocked / in-progress / pending counts; warns while any are unfinished.
+- **Coverage** — planned+tested vs total, implemented count, and the suite signal (green/failing/
+  unknown) from the last `th verify run`.
+- **Revise loops** — warns on any mode that has reached its cap (a human decision is owed).
 
-Exit non-zero only on hard failures (unsupported Node version, invalid `state.json`). Informational
-warnings (outdated schema, open drift, stale lock) exit 0. Never mutates anything.
+Exit non-zero only on hard failures (unsupported Node version, invalid `state.json`). All
+run-health findings are warnings — they inform; they never fail the process. Never mutates anything.
+
+```
+th next
+```
+
+The next-action **oracle**: given durable state + on-disk anchors, it returns the single
+highest-priority **mechanical** obligation the run owes next, in this priority order — fix invalid
+state → resolve blocking drift → escalate a capped revise loop → re-register a silently-changed
+artifact → classify the tier → produce/register the current stage's artifact → clear the coverage
+gate → finish/block remaining slices (at final verification) → human sign-off → advance to the next
+engaged stage. The JSON form carries a stable `kind` token plus the human `action`. Like `th stage
+current`, it reports a mechanical obligation; it never chooses strategy — consult it when unsure
+what the run owes next, especially after a long context window (F7).
 
 ```
 th context estimate
+th context pack [--slice <SLICE-ID>]
 ```
 
-Approximates the prompt-surface token cost of the plugin's skill, agent, and command files
-(heuristic: ~4 chars/token). Flags any file exceeding Claude Code's ~500-line / ~5,000-token
-re-attach guidance — these are the files that risk losing their tail after context compaction on
-long runs. The on-demand `skills/twinharness/reference/` files are expected to exceed the threshold
-by design (they load only when needed for a given stage or mode, not on every turn). All
-always-loaded core files are within the guidance.
+`th context estimate` approximates the prompt-surface token cost of the plugin's skill, agent, and
+command files (heuristic: ~4 chars/token). Flags any file exceeding Claude Code's ~500-line /
+~5,000-token re-attach guidance — these are the files that risk losing their tail after context
+compaction on long runs. The on-demand `skills/twinharness/reference/` files are expected to exceed
+the threshold by design (they load only when needed for a given stage or mode, not on every turn).
+All always-loaded core files are within the guidance.
+
+`th context pack` assembles the §9 **handoff bundle**: the Summary block of every approved artifact
+(the handoff currency — full artifacts are fetched only on demand), with a token estimate. With
+`--slice <SLICE-ID>` it adds that slice's record, the components it touches, and the other slices it
+shares components with (§16 conflict awareness — which slices must serialize). It **computes** a
+candidate bundle; deciding what to actually route remains the Orchestrator's call.
 
 ### Schema migration
 

@@ -40,6 +40,9 @@ const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const state_schema_1 = require("../core/state-schema");
 const ledger_1 = require("../core/ledger");
+const health_1 = require("../core/health");
+const coverage_1 = require("../core/coverage");
+const verify_1 = require("../core/verify");
 /** Resolve the plugin root from the compiled location (dist/commands → root). */
 function pluginRoot() {
     return path.resolve(__dirname, "..", "..");
@@ -120,6 +123,67 @@ function runDoctor(paths) {
         }
         const ledgerCount = (0, ledger_1.readLedger)(paths).length;
         checks.push({ name: "audit ledger", status: "ok", detail: `${ledgerCount} gate-mutation entr${ledgerCount === 1 ? "y" : "ies"}` });
+        // --- Run health (read-only; warnings only) ---
+        // Artifact integrity: on-disk hash vs the recorded approved hash.
+        const integrity = (0, health_1.artifactIntegrity)(paths, s);
+        if (integrity.length === 0) {
+            checks.push({ name: "artifacts", status: "ok", detail: "no artifacts registered yet" });
+        }
+        else {
+            const changed = integrity.filter((i) => i.status === "changed");
+            const missing = integrity.filter((i) => i.status === "missing");
+            const drifted = [...changed, ...missing];
+            checks.push({
+                name: "artifacts",
+                status: drifted.length > 0 ? "warn" : "ok",
+                detail: drifted.length > 0
+                    ? `${changed.length} changed, ${missing.length} missing — re-register or run \`th stale --artifact <file>\`: ${drifted.map((i) => i.file).join(", ")}`
+                    : `${integrity.length} registered, all match recorded hashes`,
+            });
+        }
+        // Slice progress.
+        const prog = (0, health_1.sliceProgress)(s);
+        if (prog.total === 0) {
+            checks.push({ name: "slices", status: "ok", detail: "no slices synced yet" });
+        }
+        else {
+            const unfinished = prog.pending + prog.inProgress;
+            checks.push({
+                name: "slices",
+                status: unfinished > 0 ? "warn" : "ok",
+                detail: `${prog.done} done / ${prog.blocked} blocked / ${prog.inProgress} in-progress / ${prog.pending} pending (of ${prog.total})`,
+            });
+        }
+        // Coverage status (best-effort; never a gate here).
+        const breakdown = (0, coverage_1.computeBreakdown)(paths.root);
+        if ("error" in breakdown) {
+            checks.push({ name: "coverage", status: "ok", detail: "requirements not authored yet" });
+        }
+        else if (breakdown.total === 0) {
+            checks.push({ name: "coverage", status: "ok", detail: "no REQ-IDs found in requirements" });
+        }
+        else {
+            const fullyMapped = breakdown.rows.filter((r) => r.planned && r.tested).length;
+            const report = (0, verify_1.readVerifyReport)(paths);
+            const passing = report ? (report.ok ? "suite green" : "suite FAILING") : "suite unknown (run `th verify run`)";
+            checks.push({
+                name: "coverage",
+                status: fullyMapped < breakdown.total ? "warn" : "ok",
+                detail: `${fullyMapped}/${breakdown.total} planned+tested; ${breakdown.implemented}/${breakdown.total} implemented; ${passing}`,
+            });
+        }
+        // Revise-loop escalations (cap reached → human owes a decision).
+        const escalations = (0, health_1.reviseEscalations)(s);
+        if (escalations.length > 0) {
+            checks.push({
+                name: "revise loops",
+                status: "warn",
+                detail: `at cap (escalate to human): ${escalations.map((e) => `${e.mode} ${e.count}/${e.cap}`).join(", ")}`,
+            });
+        }
+        else {
+            checks.push({ name: "revise loops", status: "ok", detail: "none at cap" });
+        }
     }
     const hasFail = checks.some((c) => c.status === "fail");
     const icon = (s) => (s === "ok" ? "✓" : s === "warn" ? "!" : "✗");

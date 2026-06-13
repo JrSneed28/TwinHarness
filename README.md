@@ -2,7 +2,7 @@
 
 **Turns "build me X" into working, tested software** by forcing the idea through requirements, scope, design, and slice-by-slice implementation with verification gates — as a Claude Code plugin.
 
-> **Early development notice.** TwinHarness is at v0.4.x. The pipeline has been exercised end-to-end and ships 336 passing tests, but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
+> **Early development notice.** TwinHarness is at v0.5.x. The pipeline has been exercised end-to-end and ships 370 passing tests, but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
 
 ---
 
@@ -151,7 +151,7 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 - **PreToolUse write-gate.** Blocks the standard Write/Edit/NotebookEdit path by default — before the pre-build gates clear and across slice-component boundaries during the build. A second, conservative `Bash` matcher catches obvious shell writes (`>`, `>>`, `tee`, `dd of=`, `sed -i`) into implementation paths pre-implementation; Bash writes remain out of scope as a *guarantee* (see `spec/write-gate-design.md` and `SECURITY.md`). The gate is fail-open (non-TwinHarness projects are completely unaffected), configurable (`ask` / `deny` / `off`, default `ask`), and one click to allow in a manual session.
 - **Gate-mutation audit ledger.** Every gate-relevant state change (`implementation_allowed`, tier, blast-radius flags, write-gate mode, blocking drift opened/resolved) is appended to `.twinharness/gate-ledger.jsonl` with a timestamp. The gates bind a compliant agent; the ledger makes any override reviewable after the fact. `drift_open_blocking` is additionally a *managed field*: `th state set` refuses it — only `th drift add`/`th drift resolve` move it.
 - **Safe parallel builds.** Concurrent `th` invocations (parallel Builders in a wave) serialize their state mutations under a cross-process lock, so no `drift add` or slice-status update is ever lost to a race.
-- **Self-diagnostics and run inspection.** `th doctor` checks environment and run health; `th stage current` returns the mechanical contract of the current stage (produces / Critic mode / human gate); `th manifest export` emits a deterministic snapshot of the whole run (state + drift + ledger); `th context estimate` reports the prompt-surface token cost; `th migrate` upgrades `state.json` across schema versions.
+- **Self-diagnostics and run inspection.** `th doctor` is a full run-health audit (environment, artifact integrity, coverage, slice progress, revise escalations); `th next` returns the single mechanical obligation the run owes next; `th stage current` returns the mechanical contract of the current stage (produces / Critic mode / human gate); `th coverage report` gives the planned/implemented/tested/passing breakdown; `th context pack` assembles the §9 handoff bundle; `th manifest export` emits a deterministic snapshot of the whole run; `th context estimate` reports prompt-surface token cost; `th migrate` upgrades `state.json` across schema versions.
 - **Conditional UI-design stage.** Present only when the project has a user interface. The UI-Designer presents 2–3 distinct design directions and asks you to pick one before streaming the detailed design.
 - **Tier-scaled documentation.** T1 gets a readme; T2 adds a user guide and API reference; T3 gets the full suite. A Critic reviews the docs; no human gate required.
 - **Automatic model routing.** Cheap models handle routine work; expensive ones (Opus) handle high-risk stages, blast-radius reviews, and the Orchestrator. Haiku handles trivial summarization. The full routing policy is in `skills/twinharness/SKILL.md`.
@@ -167,8 +167,9 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 | `th init` | Scaffold `docs/`, `.twinharness/state.json`, `drift-log.md` |
 | `th state get\|set\|status\|verify` | Read, patch, snapshot, or validate `state.json` |
 | `th tier classify\|veto-check` | Advisory tier eligibility check; mechanical blast-radius veto (exit 3) |
-| `th artifact register\|list` | Content-hash and record approved artifacts |
-| `th coverage check` | Verify every MVP REQ-ID maps to at least one slice and one test |
+| `th artifact register\|list` | Content-hash and record approved artifacts (file **or** directory, e.g. the ADR set) |
+| `th coverage check` / `th coverage report` | Gate: every MVP REQ-ID maps to ≥1 slice and ≥1 test · Report: planned/implemented/tested/passing breakdown |
+| `th verify add\|list\|clear\|run` | Configure and run the project's own test/check commands; records a green/failing report |
 | `th slices sync` / `th slice set-status` | Upsert slices from the implementation plan; update status |
 | `th build plan` | Schedule slices into conflict-free parallel build waves |
 | `th anchors scan` / `th trace render` / `th stale` | Map REQ anchors, render traceability, compute cascade-stale set |
@@ -177,9 +178,10 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 | `th hook stop-gate` | Emit the Claude Code Stop-hook decision |
 | `th hook pretool-gate` | Emit the Claude Code PreToolUse-hook decision (write-gate, incl. the Bash matcher) |
 | `th stage current\|describe\|list` | The mechanical per-stage contract: produces / Critic mode / human gate |
-| `th doctor` | Self-diagnostic: environment, state validity, schema version, stale locks, ledger |
+| `th doctor` | Run-health audit: environment, state validity, artifact integrity, coverage, slices, revise loops, locks, ledger |
+| `th next` | Next-action oracle: the single mechanical obligation the run owes next |
 | `th manifest export` | Deterministic run snapshot (state + drift + gate ledger) for review or golden CI checks |
-| `th context estimate` | Approximate prompt-surface token cost; flags files over the context-budget guidance |
+| `th context estimate` / `th context pack` | Approximate prompt-surface token cost · assemble the §9 slice/agent handoff bundle |
 | `th migrate` | Upgrade `state.json` to the current schema version (forward-only) |
 
 All commands accept `--json` for machine-readable output. The full reference is in [USAGE.md](./USAGE.md) Part 3.
@@ -191,7 +193,7 @@ All commands accept `--json` for machine-readable output. The full reference is 
 **What works today:**
 
 - Full T0–T3 pipeline, all 7 agents, all stages.
-- `th` CLI with 336 passing tests covering CLI behavior, plugin-packaging integrity, security containment (path traversal, proto-pollution), and a real cross-process concurrency race test; CI runs typecheck, build, a dist-sync assertion, and the full suite on every push and PR.
+- `th` CLI with 370 passing tests covering CLI behavior, plugin-packaging integrity, security containment (path traversal, proto-pollution), and a real cross-process concurrency race test; CI runs typecheck, build, a dist-sync assertion, and the full suite on every push and PR.
 - Validated Claude Code plugin packaging (`claude plugin validate` + `--plugin-dir` load pass).
 - PreToolUse write-gate: blocks the Write/Edit/NotebookEdit path by default before gates clear and across slice-component boundaries during the build, plus a conservative pre-implementation Bash matcher; Bash writes remain out of scope as a guarantee (v0.3.0+).
 - Gate-mutation audit ledger, managed drift counter, schema-versioned state with `th migrate`, and run inspection via `th doctor` / `th stage` / `th manifest export` / `th context estimate`.
@@ -263,4 +265,4 @@ MIT
 
 ---
 
-[![version](https://img.shields.io/badge/version-0.4.0-blue)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-7c3aed) ![node](https://img.shields.io/badge/node-%E2%89%A5%2018-339933)
+[![version](https://img.shields.io/badge/version-0.5.0-blue)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-7c3aed) ![node](https://img.shields.io/badge/node-%E2%89%A5%2018-339933)

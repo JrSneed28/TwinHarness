@@ -8,7 +8,9 @@ import { runStateGet, runStateSet, runStateStatus, runStateVerify } from "./comm
 import { runReviseBump, runReviseStatus, runReviseReset } from "./commands/revise";
 import { runTierClassify, runTierVetoCheck } from "./commands/tier";
 import { runArtifactRegister, runArtifactList } from "./commands/artifact";
-import { runCoverageCheck } from "./commands/coverage";
+import { runCoverageCheck, runCoverageReport } from "./commands/coverage";
+import { runVerifyRun, runVerifyAdd, runVerifyList, runVerifyClear } from "./commands/verify";
+import { runNext } from "./commands/next";
 import { runBuildPlan } from "./commands/build";
 import { runAnchorsScan } from "./commands/anchors";
 import { runDriftAdd, runDriftList, runDriftResolve } from "./commands/drift";
@@ -18,7 +20,7 @@ import { runHookStopGate, runHookPretoolGate, type StopHookInput, type PreToolHo
 import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
 import { runMigrate } from "./commands/migrate";
 import { runDoctor } from "./commands/doctor";
-import { runContextEstimate } from "./commands/context";
+import { runContextEstimate, runContextPack } from "./commands/context";
 import { runStageCurrent, runStageDescribe, runStageList } from "./commands/stage";
 import { runManifestExport } from "./commands/manifest";
 
@@ -38,7 +40,13 @@ Usage:
   th artifact register <file> --version <n>  Content-hash a file and record it in approved_artifacts
   th artifact list                  List recorded approved artifacts (file, version, hash)
   th coverage check [--reqs F] [--plan F] [--tests D] [--scope F]
-                                    Verify every (MVP) REQ-ID maps to ≥1 slice and ≥1 test
+                                    Verify every (MVP) REQ-ID maps to ≥1 slice and ≥1 test (hard gate)
+  th coverage report [--reqs F] [--plan F] [--tests D] [--scope F] [--code D]
+                                    Planned/implemented/tested/passing breakdown per REQ-ID (status view)
+  th verify add "<command>"         Add a project test/check command to the verify list
+  th verify list                    Show configured verify commands
+  th verify clear                   Remove all configured verify commands
+  th verify run                     Run every configured verify command; writes a report; exit 1 on failure
   th build plan [--include-done]    Schedule slices into conflict-free build waves (§16: disjoint parallelize, shared serialize)
   th anchors scan [--scan-reqs] [--scan-tests] [--scan-code] [--strict]  Map REQ-anchors across docs/tests/src; report orphans
   th trace render                   Render the §17 traceability view from anchors (on demand; never stored)
@@ -54,8 +62,10 @@ Usage:
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
   th hook pretool-gate              Emit a Claude Code PreToolUse write-gate decision
   th migrate                        Upgrade state.json to the current schema version
-  th doctor                         Self-diagnostic: environment + project health
+  th doctor                         Self-diagnostic + run-health audit (env, state, artifacts, coverage, slices, revise loops)
+  th next                           The next mechanical obligation the run owes (next-action oracle)
   th context estimate               Approximate the prompt-surface token cost (flags oversized files)
+  th context pack [--slice <ID>]    Assemble the §9 handoff bundle (artifact Summary blocks + slice framing)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
   th version                        Print the CLI version
@@ -70,6 +80,8 @@ Global flags:
   --plan <file>     (coverage, slices sync) Implementation-plan file (default docs/09-implementation-plan.md)
   --tests <dir>     (coverage) Tests directory (default tests)
   --scope <file>    (coverage) Scope file for MVP filtering (default docs/02-scope.md)
+  --code <dir>      (coverage report) Code directory scanned for implemented (default src)
+  --slice <id>      (context pack) Frame the pack for a specific slice (SLICE-ID)
   --include-done    (build plan) Include slices with status done (default: only unfinished)
   --scan-reqs       (anchors) Scan docs/ for REQ-anchors
   --scan-tests      (anchors) Scan tests/ for REQ-anchors
@@ -99,6 +111,8 @@ interface ParsedArgs {
     plan?: string;
     tests?: string;
     scope?: string;
+    code?: string;
+    slice?: string;
     includeDone: boolean;
     scanReqs: boolean;
     scanTests: boolean;
@@ -128,6 +142,8 @@ function parseArgs(argv: string[]): ParsedArgs {
   let plan: string | undefined;
   let tests: string | undefined;
   let scope: string | undefined;
+  let code: string | undefined;
+  let slice: string | undefined;
   let includeDone = false;
   let scanReqs = false;
   let scanTests = false;
@@ -161,6 +177,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (a.startsWith("--tests=")) tests = a.slice("--tests=".length);
     else if (a === "--scope") scope = argv[++i];
     else if (a.startsWith("--scope=")) scope = a.slice("--scope=".length);
+    else if (a === "--code") code = argv[++i];
+    else if (a.startsWith("--code=")) code = a.slice("--code=".length);
+    else if (a === "--slice") slice = argv[++i];
+    else if (a.startsWith("--slice=")) slice = a.slice("--slice=".length);
     else if (a === "--include-done") includeDone = true;
     else if (a === "--scan-reqs") scanReqs = true;
     else if (a === "--scan-tests") scanTests = true;
@@ -198,6 +218,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       plan,
       tests,
       scope,
+      code,
+      slice,
       includeDone,
       scanReqs,
       scanTests,
@@ -262,10 +284,14 @@ function dispatch(parsed: ParsedArgs): CommandResult {
       return runMigrate(paths);
     case "doctor":
       return runDoctor(paths);
+    case "next":
+      return runNext(paths);
     case "context":
       switch (sub) {
         case "estimate":
           return runContextEstimate();
+        case "pack":
+          return runContextPack(paths, { slice: parsed.flags.slice });
         default:
           return failure({ human: `unknown 'context' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
@@ -328,8 +354,29 @@ function dispatch(parsed: ParsedArgs): CommandResult {
             testsDir: parsed.flags.tests,
             scopeFile: parsed.flags.scope,
           });
+        case "report":
+          return runCoverageReport(paths, {
+            reqsFile: parsed.flags.reqs,
+            planFile: parsed.flags.plan,
+            testsDir: parsed.flags.tests,
+            scopeFile: parsed.flags.scope,
+            codeDir: parsed.flags.code,
+          });
         default:
           return failure({ human: `unknown 'coverage' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    case "verify":
+      switch (sub) {
+        case "run":
+          return runVerifyRun(paths);
+        case "add":
+          return runVerifyAdd(paths, rest.join(" "));
+        case "list":
+          return runVerifyList(paths);
+        case "clear":
+          return runVerifyClear(paths);
+        default:
+          return failure({ human: `unknown 'verify' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
     case "build":
       switch (sub) {

@@ -122,12 +122,13 @@ function runStale(paths, sinceHash, artifactFile) {
             });
         }
     }
-    // Recompute the upstream file's CURRENT hash. A missing file is treated as a
-    // change (its content no longer matches the recorded version).
+    // Recompute the upstream artifact's CURRENT hash. A missing path is treated as
+    // a change (its content no longer matches the recorded version). Handles both
+    // file and directory artifacts (e.g. docs/05-adrs/).
     const abs = path.resolve(paths.root, upstream.file);
     let currentHash;
-    if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
-        currentHash = (0, hash_1.shortHash)(fs.readFileSync(abs, "utf8"));
+    if (fs.existsSync(abs)) {
+        currentHash = (0, hash_1.shortHashPath)(abs);
     }
     // In --since mode compare current hash against sinceHash (the recorded snapshot).
     // In --artifact mode compare current hash against the stored artifact hash.
