@@ -241,6 +241,7 @@ forcing Claude to keep working or surface the problem — when any of these cond
 1. `.twinharness/state.json` is present but invalid (must be repaired before completion can be claimed).
 2. Any blocking requirement-layer drift is open (`drift_open_blocking > 0`).
 3. `current_stage` is `final-verification` and any slice's status is not `done` or `blocked` — this catches a claimed-complete run with unbuilt slices. **This check fires only at `final-verification`**; at every earlier stage the gate never tests slice completeness, so legitimate mid-build pauses are never interrupted.
+4. `current_stage` is `final-verification`, verify commands are configured, and the last `th verify run` is **missing or red** — a run may not claim completion with a known-red or never-run suite. (Inert when no verify commands are configured; the CLI still doesn't *certify* correctness — tests + your sign-off do.)
 
 Loop protection: the gate blocks **at most once per stop sequence**. If Claude is already
 continuing because of a prior block and the gate is *still* unsatisfied, it lets the stop through
@@ -505,6 +506,15 @@ flow for each wave:
    disjoint (drift can grow a component set mid-build). Claims serialize under the state lock.
 3. On Critic PASS: `th slice set-status <ID> done` and `th build release <ID>`, then re-run
    `th build next-wave`. On failure: set the slice `blocked`, release, and engage the Debugger.
+   Setting a slice `done`/`blocked` **auto-releases its lease**, so a forgotten `th build release`
+   can't leave a stale lease behind. Leases are also reconciled against slice state: a lease held by a
+   `done`/`blocked`/missing slice is **stale** — ignored by `next-wave`/`claim`, shown separately by
+   `th build leases`, and flagged by `th doctor`.
+
+`next-wave` also guards against deadlocks: if the `depends_on` graph has a **cycle** or a **dangling
+reference**, or pending slices can't dispatch with nothing in progress to unblock them, it reports a
+**STALL** instead of a silent empty wave (`th next` surfaces this as `stalled-build`; `th doctor`
+validates the graph). Break the cycle / fix the reference in the plan and re-sync.
 
 Slices may declare `depends_on` (parsed by `th slices sync` from a `Depends on: SLICE-1, SLICE-2`
 line) so a feature slice waits for the walking skeleton even when their components are disjoint. One
@@ -540,7 +550,9 @@ th verify run                    Run every command in order; exit 1 on any failu
 project root, and writes a report (`.twinharness/verify-report.json`). Every other `th` command
 only records and computes. The report feeds the **passing** column of `th coverage report` and the
 suite signal in `th doctor`. Commands live outside `state.json`, so the state schema and its
-content-hash stability are untouched. See `SECURITY.md` — `th verify run` only ever runs commands a
+content-hash stability are untouched. Each command runs under a wall-clock timeout (5 min) with stdin
+closed, so a command that hangs (watch mode, server, stdin wait) is killed and recorded as a failure
+rather than blocking the run forever. See `SECURITY.md` — `th verify run` only ever runs commands a
 human added; it never sources commands from artifact content.
 
 ### Version

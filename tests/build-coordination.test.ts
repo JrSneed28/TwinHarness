@@ -8,7 +8,8 @@ import { runInit } from "../src/commands/init";
 import { runStateSet } from "../src/commands/state";
 import { runSlicesSync } from "../src/commands/slices";
 import { runBuildNextWave, runBuildClaim, runBuildRelease, runBuildLeases } from "../src/commands/build";
-import { activeLeases } from "../src/core/leases";
+import { runSliceSetStatus } from "../src/commands/slices";
+import { activeLeases, liveLeases, staleLeases } from "../src/core/leases";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -112,6 +113,81 @@ describe("REQ-LEASE-001: claim takes a live lease; release frees it; leases list
     runBuildClaim(tp.paths, "SLICE-1");
     const res = runBuildNextWave(tp.paths);
     expect((res.data?.wave as string[])).toEqual([]); // SLICE-2 held on the leased "api"
+  });
+});
+
+describe("REQ-LEASE-002: leases reconcile against slice state (no stale wedge)", () => {
+  it("set-status done auto-releases the slice's lease", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    setSlices(tp, [{ id: "SLICE-1", status: "in-progress", components: ["api"] }]);
+    runBuildClaim(tp.paths, "SLICE-1");
+    expect(activeLeases(tp.paths)).toHaveLength(1);
+
+    const res = runSliceSetStatus(tp.paths, "SLICE-1", "done");
+    expect(res.ok).toBe(true);
+    expect(res.data?.releasedLease).toEqual(["api"]);
+    expect(activeLeases(tp.paths)).toEqual([]); // released by the status change
+  });
+
+  it("a stale lease (owning slice done, never released) is ignored by next-wave and claim", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    // SLICE-1 in-progress claims api, then a forced raw status flip leaves the lease behind.
+    setSlices(tp, [
+      { id: "SLICE-1", status: "in-progress", components: ["api"] },
+      { id: "SLICE-2", status: "pending", components: ["api"] },
+    ]);
+    runBuildClaim(tp.paths, "SLICE-1");
+    // Simulate a crash-style settle WITHOUT release by writing state directly.
+    setSlices(tp, [
+      { id: "SLICE-1", status: "done", components: ["api"] },
+      { id: "SLICE-2", status: "pending", components: ["api"] },
+    ]);
+    // The ledger still holds SLICE-1's claim, but it's now stale.
+    expect(staleLeases(tp.paths, [{ id: "SLICE-1", status: "done" }]).length).toBe(1);
+    expect(liveLeases(tp.paths, [{ id: "SLICE-1", status: "done" }])).toEqual([]);
+
+    // next-wave must NOT treat api as busy → SLICE-2 dispatches.
+    const res = runBuildNextWave(tp.paths);
+    expect((res.data?.wave as string[])).toEqual(["SLICE-2"]);
+    // claim must also ignore the stale lease.
+    expect(runBuildClaim(tp.paths, "SLICE-2").ok).toBe(true);
+  });
+
+  it("th build leases lists the stale set separately", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    setSlices(tp, [{ id: "SLICE-1", status: "in-progress", components: ["api"] }]);
+    runBuildClaim(tp.paths, "SLICE-1");
+    setSlices(tp, [{ id: "SLICE-1", status: "blocked", components: ["api"] }]);
+    const res = runBuildLeases(tp.paths);
+    expect((res.data?.stale as unknown[]).length).toBe(1);
+    expect((res.data?.leases as unknown[]).length).toBe(0);
+  });
+});
+
+describe("REQ-NEXTWAVE-003: dependency deadlocks surface as a stall, not an empty wave", () => {
+  it("a depends_on cycle → stalled + reported cycle", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    setSlices(tp, [
+      { id: "SLICE-1", status: "pending", components: ["a"], depends_on: ["SLICE-2"] },
+      { id: "SLICE-2", status: "pending", components: ["b"], depends_on: ["SLICE-1"] },
+    ]);
+    const res = runBuildNextWave(tp.paths);
+    expect((res.data?.wave as string[])).toEqual([]);
+    expect(res.data?.stalled).toBe(true);
+    expect((res.data?.deps as { cycles: string[][] }).cycles.length).toBeGreaterThan(0);
+  });
+
+  it("a dangling depends_on reference is reported", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    setSlices(tp, [{ id: "SLICE-1", status: "pending", components: ["a"], depends_on: ["SLICE-99"] }]);
+    const res = runBuildNextWave(tp.paths);
+    expect((res.data?.deps as { dangling: unknown[] }).dangling).toEqual([{ slice: "SLICE-1", missing: ["SLICE-99"] }]);
+    expect(res.data?.stalled).toBe(true);
   });
 });
 

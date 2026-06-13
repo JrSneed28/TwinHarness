@@ -45,6 +45,14 @@ export interface VerifyReport {
 
 const OUTPUT_TAIL_CHARS = 2000;
 
+/**
+ * Per-command wall-clock budget (ms). A configured command that hangs (a watch
+ * mode, a server, a process waiting on stdin, a deadlocked test) would otherwise
+ * block `th verify run` forever; the timeout kills it and records a failure so
+ * the run always terminates. 5 minutes is generous for a real test suite.
+ */
+export const DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
+
 export function verifyConfigPath(paths: ProjectPaths): string {
   return path.join(paths.stateDir, "verify.json");
 }
@@ -98,9 +106,18 @@ export function writeVerifyReport(paths: ProjectPaths, report: VerifyReport): vo
  * Execute each command in order via the shell, in `root`. Stops nothing — every
  * command runs so the report is complete — but `ok` is false if any fail. A
  * command that cannot be spawned is recorded as a failure (exit 127) rather than
- * throwing. `now` is injectable so callers/tests control the timestamp.
+ * throwing. Each command is bounded by `timeoutMs` (default
+ * {@link DEFAULT_COMMAND_TIMEOUT_MS}): a process that exceeds it is killed and
+ * recorded as a failure, so a hanging command can never block the run forever.
+ * stdin is closed (`input: ""`) so a command that reads stdin gets EOF instead of
+ * blocking. `now` is injectable so callers/tests control the timestamp.
  */
-export function runCommands(root: string, commands: string[], now: () => Date = () => new Date()): VerifyReport {
+export function runCommands(
+  root: string,
+  commands: string[],
+  now: () => Date = () => new Date(),
+  timeoutMs: number = DEFAULT_COMMAND_TIMEOUT_MS,
+): VerifyReport {
   const results: VerifyResult[] = [];
   for (const command of commands) {
     const start = Date.now();
@@ -109,13 +126,18 @@ export function runCommands(root: string, commands: string[], now: () => Date = 
       shell: true,
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+      input: "",
     });
     const durationMs = Date.now() - start;
-    const combined = `${proc.stdout ?? ""}${proc.stderr ?? ""}`;
+    // A timeout kill surfaces as proc.error with code ETIMEDOUT and a null status.
+    const timedOut = (proc.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT";
+    const combined = `${proc.stdout ?? ""}${proc.stderr ?? ""}${timedOut ? `\n[th verify] command killed after ${timeoutMs}ms timeout` : ""}`;
     const outputTail = combined.length > OUTPUT_TAIL_CHARS ? combined.slice(-OUTPUT_TAIL_CHARS) : combined;
     // spawnSync returns status null when the process was killed or failed to spawn.
-    const exitCode = proc.status ?? 127;
-    results.push({ command, exitCode, ok: exitCode === 0, durationMs, outputTail });
+    const exitCode = proc.status ?? 124; // 124 = conventional timeout/kill exit code
+    results.push({ command, exitCode, ok: proc.status === 0, durationMs, outputTail });
   }
   return {
     ok: results.every((r) => r.ok),

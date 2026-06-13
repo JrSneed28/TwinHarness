@@ -9,6 +9,7 @@ import {
   SLICE_STATUSES,
   validateState,
 } from "../core/state-schema";
+import { activeLeases, appendLeaseEvent } from "../core/leases";
 import { structuredLog } from "../core/log";
 
 /**
@@ -288,9 +289,22 @@ function runSliceSetStatusLocked(
   }
 
   writeState(paths, validation.state!);
-  structuredLog({ cmd: "slice set-status", sliceId, status });
+
+  // Auto-release the slice's component lease the moment it reaches a terminal
+  // state, so a forgotten `th build release` can't leave a stale lease wedging
+  // the next wave. Only emit a release when the slice actually holds a live lease.
+  let releasedLease: string[] | undefined;
+  if (status === "done" || status === "blocked") {
+    const held = activeLeases(paths).find((l) => l.slice === sliceId);
+    if (held) {
+      appendLeaseEvent(paths, { event: "release", slice: sliceId, components: held.components });
+      releasedLease = held.components;
+    }
+  }
+
+  structuredLog({ cmd: "slice set-status", sliceId, status, releasedLease: releasedLease ?? null });
   return success({
-    data: { sliceId, status },
-    human: `${sliceId} status set to "${status}".`,
+    data: { sliceId, status, ...(releasedLease ? { releasedLease } : {}) },
+    human: `${sliceId} status set to "${status}".${releasedLease ? ` Released lease on: ${releasedLease.join(", ") || "(none)"}.` : ""}`,
   });
 }

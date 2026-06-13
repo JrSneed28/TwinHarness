@@ -146,6 +146,18 @@ describe("REQ-NEXT-009: implementation stage dispatches build waves", () => {
     runStateSet(tp.paths, "slices", JSON.stringify([{ id: "SLICE-1", status: "in-progress", components: ["api"] }]));
     expect(runNext(tp.paths).data?.kind).toBe("await-builders");
   });
+
+  it("a dependency deadlock → kind stalled-build (not a cheery dispatch-wave)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runStateSet(tp.paths, "tier", "T2");
+    runStateSet(tp.paths, "current_stage", "implementation");
+    runStateSet(tp.paths, "slices", JSON.stringify([
+      { id: "SLICE-1", status: "pending", components: ["a"], depends_on: ["SLICE-2"] },
+      { id: "SLICE-2", status: "pending", components: ["b"], depends_on: ["SLICE-1"] },
+    ]));
+    expect(runNext(tp.paths).data?.kind).toBe("stalled-build");
+  });
 });
 
 describe("REQ-NEXT-007: final-verification floor — slices then coverage then sign-off", () => {

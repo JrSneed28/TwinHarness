@@ -41,6 +41,7 @@ const path = __importStar(require("node:path"));
 const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const state_schema_1 = require("../core/state-schema");
+const leases_1 = require("../core/leases");
 const log_1 = require("../core/log");
 /** Extract backtick-quoted tokens or comma-separated bare words from a component line/cell. */
 function parseComponentTokens(raw) {
@@ -256,9 +257,20 @@ function runSliceSetStatusLocked(paths, sliceId, status) {
         });
     }
     (0, state_store_1.writeState)(paths, validation.state);
-    (0, log_1.structuredLog)({ cmd: "slice set-status", sliceId, status });
+    // Auto-release the slice's component lease the moment it reaches a terminal
+    // state, so a forgotten `th build release` can't leave a stale lease wedging
+    // the next wave. Only emit a release when the slice actually holds a live lease.
+    let releasedLease;
+    if (status === "done" || status === "blocked") {
+        const held = (0, leases_1.activeLeases)(paths).find((l) => l.slice === sliceId);
+        if (held) {
+            (0, leases_1.appendLeaseEvent)(paths, { event: "release", slice: sliceId, components: held.components });
+            releasedLease = held.components;
+        }
+    }
+    (0, log_1.structuredLog)({ cmd: "slice set-status", sliceId, status, releasedLease: releasedLease ?? null });
     return (0, output_1.success)({
-        data: { sliceId, status },
-        human: `${sliceId} status set to "${status}".`,
+        data: { sliceId, status, ...(releasedLease ? { releasedLease } : {}) },
+        human: `${sliceId} status set to "${status}".${releasedLease ? ` Released lease on: ${releasedLease.join(", ") || "(none)"}.` : ""}`,
     });
 }

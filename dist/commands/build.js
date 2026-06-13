@@ -9,6 +9,7 @@ const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const schedule_1 = require("../core/schedule");
 const leases_1 = require("../core/leases");
+const wave_1 = require("../core/wave");
 const log_1 = require("../core/log");
 /**
  * `th build plan` — the mechanical parallel-build serializer (spec §16; build
@@ -68,13 +69,17 @@ function runBuildPlan(paths, opts = {}) {
     ].join("\n");
     return (0, output_1.success)({ data: { waves, conflicts, parallelism }, human });
 }
+/* ------------------------------------------------------------------ *
+ * Live build coordination: next-wave oracle + dynamic component leases *
+ * ------------------------------------------------------------------ */
 /**
  * `th build next-wave` — the live wave-runner oracle. Returns the set of slices
  * that are dispatchable IN PARALLEL right now: status `pending`, all `depends_on`
- * slices `done`, and components free of (a) in-progress slices, (b) active
- * leases, and (c) each other within the wave. The held slices are reported with
- * the reason they wait (unmet dependency or a component conflict). Reuses the
- * §16 disjointness rule but over the *current* run state, not the static plan.
+ * slices `done`, and components free of (a) in-progress slices, (b) live leases,
+ * and (c) each other within the wave. Held slices are reported with the reason
+ * they wait. It also validates the dependency graph (cycles / dangling refs) and
+ * flags a STALL — pending slices that can never dispatch with nothing running to
+ * unblock them — so a deadlock surfaces instead of an empty wave forever.
  */
 function runBuildNextWave(paths) {
     const r = (0, state_store_1.readState)(paths);
@@ -84,55 +89,27 @@ function runBuildNextWave(paths) {
         return (0, output_1.failure)({ human: `state.json is invalid:\n${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
     }
     const slices = r.state.slices;
-    const statusById = new Map(slices.map((s) => [s.id, s.status]));
-    // Component → the slice that currently occupies it: an in-progress slice owns
-    // its components; an active lease owns its components. A component is busy FOR a
-    // candidate only when occupied by a DIFFERENT slice (a slice never blocks itself).
-    const ownerByComponent = new Map();
-    for (const s of slices)
-        if (s.status === "in-progress")
-            for (const c of s.components)
-                if (!ownerByComponent.has(c))
-                    ownerByComponent.set(c, s.id);
-    for (const [component, owner] of (0, leases_1.leasedComponents)(paths))
-        if (!ownerByComponent.has(component))
-            ownerByComponent.set(component, owner);
-    const wave = [];
-    const claimedInWave = new Set();
-    const held = [];
-    for (const s of slices) {
-        if (s.status !== "pending")
-            continue;
-        // Dependency gate: every declared dependency must be done.
-        const unmet = (s.depends_on ?? []).filter((d) => statusById.get(d) !== "done");
-        if (unmet.length > 0) {
-            held.push({ id: s.id, reason: "dependency", detail: unmet });
-            continue;
-        }
-        // Component gate: free of components owned by another slice AND of components
-        // already taken earlier in this same wave.
-        const conflicts = s.components.filter((c) => {
-            const owner = ownerByComponent.get(c);
-            return (owner !== undefined && owner !== s.id) || claimedInWave.has(c);
-        });
-        if (conflicts.length > 0) {
-            held.push({ id: s.id, reason: "component-conflict", detail: conflicts });
-            continue;
-        }
-        wave.push(s.id);
-        for (const c of s.components)
-            claimedInWave.add(c);
-    }
-    (0, log_1.structuredLog)({ cmd: "build next-wave", dispatch: wave.length, held: held.length });
-    const human = [
+    const anyInProgress = slices.some((s) => s.status === "in-progress");
+    // "occupied" excludes stale leases (a finished/crashed slice never releases) so
+    // a stale lease can't wedge the wave — see core/leases.ts occupiedComponents.
+    const occupied = (0, leases_1.occupiedComponents)(paths, slices);
+    const { wave, held, stalled } = (0, wave_1.computeWave)(slices, occupied, anyInProgress);
+    const deps = (0, wave_1.validateDeps)(slices);
+    (0, log_1.structuredLog)({ cmd: "build next-wave", dispatch: wave.length, held: held.length, stalled, depIssues: (0, wave_1.hasDepIssues)(deps) });
+    const lines = [
         wave.length ? `Dispatch now (parallel): ${wave.join(", ")}` : "Dispatch now: (none ready)",
         ...(held.length
             ? ["Held:", ...held.map((h) => `  ${h.id} — ${h.reason}: ${h.detail.join(", ")}`)]
             : ["Held: (none)"]),
-        "",
-        "Set each dispatched slice in-progress and `th build claim <ID>` before spawning its Builder.",
-    ].join("\n");
-    return (0, output_1.success)({ data: { wave, held }, human });
+    ];
+    for (const c of deps.cycles)
+        lines.push(`DEPENDENCY CYCLE: ${c.join(" → ")} → ${c[0]} (unsatisfiable — break the cycle in the plan)`);
+    for (const d of deps.dangling)
+        lines.push(`DANGLING DEPENDENCY: ${d.slice} depends on unknown slice(s): ${d.missing.join(", ")}`);
+    if (stalled)
+        lines.push("STALLED: pending slices exist but none can dispatch and none are in progress — resolve the dependency/component deadlock above.");
+    lines.push("", "Set each dispatched slice in-progress and `th build claim <ID>` before spawning its Builder.");
+    return (0, output_1.success)({ data: { wave, held, stalled, deps }, human: lines.join("\n") });
 }
 function leaseUsage(action) {
     return (0, output_1.failure)({ human: `usage: th build ${action} <SLICE-ID>` });
@@ -157,7 +134,14 @@ function runBuildClaim(paths, sliceId) {
         if (!slice) {
             return (0, output_1.failure)({ human: `Slice not found: ${sliceId}. Known: ${r.state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", sliceId } });
         }
-        const owners = (0, leases_1.leasedComponents)(paths);
+        // Only LIVE leases (held by a pending/in-progress slice) block a claim — a
+        // stale lease from a done/blocked/crashed slice is ignored, not a permanent wall.
+        const owners = new Map();
+        for (const lease of (0, leases_1.liveLeases)(paths, r.state.slices)) {
+            for (const c of lease.components)
+                if (!owners.has(c))
+                    owners.set(c, lease.slice);
+        }
         const conflicts = slice.components
             .map((c) => ({ component: c, owner: owners.get(c) }))
             .filter((x) => x.owner !== undefined && x.owner !== sliceId);
@@ -188,14 +172,32 @@ function runBuildRelease(paths, sliceId) {
         return (0, output_1.success)({ data: { slice: sliceId, released: held?.components ?? [] }, human: `released ${sliceId}.` });
     });
 }
-/** `th build leases` — list the live component leases. */
+/**
+ * `th build leases` — list the live component leases, reconciled against slice
+ * state. Leases whose owning slice has settled (done/blocked) or vanished are
+ * reported separately as STALE so they can be cleaned up (`th build release`),
+ * rather than silently occupying components.
+ */
 function runBuildLeases(paths) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
         return NOT_INIT;
-    const leases = (0, leases_1.activeLeases)(paths);
-    const human = leases.length
-        ? leases.map((l) => `${l.slice}: ${l.components.join(", ") || "(no components)"}`).join("\n")
-        : "(no active leases)";
-    return (0, output_1.success)({ data: { leases }, human });
+    // Without valid state we cannot reconcile; fall back to the raw active set.
+    if (!r.state) {
+        const leases = (0, leases_1.activeLeases)(paths);
+        const human = leases.length ? leases.map((l) => `${l.slice}: ${l.components.join(", ") || "(no components)"}`).join("\n") : "(no active leases)";
+        return (0, output_1.success)({ data: { leases, stale: [] }, human });
+    }
+    const live = (0, leases_1.liveLeases)(paths, r.state.slices);
+    const stale = (0, leases_1.staleLeases)(paths, r.state.slices);
+    const lines = [];
+    lines.push(live.length ? "Live leases:" : "Live leases: (none)");
+    for (const l of live)
+        lines.push(`  ${l.slice}: ${l.components.join(", ") || "(no components)"}`);
+    if (stale.length) {
+        lines.push("STALE leases (owning slice is done/blocked/missing — `th build release <ID>` to clear):");
+        for (const l of stale)
+            lines.push(`  ${l.slice}: ${l.components.join(", ")}`);
+    }
+    return (0, output_1.success)({ data: { leases: live, stale }, human: lines.join("\n") });
 }

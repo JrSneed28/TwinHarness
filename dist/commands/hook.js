@@ -40,6 +40,7 @@ exports.runHookPretoolGate = runHookPretoolGate;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const state_store_1 = require("../core/state-store");
+const verify_1 = require("../core/verify");
 /**
  * Decide whether the orchestrator may declare completion.
  *
@@ -52,6 +53,12 @@ const state_store_1 = require("../core/state-store");
  *   are still unbuilt. The check is ONLY applied at the final-verification
  *   stage so that legitimate mid-build pauses (the Stop hook fires on every
  *   turn-end) are never interrupted.
+ * - At `final-verification`, ALSO block when verify commands are configured but
+ *   the last `th verify run` is missing or red. The CLI still doesn't *certify*
+ *   correctness (tests + the human do), but it refuses to let a run claim
+ *   completion with a known-red or never-run suite when the operator wired one
+ *   up. When no verify commands are configured this check is inert (nothing to
+ *   run), and the human correctness gate still applies.
  * - Otherwise → allow.
  */
 function evaluateStopGate(paths) {
@@ -91,6 +98,31 @@ function evaluateStopGate(paths) {
                         `Note: the human correctness gate on the verification report still applies after all slices are resolved.`,
                 ],
             };
+        }
+        // Verify-suite gate: if the operator configured project test commands, the
+        // run may not claim completion with a red or never-run suite.
+        const commands = (0, verify_1.readVerifyConfig)(paths).commands;
+        if (commands.length > 0) {
+            const report = (0, verify_1.readVerifyReport)(paths);
+            if (!report) {
+                return {
+                    block: true,
+                    reasons: [
+                        `Stop-gate (final-verification suite check): ${commands.length} verify command(s) are configured but ` +
+                            `\`th verify run\` has never been recorded. Run \`th verify run\` and confirm the suite is green before completing.`,
+                    ],
+                };
+            }
+            if (!report.ok) {
+                const failed = report.results.filter((x) => !x.ok).map((x) => x.command).join(", ");
+                return {
+                    block: true,
+                    reasons: [
+                        `Stop-gate (final-verification suite check): the last \`th verify run\` is RED — failing command(s): ${failed}. ` +
+                            `Engage the Debugger (\`th debug pack\`), fix, and re-run \`th verify run\` until green before completing.`,
+                    ],
+                };
+            }
         }
     }
     return { block: false, reasons: [] };

@@ -95,3 +95,22 @@ describe("REQ-VERIFY-004: runCommands timestamp is injectable (clock-free testin
     expect(report.ok).toBe(true);
   });
 });
+
+describe("REQ-VERIFY-005: a hanging command is killed by the timeout, not blocked forever", () => {
+  it("`sleep 10` with a 150ms budget → recorded as a failure and the run returns", () => {
+    tp = makeTempProject();
+    const start = Date.now();
+    const report = runCommands(tp.root, ["sleep 10"], undefined, 150);
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeLessThan(5000); // returned promptly, did not hang
+    expect(report.ok).toBe(false);
+    expect(report.results[0]?.ok).toBe(false);
+    expect(report.results[0]?.outputTail).toContain("timeout");
+  });
+
+  it("a fast command still passes under a generous budget", () => {
+    tp = makeTempProject();
+    const report = runCommands(tp.root, ["true"], undefined, 150);
+    expect(report.ok).toBe(true);
+  });
+});
