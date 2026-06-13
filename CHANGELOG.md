@@ -5,6 +5,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.6.1] — 2026-06-13
+
+Robustness hardening from a self-audit of the 0.6.0 coordination features. **413 tests** (was 392).
+
+### Fixed
+
+- **Stale component leases could wedge the build (§16).** A Builder that crashed (or a forgotten `th build release`) between `claim` and release left a lease holding components forever, blocking every overlapping/dependent slice. Leases now reconcile against slice state: a lease whose owning slice is `done`/`blocked`/missing is **stale** and ignored by `th build next-wave` and `th build claim`. `th slice set-status <id> done|blocked` **auto-releases** the slice's lease, `th build leases` lists the stale set separately, and `th doctor` warns on stale leases.
+- **Dependency deadlocks were silent.** A `depends_on` cycle, a dangling reference, or a dep on a never-finishing slice left `th build next-wave` returning an empty wave forever while `th next` cheerily said "dispatch the next wave". `next-wave` now detects an unsatisfiable graph (cycle/dangling) and a **stall** (pending slices, nothing dispatchable, nothing in progress) and reports it; `th next` surfaces a new `stalled-build` obligation; `th doctor` validates the `depends_on` graph.
+- **`th verify run` could hang forever.** A configured command that blocks (watch mode, server, stdin wait, deadlocked test) had no timeout. Each command now runs under a wall-clock budget (`DEFAULT_COMMAND_TIMEOUT_MS`, 5 min) with stdin closed; a timed-out command is killed and recorded as a failure so the run always terminates.
+- **Research artifacts didn't affect downstream staleness.** `docs/00-research/` (and `docs/04b-ui-design.md`) were absent from the cascade graph, so correcting research never flagged requirements/architecture/contracts as stale. Both are now in `ARTIFACT_PIPELINE`; `docs/00-research` is the most-upstream artifact, so a change to it cascades to everything.
+
+### Changed
+
+- **Final-verification stop-gate now requires a green suite when one is configured.** If verify commands are set, `evaluateStopGate` blocks completion at `final-verification` when the last `th verify run` is missing or red. When no commands are configured the check is inert; the CLI still doesn't *certify* correctness (tests + human do) — it just refuses to let a run claim done with a known-red or never-run suite.
+
 ## [0.6.0] — 2026-06-13
 
 ### Added

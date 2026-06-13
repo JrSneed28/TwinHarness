@@ -5,6 +5,7 @@ import { runInit } from "../src/commands/init";
 import { evaluateStopGate, runHookStopGate } from "../src/commands/hook";
 import { writeState } from "../src/core/state-store";
 import { initialState } from "../src/core/state-schema";
+import { writeVerifyConfig, writeVerifyReport } from "../src/core/verify";
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
@@ -104,6 +105,53 @@ describe("REQ-GATE-001: stop-gate blocks premature completion (pre-mortem #2)", 
         { id: "SLICE-2", status: "in-progress", components: [] },
       ],
     });
+    expect(evaluateStopGate(tp.paths).block).toBe(false);
+  });
+});
+
+describe("REQ-GATE-005: final-verification requires a green verify suite when one is configured", () => {
+  function settledAtFinal(tp: TempProject): void {
+    writeState(tp.paths, {
+      ...initialState(),
+      current_stage: "final-verification",
+      slices: [{ id: "SLICE-1", status: "done", components: [] }],
+    });
+  }
+
+  it("no verify commands configured → suite check is inert (allows)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    settledAtFinal(tp);
+    expect(evaluateStopGate(tp.paths).block).toBe(false);
+  });
+
+  it("commands configured but no report → blocks (never run)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeVerifyConfig(tp.paths, { commands: ["npm test"] });
+    settledAtFinal(tp);
+    const d = evaluateStopGate(tp.paths);
+    expect(d.block).toBe(true);
+    expect(d.reasons[0]).toContain("never been recorded");
+  });
+
+  it("a RED report → blocks", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeVerifyConfig(tp.paths, { commands: ["npm test"] });
+    writeVerifyReport(tp.paths, { ok: false, ranAt: "2026-06-13T00:00:00.000Z", results: [{ command: "npm test", exitCode: 1, ok: false, durationMs: 1, outputTail: "fail" }] });
+    settledAtFinal(tp);
+    const d = evaluateStopGate(tp.paths);
+    expect(d.block).toBe(true);
+    expect(d.reasons[0]).toContain("RED");
+  });
+
+  it("a GREEN report → allows", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeVerifyConfig(tp.paths, { commands: ["npm test"] });
+    writeVerifyReport(tp.paths, { ok: true, ranAt: "2026-06-13T00:00:00.000Z", results: [{ command: "npm test", exitCode: 0, ok: true, durationMs: 1, outputTail: "" }] });
+    settledAtFinal(tp);
     expect(evaluateStopGate(tp.paths).block).toBe(false);
   });
 });

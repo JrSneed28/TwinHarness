@@ -42,6 +42,8 @@ const stages_1 = require("../core/stages");
 const health_1 = require("../core/health");
 const coverage_1 = require("../core/coverage");
 const verify_1 = require("../core/verify");
+const leases_1 = require("../core/leases");
+const wave_1 = require("../core/wave");
 function runNext(paths) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists) {
@@ -170,11 +172,29 @@ function runNext(paths) {
                 action: "Implementation has no slices — run `th slices sync` to populate them from the implementation plan, then `th build next-wave`.",
             });
         }
-        if (prog.pending > 0) {
+        // Compute the LIVE wave so a deadlock (dependency cycle / dangling ref / a
+        // dep on a blocked slice) surfaces as a stall instead of looping forever on
+        // "dispatch the next wave" while nothing can actually dispatch.
+        const deps = (0, wave_1.validateDeps)(s.slices);
+        const occupied = (0, leases_1.occupiedComponents)(paths, s.slices);
+        const plan = (0, wave_1.computeWave)(s.slices, occupied, prog.inProgress > 0);
+        if (plan.stalled || (0, wave_1.hasDepIssues)(deps)) {
+            const reasons = [
+                ...deps.cycles.map((c) => `cycle ${c.join("→")}`),
+                ...deps.dangling.map((d) => `${d.slice}→unknown ${d.missing.join(",")}`),
+                ...plan.held.map((h) => `${h.id} (${h.reason}: ${h.detail.join(",")})`),
+            ];
+            return emit({
+                kind: "stalled-build",
+                action: `Build is stalled — no slice can be dispatched and none are in progress to unblock it. Fix the dependency/component deadlock, then \`th build next-wave\`. Blockers: ${reasons.join("; ")}.`,
+                data: { held: plan.held, cycles: deps.cycles, dangling: deps.dangling },
+            });
+        }
+        if (plan.wave.length > 0) {
             return emit({
                 kind: "dispatch-wave",
-                action: "Dispatch the next parallel build wave — `th build next-wave` lists the ready slices; set each `in-progress` and `th build claim <ID>` before spawning its Builder.",
-                data: { pending: prog.pending, inProgress: prog.inProgress },
+                action: `Dispatch the next parallel build wave: ${plan.wave.join(", ")} — set each \`in-progress\` and \`th build claim <ID>\` before spawning its Builder (\`th build next-wave\`).`,
+                data: { wave: plan.wave, pending: prog.pending, inProgress: prog.inProgress },
             });
         }
         if (prog.inProgress > 0) {

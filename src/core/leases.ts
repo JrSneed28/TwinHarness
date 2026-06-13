@@ -17,6 +17,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "./paths";
+import type { SliceState } from "./state-schema";
 
 export interface LeaseEvent {
   /** ISO-8601 UTC timestamp (audit record — intentionally clock-bearing). */
@@ -98,4 +99,45 @@ export function leasedComponents(paths: ProjectPaths): Map<string, string> {
     }
   }
   return map;
+}
+
+type SliceLike = Pick<SliceState, "id" | "status">;
+
+/** A slice still owes work iff it's pending or in-progress; done/blocked/absent do not. */
+function isLiveSlice(status: string | undefined): boolean {
+  return status === "pending" || status === "in-progress";
+}
+
+/**
+ * The leases that should still hold components, reconciled against slice state: a
+ * lease whose owning slice has reached `done`/`blocked` — or no longer exists —
+ * is STALE (a Builder that crashed or finished without `th build release`) and is
+ * dropped. This is the safety net that stops a stale lease from wedging the build
+ * forever even when the explicit release never ran.
+ */
+export function liveLeases(paths: ProjectPaths, slices: SliceLike[]): ActiveLease[] {
+  const statusById = new Map(slices.map((s) => [s.id, s.status]));
+  return activeLeases(paths).filter((l) => isLiveSlice(statusById.get(l.slice)));
+}
+
+/** The complement of {@link liveLeases}: leases held by a settled/missing slice. */
+export function staleLeases(paths: ProjectPaths, slices: SliceLike[]): ActiveLease[] {
+  const statusById = new Map(slices.map((s) => [s.id, s.status]));
+  return activeLeases(paths).filter((l) => !isLiveSlice(statusById.get(l.slice)));
+}
+
+/**
+ * Component → owning slice, combining in-progress slices and reconciled live
+ * leases (stale leases excluded). This is the "occupied" map the live wave-runner
+ * consults; the first owner of a component wins.
+ */
+export function occupiedComponents(paths: ProjectPaths, slices: SliceState[]): Map<string, string> {
+  const occ = new Map<string, string>();
+  for (const s of slices) {
+    if (s.status === "in-progress") for (const c of s.components) if (!occ.has(c)) occ.set(c, s.id);
+  }
+  for (const lease of liveLeases(paths, slices)) {
+    for (const c of lease.components) if (!occ.has(c)) occ.set(c, lease.slice);
+  }
+  return occ;
 }

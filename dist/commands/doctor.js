@@ -43,6 +43,8 @@ const ledger_1 = require("../core/ledger");
 const health_1 = require("../core/health");
 const coverage_1 = require("../core/coverage");
 const verify_1 = require("../core/verify");
+const leases_1 = require("../core/leases");
+const wave_1 = require("../core/wave");
 /** Resolve the plugin root from the compiled location (dist/commands → root). */
 function pluginRoot() {
     return path.resolve(__dirname, "..", "..");
@@ -153,6 +155,27 @@ function runDoctor(paths) {
                 status: unfinished > 0 ? "warn" : "ok",
                 detail: `${prog.done} done / ${prog.blocked} blocked / ${prog.inProgress} in-progress / ${prog.pending} pending (of ${prog.total})`,
             });
+            // Dependency graph: a cycle or dangling ref deadlocks `th build next-wave`.
+            const deps = (0, wave_1.validateDeps)(s.slices);
+            if ((0, wave_1.hasDepIssues)(deps)) {
+                const parts = [
+                    ...deps.cycles.map((c) => `cycle ${c.join("→")}`),
+                    ...deps.dangling.map((d) => `${d.slice}→unknown ${d.missing.join(",")}`),
+                ];
+                checks.push({ name: "slice deps", status: "warn", detail: `unsatisfiable depends_on — will stall next-wave: ${parts.join("; ")}` });
+            }
+            else {
+                checks.push({ name: "slice deps", status: "ok", detail: "depends_on graph is acyclic with no dangling refs" });
+            }
+            // Stale component leases: a lease whose owning slice has settled/vanished.
+            const stale = (0, leases_1.staleLeases)(paths, s.slices);
+            if (stale.length > 0) {
+                checks.push({
+                    name: "build leases",
+                    status: "warn",
+                    detail: `${stale.length} stale lease(s) (owning slice done/blocked/missing) — \`th build release <ID>\`: ${stale.map((l) => l.slice).join(", ")}`,
+                });
+            }
         }
         // Coverage status (best-effort; never a gate here).
         const breakdown = (0, coverage_1.computeBreakdown)(paths.root);

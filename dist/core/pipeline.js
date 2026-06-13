@@ -14,13 +14,18 @@ exports.downstreamOf = downstreamOf;
 /**
  * Canonical pipeline order of artifact files, root-relative with forward slashes
  * (matching the `approved_artifacts.file` key shape, see commands/artifact.ts).
- * `docs/05-adrs` is the ADR directory; everything else is a single markdown file.
+ * `docs/00-research` (the conditional Researcher's output) is the most-upstream
+ * artifact — it feeds the design stages, so a change to it cascades to everything.
+ * `docs/04b-ui-design.md` (conditional UI-Design) sits just after architecture.
+ * `docs/00-research` and `docs/05-adrs` are directories; the rest are single files.
  */
 exports.ARTIFACT_PIPELINE = [
+    "docs/00-research",
     "docs/01-requirements.md",
     "docs/02-scope.md",
     "docs/03-domain-model.md",
     "docs/04-architecture.md",
+    "docs/04b-ui-design.md",
     "docs/05-adrs",
     "docs/06-technical-design.md",
     "docs/07-contracts.md",

@@ -8,6 +8,8 @@ import { readLedger } from "../core/ledger";
 import { artifactIntegrity, sliceProgress, reviseEscalations } from "../core/health";
 import { computeBreakdown } from "../core/coverage";
 import { readVerifyReport } from "../core/verify";
+import { staleLeases } from "../core/leases";
+import { validateDeps, hasDepIssues } from "../core/wave";
 
 /**
  * `th doctor` — self-diagnostic + run-health audit. Reports environment and
@@ -148,6 +150,28 @@ export function runDoctor(paths: ProjectPaths): CommandResult {
         status: unfinished > 0 ? "warn" : "ok",
         detail: `${prog.done} done / ${prog.blocked} blocked / ${prog.inProgress} in-progress / ${prog.pending} pending (of ${prog.total})`,
       });
+
+      // Dependency graph: a cycle or dangling ref deadlocks `th build next-wave`.
+      const deps = validateDeps(s.slices);
+      if (hasDepIssues(deps)) {
+        const parts = [
+          ...deps.cycles.map((c) => `cycle ${c.join("→")}`),
+          ...deps.dangling.map((d) => `${d.slice}→unknown ${d.missing.join(",")}`),
+        ];
+        checks.push({ name: "slice deps", status: "warn", detail: `unsatisfiable depends_on — will stall next-wave: ${parts.join("; ")}` });
+      } else {
+        checks.push({ name: "slice deps", status: "ok", detail: "depends_on graph is acyclic with no dangling refs" });
+      }
+
+      // Stale component leases: a lease whose owning slice has settled/vanished.
+      const stale = staleLeases(paths, s.slices);
+      if (stale.length > 0) {
+        checks.push({
+          name: "build leases",
+          status: "warn",
+          detail: `${stale.length} stale lease(s) (owning slice done/blocked/missing) — \`th build release <ID>\`: ${stale.map((l) => l.slice).join(", ")}`,
+        });
+      }
     }
 
     // Coverage status (best-effort; never a gate here).

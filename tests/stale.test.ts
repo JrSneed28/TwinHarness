@@ -184,7 +184,11 @@ describe("REQ-STALE-007: --artifact mode looks up by file key (§18)", () => {
 
 describe("REQ-STALE-006: downstreamOf is the strict pipeline suffix (§18)", () => {
   it("returns everything strictly after a file in ARTIFACT_PIPELINE", () => {
-    expect(downstreamOf("docs/01-requirements.md")).toEqual(ARTIFACT_PIPELINE.slice(1));
+    // docs/00-research is the most-upstream artifact → everything else is downstream.
+    expect(downstreamOf("docs/00-research")).toEqual(ARTIFACT_PIPELINE.slice(1));
+    expect(downstreamOf("docs/01-requirements.md")).toEqual(ARTIFACT_PIPELINE.slice(2));
+    // docs/04b-ui-design.md sits between architecture and the ADR directory.
+    expect(downstreamOf("docs/04-architecture.md").slice(0, 2)).toEqual(["docs/04b-ui-design.md", "docs/05-adrs"]);
     // Correct T3 stage order: Contracts → Security (08a) → Failure Modes (08b) → Test Strategy (08).
     expect(downstreamOf("docs/07-contracts.md")).toEqual([
       "docs/08a-security-threat-model.md",
@@ -198,6 +202,21 @@ describe("REQ-STALE-006: downstreamOf is the strict pipeline suffix (§18)", () 
   it("the last artifact has no downstream, and an unknown file has none", () => {
     expect(downstreamOf("docs/10-verification-report.md")).toEqual([]);
     expect(downstreamOf("docs/does-not-exist.md")).toEqual([]);
+  });
+
+  it("REQ-STALE-007: a research-directory change cascades to downstream design docs", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/00-research/db-options.md", "Findings for REQ-001.\n");
+    writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
+    writeFile(tp, "docs/04-architecture.md", "arch.\n");
+    runArtifactRegister(tp.paths, "docs/00-research", 1);
+    runArtifactRegister(tp.paths, "docs/01-requirements.md", 1);
+    runArtifactRegister(tp.paths, "docs/04-architecture.md", 1);
+
+    const res = runStale(tp.paths, undefined, "docs/00-research");
+    expect(res.ok).toBe(true);
+    expect(res.data?.stale).toEqual(["docs/01-requirements.md", "docs/04-architecture.md"]);
   });
 
   it("the recorded hash from a real shortHash round-trips against the file content", () => {
