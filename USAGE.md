@@ -484,6 +484,48 @@ component sets → same wave (safe to run Builders concurrently), shared compone
 (serialized). By default only unfinished slices are scheduled. `th build plan` does NOT read the
 raw plan file — always run `th slices sync` first.
 
+### Live build coordination — parallel Builders without collisions
+
+```
+th build next-wave               Slices dispatchable in parallel right now (live)
+th build claim <SLICE-ID>        Take a live component lease (refuses an overlapping claim)
+th build release <SLICE-ID>      Release the slice's lease
+th build leases                  List active component leases
+```
+
+`th build plan` schedules from the *static* plan; these commands coordinate the *live* build. The
+flow for each wave:
+
+1. `th build next-wave` → the slices ready now: status `pending`, every `depends_on` slice `done`,
+   and components free of in-progress slices, active leases, and each other. Held slices are listed
+   with the reason (`dependency` or `component-conflict`).
+2. For each dispatched slice: `th slice set-status <ID> in-progress`, then `th build claim <ID>`,
+   then spawn its Builder. `claim` is the **collision guard** — it refuses (exit 1) if any of the
+   slice's components are already leased to a different slice, even when the static plan thought them
+   disjoint (drift can grow a component set mid-build). Claims serialize under the state lock.
+3. On Critic PASS: `th slice set-status <ID> done` and `th build release <ID>`, then re-run
+   `th build next-wave`. On failure: set the slice `blocked`, release, and engage the Debugger.
+
+Slices may declare `depends_on` (parsed by `th slices sync` from a `Depends on: SLICE-1, SLICE-2`
+line) so a feature slice waits for the walking skeleton even when their components are disjoint. One
+coordinator (the Orchestrator) drives N Builders — there is no second controller to collide with.
+
+### Debug — evidence-first defect tracing (the Debugger agent)
+
+```
+th debug pack [--slice <ID> | --req <REQ-ID>]   Assemble a read-only failure-evidence bundle
+th debug log add --ref "REQ-007 / SLICE-2" --symptom "…" [--evidence "…"] [--root-cause "…"] [--status open|resolved]
+th debug log list                                List evidence entries + open count
+```
+
+`th debug pack` gives the Debugger facts to start from: the failing `th verify run` commands +
+output tails, the target slice's components (or a REQ-ID's code/test anchors), recent drift, and any
+open findings. `th debug log` is the append-only evidence ledger (`debug-log.md`, mirroring
+`drift-log.md`) — each entry anchors a symptom/evidence/root-cause to a REQ-ID/slice. A root cause
+that contradicts a requirement is opened as **blocking** drift through `th drift add --layer
+requirement` so the stop-gate sees it. The Debugger proposes the minimal fix; the Builder applies it;
+tests and the human certify correctness (§11).
+
 ### Verify — run the project's own tests/checks
 
 ```
@@ -675,7 +717,7 @@ process.
 ```
 .claude-plugin/   plugin manifest + marketplace.json (installation wiring)
 .github/          CI workflow (ci.yml — typecheck, build, dist-sync, test on every push/PR)
-agents/           7 agent prompt files
+agents/           9 agent prompt files
 commands/         4 Claude Code command files (th-run, th-status, th-drift, th-escalate)
 dist/             compiled CLI — committed on purpose; no build step at install time
 hooks/            Stop hook wiring (hooks.json → th hook stop-gate)
@@ -717,7 +759,7 @@ Three invariants are enforced by `tests/plugin-manifest.test.ts` — do not figh
 - **Components never call a bare `th`.** Every skill/command/agent resolves the CLI via
   `${CLAUDE_PLUGIN_ROOT}/dist/cli.js` (substituted by Claude Code at load time), because installed
   users don't have `th` on PATH.
-- **7 agents, 4 commands, 1 skill.** The manifest test verifies these counts automatically via
+- **9 agents, 4 commands, 1 skill.** The manifest test verifies these counts automatically via
   `readdirSync` — adding or removing agents will surface immediately.
 - **Version sync.** `plugin.json` version must equal `package.json` version.
 

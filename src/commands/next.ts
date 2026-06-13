@@ -6,6 +6,7 @@ import { readState } from "../core/state-store";
 import { stageContract, nextStageAfter } from "../core/stages";
 import { artifactIntegrity, sliceProgress, reviseEscalations } from "../core/health";
 import { computeBreakdown } from "../core/coverage";
+import { readVerifyReport } from "../core/verify";
 
 /**
  * `th next` — the next-action ORACLE (audit F7 — the playbook can fall out of the
@@ -31,6 +32,10 @@ export type NextKind =
   | "produce-artifact"
   | "register-artifact"
   | "fix-coverage"
+  | "investigate-failure"
+  | "dispatch-wave"
+  | "await-builders"
+  | "sync-slices"
   | "finish-slices"
   | "human-signoff"
   | "advance-stage"
@@ -72,6 +77,17 @@ export function runNext(paths: ProjectPaths): CommandResult {
       kind: "escalate-revise",
       action: `Revise loop at cap — escalate to the human: ${escalations.map((e) => `${e.mode} (${e.count}/${e.cap})`).join(", ")}.`,
       data: { escalations },
+    });
+  }
+
+  // 2b. A failing test suite is a defect owed to the Debugger before advancing.
+  const verifyReport = readVerifyReport(paths);
+  if (verifyReport && !verifyReport.ok) {
+    const failed = verifyReport.results.filter((x) => !x.ok).length;
+    return emit({
+      kind: "investigate-failure",
+      action: `Test suite failing (${failed} command(s)) — assemble evidence with \`th debug pack\` and engage the Debugger before advancing.`,
+      data: { failed },
     });
   }
 
@@ -160,6 +176,32 @@ export function runNext(paths: ProjectPaths): CommandResult {
       kind: "human-signoff",
       action: "Coherence is gated and coverage is clean — present `th trace render` + the verification report for the human correctness sign-off (§11).",
     });
+  }
+
+  // 7b. Implementation: dispatch build waves, await in-flight Builders, then advance.
+  if (current === "implementation") {
+    const prog = sliceProgress(s);
+    if (prog.total === 0) {
+      return emit({
+        kind: "sync-slices",
+        action: "Implementation has no slices — run `th slices sync` to populate them from the implementation plan, then `th build next-wave`.",
+      });
+    }
+    if (prog.pending > 0) {
+      return emit({
+        kind: "dispatch-wave",
+        action: "Dispatch the next parallel build wave — `th build next-wave` lists the ready slices; set each `in-progress` and `th build claim <ID>` before spawning its Builder.",
+        data: { pending: prog.pending, inProgress: prog.inProgress },
+      });
+    }
+    if (prog.inProgress > 0) {
+      return emit({
+        kind: "await-builders",
+        action: `${prog.inProgress} Builder(s) in flight — on each Critic PASS set the slice \`done\` and \`th build release <ID>\`, then re-check \`th build next-wave\`.`,
+        data: { inProgress: prog.inProgress },
+      });
+    }
+    // All slices settled (done/blocked) → leave the implementation stage.
   }
 
   // 8. Otherwise: advance to the next engaged stage for this tier.

@@ -41,6 +41,13 @@ export interface SliceState {
   status: SliceStatus;
   /** Components touched end-to-end — used for parallel-build serialization (§16). */
   components: string[];
+  /**
+   * Slice IDs this slice depends on (must reach `done` before it can build).
+   * Optional: absent ⇒ no explicit dependencies (scheduling falls back to pure
+   * component-disjointness, §16). Omitted from serialization when absent so
+   * existing slices hash byte-identically.
+   */
+  depends_on?: string[];
 }
 
 /** Valid values for the optional write-gate field (design doc §State schema change). */
@@ -203,6 +210,9 @@ export function validateState(value: unknown): ValidationResult {
       }
       if (!Array.isArray(s.components) || s.components.some((c: unknown) => typeof c !== "string")) {
         issues.push({ path: `slices[${i}].components`, message: "must be an array of strings" });
+      }
+      if (s.depends_on !== undefined && (!Array.isArray(s.depends_on) || s.depends_on.some((d: unknown) => typeof d !== "string"))) {
+        issues.push({ path: `slices[${i}].depends_on`, message: "must be an array of strings or absent" });
       }
     });
   }

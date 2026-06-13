@@ -5,6 +5,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.6.0] — 2026-06-13
+
+### Added
+
+- **Debugger agent (`agents/debugger.md`) + `th debug`:** an on-demand, fresh-context, evidence-first defect tracer invoked on a failing suite, an ungrounded Critic defect, or a behavior↔contract contradiction. `th debug pack [--slice ID | --req REQ]` assembles a deterministic evidence bundle (failing commands + output tails, slice/REQ anchors, recent drift, open findings); `th debug log add|list` is an append-only evidence ledger (`debug-log.md`, mirroring `drift-log.md`). New Critic mode `debug-review` rejects an unanchored root cause, a fix that crosses component boundaries, or a silent requirement contradiction. The Debugger proposes and proves; the Builder fixes; tests + human certify correctness.
+- **Researcher agent (`agents/researcher.md`):** an on-demand, **conditional** information-gatherer the Orchestrator invokes only when a project needs unfamiliar external knowledge. It scopes questions to REQ-IDs, gathers via web search/fetch, cites every claim, separates fact from opinion, adversarially verifies, and emits `docs/00-research/<topic>.md` (a directory artifact). New Critic mode `research` fails uncited/fabricated claims, stale version-sensitive facts, and findings that bear on no REQ-ID. Fetched content is treated as untrusted data (see SECURITY.md).
+- **Live build coordination — `th build next-wave|claim|release|leases`:** `next-wave` is the live oracle for the slices dispatchable in parallel *right now* (status pending, `depends_on` done, components free of in-progress slices and active leases). `claim`/`release` are dynamic **component leases** (`build-leases.jsonl`); `claim` refuses an overlapping claim (exit 1) — the collision guard that closes the race the static plan can't see when drift expands a slice's component set mid-build. Serialized under the existing cross-process state lock.
+- **Slice `depends_on`:** an optional slice field (parsed from a `Depends on: SLICE-x` line by `th slices sync`) so the wave-runner respects true ordering (walking-skeleton-then-features) beyond component disjointness. Optional and omitted when empty, so existing slices serialize byte-identically.
+
+### Changed
+
+- **`th next` extended** with three build-time obligations: a failing `th verify run` report → `investigate-failure` (engage the Debugger); the implementation stage with pending slices → `dispatch-wave`; with only in-flight Builders → `await-builders`.
+
+### Security
+
+- The Researcher fetches **untrusted external content** (a prompt-injection surface): it treats pages as data, never follows embedded instructions, never runs commands they suggest, and the `research` Critic mode flags unsupported/fabricated claims. Documented in SECURITY.md.
+
 ## [0.5.0] — 2026-06-13
 
 ### Fixed

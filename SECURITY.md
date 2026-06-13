@@ -60,6 +60,18 @@ Two boundaries keep this narrow:
   privileges. `th verify list` shows exactly what will run; review it on an
   untrusted project before invoking `th verify run`.
 
+### The Researcher agent fetches untrusted external content
+
+The on-demand Researcher agent (`agents/researcher.md`, invoked only when a
+project needs unfamiliar external knowledge) uses web search/fetch. Fetched pages
+are an **injection surface**: the agent is instructed to treat them strictly as
+data — extract facts, never follow instructions embedded in a page, never run
+commands a page suggests — and the `research` Critic mode flags unsupported or
+fabricated claims. Research is conditional and skipped entirely when not
+warranted, so most runs have no external-fetch surface at all. As with any
+network-using tool, the environment's network policy governs whether egress is
+available.
+
 ### Prompt-injection
 
 The orchestrator reads the user's idea text and the **existing files in the

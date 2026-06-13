@@ -47,6 +47,7 @@ const coverage_1 = require("./commands/coverage");
 const verify_1 = require("./commands/verify");
 const next_1 = require("./commands/next");
 const build_1 = require("./commands/build");
+const debug_1 = require("./commands/debug");
 const anchors_1 = require("./commands/anchors");
 const drift_1 = require("./commands/drift");
 const trace_1 = require("./commands/trace");
@@ -82,6 +83,12 @@ Usage:
   th verify clear                   Remove all configured verify commands
   th verify run                     Run every configured verify command; writes a report; exit 1 on failure
   th build plan [--include-done]    Schedule slices into conflict-free build waves (§16: disjoint parallelize, shared serialize)
+  th build next-wave                Live oracle: slices dispatchable in parallel now (deps done, components free)
+  th build claim|release <SLICE-ID> Take/release a live component lease (collision guard for parallel Builders)
+  th build leases                   List the live component leases
+  th debug pack [--slice ID|--req REQ]  Assemble a read-only evidence bundle for a failure (Debugger agent)
+  th debug log add --ref … --symptom … [--evidence …] [--root-cause …] [--status open|resolved]
+  th debug log list                 List debug-log evidence entries + open count
   th anchors scan [--scan-reqs] [--scan-tests] [--scan-code] [--strict]  Map REQ-anchors across docs/tests/src; report orphans
   th trace render                   Render the §17 traceability view from anchors (on demand; never stored)
   th stale --since <hash>           Compute the diff-scoped downstream artifacts made stale by an upstream change (§18)
@@ -115,7 +122,12 @@ Global flags:
   --tests <dir>     (coverage) Tests directory (default tests)
   --scope <file>    (coverage) Scope file for MVP filtering (default docs/02-scope.md)
   --code <dir>      (coverage report) Code directory scanned for implemented (default src)
-  --slice <id>      (context pack) Frame the pack for a specific slice (SLICE-ID)
+  --slice <id>      (context pack, debug pack) Frame the pack for a specific slice (SLICE-ID)
+  --req <REQ-ID>    (debug pack) Frame the pack for a specific REQ-ID
+  --symptom <s>     (debug log add) The observed failure
+  --evidence <s>    (debug log add) Anchored evidence (file:line / captured output)
+  --root-cause <s>  (debug log add) The identified root cause
+  --status <s>      (debug log add) open | resolved (default open)
   --include-done    (build plan) Include slices with status done (default: only unfinished)
   --scan-reqs       (anchors) Scan docs/ for REQ-anchors
   --scan-tests      (anchors) Scan tests/ for REQ-anchors
@@ -145,6 +157,11 @@ function parseArgs(argv) {
     let scope;
     let code;
     let slice;
+    let req;
+    let symptom;
+    let evidence;
+    let rootCause;
+    let status;
     let includeDone = false;
     let scanReqs = false;
     let scanTests = false;
@@ -202,6 +219,26 @@ function parseArgs(argv) {
             slice = argv[++i];
         else if (a.startsWith("--slice="))
             slice = a.slice("--slice=".length);
+        else if (a === "--req")
+            req = argv[++i];
+        else if (a.startsWith("--req="))
+            req = a.slice("--req=".length);
+        else if (a === "--symptom")
+            symptom = argv[++i];
+        else if (a.startsWith("--symptom="))
+            symptom = a.slice("--symptom=".length);
+        else if (a === "--evidence")
+            evidence = argv[++i];
+        else if (a.startsWith("--evidence="))
+            evidence = a.slice("--evidence=".length);
+        else if (a === "--root-cause")
+            rootCause = argv[++i];
+        else if (a.startsWith("--root-cause="))
+            rootCause = a.slice("--root-cause=".length);
+        else if (a === "--status")
+            status = argv[++i];
+        else if (a.startsWith("--status="))
+            status = a.slice("--status=".length);
         else if (a === "--include-done")
             includeDone = true;
         else if (a === "--scan-reqs")
@@ -265,6 +302,11 @@ function parseArgs(argv) {
             scope,
             code,
             slice,
+            req,
+            symptom,
+            evidence,
+            rootCause,
+            status,
             includeDone,
             scanReqs,
             scanTests,
@@ -428,8 +470,38 @@ function dispatch(parsed) {
             switch (sub) {
                 case "plan":
                     return (0, build_1.runBuildPlan)(paths, { includeDone: parsed.flags.includeDone });
+                case "next-wave":
+                    return (0, build_1.runBuildNextWave)(paths);
+                case "claim":
+                    return (0, build_1.runBuildClaim)(paths, rest[0]);
+                case "release":
+                    return (0, build_1.runBuildRelease)(paths, rest[0]);
+                case "leases":
+                    return (0, build_1.runBuildLeases)(paths);
                 default:
                     return (0, output_1.failure)({ human: `unknown 'build' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "debug":
+            switch (sub) {
+                case "pack":
+                    return (0, debug_1.runDebugPack)(paths, { slice: parsed.flags.slice, req: parsed.flags.req });
+                case "log":
+                    switch (rest[0]) {
+                        case "add":
+                            return (0, debug_1.runDebugLogAdd)(paths, {
+                                ref: parsed.flags.ref,
+                                symptom: parsed.flags.symptom,
+                                evidence: parsed.flags.evidence,
+                                rootCause: parsed.flags.rootCause,
+                                status: parsed.flags.status,
+                            });
+                        case "list":
+                            return (0, debug_1.runDebugLogList)(paths);
+                        default:
+                            return (0, output_1.failure)({ human: `unknown 'debug log' subcommand: ${rest[0] ?? "(none)"}\n\n${HELP}` });
+                    }
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'debug' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
         case "anchors":
             switch (sub) {

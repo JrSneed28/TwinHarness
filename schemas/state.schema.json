@@ -61,7 +61,12 @@
         "properties": {
           "id": { "type": "string", "minLength": 1 },
           "status": { "type": "string", "enum": ["pending", "in-progress", "done", "blocked"] },
-          "components": { "type": "array", "items": { "type": "string" } }
+          "components": { "type": "array", "items": { "type": "string" } },
+          "depends_on": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Slice IDs that must reach done before this slice can build. Absent = no explicit dependencies."
+          }
         }
       }
     },

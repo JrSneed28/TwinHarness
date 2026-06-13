@@ -41,6 +41,7 @@ const state_store_1 = require("../core/state-store");
 const stages_1 = require("../core/stages");
 const health_1 = require("../core/health");
 const coverage_1 = require("../core/coverage");
+const verify_1 = require("../core/verify");
 function runNext(paths) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists) {
@@ -69,6 +70,16 @@ function runNext(paths) {
             kind: "escalate-revise",
             action: `Revise loop at cap — escalate to the human: ${escalations.map((e) => `${e.mode} (${e.count}/${e.cap})`).join(", ")}.`,
             data: { escalations },
+        });
+    }
+    // 2b. A failing test suite is a defect owed to the Debugger before advancing.
+    const verifyReport = (0, verify_1.readVerifyReport)(paths);
+    if (verifyReport && !verifyReport.ok) {
+        const failed = verifyReport.results.filter((x) => !x.ok).length;
+        return emit({
+            kind: "investigate-failure",
+            action: `Test suite failing (${failed} command(s)) — assemble evidence with \`th debug pack\` and engage the Debugger before advancing.`,
+            data: { failed },
         });
     }
     // 3. Silent artifact drift: a governed doc changed on disk without re-registration.
@@ -149,6 +160,31 @@ function runNext(paths) {
             kind: "human-signoff",
             action: "Coherence is gated and coverage is clean — present `th trace render` + the verification report for the human correctness sign-off (§11).",
         });
+    }
+    // 7b. Implementation: dispatch build waves, await in-flight Builders, then advance.
+    if (current === "implementation") {
+        const prog = (0, health_1.sliceProgress)(s);
+        if (prog.total === 0) {
+            return emit({
+                kind: "sync-slices",
+                action: "Implementation has no slices — run `th slices sync` to populate them from the implementation plan, then `th build next-wave`.",
+            });
+        }
+        if (prog.pending > 0) {
+            return emit({
+                kind: "dispatch-wave",
+                action: "Dispatch the next parallel build wave — `th build next-wave` lists the ready slices; set each `in-progress` and `th build claim <ID>` before spawning its Builder.",
+                data: { pending: prog.pending, inProgress: prog.inProgress },
+            });
+        }
+        if (prog.inProgress > 0) {
+            return emit({
+                kind: "await-builders",
+                action: `${prog.inProgress} Builder(s) in flight — on each Critic PASS set the slice \`done\` and \`th build release <ID>\`, then re-check \`th build next-wave\`.`,
+                data: { inProgress: prog.inProgress },
+            });
+        }
+        // All slices settled (done/blocked) → leave the implementation stage.
     }
     // 8. Otherwise: advance to the next engaged stage for this tier.
     const next = (0, stages_1.nextStageAfter)(current, s.tier);

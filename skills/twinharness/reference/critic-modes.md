@@ -750,3 +750,64 @@ Grounded defect examples for this mode:
 >  term as 'Order' — vocabulary mismatch that will leak into code naming"
 > "Design Tokens section lists 'Primary color: a calming blue' with no hex value — not a
 >  concrete design token; a Builder cannot implement 'calming blue'"
+
+---
+
+## `research` — IMPLEMENTED — checks `docs/00-research/<topic>.md`
+
+The Researcher agent is conditional and external-facing; its single biggest failure mode is a
+confident, uncited (or fabricated) claim. Review for grounded evidence, not coverage.
+
+**What to check for research artifacts:**
+
+- **Every claim is cited to a real, reachable source** with an access date. A material claim with no
+  citation is a grounded defect. A citation to a URL that does not support the claim is worse — flag
+  it.
+- **No fabricated or unverifiable sources.** A hallucinated citation is the worst failure for this
+  agent; treat any source you cannot reconcile with the claim as a defect.
+- **Opinion is separated from established fact.** A blog author's preference presented as a settled
+  fact is a defect; it must be labelled opinion.
+- **Version/recency is noted on version-sensitive claims.** A benchmark or API detail for a since-
+  rewritten major version, presented as current, is a grounded defect.
+- **Each finding bears on a named REQ-ID.** Research that does not change any design decision is
+  scope creep — flag findings with no REQ-ID anchor.
+- **Implications are stated, not decisions made.** The artifact may say "X favors approach A on
+  REQ-007"; it may not say "we will use A" — that is the design stage's and human's call.
+
+Example grounded defects:
+
+> "Findings §2 asserts 'library X is faster than Y' with no source — uncited performance claim"
+> "Sources table lists a URL that 404s / does not mention the benchmarked operation — unverifiable"
+> "§3 states the rate limit as 100 req/s citing a 2019 post; the current v3 API docs say 50 — stale,
+>  recency not noted"
+
+---
+
+## `debug-review` — IMPLEMENTED — checks the Debugger's Evidence Report + `debug-log.md`
+
+The Debugger must PROVE a root cause, not narrate a plausible story. Review the evidence, not the
+prose.
+
+**What to check for debug findings:**
+
+- **Root cause (not symptom) anchored to a `file:line`, captured output, or `th` state fact.** "The
+  export looks wrong" is a symptom; "src/export.ts:42 joins rows without a terminating newline" is a
+  rooted cause. An unanchored root cause is a grounded defect.
+- **Reproduction is a real command**, not a description. A defect that cannot be reproduced is a
+  hypothesis — it must be labelled as such, with a discriminating experiment.
+- **Hypotheses carry discriminating experiments.** A ranked hypothesis with no experiment that would
+  confirm or kill it is hand-waving.
+- **The fix maps to the owning slice/REQ and stays in its component boundary** (§16). A proposed fix
+  spanning unrelated components is a redesign, not a debug fix — flag it.
+- **A requirement contradiction is opened as BLOCKING drift.** If the root cause contradicts a
+  requirement, the report must record a `th drift add --layer requirement …` — not silently propose a
+  behavior change.
+
+Example grounded defects:
+
+> "Report concludes 'race condition in the cache' with no anchored evidence and no failing repro —
+>  unproven root cause"
+> "Proposed fix edits `auth/` and `billing/` to fix a CSV export defect — crosses component
+>  boundaries; this is a redesign, not the minimal fix"
+> "Root cause contradicts REQ-007 (it changes the documented export format) but no requirement-layer
+>  drift was opened — silent requirement contradiction"

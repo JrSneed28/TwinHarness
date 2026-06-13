@@ -15,6 +15,7 @@ import { runDriftAdd } from "../src/commands/drift";
 import { runReviseBump } from "../src/commands/revise";
 import { runArtifactRegister } from "../src/commands/artifact";
 import { runSlicesSync } from "../src/commands/slices";
+import { runVerifyAdd, runVerifyRun } from "../src/commands/verify";
 import { runNext } from "../src/commands/next";
 
 let tp: TempProject | undefined;
@@ -113,6 +114,37 @@ describe("REQ-NEXT-006: re-register a silently changed artifact before advancing
     // Edit after registration → drift.
     writeFile(tp, "docs/01-requirements.md", "REQ-001 changed.\n");
     expect(runNext(tp.paths).data?.kind).toBe("re-register-artifact");
+  });
+});
+
+describe("REQ-NEXT-008: a failing suite routes to the Debugger before advancing", () => {
+  it("verify report failing → kind investigate-failure", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runStateSet(tp.paths, "tier", "T2");
+    runVerifyAdd(tp.paths, "false");
+    runVerifyRun(tp.paths);
+    expect(runNext(tp.paths).data?.kind).toBe("investigate-failure");
+  });
+});
+
+describe("REQ-NEXT-009: implementation stage dispatches build waves", () => {
+  it("pending slices at implementation → kind dispatch-wave", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runStateSet(tp.paths, "tier", "T2");
+    runStateSet(tp.paths, "current_stage", "implementation");
+    runStateSet(tp.paths, "slices", JSON.stringify([{ id: "SLICE-1", status: "pending", components: ["api"] }]));
+    expect(runNext(tp.paths).data?.kind).toBe("dispatch-wave");
+  });
+
+  it("only in-progress slices remain → kind await-builders", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runStateSet(tp.paths, "tier", "T2");
+    runStateSet(tp.paths, "current_stage", "implementation");
+    runStateSet(tp.paths, "slices", JSON.stringify([{ id: "SLICE-1", status: "in-progress", components: ["api"] }]));
+    expect(runNext(tp.paths).data?.kind).toBe("await-builders");
   });
 });
 
