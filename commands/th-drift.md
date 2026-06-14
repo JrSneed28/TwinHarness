@@ -1,10 +1,17 @@
 ---
 description: Review and ratify the TwinHarness drift log — async derived-layer changes and open blocking escalations.
+argument-hint: [DRIFT-NNN to ratify, optional]
+allowed-tools: Bash(node:*)
 ---
 
 Review the TwinHarness drift log (spec §10) for this project.
 
-Run (the `th` CLI ships inside this plugin — `th <args>` below means this invocation):
+Live drift log (captured before this prompt runs):
+
+!`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" drift list`
+
+For the machine-readable form (the `th` CLI ships inside this plugin — `th <args>` below means this
+invocation):
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" drift list --json

@@ -3,6 +3,7 @@ import { type CommandResult, success, failure } from "../core/output";
 import { readState, writeState, withStateLock } from "../core/state-store";
 import { type ValidationIssue, validateState } from "../core/state-schema";
 import { structuredLog } from "../core/log";
+import { NOT_INIT, formatIssues } from "../core/guards";
 
 /**
  * `th revise` — the mechanical revise-loop cap (spec §18 "Loop termination").
@@ -16,15 +17,6 @@ import { structuredLog } from "../core/log";
 
 /** Default Agent↔Critic revise-loop cap (spec §18). */
 export const DEFAULT_REVISE_CAP = 3;
-
-function formatIssues(issues: ValidationIssue[] | undefined): string {
-  return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
-
-const NOT_INIT = failure({
-  human: "No state.json found. Run `th init` first.",
-  data: { error: "not_initialized" },
-});
 
 function invalidState(issues: ValidationIssue[] | undefined): CommandResult {
   return failure({

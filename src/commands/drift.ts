@@ -2,7 +2,6 @@ import * as fs from "node:fs";
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState, writeState, withStateLock } from "../core/state-store";
-import { type ValidationIssue } from "../core/state-schema";
 import {
   type DriftEntry,
   formatDriftEntry,
@@ -11,6 +10,7 @@ import {
 } from "../core/drift-log";
 import { structuredLog } from "../core/log";
 import { appendLedger } from "../core/ledger";
+import { NOT_INIT, formatIssues } from "../core/guards";
 
 /**
  * `th drift` — append-only access to the bidirectional drift log (spec §10).
@@ -41,15 +41,6 @@ Action    : ...
 Escalation: ...
 \`\`\`
 `;
-
-function formatIssues(issues: ValidationIssue[] | undefined): string {
-  return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
-
-const NOT_INIT = failure({
-  human: "No state.json found. Run `th init` first.",
-  data: { error: "not_initialized" },
-});
 
 export interface DriftAddOptions {
   layer?: string;

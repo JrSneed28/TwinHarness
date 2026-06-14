@@ -1,8 +1,14 @@
 ---
 description: Surface TwinHarness blocking escalations that need a human decision before work can complete.
+argument-hint: (no arguments)
+allowed-tools: Bash(node:*)
 ---
 
 Surface everything currently **blocking** completion of this TwinHarness run (spec §8, §10, §18).
+
+Next mechanical obligation (the run's highest-priority owed action, captured before this prompt runs):
+
+!`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" next`
 
 Gather state and drift (the `th` CLI ships inside this plugin — `th <args>` below means this
 invocation):

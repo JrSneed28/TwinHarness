@@ -11,13 +11,28 @@ import { runArtifactRegister, runArtifactList } from "./commands/artifact";
 import { runCoverageCheck, runCoverageReport } from "./commands/coverage";
 import { runVerifyRun, runVerifyAdd, runVerifyList, runVerifyClear } from "./commands/verify";
 import { runNext } from "./commands/next";
-import { runBuildPlan, runBuildNextWave, runBuildClaim, runBuildRelease, runBuildLeases } from "./commands/build";
+import {
+  runBuildPlan,
+  runBuildNextWave,
+  runBuildClaim,
+  runBuildRelease,
+  runBuildLeases,
+  runBuildSubClaim,
+  runBuildSubRelease,
+} from "./commands/build";
 import { runDebugPack, runDebugLogAdd, runDebugLogList } from "./commands/debug";
 import { runAnchorsScan } from "./commands/anchors";
 import { runDriftAdd, runDriftList, runDriftResolve } from "./commands/drift";
 import { runTraceRender } from "./commands/trace";
 import { runStale } from "./commands/stale";
-import { runHookStopGate, runHookPretoolGate, type StopHookInput, type PreToolHookInput } from "./commands/hook";
+import {
+  runHookStopGate,
+  runHookPretoolGate,
+  runHookSubagentStop,
+  type StopHookInput,
+  type PreToolHookInput,
+  type SubagentStopHookInput,
+} from "./commands/hook";
 import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
 import { runMigrate } from "./commands/migrate";
 import { runDoctor } from "./commands/doctor";
@@ -27,6 +42,7 @@ import { runManifestExport } from "./commands/manifest";
 import { runPreview } from "./commands/preview";
 import { runScorecard } from "./commands/scorecard";
 import { runTelemetrySet, runTelemetryStatus } from "./commands/telemetry";
+import { runRoute } from "./commands/route";
 
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
@@ -54,7 +70,10 @@ Usage:
   th build plan [--include-done]    Schedule slices into conflict-free build waves (§16: disjoint parallelize, shared serialize)
   th build next-wave                Live oracle: slices dispatchable in parallel now (deps done, components free)
   th build claim|release <SLICE-ID> Take/release a live component lease (collision guard for parallel Builders)
-  th build leases                   List the live component leases
+  th build sub-claim <PARENT-SLICE> --components <c1,c2,...>
+                                    Open a SUB-lease for a scoped sub-Builder (subset of an in-progress parent's components)
+  th build sub-release <SUB-ID>     Release a sub-lease (parent settling already makes it stale)
+  th build leases                   List the live component leases (and sub-leases)
   th debug pack [--slice ID|--req REQ]  Assemble a read-only evidence bundle for a failure (Debugger agent)
   th debug log add --ref … --symptom … [--evidence …] [--root-cause …] [--status open|resolved]
   th debug log list                 List debug-log evidence entries + open count
@@ -71,11 +90,14 @@ Usage:
   th drift resolve <DRIFT-NNN>      Append a resolution note; decrement blocking counter only for requirement-layer entries
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
   th hook pretool-gate              Emit a Claude Code PreToolUse write-gate decision
+  th hook subagent-stop             Emit a Claude Code SubagentStop-hook decision (state-validity guard)
   th migrate                        Upgrade state.json to the current schema version
   th doctor                         Self-diagnostic + run-health audit (env, state, artifacts, coverage, slices, revise loops)
-  th next                           The next mechanical obligation the run owes (next-action oracle)
+  th next [--explain]               The next mechanical obligation the run owes (next-action oracle); --explain adds a WHY
   th preview [--tier T<n>]          Pre-run view: engaged stages, human gates, and Critic modes for a tier
   th scorecard                      Post-run one-screen summary (tier/coverage/slices/suite/drift/revise)
+  th route [--agent A] [--mode M] [--tier T] [--component-blast] [--summarization]
+                                    Advisory model+effort for an agent spawn (computes; the Orchestrator applies)
   th telemetry on|off|status        Toggle/report opt-in, LOCAL-ONLY run telemetry (never sent off-machine)
   th context estimate               Approximate the prompt-surface token cost (flags oversized files)
   th context pack [--slice <ID>]    Assemble the §9 handoff bundle (artifact Summary blocks + slice framing)
@@ -96,6 +118,7 @@ Global flags:
   --code <dir>      (coverage report) Code directory scanned for implemented (default src)
   --tier <T0-T3>    (preview) Tier whose engaged pipeline to preview (default: state.tier, else T2)
   --slice <id>      (context pack, debug pack) Frame the pack for a specific slice (SLICE-ID)
+  --components <l>  (build sub-claim) Comma-separated component subset for the sub-lease
   --req <REQ-ID>    (debug pack) Frame the pack for a specific REQ-ID
   --symptom <s>     (debug log add) The observed failure
   --evidence <s>    (debug log add) Anchored evidence (file:line / captured output)
@@ -116,15 +139,25 @@ Global flags:
   --source <s>      (drift add) Who logged the entry (default: Builder)
   --dry-run         (slices sync) Compute without writing state
   --remove-missing  (slices sync) Remove slices absent from the plan
+  --explain         (next) Include a WHY string: why this obligation is the highest-priority one
   --force           (init) Reset existing state.json
   --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)`;
 
-interface ParsedArgs {
+export interface ParsedArgs {
   positionals: string[];
+  /** `--flags` the parser does not recognize (typos); `main()` rejects them. */
+  unknownFlags: string[];
+  /** Flags supplied without a required (or non-numeric) value; `main()` rejects them. */
+  errors: string[];
   flags: {
     json: boolean;
     force: boolean;
     cwd: string;
+    agent?: string;
+    mode?: string;
+    brief?: string;
+    componentBlast: boolean;
+    summarization: boolean;
     cap?: number;
     version?: number;
     reqs?: string;
@@ -134,6 +167,7 @@ interface ParsedArgs {
     code?: string;
     tier?: string;
     slice?: string;
+    components?: string;
     req?: string;
     symptom?: string;
     evidence?: string;
@@ -155,142 +189,129 @@ interface ParsedArgs {
     dryRun: boolean;
     removeMissing: boolean;
     brownfield: boolean;
+    explain: boolean;
   };
 }
 
-function parseArgs(argv: string[]): ParsedArgs {
+type FlagField = keyof ParsedArgs["flags"];
+
+/** Boolean flags (presence = true). */
+const BOOLEAN_FLAGS: Record<string, FlagField> = {
+  "--json": "json",
+  "--force": "force",
+  "--include-done": "includeDone",
+  "--scan-reqs": "scanReqs",
+  "--scan-tests": "scanTests",
+  "--scan-code": "scanCode",
+  "--strict": "strict",
+  "--dry-run": "dryRun",
+  "--remove-missing": "removeMissing",
+  "--brownfield": "brownfield",
+  "--component-blast": "componentBlast",
+  "--summarization": "summarization",
+  "--explain": "explain",
+};
+
+/** Flags that consume a string value (`--flag v` or `--flag=v`). */
+const STRING_FLAGS: Record<string, FlagField> = {
+  "--cwd": "cwd",
+  "--reqs": "reqs",
+  "--plan": "plan",
+  "--tests": "tests",
+  "--scope": "scope",
+  "--code": "code",
+  "--tier": "tier",
+  "--slice": "slice",
+  "--components": "components",
+  "--req": "req",
+  "--symptom": "symptom",
+  "--evidence": "evidence",
+  "--root-cause": "rootCause",
+  "--status": "status",
+  "--since": "since",
+  "--artifact": "artifact",
+  "--layer": "layer",
+  "--ref": "ref",
+  "--discovery": "discovery",
+  "--action": "action",
+  "--escalation": "escalation",
+  "--source": "source",
+  "--agent": "agent",
+  "--mode": "mode",
+  "--brief": "brief",
+};
+
+/** Flags that consume a numeric value. */
+const NUMBER_FLAGS: Record<string, FlagField> = {
+  "--cap": "cap",
+  "--version": "version",
+};
+
+/**
+ * Table-driven flag parser. Unknown `--flags` and value-less flags are recorded
+ * (rather than silently swallowed as positionals / coerced to NaN — the old
+ * behavior); `main()` rejects them with a clear error. A bare `--` ends flag
+ * parsing so a positional value may legitimately begin with `--`.
+ */
+export function parseArgs(argv: string[]): ParsedArgs {
+  const flags: ParsedArgs["flags"] = {
+    json: false,
+    force: false,
+    cwd: process.cwd(),
+    includeDone: false,
+    scanReqs: false,
+    scanTests: false,
+    scanCode: false,
+    strict: false,
+    dryRun: false,
+    removeMissing: false,
+    brownfield: false,
+    componentBlast: false,
+    summarization: false,
+    explain: false,
+  };
   const positionals: string[] = [];
-  let json = false;
-  let force = false;
-  let cwd = process.cwd();
-  let cap: number | undefined;
-  let version: number | undefined;
-  let reqs: string | undefined;
-  let plan: string | undefined;
-  let tests: string | undefined;
-  let scope: string | undefined;
-  let code: string | undefined;
-  let tier: string | undefined;
-  let slice: string | undefined;
-  let req: string | undefined;
-  let symptom: string | undefined;
-  let evidence: string | undefined;
-  let rootCause: string | undefined;
-  let status: string | undefined;
-  let includeDone = false;
-  let scanReqs = false;
-  let scanTests = false;
-  let scanCode = false;
-  let strict = false;
-  let since: string | undefined;
-  let artifact: string | undefined;
-  let layer: string | undefined;
-  let ref: string | undefined;
-  let discovery: string | undefined;
-  let action: string | undefined;
-  let escalation: string | undefined;
-  let source: string | undefined;
-  let dryRun = false;
-  let removeMissing = false;
-  let brownfield = false;
+  const unknownFlags: string[] = [];
+  const errors: string[] = [];
+  const assign = (field: FlagField, value: string | number | boolean): void => {
+    (flags as Record<string, unknown>)[field] = value;
+  };
+
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
-    if (a === "--json") json = true;
-    else if (a === "--force") force = true;
-    else if (a === "--cwd") cwd = argv[++i] ?? process.cwd();
-    else if (a.startsWith("--cwd=")) cwd = a.slice("--cwd=".length);
-    else if (a === "--cap") cap = Number(argv[++i]);
-    else if (a.startsWith("--cap=")) cap = Number(a.slice("--cap=".length));
-    else if (a === "--version") version = Number(argv[++i]);
-    else if (a.startsWith("--version=")) version = Number(a.slice("--version=".length));
-    else if (a === "--reqs") reqs = argv[++i];
-    else if (a.startsWith("--reqs=")) reqs = a.slice("--reqs=".length);
-    else if (a === "--plan") plan = argv[++i];
-    else if (a.startsWith("--plan=")) plan = a.slice("--plan=".length);
-    else if (a === "--tests") tests = argv[++i];
-    else if (a.startsWith("--tests=")) tests = a.slice("--tests=".length);
-    else if (a === "--scope") scope = argv[++i];
-    else if (a.startsWith("--scope=")) scope = a.slice("--scope=".length);
-    else if (a === "--code") code = argv[++i];
-    else if (a.startsWith("--code=")) code = a.slice("--code=".length);
-    else if (a === "--tier") tier = argv[++i];
-    else if (a.startsWith("--tier=")) tier = a.slice("--tier=".length);
-    else if (a === "--slice") slice = argv[++i];
-    else if (a.startsWith("--slice=")) slice = a.slice("--slice=".length);
-    else if (a === "--req") req = argv[++i];
-    else if (a.startsWith("--req=")) req = a.slice("--req=".length);
-    else if (a === "--symptom") symptom = argv[++i];
-    else if (a.startsWith("--symptom=")) symptom = a.slice("--symptom=".length);
-    else if (a === "--evidence") evidence = argv[++i];
-    else if (a.startsWith("--evidence=")) evidence = a.slice("--evidence=".length);
-    else if (a === "--root-cause") rootCause = argv[++i];
-    else if (a.startsWith("--root-cause=")) rootCause = a.slice("--root-cause=".length);
-    else if (a === "--status") status = argv[++i];
-    else if (a.startsWith("--status=")) status = a.slice("--status=".length);
-    else if (a === "--include-done") includeDone = true;
-    else if (a === "--scan-reqs") scanReqs = true;
-    else if (a === "--scan-tests") scanTests = true;
-    else if (a === "--scan-code") scanCode = true;
-    else if (a === "--strict") strict = true;
-    else if (a === "--since") since = argv[++i];
-    else if (a.startsWith("--since=")) since = a.slice("--since=".length);
-    else if (a === "--artifact") artifact = argv[++i];
-    else if (a.startsWith("--artifact=")) artifact = a.slice("--artifact=".length);
-    else if (a === "--layer") layer = argv[++i];
-    else if (a.startsWith("--layer=")) layer = a.slice("--layer=".length);
-    else if (a === "--ref") ref = argv[++i];
-    else if (a.startsWith("--ref=")) ref = a.slice("--ref=".length);
-    else if (a === "--discovery") discovery = argv[++i];
-    else if (a.startsWith("--discovery=")) discovery = a.slice("--discovery=".length);
-    else if (a === "--action") action = argv[++i];
-    else if (a.startsWith("--action=")) action = a.slice("--action=".length);
-    else if (a === "--escalation") escalation = argv[++i];
-    else if (a.startsWith("--escalation=")) escalation = a.slice("--escalation=".length);
-    else if (a === "--source") source = argv[++i];
-    else if (a.startsWith("--source=")) source = a.slice("--source=".length);
-    else if (a === "--dry-run") dryRun = true;
-    else if (a === "--remove-missing") removeMissing = true;
-    else if (a === "--brownfield") brownfield = true;
-    else positionals.push(a);
+    if (a === "--") {
+      for (let j = i + 1; j < argv.length; j++) positionals.push(argv[j]!);
+      break;
+    }
+    if (!a.startsWith("--")) {
+      positionals.push(a);
+      continue;
+    }
+    const eq = a.indexOf("=");
+    const name = eq >= 0 ? a.slice(0, eq) : a;
+    const inlineVal = eq >= 0 ? a.slice(eq + 1) : undefined;
+
+    if (name in BOOLEAN_FLAGS) {
+      assign(BOOLEAN_FLAGS[name]!, true);
+    } else if (name in STRING_FLAGS) {
+      const val = inlineVal ?? argv[++i];
+      if (val === undefined) errors.push(`flag ${name} requires a value`);
+      else assign(STRING_FLAGS[name]!, val);
+    } else if (name in NUMBER_FLAGS) {
+      const val = inlineVal ?? argv[++i];
+      if (val === undefined) {
+        errors.push(`flag ${name} requires a value`);
+      } else {
+        const n = Number(val);
+        if (!Number.isFinite(n)) errors.push(`flag ${name} requires a number (got "${val}")`);
+        else assign(NUMBER_FLAGS[name]!, n);
+      }
+    } else {
+      unknownFlags.push(name);
+    }
   }
-  return {
-    positionals,
-    flags: {
-      json,
-      force,
-      cwd,
-      cap,
-      version,
-      reqs,
-      plan,
-      tests,
-      scope,
-      code,
-      tier,
-      slice,
-      req,
-      symptom,
-      evidence,
-      rootCause,
-      status,
-      includeDone,
-      scanReqs,
-      scanTests,
-      scanCode,
-      strict,
-      since,
-      artifact,
-      layer,
-      ref,
-      discovery,
-      action,
-      escalation,
-      source,
-      dryRun,
-      removeMissing,
-      brownfield,
-    },
-  };
+
+  return { positionals, unknownFlags, errors, flags };
 }
 
 /**
@@ -339,11 +360,20 @@ function dispatch(parsed: ParsedArgs): CommandResult {
     case "doctor":
       return runDoctor(paths);
     case "next":
-      return runNext(paths);
+      return runNext(paths, { explain: parsed.flags.explain });
     case "preview":
       return runPreview(paths, { tier: parsed.flags.tier });
     case "scorecard":
       return runScorecard(paths, { json: parsed.flags.json });
+    case "route":
+      return runRoute(paths, {
+        agent: parsed.flags.agent,
+        mode: parsed.flags.mode,
+        tier: parsed.flags.tier,
+        brief: parsed.flags.brief,
+        componentBlast: parsed.flags.componentBlast,
+        summarization: parsed.flags.summarization,
+      });
     case "telemetry":
       switch (sub) {
         case "on":
@@ -457,6 +487,15 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           return runBuildClaim(paths, rest[0]);
         case "release":
           return runBuildRelease(paths, rest[0]);
+        case "sub-claim": {
+          const components = (parsed.flags.components ?? "")
+            .split(",")
+            .map((c) => c.trim())
+            .filter(Boolean);
+          return runBuildSubClaim(paths, rest[0], components);
+        }
+        case "sub-release":
+          return runBuildSubRelease(paths, rest[0]);
         case "leases":
           return runBuildLeases(paths);
         default:
@@ -586,6 +625,20 @@ function readHookStdin<T extends object>(): T | undefined {
 function main(): void {
   const parsed = parseArgs(process.argv.slice(2));
 
+  // Reject unknown flags / value-less flags up front (a typo'd flag must not be
+  // silently swallowed as a positional, the old behavior).
+  if (parsed.unknownFlags.length > 0 || parsed.errors.length > 0) {
+    const human =
+      [...parsed.unknownFlags.map((f) => `unknown flag: ${f}`), ...parsed.errors].join("\n") +
+      "\n\nRun `th help` for usage.";
+    const result = failure({
+      human,
+      data: { error: "bad_args", unknownFlags: parsed.unknownFlags, errors: parsed.errors },
+    });
+    process.stdout.write(renderResult(result, parsed.flags.json) + "\n");
+    process.exit(result.exitCode);
+  }
+
   // Hook commands speak the Claude Code hook protocol on stdout (not --json).
   if (parsed.positionals[0] === "hook") {
     if (parsed.positionals[1] === "stop-gate") {
@@ -605,6 +658,12 @@ function main(): void {
       process.stdout.write(out.stdout + "\n");
       process.exit(out.exitCode);
     }
+    if (parsed.positionals[1] === "subagent-stop") {
+      const paths = resolveProjectPaths(parsed.flags.cwd);
+      const out = runHookSubagentStop(paths, readHookStdin<SubagentStopHookInput>());
+      process.stdout.write(out.stdout + "\n");
+      process.exit(out.exitCode);
+    }
   }
 
   const result = dispatch(parsed);
@@ -612,4 +671,4 @@ function main(): void {
   process.exit(result.exitCode);
 }
 
-main();
+if (require.main === module) main();

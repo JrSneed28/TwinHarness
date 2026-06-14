@@ -1,7 +1,7 @@
 {
   "name": "twinharness",
   "version": "0.6.2",
-  "description": "TwinHarness — Agentic SDLC Orchestrator. A Claude Code plugin: prompt orchestration (7 agents + Spec/Critic modes) plus a deterministic `th` CLI for all mechanical enforcement (state, hashing, anchors, traceability, coverage, drift, cascade-staleness).",
+  "description": "TwinHarness — Agentic SDLC Orchestrator. A Claude Code plugin: prompt orchestration (10 specialized agents) plus a deterministic `th` CLI for all mechanical enforcement (state, hashing, anchors, traceability, coverage, drift, cascade-staleness).",
   "type": "commonjs",
   "bin": {
     "th": "dist/cli.js"
@@ -19,7 +19,8 @@
     ".claude-plugin"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run build:mcp",
+    "build:mcp": "esbuild src/mcp-server.ts --bundle --platform=node --target=node18 --format=cjs --outfile=dist/mcp-server.js",
     "th": "node dist/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -32,7 +33,9 @@
     "node": ">=18"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/node": "^22.10.0",
+    "esbuild": "^0.28.1",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },

@@ -45,6 +45,7 @@ const drift_log_1 = require("../core/drift-log");
 const debug_log_1 = require("../core/debug-log");
 const verify_1 = require("../core/verify");
 const log_1 = require("../core/log");
+const guards_1 = require("../core/guards");
 /**
  * `th debug` — mechanical support for the Debugger agent (evidence-first
  * defect tracing). `th debug pack` assembles a deterministic evidence bundle so
@@ -56,7 +57,6 @@ const log_1 = require("../core/log");
 function debugLogPath(paths) {
     return path.join(paths.root, "debug-log.md");
 }
-const NOT_INIT = (0, output_1.failure)({ human: "No state.json found. Run `th init` first.", data: { error: "not_initialized" } });
 /**
  * `th debug pack [--slice <ID> | --req <REQ-ID>]` — assemble the read-only
  * evidence bundle for a failure: the failing verify commands + output tails, the
@@ -66,7 +66,7 @@ const NOT_INIT = (0, output_1.failure)({ human: "No state.json found. Run `th in
 function runDebugPack(paths, opts = {}) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state)
         return (0, output_1.failure)({ human: "state.json is invalid.", data: { error: "invalid_state", issues: r.issues } });
     const s = r.state;
@@ -120,7 +120,7 @@ function runDebugPack(paths, opts = {}) {
 function runDebugLogAdd(paths, opts) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state)
         return (0, output_1.failure)({ human: "state.json is invalid.", data: { error: "invalid_state", issues: r.issues } });
     if (!opts.ref || !opts.symptom) {

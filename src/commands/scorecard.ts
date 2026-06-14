@@ -7,7 +7,7 @@ import { computeBreakdown } from "../core/coverage";
 import { readVerifyReport } from "../core/verify";
 import { parseDriftEntries } from "../core/drift-log";
 import { readLedger } from "../core/ledger";
-import { readTelemetryConfig, appendTelemetry } from "../core/telemetry";
+import { readTelemetryConfig, appendTelemetry, readTelemetryLog } from "../core/telemetry";
 
 /**
  * `th scorecard` — a post-run, one-screen summary of where the run stands.
@@ -38,6 +38,33 @@ interface CoverageSummary {
   planned: number;
   implemented: number;
   tested: number;
+}
+
+/** Read-only summary of recorded `th route` telemetry (event "route"). */
+interface RoutingSummary {
+  /** Total recorded route events. */
+  events: number;
+  /** Per-model tally across those events (e.g. {opus: 2, sonnet: 3}). */
+  models: Record<string, number>;
+}
+
+/**
+ * Summarize the recorded `th route` telemetry: count the "route" events and tally
+ * them by chosen model. Read-only — it consults the same local telemetry log the
+ * scorecard appends to, never the network. A missing/disabled log reads as zero
+ * events (and renders as "—").
+ */
+function summarizeRouting(paths: ProjectPaths): RoutingSummary {
+  const models: Record<string, number> = {};
+  let events = 0;
+  for (const rec of readTelemetryLog(paths) as Array<{ event?: unknown; model?: unknown }>) {
+    if (rec.event !== "route") continue;
+    events++;
+    if (typeof rec.model === "string" && rec.model.length > 0) {
+      models[rec.model] = (models[rec.model] ?? 0) + 1;
+    }
+  }
+  return { events, models };
 }
 
 export function runScorecard(paths: ProjectPaths, opts: { json?: boolean }): CommandResult {
@@ -86,6 +113,9 @@ export function runScorecard(paths: ProjectPaths, opts: { json?: boolean }): Com
 
   const ledgerEntries = readLedger(paths).length;
 
+  // --- Routing (read-only summary of recorded `th route` telemetry) ---
+  const routing = summarizeRouting(paths);
+
   const data = {
     tier: s.tier,
     stage: s.current_stage,
@@ -98,6 +128,7 @@ export function runScorecard(paths: ProjectPaths, opts: { json?: boolean }): Com
     reviseEscalations: escalations,
     artifacts: { registered: integrity.length, changed: artifactsChanged, missing: artifactsMissing },
     ledgerEntries,
+    routing,
   };
 
   // --- Opt-in local telemetry snapshot (no-op when telemetry is disabled) ---
@@ -132,6 +163,7 @@ function renderScorecard(d: {
   drift: DriftSummary;
   reviseEscalations: { mode: string; count: number; cap: number }[];
   artifacts: { registered: number; changed: number; missing: number };
+  routing: RoutingSummary;
 }): string {
   const cov = d.coverage
     ? `${d.coverage.planned}/${d.coverage.implemented}/${d.coverage.tested} of ${d.coverage.total} (planned/implemented/tested)`
@@ -165,6 +197,17 @@ function renderScorecard(d: {
       ? `${d.artifacts.registered} registered, all match`
       : `${d.artifacts.registered} registered, ${d.artifacts.changed} changed, ${d.artifacts.missing} missing`;
 
+  const routing =
+    d.routing.events === 0
+      ? "—"
+      : `${d.routing.events} route call${d.routing.events === 1 ? "" : "s"}` +
+        (Object.keys(d.routing.models).length > 0
+          ? ` (${Object.entries(d.routing.models)
+              .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+              .map(([model, n]) => `${model}×${n}`)
+              .join(", ")})`
+          : "");
+
   return [
     `Tier / stage : ${d.tier ?? "unclassified"} / ${d.stage}${d.implementationAllowed ? " (implementation allowed)" : ""}`,
     `Coverage     : ${cov}`,
@@ -173,5 +216,6 @@ function renderScorecard(d: {
     `Drift        : ${drift}`,
     `Revise loops : ${revise}`,
     `Artifacts    : ${artifacts}`,
+    `Routing      : ${routing}`,
   ].join("\n");
 }

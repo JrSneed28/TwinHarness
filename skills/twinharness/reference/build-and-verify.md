@@ -133,6 +133,61 @@ th slice set-status <SLICE-ID> done          # after the Critic code-review PASS
 The wave schedule from `th build plan` is the mechanical input — not a judgment call. Apply it
 exactly as computed.
 
+### Worktree isolation + merge-back protocol (§21)
+
+Parallel Builders — and any **scoped sub-Builder** one of them spawns under a component sub-lease
+(see the "Spawning sub-agents (Phase 5)" section of `agents/builder.md` / `agents/debugger.md`) —
+run in **isolated git worktrees** (`isolation: worktree` in `agents/builder.md`). A worktree gives
+each concurrent slice its own branched-off copy of the **code tree**, so half-written files in one
+slice are never visible to another. The protocol has five parts:
+
+1. **Parallel Builders run in isolated worktrees.** Each Builder (and each scoped sub-Builder)
+   operates on its own `isolation: worktree` checkout branched off the default branch; an
+   unchanged worktree is auto-cleaned.
+
+2. **Shared-state gotcha (load-bearing): `.twinharness/` must stay SHARED, not per-worktree.**
+   This is the part that is easy to get wrong and silently breaks everything. The lease ledger,
+   `state.json`, and the drift log are a **cross-process coordination plane** — the collision guard
+   in `th build claim` / `th build sub-claim` only works because every Builder reads and writes the
+   **same** `.twinharness/`. If each worktree got its own copy of `.twinharness/`, each Builder would
+   hold its own private lease ledger and the cross-process lock would protect **nothing** — two
+   Builders could "claim" the same component and never see the conflict. So worktrees isolate
+   **CODE only**: every `th` state / lease / drift command issued from inside a worktree MUST target
+   the **main project root** — either pass `--cwd <main-root>`, or use the typed
+   `mcp__plugin_twinharness_th__*` MCP tools (they resolve `${CLAUDE_PROJECT_DIR}` to the stable
+   project root regardless of which worktree the caller is in). **One shared coordination plane;
+   isolated code trees.** Restate this in every Builder / sub-Builder delegation prompt — it is the
+   single most important sentence of the parallel-build contract.
+
+3. **On Critic PASS, merge each worktree branch back in WAVE ORDER.** When a slice's `code-review`
+   Critic passes, merge its worktree branch back into the main branch before releasing it. Do this
+   **wave by wave**: the `th build plan` schedule already serializes any slices that share a
+   component into separate waves, so **within a wave the branches are component-disjoint and merge
+   cleanly** by construction. (A `th` CLI cannot perform git merges — the merge is an Orchestrator
+   action; its mechanical hook is `th build release` on a clean merge, and `th drift add` on a
+   dirty one, below.)
+
+4. **A NON-CLEAN merge is the mechanical signal of accidental shared-state coupling.** If two
+   slices the plan believed disjoint produce a merge **conflict**, that conflict is the evidence of
+   a coupling the static `th build plan` could not see (e.g. two slices that both edit a file the
+   plan never attributed to either component). Do NOT hand-resolve it silently — open it as
+   **BLOCKING** drift so the stop-gate refuses completion until a human decides:
+   ```
+   th drift add --layer requirement \
+     --ref "<SLICE-A> + <SLICE-B>" \
+     --discovery "merge conflict between plan-disjoint slices — accidental shared-state coupling" \
+     --action "build paused for human resolution"
+   ```
+   A **clean** merge → `th build release <SLICE-ID>` and continue to the next slice / wave.
+
+5. **Relationship to leases (acknowledged, useful redundancy).** The lease stays the scheduler's
+   **live oracle** — `th build claim` / `th build next-wave` consult it, and it prevents the
+   collision **up front**. Worktrees add **filesystem-level** enforcement (a Builder physically
+   cannot see another slice's uncommitted files), and the merge adds a **second** conflict check
+   **after** the fact (it catches a coupling the static plan never modeled). That the lease and the
+   merge can both flag the same class of problem is deliberate redundancy: the lease is the primary
+   guard; the merge is the backstop for what the static plan missed.
+
 ### Write-gate
 
 Setting slice status to `in-progress` before spawning each Builder is also what the write-gate

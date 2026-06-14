@@ -3,10 +3,10 @@ import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState } from "../core/state-store";
-import { type ValidationIssue } from "../core/state-schema";
 import { shortHashPath } from "../core/hash";
 import { downstreamOf } from "../core/pipeline";
 import { structuredLog } from "../core/log";
+import { NOT_INIT, formatIssues } from "../core/guards";
 
 /**
  * `th stale --since <hash>` — diff-scoped cascade re-verification (spec §18).
@@ -18,15 +18,6 @@ import { structuredLog } from "../core/log";
  * command only computes the diff-scoped downstream set so the Critic can re-run
  * "only against the diff" rather than the whole project (§18).
  */
-
-function formatIssues(issues: ValidationIssue[] | undefined): string {
-  return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
-
-const NOT_INIT = failure({
-  human: "No state.json found. Run `th init` first.",
-  data: { error: "not_initialized" },
-});
 
 /**
  * Normalize a path to a root-relative forward-slash key, matching the shape

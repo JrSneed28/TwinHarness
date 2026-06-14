@@ -4,9 +4,10 @@ import type { ProjectPaths } from "../core/paths";
 import { resolveWithinRoot } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState, writeState, withStateLock } from "../core/state-store";
-import { type ValidationIssue, type ApprovedArtifact } from "../core/state-schema";
-import { shortHashPath } from "../core/hash";
+import { type ApprovedArtifact } from "../core/state-schema";
+import { shortHashPath, HashLimitError } from "../core/hash";
 import { structuredLog } from "../core/log";
+import { NOT_INIT, formatIssues } from "../core/guards";
 
 /**
  * `th artifact` — content-hash and record an approved, versioned artifact
@@ -17,15 +18,6 @@ import { structuredLog } from "../core/log";
  * content hash and records the version it is told. It never decides *whether* an
  * artifact is approved — the caller supplies the version when it approves.
  */
-
-function formatIssues(issues: ValidationIssue[] | undefined): string {
-  return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
-
-const NOT_INIT = failure({
-  human: "No state.json found. Run `th init` first.",
-  data: { error: "not_initialized" },
-});
 
 /** Normalize a root-relative path to forward slashes for cross-platform stable storage. */
 function toRelKey(root: string, file: string): string {
@@ -80,7 +72,18 @@ function runArtifactRegisterLocked(
     });
   }
 
-  const hash = shortHashPath(abs);
+  let hash: string;
+  try {
+    hash = shortHashPath(abs);
+  } catch (e) {
+    if (e instanceof HashLimitError) {
+      return failure({
+        human: `Cannot register ${file}: ${e.message}`,
+        data: { error: "artifact_too_large", file },
+      });
+    }
+    throw e;
+  }
   const relKey = toRelKey(paths.root, file);
 
   const entry: ApprovedArtifact = { file: relKey, version, hash };

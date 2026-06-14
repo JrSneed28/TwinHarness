@@ -171,3 +171,36 @@ describe("REQ-NEXT-007: final-verification floor — slices then coverage then s
     expect(runNext(tp.paths).data?.kind).toBe("finish-slices");
   });
 });
+
+describe("REQ-NEXT-010: --explain adds a WHY for the chosen obligation", () => {
+  it("default (no --explain) carries no why; --explain adds a why to data + human", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    // Tier unclassified → the obligation is classify-tier (a stable, simple case).
+    const plain = runNext(tp.paths);
+    expect(plain.data?.kind).toBe("classify-tier");
+    expect(plain.data?.why).toBeUndefined();
+    expect(plain.human).not.toMatch(/why:/);
+
+    const explained = runNext(tp.paths, { explain: true });
+    expect(explained.data?.kind).toBe("classify-tier");
+    expect(typeof explained.data?.why).toBe("string");
+    expect((explained.data?.why as string).length).toBeGreaterThan(0);
+    // The WHY explains the ORDERING (why it gates), not just the action.
+    expect(explained.data?.why).toMatch(/tier/i);
+    expect(explained.human).toMatch(/^why: /m);
+    // The action line is unchanged whether or not --explain is passed.
+    expect(explained.data?.action).toBe(plain.data?.action);
+  });
+
+  it("the highest-priority obligation's why explains why it outranks the rest", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runStateSet(tp.paths, "tier", "T2");
+    // Open blocking drift is the top-priority obligation; its WHY must cite the stop-gate.
+    runDriftAdd(tp.paths, { layer: "requirement", ref: "SLICE-1 / TASK-1", discovery: "x", action: "paused" });
+    const res = runNext(tp.paths, { explain: true });
+    expect(res.data?.kind).toBe("resolve-blocking-drift");
+    expect(res.data?.why).toMatch(/stop-gate|completion/i);
+  });
+});

@@ -7,6 +7,7 @@ const paths_1 = require("../core/paths");
 const output_1 = require("../core/output");
 const brief_1 = require("../core/brief");
 const log_1 = require("../core/log");
+const guards_1 = require("../core/guards");
 /**
  * `th tier` — the Tier-0 classifier (spec §5).
  *
@@ -23,12 +24,9 @@ const log_1 = require("../core/log");
  */
 /** Exit code for a blast-radius veto (distinct from the generic failure 1). */
 exports.VETO_EXIT_CODE = 3;
-function formatIssues(issues) {
-    return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
 function briefLoadFailure(briefPath, issues) {
     return (0, output_1.failure)({
-        human: `Could not load brief "${briefPath}":\n${formatIssues(issues)}`,
+        human: `Could not load brief "${briefPath}":\n${(0, guards_1.formatIssues)(issues)}`,
         data: { error: "invalid_brief", issues },
     });
 }

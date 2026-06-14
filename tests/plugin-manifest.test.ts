@@ -81,6 +81,16 @@ describe("REQ-PLUGIN-002: the compiled CLI ships with the plugin", () => {
     expect(stop?.command).toContain("hook stop-gate");
   });
 
+  it("the SubagentStop hook invokes the shipped CLI via ${CLAUDE_PLUGIN_ROOT}", () => {
+    const hooks = readJson("hooks/hooks.json") as {
+      hooks: { SubagentStop?: Array<{ hooks: Array<{ type: string; command: string }> }> };
+    };
+    const subagentStop = hooks.hooks.SubagentStop?.[0]?.hooks[0];
+    expect(subagentStop?.type).toBe("command");
+    expect(subagentStop?.command).toContain(CLI_INVOCATION);
+    expect(subagentStop?.command).toContain("hook subagent-stop");
+  });
+
   it("hooks.json contains a PreToolUse entry for Write|Edit|NotebookEdit that invokes th hook pretool-gate", () => {
     const hooks = readJson("hooks/hooks.json") as {
       hooks: {
@@ -160,6 +170,16 @@ describe("REQ-PLUGIN-003: every component resolves `th` without relying on PATH"
   it.each(commandFiles)("%s has description frontmatter", (rel) => {
     expect(frontmatter(read(rel)).description).toBeTruthy();
   });
+
+  it.each(commandFiles)(
+    "%s pre-approves the th Bash call via allowed-tools frontmatter",
+    (rel) => {
+      const fm = frontmatter(read(rel));
+      expect(fm["allowed-tools"]).toBeTruthy();
+      // The th CLI is invoked through `node`, so the allowlist must cover it.
+      expect(fm["allowed-tools"]).toContain("Bash(node:");
+    },
+  );
 
   it("the skill has name + description frontmatter", () => {
     const fm = frontmatter(read("skills/twinharness/SKILL.md"));

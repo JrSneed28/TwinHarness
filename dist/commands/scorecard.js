@@ -43,6 +43,25 @@ const verify_1 = require("../core/verify");
 const drift_log_1 = require("../core/drift-log");
 const ledger_1 = require("../core/ledger");
 const telemetry_1 = require("../core/telemetry");
+/**
+ * Summarize the recorded `th route` telemetry: count the "route" events and tally
+ * them by chosen model. Read-only — it consults the same local telemetry log the
+ * scorecard appends to, never the network. A missing/disabled log reads as zero
+ * events (and renders as "—").
+ */
+function summarizeRouting(paths) {
+    const models = {};
+    let events = 0;
+    for (const rec of (0, telemetry_1.readTelemetryLog)(paths)) {
+        if (rec.event !== "route")
+            continue;
+        events++;
+        if (typeof rec.model === "string" && rec.model.length > 0) {
+            models[rec.model] = (models[rec.model] ?? 0) + 1;
+        }
+    }
+    return { events, models };
+}
 function runScorecard(paths, opts) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists) {
@@ -81,6 +100,8 @@ function runScorecard(paths, opts) {
     const artifactsChanged = integrity.filter((i) => i.status === "changed").length;
     const artifactsMissing = integrity.filter((i) => i.status === "missing").length;
     const ledgerEntries = (0, ledger_1.readLedger)(paths).length;
+    // --- Routing (read-only summary of recorded `th route` telemetry) ---
+    const routing = summarizeRouting(paths);
     const data = {
         tier: s.tier,
         stage: s.current_stage,
@@ -93,6 +114,7 @@ function runScorecard(paths, opts) {
         reviseEscalations: escalations,
         artifacts: { registered: integrity.length, changed: artifactsChanged, missing: artifactsMissing },
         ledgerEntries,
+        routing,
     };
     // --- Opt-in local telemetry snapshot (no-op when telemetry is disabled) ---
     if ((0, telemetry_1.readTelemetryConfig)(paths).enabled) {
@@ -135,6 +157,15 @@ function renderScorecard(d) {
     const artifacts = d.artifacts.changed + d.artifacts.missing === 0
         ? `${d.artifacts.registered} registered, all match`
         : `${d.artifacts.registered} registered, ${d.artifacts.changed} changed, ${d.artifacts.missing} missing`;
+    const routing = d.routing.events === 0
+        ? "—"
+        : `${d.routing.events} route call${d.routing.events === 1 ? "" : "s"}` +
+            (Object.keys(d.routing.models).length > 0
+                ? ` (${Object.entries(d.routing.models)
+                    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+                    .map(([model, n]) => `${model}×${n}`)
+                    .join(", ")})`
+                : "");
     return [
         `Tier / stage : ${d.tier ?? "unclassified"} / ${d.stage}${d.implementationAllowed ? " (implementation allowed)" : ""}`,
         `Coverage     : ${cov}`,
@@ -143,5 +174,6 @@ function renderScorecard(d) {
         `Drift        : ${drift}`,
         `Revise loops : ${revise}`,
         `Artifacts    : ${artifacts}`,
+        `Routing      : ${routing}`,
     ].join("\n");
 }

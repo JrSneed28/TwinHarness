@@ -27,6 +27,19 @@ jobs:
         id: version
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
+      # A release tag must match the version it ships, or the CHANGELOG section and
+      # the artifact would disagree. Only enforced on a tag push (not workflow_dispatch).
+      - name: Assert tag matches package.json version
+        if: github.ref_type == 'tag'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "Pushed tag '$GITHUB_REF_NAME' does not match package.json version '$VERSION'" >&2
+            exit 1
+          fi
+
       # Print the lines between `## [<version>]` and the next `## [` heading.
       # Written to a file so multi-line content survives into the release body.
       - name: Extract changelog section

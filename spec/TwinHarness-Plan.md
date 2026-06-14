@@ -770,5 +770,14 @@ A compact record so the rationale travels with the outline.
   slice ends and the next begins for a given domain.
 - **Brownfield slicing:** how Slice 0 and the walking skeleton differ when building into an existing codebase
   rather than greenfield.
-- **Parallel-build merge protocol:** the concrete mechanism for integrating concurrently built disjoint slices
-  and detecting accidental shared-state coupling at merge time.
+- ~~**Parallel-build merge protocol:** the concrete mechanism for integrating concurrently built disjoint slices
+  and detecting accidental shared-state coupling at merge time.~~ **RESOLVED (Phase 5).** Parallel Builders
+  (and scoped sub-Builders) run in isolated git worktrees (`isolation: worktree`); `.twinharness/` stays a
+  shared coordination plane (every `th` state/lease/drift call from a worktree targets the main root via
+  `--cwd` or the `mcp__plugin_twinharness_th__*` tools). On Critic PASS the Orchestrator merges each worktree
+  branch back in **wave order** — within a wave the `th build plan` schedule already makes branches
+  component-disjoint, so they merge cleanly; a non-clean merge between plan-disjoint slices is the mechanical
+  signal of accidental shared-state coupling and is opened as **blocking** drift (`th drift add --layer
+  requirement`) for human resolution, a clean merge → `th build release`. See the **Worktree isolation +
+  merge-back protocol** sections of `agents/orchestrator.md` (parallel-build coordination) and
+  `skills/twinharness/reference/build-and-verify.md` (Stage 10, parallel waves).
