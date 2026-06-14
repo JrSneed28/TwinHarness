@@ -146,6 +146,17 @@ export function runBuildClaim(paths: ProjectPaths, sliceId?: string): CommandRes
       return failure({ human: `Slice not found: ${sliceId}. Known: ${r.state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", sliceId } });
     }
 
+    // A slice must be in-progress to hold a lease: the documented protocol is
+    // "set in-progress, then claim" (mirrors runBuildSubClaim's parent check and
+    // the Phase-B write-gate, which only grants writes to an in-progress slice's
+    // components). A pending/done/blocked slice has no business holding components.
+    if (slice.status !== "in-progress") {
+      return failure({
+        human: `Cannot claim ${sliceId}: it is "${slice.status}", not in-progress. Set it in-progress first (\`th slice set-status ${sliceId} in-progress\`), then claim (§16).`,
+        data: { error: "slice_not_in_progress", sliceId, status: slice.status },
+      });
+    }
+
     // Only LIVE leases (held by a pending/in-progress slice) block a claim — a
     // stale lease from a done/blocked/crashed slice is ignored, not a permanent wall.
     const owners = new Map<string, string>();

@@ -97,12 +97,14 @@ describe("REQ-VERIFY-004: runCommands timestamp is injectable (clock-free testin
 });
 
 describe("REQ-VERIFY-005: a hanging command is killed by the timeout, not blocked forever", () => {
-  it("`sleep 10` with a 150ms budget → recorded as a failure and the run returns", () => {
+  it("`sleep 10` with a short budget → recorded as a failure and the run returns", () => {
     tp = makeTempProject();
     const start = Date.now();
-    const report = runCommands(tp.root, ["sleep 10"], undefined, 150);
+    // 2s budget: long enough to be robust against spawn jitter under full-suite
+    // parallel load, short enough to prove a 10s sleep is killed well before it ends.
+    const report = runCommands(tp.root, ["sleep 10"], undefined, 2000);
     const elapsed = Date.now() - start;
-    expect(elapsed).toBeLessThan(5000); // returned promptly, did not hang
+    expect(elapsed).toBeLessThan(8000); // returned well before the 10s sleep would finish
     expect(report.ok).toBe(false);
     expect(report.results[0]?.ok).toBe(false);
     expect(report.results[0]?.outputTail).toContain("timeout");
@@ -110,7 +112,9 @@ describe("REQ-VERIFY-005: a hanging command is killed by the timeout, not blocke
 
   it("a fast command still passes under a generous budget", () => {
     tp = makeTempProject();
-    const report = runCommands(tp.root, ["true"], undefined, 150);
+    // Use the default (5-minute) budget — a 150ms budget is NOT generous for a
+    // real shell spawn and flakes under full-suite parallel load on slower hosts.
+    const report = runCommands(tp.root, ["true"]);
     expect(report.ok).toBe(true);
   });
 });

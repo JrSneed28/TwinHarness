@@ -114,6 +114,18 @@ describe("REQ-LEASE-001: claim takes a live lease; release frees it; leases list
     const res = runBuildNextWave(tp.paths);
     expect((res.data?.wave as string[])).toEqual([]); // SLICE-2 held on the leased "api"
   });
+
+  it("claim refuses a slice that is not in-progress (protocol: set in-progress first)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    setSlices(tp, [{ id: "SLICE-1", status: "pending", components: ["api"] }]);
+    const pending = runBuildClaim(tp.paths, "SLICE-1");
+    expect(pending.ok).toBe(false);
+    expect(pending.data?.error).toBe("slice_not_in_progress");
+    // Per protocol: set in-progress first, then the claim succeeds.
+    runSliceSetStatus(tp.paths, "SLICE-1", "in-progress");
+    expect(runBuildClaim(tp.paths, "SLICE-1").ok).toBe(true);
+  });
 });
 
 describe("REQ-LEASE-002: leases reconcile against slice state (no stale wedge)", () => {
@@ -151,7 +163,12 @@ describe("REQ-LEASE-002: leases reconcile against slice state (no stale wedge)",
     // next-wave must NOT treat api as busy → SLICE-2 dispatches.
     const res = runBuildNextWave(tp.paths);
     expect((res.data?.wave as string[])).toEqual(["SLICE-2"]);
-    // claim must also ignore the stale lease.
+    // Dispatch SLICE-2 per protocol (set in-progress, then claim); the claim must
+    // still ignore the stale lease left behind by the crashed SLICE-1.
+    setSlices(tp, [
+      { id: "SLICE-1", status: "done", components: ["api"] },
+      { id: "SLICE-2", status: "in-progress", components: ["api"] },
+    ]);
     expect(runBuildClaim(tp.paths, "SLICE-2").ok).toBe(true);
   });
 

@@ -6,7 +6,7 @@ import { readState } from "../core/state-store";
 import { stageContract, nextStageAfter } from "../core/stages";
 import { artifactIntegrity, sliceProgress, reviseEscalations } from "../core/health";
 import { computeBreakdown } from "../core/coverage";
-import { readVerifyReport } from "../core/verify";
+import { readVerifyConfig, readVerifyReport } from "../core/verify";
 import { occupiedComponents } from "../core/leases";
 import { computeWave, validateDeps, hasDepIssues } from "../core/wave";
 
@@ -35,6 +35,7 @@ export type NextKind =
   | "register-artifact"
   | "fix-coverage"
   | "investigate-failure"
+  | "run-verify"
   | "dispatch-wave"
   | "await-builders"
   | "stalled-build"
@@ -213,6 +214,23 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
         explain,
       );
     }
+    // Verify-suite gate — mirror the Stop-gate (core hook.ts evaluateStopGate):
+    // at final-verification, a configured-but-never-run suite blocks completion.
+    // (A RED suite is already surfaced globally as investigate-failure in step 2b,
+    // so only the never-run case needs handling here.)
+    const verifyCfg = readVerifyConfig(paths);
+    if (verifyCfg.commands.length > 0 && !readVerifyReport(paths)) {
+      return emit(
+        {
+          kind: "run-verify",
+          action: `Final verification needs a green suite — ${verifyCfg.commands.length} verify command(s) are configured but \`th verify run\` has never been recorded. Run \`th verify run\` and confirm it is green before sign-off.`,
+          why: "At final-verification the stop-gate refuses completion when verify commands are configured but the suite has never been run, so recording a green `th verify run` outranks producing the verification report or seeking the human sign-off.",
+          data: { commands: verifyCfg.commands.length },
+        },
+        explain,
+      );
+    }
+
     const cov = coverageBlocker(paths);
     if (cov) return emit(cov, explain);
 

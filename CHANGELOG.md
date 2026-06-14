@@ -5,6 +5,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+Post-0.6.2 infrastructure work (Phases 1–5), not yet cut as a versioned release. **566 tests** (was 460).
+
+### Added
+
+- **`th route` — automatic model/effort routing (Phase 2).** A mechanical routing oracle recording the recommended model/effort per stage; surfaced as a Routing line in `th scorecard`.
+- **`th` as a plugin-scoped MCP server (Phase 4).** `dist/mcp-server.js` exposes the CLI's read/compute surface as MCP tools (`th_next`, `th_build_claim`, …); the CLI itself stays zero-runtime-dependency.
+- **Component sub-leases (Phase 5).** `th build sub-claim` / `sub-release` scope a sub-Builder to a subset of an in-progress parent slice's components, nested under the parent's top-level lease and guarded against overlapping siblings.
+- **`th next --explain` (Phase 5).** Adds a WHY rationale to the next-action oracle, explaining why the chosen obligation outranks the others.
+- **SubagentStop hook (Phase 3).** A narrow state-validity guard at every delegated-subagent boundary (`th hook subagent-stop`), distinct from the completion Stop-gate.
+
+### Changed
+
+- **Phase 1 hardening:** shared command guards, a table-driven arg parser, the DOC-TRUTH test suite (docs are checked against mechanical reality), and a CI matrix.
+
+### Fixed
+
+- **`th next` now mirrors the final-verification verify-suite gate.** At `final-verification`, when verify commands are configured but `th verify run` has never been recorded, `th next` surfaces a new `run-verify` obligation — matching what the Stop-gate (`evaluateStopGate`) already blocks completion on. (A red suite was already surfaced as `investigate-failure`.)
+- **`th build claim` requires the slice to be `in-progress`.** A claim on a `pending`/`done`/`blocked` slice is now refused (`slice_not_in_progress`), mirroring `th build sub-claim`'s parent check and the Phase-B write-gate. The documented protocol has always been "set in-progress, then claim."
+- **`strict` write-gate wording reconciled.** The README feature bullet and the published JSON Schema described `strict` as only adding Phase-B Bash enforcement; both now state the full definition — `deny` semantics **plus** Phase-B Bash-mediated-write enforcement (a superset of `deny`) — matching the changelog, spec, and code. `strict` is also now listed in the README and USAGE write-gate mode tables.
+- **Flaky verify tests.** Both `REQ-VERIFY-005` cases used a tight 150 ms command budget that intermittently failed under full-suite parallel load (a real shell spawn needs more headroom): the "fast command" case now uses the default budget, and the timeout-kill case uses a load-robust 2 s budget. Both pass deterministically.
+
 ## [0.6.2] — 2026-06-14
 
 Gap-remediation release: end-to-end test coverage, write-gate hardening, a product surface (preview/scorecard/telemetry), brownfield support, release automation, and contributor DX. **460 tests** (was 413).

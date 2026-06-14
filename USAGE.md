@@ -283,8 +283,9 @@ violation. Writes to in-progress slices' paths and to paths owned by no slice ar
 | `ask` (default) | Claude Code presents an allow/deny prompt. Human sessions proceed with one click; headless agents are effectively blocked. |
 | `deny` | Writes are hard-blocked. Use for strict runs where no slip-through is acceptable. |
 | `off` | Gate disabled. Equivalent to setting `TH_DISABLE_WRITE_GATE=1`. |
+| `strict` | `deny` semantics plus Phase-B Bash-mediated-write enforcement of the §16 component-boundary rule — a backward-compatible superset of `deny` (see the 0.6.2 notes below). |
 
-Set it with `th state set write_gate deny` (or `ask`, `off`). The field is absent by default (behaves as `ask`).
+Set it with `th state set write_gate deny` (or `ask`, `off`, `strict`). The field is absent by default (behaves as `ask`).
 
 **Env escape hatch:** `TH_DISABLE_WRITE_GATE=1` disables the gate for the current session without
 touching state.

@@ -172,6 +172,35 @@ describe("REQ-NEXT-007: final-verification floor — slices then coverage then s
   });
 });
 
+describe("REQ-NEXT-011: final-verification mirrors the stop-gate verify-suite check", () => {
+  it("verify configured but never run at final-verification → kind run-verify", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runStateSet(tp.paths, "tier", "T1");
+    writeFile(tp, "docs/09-implementation-plan.md", "### SLICE-1\nComponents touched: api\n");
+    runSlicesSync(tp.paths, { planFile: "docs/09-implementation-plan.md" });
+    // Settle the slice so the finish-slices floor is clear; configure a verify
+    // command but never run it — exactly what the stop-gate blocks completion on.
+    runStateSet(tp.paths, "slices", JSON.stringify([{ id: "SLICE-1", status: "done", components: ["api"] }]));
+    runStateSet(tp.paths, "current_stage", "final-verification");
+    runVerifyAdd(tp.paths, "true");
+    expect(runNext(tp.paths).data?.kind).toBe("run-verify");
+  });
+
+  it("verify configured AND run green at final-verification → no run-verify obligation", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runStateSet(tp.paths, "tier", "T1");
+    writeFile(tp, "docs/09-implementation-plan.md", "### SLICE-1\nComponents touched: api\n");
+    runSlicesSync(tp.paths, { planFile: "docs/09-implementation-plan.md" });
+    runStateSet(tp.paths, "slices", JSON.stringify([{ id: "SLICE-1", status: "done", components: ["api"] }]));
+    runStateSet(tp.paths, "current_stage", "final-verification");
+    runVerifyAdd(tp.paths, "true");
+    runVerifyRun(tp.paths); // green (`true` exits 0)
+    expect(runNext(tp.paths).data?.kind).not.toBe("run-verify");
+  });
+});
+
 describe("REQ-NEXT-010: --explain adds a WHY for the chosen obligation", () => {
   it("default (no --explain) carries no why; --explain adds a why to data + human", () => {
     tp = makeTempProject();

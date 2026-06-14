@@ -16136,6 +16136,12 @@ ${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } }
     if (!slice) {
       return failure({ human: `Slice not found: ${sliceId}. Known: ${r.state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", sliceId } });
     }
+    if (slice.status !== "in-progress") {
+      return failure({
+        human: `Cannot claim ${sliceId}: it is "${slice.status}", not in-progress. Set it in-progress first (\`th slice set-status ${sliceId} in-progress\`), then claim (\xA716).`,
+        data: { error: "slice_not_in_progress", sliceId, status: slice.status }
+      });
+    }
     const owners = /* @__PURE__ */ new Map();
     for (const lease of liveLeases(paths, r.state.slices)) {
       for (const c of lease.components) if (!owners.has(c)) owners.set(c, lease.slice);
@@ -16292,8 +16298,24 @@ function computeBreakdown(root, opts = {}) {
 var fs8 = __toESM(require("node:fs"));
 var path7 = __toESM(require("node:path"));
 var DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60 * 1e3;
+function verifyConfigPath(paths) {
+  return path7.join(paths.stateDir, "verify.json");
+}
 function verifyReportPath(paths) {
   return path7.join(paths.stateDir, "verify-report.json");
+}
+function readVerifyConfig(paths) {
+  const file = verifyConfigPath(paths);
+  if (!fs8.existsSync(file)) return { commands: [] };
+  try {
+    const parsed = JSON.parse(fs8.readFileSync(file, "utf8"));
+    if (parsed && typeof parsed === "object" && Array.isArray(parsed.commands)) {
+      const commands = parsed.commands.filter((c) => typeof c === "string");
+      return { commands };
+    }
+  } catch {
+  }
+  return { commands: [] };
 }
 function readVerifyReport(paths) {
   const file = verifyReportPath(paths);
@@ -16822,6 +16844,18 @@ function runNext(paths, opts = {}) {
           action: `Final verification is blocked while slices are unfinished \u2014 finish or block: ${open.join(", ")} (\`th slice set-status <SLICE-ID> done|blocked\`).`,
           why: "At final-verification the stop-gate mechanically refuses completion while any slice is neither done nor blocked, so settling the open slices outranks producing the verification report.",
           data: { open }
+        },
+        explain
+      );
+    }
+    const verifyCfg = readVerifyConfig(paths);
+    if (verifyCfg.commands.length > 0 && !readVerifyReport(paths)) {
+      return emit(
+        {
+          kind: "run-verify",
+          action: `Final verification needs a green suite \u2014 ${verifyCfg.commands.length} verify command(s) are configured but \`th verify run\` has never been recorded. Run \`th verify run\` and confirm it is green before sign-off.`,
+          why: "At final-verification the stop-gate refuses completion when verify commands are configured but the suite has never been run, so recording a green `th verify run` outranks producing the verification report or seeking the human sign-off.",
+          data: { commands: verifyCfg.commands.length }
         },
         explain
       );

@@ -80,7 +80,7 @@
     "write_gate": {
       "type": "string",
       "enum": ["ask", "deny", "off", "strict"],
-      "description": "PreToolUse write-gate mode. Absent ⇒ ask semantics. strict adds Phase-B Bash-write enforcement."
+      "description": "PreToolUse write-gate mode. Absent ⇒ ask semantics. strict = deny semantics plus Phase-B Bash-write enforcement (a superset of deny)."
     },
     "project_mode": {
       "type": "string",
