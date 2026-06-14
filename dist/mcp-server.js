@@ -18673,11 +18673,11 @@ var TOOL_DEFS = [
   // Anchor: REQ-RU-051
   {
     name: "th_repo_map",
-    description: "Scan the governed project and build the dual repo-map artifacts (.twinharness/repo-map.json + docs/00-repo-map.md). With write:false (default for MCP), returns the compact summary in memory only \u2014 nothing written.",
+    description: "Scan the governed project and build the dual repo-map artifacts (.twinharness/repo-map.json + docs/00-repo-map.md). WRITES both artifacts by default (D-CONTRACTS-001). Pass write:false for a dry/preview run that returns the compact summary in memory only \u2014 nothing written.",
     inputSchema: {
       type: "object",
       properties: {
-        write: boolProp("Write the two artifacts to disk (default false for MCP preview). Set true to persist."),
+        write: boolProp("Write the artifacts (default true). false = dry/preview, no filesystem write."),
         format: { type: "string", description: "Text rendering: summary (default) | json | md.", enum: ["summary", "json", "md"] }
       },
       additionalProperties: false
