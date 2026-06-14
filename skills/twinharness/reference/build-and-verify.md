@@ -85,6 +85,24 @@ When a discovery contradicts `docs/01-requirements.md` or `docs/02-scope.md`:
 
 The source-of-truth rule (§4): **code wins on behavior; requirements win on intent.**
 
+### Brownfield build protocol (`project_mode: "brownfield"`)
+
+On an adoption run, the build attaches to existing code rather than creating it from nothing. The
+Builder applies these adaptations on top of the normal loop:
+
+- **Slice 0 is characterization, not skeleton.** The first slice's acceptance test pins the adoption
+  seam end-to-end (per `docs/00-existing-codebase-analysis.md`) with existing components untouched —
+  proving the integration point before any new behavior lands.
+- **Reuse over reimplementation — the common derived drift.** Discovering existing code already
+  satisfies a REQ is normal derived-layer drift: wire tests against the existing implementation and
+  log a derived entry (`--discovery "existing <component> at <path> already satisfies REQ-XXX"`,
+  `--action "reused; no reimplementation"`). Build continues — non-blocking.
+- **Existing code that contradicts a requirement-level REQ is BLOCKING.** Handle it exactly like any
+  requirement contradiction (stop, `--layer requirement`, escalate). Only a human moves requirements.
+- **Stay inside the seam.** Existing module code is off-limits except narrow *conformance fixes* that
+  bring existing code into line with a requirement-level REQ — and those fixes belong to a slice that
+  owns that component, within its write-gate boundary.
+
 ### Parallel builds (§16)
 
 After the coverage gate passes, sync the slice plan into state and then compute the wave schedule:

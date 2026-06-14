@@ -1,0 +1,28 @@
+#!/usr/bin/env sh
+#
+# TwinHarness pre-commit hook (zero-dependency; wired via core.hooksPath, set by
+# `npm install`'s `prepare` script — no husky). Enforces two local invariants:
+#
+#   1. The committed-dist/ rule: if any staged file is under src/ but no dist/
+#      file is staged, the build is missing from this commit — reject it.
+#   2. The CLI must type-check.
+#
+# Bypass in an emergency with `git commit --no-verify`.
+
+set -e
+
+staged=$(git diff --cached --name-only)
+
+src_staged=$(printf '%s\n' "$staged" | grep '^src/' || true)
+dist_staged=$(printf '%s\n' "$staged" | grep '^dist/' || true)
+
+if [ -n "$src_staged" ] && [ -z "$dist_staged" ]; then
+  echo "pre-commit: src/ changed but no dist/ file is staged." >&2
+  echo "            The committed dist/ is the shipped plugin artifact." >&2
+  echo "            Run:  npm run build && git add dist/" >&2
+  echo "            (or commit with --no-verify to bypass)." >&2
+  exit 1
+fi
+
+echo "pre-commit: type-checking..." >&2
+npm run typecheck

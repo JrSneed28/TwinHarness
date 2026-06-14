@@ -289,6 +289,12 @@ function findOwningSlices(
  * c2. Phase A + Bash tool: heuristically detect shell-mediated writes into in-root
  *     implementation paths and fire the gate on the first offending target (fail-open:
  *     if no offending target is found, fall through). NOT applied in Phase B.
+ * c3. Phase B + write_gate="strict" + Bash command: apply the same conservative Bash
+ *     matcher used in Phase A to mid-build Bash writes, firing `deny` on a target owned
+ *     solely by non-in-progress slices (fail-open otherwise). Runs before step d
+ *     because a Bash tool call has no file_path (step d would otherwise short-circuit).
+ *     Only active in strict mode; default modes leave Phase-B Bash writes ungated
+ *     (original behaviour).
  * d. No tool_input.file_path (or notebook_path for NotebookEdit) → allow.
  * e. Target outside project root → allow.
  * f. Doc/state allowlist path → allow.
@@ -345,7 +351,10 @@ export function runHookPretoolGate(
   if (state.write_gate === "off") return allow();
 
   // Effective gate mode: use write_gate field, defaulting to "ask" when absent.
-  const gateMode: "ask" | "deny" = state.write_gate === "deny" ? "deny" : "ask";
+  // "strict" carries "deny" semantics (and additionally gates Phase-B Bash writes
+  // below — G4), so it maps to "deny" here.
+  const gateMode: "ask" | "deny" =
+    state.write_gate === "deny" || state.write_gate === "strict" ? "deny" : "ask";
 
   // Step c2: Phase A Bash-mediated write defense-in-depth (fail-open).
   // Only fires during Phase A (implementation_allowed=false). Heuristically detect
@@ -372,6 +381,49 @@ export function runHookPretoolGate(
           `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision.`;
         return fireGate(gateMode, reason);
       }
+    }
+    // No offending target found → fall through (fail-open).
+  }
+
+  // Step c3: Phase B Bash-mediated write enforcement — strict mode only (G4).
+  // Runs BEFORE step d because a Bash tool call carries `command` but no
+  // `file_path`/`notebook_path`, so step d's early allow() would otherwise make
+  // this branch unreachable for Bash writes. Default modes (ask/deny/off) leave
+  // Phase-B Bash writes ungated (the original behaviour: Bash gating was Phase A
+  // only). Under `write_gate: "strict"`, with implementation allowed and a Bash
+  // command present, the same conservative matcher used in Phase A is applied to
+  // mid-build Bash writes so that a Bash redirection cannot sidestep the §16
+  // component-boundary rule. Fail-open: only a target owned solely by slices that
+  // are NOT in-progress fires the gate; anything unparseable, out-of-root,
+  // doc-allowlisted, unowned, or owned by an in-progress slice falls through.
+  if (
+    state.write_gate === "strict" &&
+    state.implementation_allowed &&
+    bashCommand &&
+    state.slices.length > 0
+  ) {
+    const baseB = input?.cwd ?? paths.root;
+    const targetsB = extractBashWriteTargets(bashCommand);
+    for (const token of targetsB) {
+      const absT = path.isAbsolute(token) ? token : path.resolve(baseB, token);
+      const relB = toRootRelative(absT, paths.root);
+      if (relB === null || isAllowedDocOrStatePath(relB)) continue; // out-of-root / doc → allow.
+      const owners = findOwningSlices(relB, state.slices, paths.root);
+      if (owners.length === 0) continue; // unowned in-root path → allow.
+      if (owners.some((o) => o.status === "in-progress")) continue; // an in-progress owner → allow.
+      // Owned only by slices that are not in-progress → component-boundary violation.
+      const ownerSummary = owners.map((o) => `${o.id} (${o.status})`).join(", ");
+      const reason =
+        `TwinHarness write-gate (strict mode — Phase-B Bash enforcement) blocked this Bash-mediated write. ` +
+        `Target path: ${relB}. ` +
+        `This path is owned by slice(s): ${ownerSummary}, none of which are currently in-progress. ` +
+        `Under write_gate=strict, Bash-mediated writes (e.g. echo/sed/tee redirections) are held to the same ` +
+        `§16 component-boundary rule as Write/Edit: another slice owns this path. ` +
+        `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision. ` +
+        `To allow this write, set the owning slice to in-progress: ` +
+        `\`th slice set-status <SLICE-ID> in-progress\`. ` +
+        `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1.`;
+      return fireGate("deny", reason);
     }
     // No offending target found → fall through (fail-open).
   }

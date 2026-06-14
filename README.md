@@ -8,7 +8,7 @@
 
 ## What it is
 
-TwinHarness is a Claude Code plugin: an agentic SDLC orchestrator that takes a vague software idea and produces working, tested software through a disciplined pipeline. It coordinates 9 specialized agents — Orchestrator, Spec, Critic, Vertical-Slice, Builder, UI-Designer, Doc-Writer, plus an on-demand Researcher (conditional, source-cited) and Debugger (evidence-first defect tracer) — and backs them with a deterministic TypeScript CLI (`th`) that handles every mechanical operation: state, content hashing, REQ-ID traceability, coverage gates, the drift log, and a Stop hook that blocks Claude from claiming "done" while state is invalid or a blocking discovery is open.
+TwinHarness is a Claude Code plugin: an agentic SDLC orchestrator that takes a vague software idea and produces working, tested software through a disciplined pipeline. It coordinates 10 specialized agents — Orchestrator, Spec, Critic, Vertical-Slice, Builder, UI-Designer, Doc-Writer, plus on-demand Researcher (conditional, source-cited), Debugger (evidence-first defect tracer), and Codebase-Inspector (maps an existing repo for brownfield adoption) — and backs them with a deterministic TypeScript CLI (`th`) that handles every mechanical operation: state, content hashing, REQ-ID traceability, coverage gates, the drift log, and a Stop hook that blocks Claude from claiming "done" while state is invalid or a blocking discovery is open.
 
 Three things make it different from asking an agent to build something directly:
 
@@ -85,7 +85,7 @@ flowchart TD
 
 ## Getting started
 
-**Prerequisites:** Claude Code; Node >= 18 on PATH.
+**Prerequisites:** Claude Code (≥ 1.0.0; targets the hook + agent manifest schema v1); Node >= 18 on PATH.
 
 ### Install
 
@@ -156,6 +156,9 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 - **Conditional UI-design stage.** Present only when the project has a user interface. The UI-Designer presents 2–3 distinct design directions and asks you to pick one before streaming the detailed design.
 - **Tier-scaled documentation.** T1 gets a readme; T2 adds a user guide and API reference; T3 gets the full suite. A Critic reviews the docs; no human gate required.
 - **Automatic model routing.** Cheap models handle routine work; expensive ones (Opus) handle high-risk stages, blast-radius reviews, and the Orchestrator. Haiku handles trivial summarization. The full routing policy is in `skills/twinharness/SKILL.md`.
+- **Brownfield mode.** `th init --brownfield` adopts an existing codebase: a Codebase-Inspector agent maps the repo, Slice 0 becomes a characterization test around the adoption seam, and the Builder reuses code that already satisfies a requirement instead of reimplementing it.
+- **Run preview & scorecard.** `th preview` shows the engaged stages and gates for a tier before you commit; `th scorecard` is a one-screen post-run summary (coverage, slices, suite, drift, revise loops). Opt-in `th telemetry` records scorecard snapshots locally — never sent off-machine.
+- **`strict` write-gate.** `th state set write_gate strict` adds Phase-B Bash-mediated-write enforcement of the component-boundary rule, narrowing the documented Bash bypass (it does not close it — see `SECURITY.md`).
 
 ---
 
@@ -183,6 +186,9 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 | `th stage current\|describe\|list` | The mechanical per-stage contract: produces / Critic mode / human gate |
 | `th doctor` | Run-health audit: environment, state validity, artifact integrity, coverage, slices, revise loops, locks, ledger |
 | `th next` | Next-action oracle: the single mechanical obligation the run owes next |
+| `th preview` | Pre-run view of the engaged stages, human gates, and Critic modes for a tier |
+| `th scorecard` | Post-run one-screen summary: tier, coverage, slices, suite, drift, revise loops |
+| `th telemetry on\|off\|status` | Opt-in, local-only run telemetry (snapshots; never leaves the machine) |
 | `th manifest export` | Deterministic run snapshot (state + drift + gate ledger) for review or golden CI checks |
 | `th context estimate` / `th context pack` | Approximate prompt-surface token cost · assemble the §9 slice/agent handoff bundle |
 | `th migrate` | Upgrade `state.json` to the current schema version (forward-only) |
@@ -195,17 +201,16 @@ All commands accept `--json` for machine-readable output. The full reference is 
 
 **What works today:**
 
-- Full T0–T3 pipeline, all 9 agents, all stages.
+- Full T0–T3 pipeline, all 10 agents, all stages.
 - `th` CLI with 413 passing tests covering CLI behavior, plugin-packaging integrity, security containment (path traversal, proto-pollution), and a real cross-process concurrency race test; CI runs typecheck, build, a dist-sync assertion, and the full suite on every push and PR.
 - Validated Claude Code plugin packaging (`claude plugin validate` + `--plugin-dir` load pass).
 - PreToolUse write-gate: blocks the Write/Edit/NotebookEdit path by default before gates clear and across slice-component boundaries during the build, plus a conservative pre-implementation Bash matcher; Bash writes remain out of scope as a guarantee (v0.3.0+).
 - Gate-mutation audit ledger, managed drift counter, schema-versioned state with `th migrate`, and run inspection via `th doctor` / `th stage` / `th manifest export` / `th context estimate`.
 - Context-budgeted prompts: every always-loaded skill/agent file fits Claude Code's ~500-line / ~5k-token guidance; per-stage and per-mode detail loads on demand from `skills/twinharness/reference/`.
-- A complete worked example: `examples/autocoder/` — a T3 run producing an autocoder CLI tool, 11 slices, Stage 11 verified and human-signed.
 
 **Not yet done:**
 
-- **Limited real-world mileage.** The pipeline has been exercised on internal examples but not yet validated across a broad range of real projects.
+- **Limited real-world mileage.** The pipeline has been exercised internally but not yet validated across a broad range of real projects.
 - **Breaking changes before 1.0.** Artifact schemas, state fields, and CLI flags may change.
 
 ---
@@ -215,7 +220,7 @@ All commands accept `--json` for machine-readable output. The full reference is 
 ```
 .claude-plugin/   plugin manifest and marketplace.json
 .github/          CI (typecheck, build, dist-sync assertion, full test suite)
-agents/           9 agent prompt files (lean cores; detail lives in skills/twinharness/reference/)
+agents/           10 agent prompt files (lean cores; detail lives in skills/twinharness/reference/)
 commands/         4 slash command definitions
 dist/             compiled CLI — ships in git (no build step at install time)
 hooks/            hook wiring (hooks.json → th hook stop-gate / pretool-gate)
@@ -225,7 +230,6 @@ spec/             design spec (TwinHarness-Plan.md) and the write-gate design
 src/              TypeScript source for the th CLI
 templates/        artifact skeletons for each SDLC stage
 tests/            REQ-anchored vitest suite
-examples/         complete worked example (autocoder T3 run)
 ```
 
 The agents and skill are the brains; `src/dist` is the mechanical spine; `templates/` are the artifact skeletons; `hooks/` is the completion gate. Deeper documentation lives in [USAGE.md](./USAGE.md) and [spec/](./spec/).

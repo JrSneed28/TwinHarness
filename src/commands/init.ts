@@ -24,8 +24,13 @@ Escalation: ...
 /**
  * `th init` — scaffold `docs/`, `.agentic-sdlc/state.json`, and `drift-log.md`.
  * Idempotent: existing state.json is preserved unless `--force` is given.
+ *
+ * `--brownfield` (G5) records `project_mode: "brownfield"` on the fresh state so
+ * downstream stages adopt the existing-codebase variants (characterization Slice 0,
+ * reuse-first drift, overlay architecture). Default (greenfield) leaves the field
+ * undefined so the serialized state hashes byte-identically to a pre-G5 init.
  */
-export function runInit(paths: ProjectPaths, opts: { force?: boolean }): CommandResult {
+export function runInit(paths: ProjectPaths, opts: { force?: boolean; brownfield?: boolean }): CommandResult {
   const created: string[] = [];
   const skipped: string[] = [];
 
@@ -39,7 +44,12 @@ export function runInit(paths: ProjectPaths, opts: { force?: boolean }): Command
   if (existing.exists && !opts.force) {
     skipped.push(".twinharness/state.json (already exists; use --force to reset)");
   } else {
-    writeState(paths, initialState());
+    // Greenfield is the default: leave `project_mode` undefined so serialization
+    // is byte-identical to a pre-brownfield init. Only stamp the field when
+    // brownfield is explicitly requested.
+    const state = initialState();
+    if (opts.brownfield) state.project_mode = "brownfield";
+    writeState(paths, state);
     created.push(".twinharness/state.json");
   }
 
@@ -50,9 +60,14 @@ export function runInit(paths: ProjectPaths, opts: { force?: boolean }): Command
     skipped.push("drift-log.md (already exists)");
   }
 
-  structuredLog({ cmd: "init", created, skipped });
-  const human = ["TwinHarness initialized.", ...created.map((c) => `  created: ${c}`), ...skipped.map((s) => `  skipped: ${s}`)].join(
-    "\n",
-  );
-  return success({ data: { created, skipped }, human });
+  structuredLog({ cmd: "init", created, skipped, ...(opts.brownfield ? { project_mode: "brownfield" } : {}) });
+  const data: Record<string, unknown> = { created, skipped };
+  if (opts.brownfield) data.project_mode = "brownfield";
+  const human = [
+    "TwinHarness initialized.",
+    ...(opts.brownfield ? ["  project_mode: brownfield (adopting an existing codebase)"] : []),
+    ...created.map((c) => `  created: ${c}`),
+    ...skipped.map((s) => `  skipped: ${s}`),
+  ].join("\n");
+  return success({ data, human });
 }

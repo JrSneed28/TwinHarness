@@ -5,6 +5,14 @@
 > only what this single task needs so long sessions do not forget earlier decisions. Everything
 > else is a link.
 
+> **Brownfield / adoption task (optional — `project_mode: "brownfield"`).** If this task attaches
+> to existing code, anchor it to the adoption seam from `docs/00-existing-codebase-analysis.md` and
+> write **characterization tests around the seam** — prove the integration point end-to-end before
+> changing anything. Existing module code is **off-limits** except for narrow *conformance fixes*
+> (changes that make existing code conform to a requirement-level REQ); list any such fix explicitly
+> in *Out of Scope* with its REQ-ID, and treat a contradiction with a requirement-level REQ as
+> BLOCKING drift, not an in-task edit. Prefer reusing existing code that already satisfies a REQ.
+
 **REQ-IDs:** REQ-<###>, REQ-<###>
 **Slice:** SLICE-N — <slice name>
 **Depends on:** SLICE-<N-1> / TASK-<MMM-1> complete *(or "none")*

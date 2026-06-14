@@ -1,8 +1,0 @@
-{
-  "description": "Autocoder — autonomous coding-agent CLI (mini Claude Code). LLM-driven agent loop with a tool interface (read/list/search/write/edit/run-command), filesystem sandboxing (read-anywhere, write/exec-in-root), command-approval policy, diff generation, retries, config, and run transcripts. TS/Node + Anthropic SDK + Vitest. 22 functional + 8 non-functional requirements.",
-  "single_file_or_local": false,
-  "changes_public_interface": true,
-  "adds_dependency": true,
-  "obvious_testable_answer": false,
-  "blast_radius_flags": ["data-integrity"]
-}

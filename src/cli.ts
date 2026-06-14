@@ -24,11 +24,14 @@ import { runDoctor } from "./commands/doctor";
 import { runContextEstimate, runContextPack } from "./commands/context";
 import { runStageCurrent, runStageDescribe, runStageList } from "./commands/stage";
 import { runManifestExport } from "./commands/manifest";
+import { runPreview } from "./commands/preview";
+import { runScorecard } from "./commands/scorecard";
+import { runTelemetrySet, runTelemetryStatus } from "./commands/telemetry";
 
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
-  th init [--force]                 Scaffold docs/, .twinharness/state.json, drift-log.md
+  th init [--force] [--brownfield]  Scaffold docs/, .twinharness/state.json, drift-log.md
   th state get [dotted.path]        Print state.json (or one value)
   th state set <dotted.key> <value> Patch state.json (refuses invalid results; rejects unknown keys)
   th state status                   Human-readable tier/stage/gate snapshot
@@ -71,6 +74,9 @@ Usage:
   th migrate                        Upgrade state.json to the current schema version
   th doctor                         Self-diagnostic + run-health audit (env, state, artifacts, coverage, slices, revise loops)
   th next                           The next mechanical obligation the run owes (next-action oracle)
+  th preview [--tier T<n>]          Pre-run view: engaged stages, human gates, and Critic modes for a tier
+  th scorecard                      Post-run one-screen summary (tier/coverage/slices/suite/drift/revise)
+  th telemetry on|off|status        Toggle/report opt-in, LOCAL-ONLY run telemetry (never sent off-machine)
   th context estimate               Approximate the prompt-surface token cost (flags oversized files)
   th context pack [--slice <ID>]    Assemble the §9 handoff bundle (artifact Summary blocks + slice framing)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
@@ -88,6 +94,7 @@ Global flags:
   --tests <dir>     (coverage) Tests directory (default tests)
   --scope <file>    (coverage) Scope file for MVP filtering (default docs/02-scope.md)
   --code <dir>      (coverage report) Code directory scanned for implemented (default src)
+  --tier <T0-T3>    (preview) Tier whose engaged pipeline to preview (default: state.tier, else T2)
   --slice <id>      (context pack, debug pack) Frame the pack for a specific slice (SLICE-ID)
   --req <REQ-ID>    (debug pack) Frame the pack for a specific REQ-ID
   --symptom <s>     (debug log add) The observed failure
@@ -109,7 +116,8 @@ Global flags:
   --source <s>      (drift add) Who logged the entry (default: Builder)
   --dry-run         (slices sync) Compute without writing state
   --remove-missing  (slices sync) Remove slices absent from the plan
-  --force           (init) Reset existing state.json`;
+  --force           (init) Reset existing state.json
+  --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)`;
 
 interface ParsedArgs {
   positionals: string[];
@@ -124,6 +132,7 @@ interface ParsedArgs {
     tests?: string;
     scope?: string;
     code?: string;
+    tier?: string;
     slice?: string;
     req?: string;
     symptom?: string;
@@ -145,6 +154,7 @@ interface ParsedArgs {
     source?: string;
     dryRun: boolean;
     removeMissing: boolean;
+    brownfield: boolean;
   };
 }
 
@@ -160,6 +170,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let tests: string | undefined;
   let scope: string | undefined;
   let code: string | undefined;
+  let tier: string | undefined;
   let slice: string | undefined;
   let req: string | undefined;
   let symptom: string | undefined;
@@ -181,6 +192,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let source: string | undefined;
   let dryRun = false;
   let removeMissing = false;
+  let brownfield = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "--json") json = true;
@@ -201,6 +213,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (a.startsWith("--scope=")) scope = a.slice("--scope=".length);
     else if (a === "--code") code = argv[++i];
     else if (a.startsWith("--code=")) code = a.slice("--code=".length);
+    else if (a === "--tier") tier = argv[++i];
+    else if (a.startsWith("--tier=")) tier = a.slice("--tier=".length);
     else if (a === "--slice") slice = argv[++i];
     else if (a.startsWith("--slice=")) slice = a.slice("--slice=".length);
     else if (a === "--req") req = argv[++i];
@@ -236,6 +250,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (a.startsWith("--source=")) source = a.slice("--source=".length);
     else if (a === "--dry-run") dryRun = true;
     else if (a === "--remove-missing") removeMissing = true;
+    else if (a === "--brownfield") brownfield = true;
     else positionals.push(a);
   }
   return {
@@ -251,6 +266,7 @@ function parseArgs(argv: string[]): ParsedArgs {
       tests,
       scope,
       code,
+      tier,
       slice,
       req,
       symptom,
@@ -272,6 +288,7 @@ function parseArgs(argv: string[]): ParsedArgs {
       source,
       dryRun,
       removeMissing,
+      brownfield,
     },
   };
 }
@@ -316,13 +333,28 @@ function dispatch(parsed: ParsedArgs): CommandResult {
       return success({ data: { version: ver }, human: ver });
     }
     case "init":
-      return runInit(paths, { force: parsed.flags.force });
+      return runInit(paths, { force: parsed.flags.force, brownfield: parsed.flags.brownfield });
     case "migrate":
       return runMigrate(paths);
     case "doctor":
       return runDoctor(paths);
     case "next":
       return runNext(paths);
+    case "preview":
+      return runPreview(paths, { tier: parsed.flags.tier });
+    case "scorecard":
+      return runScorecard(paths, { json: parsed.flags.json });
+    case "telemetry":
+      switch (sub) {
+        case "on":
+          return runTelemetrySet(paths, "on");
+        case "off":
+          return runTelemetrySet(paths, "off");
+        case "status":
+          return runTelemetryStatus(paths);
+        default:
+          return failure({ human: `unknown 'telemetry' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
     case "context":
       switch (sub) {
         case "estimate":

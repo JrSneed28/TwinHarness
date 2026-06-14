@@ -50,9 +50,16 @@ export interface SliceState {
   depends_on?: string[];
 }
 
-/** Valid values for the optional write-gate field (design doc §State schema change). */
-export const WRITE_GATE_VALUES = ["ask", "deny", "off"] as const;
+/**
+ * Valid values for the optional write-gate field (design doc §State schema change).
+ * `strict` = `deny` semantics PLUS Phase-B Bash-mediated-write enforcement (G4).
+ */
+export const WRITE_GATE_VALUES = ["ask", "deny", "off", "strict"] as const;
 export type WriteGate = (typeof WRITE_GATE_VALUES)[number];
+
+/** Project mode: greenfield (default) or brownfield = adopting an existing codebase (G5). */
+export const PROJECT_MODES = ["greenfield", "brownfield"] as const;
+export type ProjectMode = (typeof PROJECT_MODES)[number];
 
 export interface TwinHarnessState {
   /**
@@ -77,6 +84,12 @@ export interface TwinHarnessState {
    * Absent ⇒ "ask" semantics applied in gate logic; never written to initialState().
    */
   write_gate?: WriteGate;
+  /**
+   * Whether this run targets a fresh project (greenfield) or adopts an existing
+   * codebase (brownfield). Absent ⇒ greenfield. Set by `th init --brownfield`.
+   * Omitted from serialization when absent so existing state files hash identically.
+   */
+  project_mode?: ProjectMode;
 }
 
 export interface ValidationIssue {
@@ -105,6 +118,7 @@ export const STATE_FIELD_ORDER: (keyof TwinHarnessState)[] = [
   "drift_open_blocking",
   "revise_loop_counts",
   "write_gate",
+  "project_mode",
 ];
 
 /** Fresh state written by `th init` — unclassified, implementation not yet allowed. */
@@ -243,6 +257,13 @@ export function validateState(value: unknown): ValidationResult {
   if (v.write_gate !== undefined) {
     if (typeof v.write_gate !== "string" || !(WRITE_GATE_VALUES as readonly string[]).includes(v.write_gate)) {
       issues.push({ path: "write_gate", message: `must be one of ${WRITE_GATE_VALUES.join(", ")} or absent` });
+    }
+  }
+
+  // Optional project_mode field (G5 — brownfield).
+  if (v.project_mode !== undefined) {
+    if (typeof v.project_mode !== "string" || !(PROJECT_MODES as readonly string[]).includes(v.project_mode)) {
+      issues.push({ path: "project_mode", message: `must be one of ${PROJECT_MODES.join(", ")} or absent` });
     }
   }
 

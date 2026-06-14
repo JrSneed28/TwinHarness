@@ -1,0 +1,147 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.runScorecard = runScorecard;
+const fs = __importStar(require("node:fs"));
+const output_1 = require("../core/output");
+const state_store_1 = require("../core/state-store");
+const health_1 = require("../core/health");
+const coverage_1 = require("../core/coverage");
+const verify_1 = require("../core/verify");
+const drift_log_1 = require("../core/drift-log");
+const ledger_1 = require("../core/ledger");
+const telemetry_1 = require("../core/telemetry");
+function runScorecard(paths, opts) {
+    const r = (0, state_store_1.readState)(paths);
+    if (!r.exists) {
+        return (0, output_1.failure)({ human: "No TwinHarness run here. Run `th init` first.", data: { error: "not_initialized" } });
+    }
+    if (!r.state) {
+        return (0, output_1.failure)({ human: "state.json is invalid (`th state verify` for details).", data: { error: "invalid_state", issues: r.issues } });
+    }
+    const s = r.state;
+    // --- Coverage (planned / implemented / tested) ---
+    const breakdown = (0, coverage_1.computeBreakdown)(paths.root);
+    const coverage = "error" in breakdown
+        ? null
+        : { total: breakdown.total, planned: breakdown.planned, implemented: breakdown.implemented, tested: breakdown.tested };
+    // --- Slice progress ---
+    const prog = (0, health_1.sliceProgress)(s);
+    // --- Suite status (from the optional verify report; "—" when never run) ---
+    const report = (0, verify_1.readVerifyReport)(paths);
+    const suite = report ? (report.ok ? "green" : "failing") : "—";
+    const suiteFailures = report ? report.results.filter((x) => !x.ok).length : 0;
+    // --- Drift summary (log entries + open blocking from durable state) ---
+    let driftEntries = 0;
+    try {
+        if (fs.existsSync(paths.driftLog)) {
+            driftEntries = (0, drift_log_1.parseDriftEntries)(fs.readFileSync(paths.driftLog, "utf8")).length;
+        }
+    }
+    catch {
+        // Unreadable drift log → treat as zero entries (never crash the scorecard).
+    }
+    const drift = { entries: driftEntries, openBlocking: s.drift_open_blocking };
+    // --- Revise escalations (loops at cap → a human owes a decision) ---
+    const escalations = (0, health_1.reviseEscalations)(s);
+    // --- Artifact integrity (changed/missing governed docs) ---
+    const integrity = (0, health_1.artifactIntegrity)(paths, s);
+    const artifactsChanged = integrity.filter((i) => i.status === "changed").length;
+    const artifactsMissing = integrity.filter((i) => i.status === "missing").length;
+    const ledgerEntries = (0, ledger_1.readLedger)(paths).length;
+    const data = {
+        tier: s.tier,
+        stage: s.current_stage,
+        implementationAllowed: s.implementation_allowed,
+        coverage,
+        slices: { total: prog.total, done: prog.done, blocked: prog.blocked, inProgress: prog.inProgress, pending: prog.pending },
+        suite,
+        suiteFailures,
+        drift,
+        reviseEscalations: escalations,
+        artifacts: { registered: integrity.length, changed: artifactsChanged, missing: artifactsMissing },
+        ledgerEntries,
+    };
+    // --- Opt-in local telemetry snapshot (no-op when telemetry is disabled) ---
+    if ((0, telemetry_1.readTelemetryConfig)(paths).enabled) {
+        (0, telemetry_1.appendTelemetry)(paths, {
+            ts: new Date().toISOString(),
+            event: "scorecard",
+            tier: s.tier,
+            stage: s.current_stage,
+            coverage,
+            slices: data.slices,
+            suite,
+            drift,
+            reviseEscalations: escalations.length,
+            artifactsChanged,
+            artifactsMissing,
+        });
+    }
+    const human = renderScorecard(data);
+    return (0, output_1.success)({ data, human });
+}
+function renderScorecard(d) {
+    const cov = d.coverage
+        ? `${d.coverage.planned}/${d.coverage.implemented}/${d.coverage.tested} of ${d.coverage.total} (planned/implemented/tested)`
+        : "requirements not authored yet";
+    const suite = d.suite === "—"
+        ? "— (run `th verify run`)"
+        : d.suite === "green"
+            ? "green"
+            : `FAILING (${d.suiteFailures} command${d.suiteFailures === 1 ? "" : "s"})`;
+    const slices = d.slices.total === 0
+        ? "no slices synced"
+        : `${d.slices.done} done / ${d.slices.total} total / ${d.slices.blocked} blocked` +
+            (d.slices.inProgress + d.slices.pending > 0 ? ` (${d.slices.inProgress} in-progress, ${d.slices.pending} pending)` : "");
+    const drift = d.drift.entries === 0 && d.drift.openBlocking === 0
+        ? "none"
+        : `${d.drift.entries} entr${d.drift.entries === 1 ? "y" : "ies"}, ${d.drift.openBlocking} open blocking`;
+    const revise = d.reviseEscalations.length === 0
+        ? "none at cap"
+        : `at cap: ${d.reviseEscalations.map((e) => `${e.mode} (${e.count}/${e.cap})`).join(", ")}`;
+    const artifacts = d.artifacts.changed + d.artifacts.missing === 0
+        ? `${d.artifacts.registered} registered, all match`
+        : `${d.artifacts.registered} registered, ${d.artifacts.changed} changed, ${d.artifacts.missing} missing`;
+    return [
+        `Tier / stage : ${d.tier ?? "unclassified"} / ${d.stage}${d.implementationAllowed ? " (implementation allowed)" : ""}`,
+        `Coverage     : ${cov}`,
+        `Slices       : ${slices}`,
+        `Suite        : ${suite}`,
+        `Drift        : ${drift}`,
+        `Revise loops : ${revise}`,
+        `Artifacts    : ${artifacts}`,
+    ].join("\n");
+}

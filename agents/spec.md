@@ -44,3 +44,13 @@ For your mode's full section list, step-by-step instructions, and completion cri
 | `test-strategy` | `docs/08-test-strategy.md` | T2, T3 | None by default — streams; ask on real quality-bar tradeoffs |
 | `security` | `docs/08a-security-threat-model.md` | T3 / blast-radius | Security model + all auth decisions (blast-radius — §8) |
 | `failure-modes` | `docs/08b-failure-edge-cases.md` | T3 / reliability-critical | Only product- or risk-meaningful failure-handling choices |
+
+## Brownfield note (`architecture` mode on an adoption run)
+
+When `project_mode` is **brownfield** — the run adopts an existing codebase — the architecture is
+an **overlay** on what already exists, not a clean-sheet design. Read the Codebase-Inspector's
+`docs/00-existing-codebase-analysis.md` Summary first. **Acknowledge existing components by path**
+and mark each as *reused* (already present, the design depends on it as-is) or *new* (this work
+adds it); call out the adoption seam where new attaches to existing. Do not redesign components
+that already work and are out of scope. The same discipline carries into `contracts`/`domain-model`:
+existing public APIs are constraints to honour, not blanks to fill.

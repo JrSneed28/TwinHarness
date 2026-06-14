@@ -26,8 +26,12 @@ TwinHarness includes two mechanical gates:
 - **Stop-gate** (`hooks/hooks.json` → `Stop` hook): checks state at the end of
   each Claude Code session and can block the session from completing cleanly.
 - **PreToolUse write-gate** (`hooks/hooks.json` → `PreToolUse` hook): intercepts
-  `Write`, `Edit`, and `NotebookEdit` tool calls; a separate Bash heuristic
-  covers obvious write-like shell commands in Phase A only.
+  `Write`, `Edit`, and `NotebookEdit` tool calls; a separate, conservative Bash
+  heuristic covers obvious write-like shell commands (redirections, `tee`,
+  `dd of=`, `sed -i`) in Phase A by default, and **also in Phase B when
+  `write_gate: "strict"` is set** (the opt-in mode added in v0.6.2 — it enforces
+  the §16 component-boundary rule on mid-build Bash redirections, denying writes
+  to paths owned by a slice that is not in-progress).
 
 These gates are **guardrails for a compliant orchestrating agent**. They are not
 a security sandbox. The orchestrator can legitimately:
@@ -35,7 +39,15 @@ a security sandbox. The orchestrator can legitimately:
 - Set state fields directly: `th state set implementation_allowed true`
 - Resolve blocking drift before writing files
 - Write files via `Bash`, which the `Write`/`Edit`-matched `PreToolUse` hook does
-  not see (only the Bash heuristic applies, and it is intentionally conservative)
+  not see directly (only the Bash heuristic applies). That heuristic is
+  intentionally conservative and **fail-open**: it is a regex over the literal
+  command string, so it does not parse here-documents (`cat <<EOF > file`),
+  subshells / command substitution, variable indirection, shell globbing, or
+  writes performed by an invoked program (`printf`, `python -c`, `node -e`).
+  `write_gate: "strict"` extends the heuristic into Phase B but does **not**
+  change this fundamental gap — it narrows the common accidental-redirection
+  cases, it does not close the Bash bypass. A determined or non-compliant agent
+  can still write through an unparsed Bash construct.
 
 The **gate-mutation audit ledger** (`.twinharness/gate-ledger.jsonl`) records
 every gate-relevant state change, making such overrides reviewable after the

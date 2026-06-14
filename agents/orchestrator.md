@@ -206,9 +206,9 @@ Cheap by default, expensive where wrong answers are expensive.
 
 ---
 
-## On-demand agents: Researcher and Debugger
+## On-demand agents: Researcher, Debugger, and Codebase-Inspector
 
-Two agents are **not** pipeline stages — you invoke them when the situation calls for it, in fresh
+Three agents are **not** pipeline stages — you invoke them when the situation calls for it, in fresh
 context, like the Critic.
 
 - **Researcher (`agents/researcher.md`) — conditional.** Spawn it only when a real knowledge gap
@@ -222,6 +222,36 @@ context, like the Critic.
   contradicts a contract. It starts from `th debug pack`, records anchored evidence via `th debug
   log`, and is reviewed in `debug-review` mode. It proposes the minimal fix; the owning slice's
   Builder applies it; a requirement contradiction becomes blocking drift.
+- **Codebase-Inspector (`agents/codebase-inspector.md`) — on a brownfield run.** Spawn it at the
+  start of a brownfield run (see *Brownfield mode* below) to map the existing repo: language/build,
+  module layout, public APIs, test framework, and any blast-radius surfaces already present (auth,
+  authz, money, data-integrity, migrations). It emits source-anchored
+  `docs/00-existing-codebase-analysis.md` (register with
+  `th artifact register docs/00-existing-codebase-analysis.md --version N`). It gathers ground truth;
+  you and the design stages decide what is new vs. reused. Greenfield runs skip it.
+
+## Brownfield mode (adopting an existing codebase)
+
+By default a run is **greenfield** — a fresh project. When the user is building INTO an existing
+repo (adding a feature to, or changing, code that already exists), run brownfield mode:
+
+1. **Record the mode** at init: `th init --brownfield` stamps `project_mode: "brownfield"` in
+   `state.json`. (Plain `th init` stays greenfield.)
+2. **Map ground truth first (recommended).** Invoke the **Codebase-Inspector** (fresh context)
+   before tiering so the existing language, modules, public APIs, test framework, and any existing
+   blast-radius surfaces are known facts feeding `th tier classify` / `th tier veto-check`. Existing
+   auth/authz/money/migrations in the code the new work touches are §5 blast-radius just as much as
+   new ones — the veto applies to them.
+3. **Tier and design as an overlay, not a clean sheet.** The Spec agent's architecture is an overlay
+   on existing components (what is new vs. reused, acknowledged by path); the Vertical-Slice agent's
+   Slice 0 becomes a **characterization** test around the adoption seam, not a fresh walking
+   skeleton; the Builder reuses code that already satisfies a REQ rather than reimplementing it.
+
+**Brownfield Tier-0 variant.** A change qualifies for Tier 0 in brownfield only when it meets the
+five Tier-0 criteria *and additionally*: it touches **only one existing module**, requires **no
+cross-module refactor**, and involves **no migration**. Any cross-module reach, schema/contract
+change to a shared surface, or data migration pulls it to at least Tier 1 — the existing-code blast
+radius is real even when the diff looks small.
 
 ## Parallel build coordination (§16)
 

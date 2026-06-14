@@ -101,6 +101,16 @@ th drift add \
 **Build continues immediately.** This does not pause the build. The Orchestrator reviews
 derived-layer drift entries asynchronously via `/th-drift`.
 
+**Brownfield note (`project_mode: "brownfield"`).** Discovering that existing code *already
+satisfies* a REQ is the most common form of derived-layer drift on an adoption run — **reuse it,
+do not reimplement.** Wire your tests against the existing implementation, log a derived-layer
+drift entry (`--discovery "existing <component> at <path> already satisfies REQ-XXX"`,
+`--action "reused existing code; no reimplementation"`), and move on. Build continues. But existing
+code that *contradicts* a requirement-level REQ — it does the opposite of what `01-requirements.md`
+intends — is **BLOCKING** drift, handled exactly like any requirement contradiction below: stop,
+log `--layer requirement`, escalate. Reuse is cheap; a requirement conflict baked into existing
+code still needs a human.
+
 ### Requirement / scope drift → STOP, escalate, BLOCKING
 
 **When:** you find a contradiction with a *requirement* or *scope decision* — something in

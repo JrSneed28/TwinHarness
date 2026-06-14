@@ -79,8 +79,13 @@
     },
     "write_gate": {
       "type": "string",
-      "enum": ["ask", "deny", "off"],
-      "description": "PreToolUse write-gate mode. Absent ⇒ ask semantics."
+      "enum": ["ask", "deny", "off", "strict"],
+      "description": "PreToolUse write-gate mode. Absent ⇒ ask semantics. strict adds Phase-B Bash-write enforcement."
+    },
+    "project_mode": {
+      "type": "string",
+      "enum": ["greenfield", "brownfield"],
+      "description": "greenfield (default/absent) or brownfield (adopting an existing codebase). Set by th init --brownfield."
     }
   }
 }
