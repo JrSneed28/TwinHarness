@@ -10,5 +10,9 @@
   "license": "MIT",
   "keywords": ["sdlc", "orchestration", "spec-driven", "vertical-slices", "traceability", "agents"],
   "homepage": "https://github.com/JrSneed28/TwinHarness",
-  "repository": "https://github.com/JrSneed28/TwinHarness"
+  "repository": "https://github.com/JrSneed28/TwinHarness",
+  "metadata": {
+    "requiresClaudeCode": ">=1.0.0",
+    "compatibility": "Targets the Claude Code hook + agent manifest schema v1. Documentation-only; not enforced by the host at load time. `th doctor` echoes this expectation."
+  }
 }

@@ -75,6 +75,17 @@ describe("REQ-DOCTOR-001: environment + project health", () => {
     expect(res.ok).toBe(false);
     expect(byName(res.data, "state.json")?.status).toBe("fail");
   });
+
+  it("reports the Claude Code compatibility expectation as a non-fatal note", () => {
+    tp = makeTempProject();
+    const res = runDoctor(tp.paths);
+    const cc = byName(res.data, "claude code");
+    expect(cc?.status).toBe("warn"); // informational, surfaced as a warning
+    expect(cc?.detail).toMatch(/Claude Code >=1\.0\.0/);
+    expect(res.human).toMatch(/plugin targets Claude Code >=1\.0\.0/);
+    // The note must not change the exit code: a fresh uninitialized dir is still ok.
+    expect(res.ok).toBe(true);
+  });
 });
 
 describe("REQ-DOCTOR-002: run-health audit (artifacts, slices, coverage, revise loops)", () => {

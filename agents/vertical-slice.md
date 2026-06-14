@@ -58,6 +58,17 @@ Slice 0 requirements:
 - Delivers no substantial user-visible feature beyond "the system boots and the integration holds."
 - Is the first slice built, always.
 
+#### Brownfield variant — Slice 0 is a characterization test
+
+When `project_mode` is **brownfield** (the run adopts an existing codebase — `th init --brownfield`,
+mapped by the Codebase-Inspector's `docs/00-existing-codebase-analysis.md`), there is no fresh
+skeleton to stand up — the system already boots. Slice 0 instead **characterizes the adoption
+seam**: an end-to-end test that pins the integration point where the new work attaches to the
+existing code, *with the existing components left untouched*. It proves the seam behaves as the
+overlay design assumes — exactly the integration-risk role of the greenfield skeleton, applied to
+real code instead of a stub. Reference the seam by path from the existing-codebase analysis. Do not
+build a parallel skeleton alongside working code; pin the real boundary instead.
+
 ### Subsequent slices
 
 Each slice after Slice 0 must have all of these fields:

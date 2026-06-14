@@ -57,6 +57,11 @@ Escalation: ...
 /**
  * `th init` — scaffold `docs/`, `.agentic-sdlc/state.json`, and `drift-log.md`.
  * Idempotent: existing state.json is preserved unless `--force` is given.
+ *
+ * `--brownfield` (G5) records `project_mode: "brownfield"` on the fresh state so
+ * downstream stages adopt the existing-codebase variants (characterization Slice 0,
+ * reuse-first drift, overlay architecture). Default (greenfield) leaves the field
+ * undefined so the serialized state hashes byte-identically to a pre-G5 init.
  */
 function runInit(paths, opts) {
     const created = [];
@@ -71,7 +76,13 @@ function runInit(paths, opts) {
         skipped.push(".twinharness/state.json (already exists; use --force to reset)");
     }
     else {
-        (0, state_store_1.writeState)(paths, (0, state_schema_1.initialState)());
+        // Greenfield is the default: leave `project_mode` undefined so serialization
+        // is byte-identical to a pre-brownfield init. Only stamp the field when
+        // brownfield is explicitly requested.
+        const state = (0, state_schema_1.initialState)();
+        if (opts.brownfield)
+            state.project_mode = "brownfield";
+        (0, state_store_1.writeState)(paths, state);
         created.push(".twinharness/state.json");
     }
     if (!fs.existsSync(paths.driftLog)) {
@@ -81,7 +92,15 @@ function runInit(paths, opts) {
     else {
         skipped.push("drift-log.md (already exists)");
     }
-    (0, log_1.structuredLog)({ cmd: "init", created, skipped });
-    const human = ["TwinHarness initialized.", ...created.map((c) => `  created: ${c}`), ...skipped.map((s) => `  skipped: ${s}`)].join("\n");
-    return (0, output_1.success)({ data: { created, skipped }, human });
+    (0, log_1.structuredLog)({ cmd: "init", created, skipped, ...(opts.brownfield ? { project_mode: "brownfield" } : {}) });
+    const data = { created, skipped };
+    if (opts.brownfield)
+        data.project_mode = "brownfield";
+    const human = [
+        "TwinHarness initialized.",
+        ...(opts.brownfield ? ["  project_mode: brownfield (adopting an existing codebase)"] : []),
+        ...created.map((c) => `  created: ${c}`),
+        ...skipped.map((s) => `  skipped: ${s}`),
+    ].join("\n");
+    return (0, output_1.success)({ data, human });
 }

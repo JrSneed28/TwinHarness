@@ -22,6 +22,27 @@ The producer→Critic mechanic is identical in every design stage:
 
 ---
 
+## Brownfield adaptations (`project_mode: "brownfield"`)
+
+When the run adopts an existing codebase (`th init --brownfield`), the pipeline overlays reality
+instead of starting clean. Three adaptations apply across the stages below:
+
+- **Inspection step before tiering.** Spawn the **Codebase-Inspector agent**
+  (`agents/codebase-inspector.md`, fresh context) first. It maps language/build, modules, public
+  APIs, the test framework, and any existing blast-radius surfaces (auth, authz, money,
+  data-integrity, migrations), emitting source-anchored `docs/00-existing-codebase-analysis.md`.
+  Feed its findings to `th tier classify` / `th tier veto-check` — existing blast-radius code the
+  new work touches triggers the §5 veto just like new code. Register it after the Critic passes:
+  `th artifact register docs/00-existing-codebase-analysis.md --version 1`.
+- **Architecture/contracts as an overlay.** The Spec agent acknowledges existing components by path
+  (new vs. reused) and treats existing public APIs as constraints, not blanks. It does not redesign
+  working, out-of-scope components.
+- **Slice 0 is a characterization test.** The Vertical-Slice agent does not build a fresh walking
+  skeleton (the system already boots). Slice 0 becomes an end-to-end **characterization** test that
+  pins the adoption seam where new work attaches, with existing components untouched (see Stage 9).
+
+---
+
 ## Stage 4 — Scope (T1, T2, T3)
 
 Delegate to the **Spec agent in `scope` mode** with the `templates/02-scope.md` skeleton. The
@@ -182,7 +203,10 @@ vertical slices.
 The agent produces:
 - **Slice 0** — the walking skeleton: the thinnest end-to-end path that exercises every significant
   architectural boundary, with an integration acceptance test, even if it does almost nothing
-  functionally.
+  functionally. **Brownfield (`project_mode: "brownfield"`):** Slice 0 is instead a
+  **characterization** test around the adoption seam (the integration point new work attaches to,
+  per `docs/00-existing-codebase-analysis.md`), with existing components untouched — the system
+  already boots, so there is no fresh skeleton to stand up.
 - **Ordered subsequent slices**, each with: name; REQ-IDs satisfied; user-demonstrable capability;
   components touched end-to-end (drives §16 parallel-build serialization); anchored acceptance
   tests; dependencies and order; definition of done.

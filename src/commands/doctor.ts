@@ -70,6 +70,16 @@ export function runDoctor(paths: ProjectPaths): CommandResult {
   }
   checks.push({ name: "version", status: "ok", detail: version });
 
+  // Claude Code compatibility expectation. Informational only: this binary can't
+  // observe the host Claude Code version, so it reports the contract the plugin
+  // is built against (declared in .claude-plugin/plugin.json `metadata`). A
+  // warning so it's visible, but it never fails the process.
+  checks.push({
+    name: "claude code",
+    status: "warn",
+    detail: "plugin targets Claude Code >=1.0.0 (hook+agent schema v1) — informational, not host-checked",
+  });
+
   // --- Project ---
   const r = readState(paths);
   if (!r.exists) {

@@ -7,7 +7,7 @@
  * `th state verify` and the stop-gate can explain *what* is wrong.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.STATE_FIELD_ORDER = exports.WRITE_GATE_VALUES = exports.SLICE_STATUSES = exports.BLAST_RADIUS_FLAGS = exports.TIERS = exports.CURRENT_SCHEMA_VERSION = void 0;
+exports.STATE_FIELD_ORDER = exports.PROJECT_MODES = exports.WRITE_GATE_VALUES = exports.SLICE_STATUSES = exports.BLAST_RADIUS_FLAGS = exports.TIERS = exports.CURRENT_SCHEMA_VERSION = void 0;
 exports.initialState = initialState;
 exports.validateState = validateState;
 exports.serializeState = serializeState;
@@ -28,8 +28,13 @@ exports.BLAST_RADIUS_FLAGS = [
     "migrations",
 ];
 exports.SLICE_STATUSES = ["pending", "in-progress", "done", "blocked"];
-/** Valid values for the optional write-gate field (design doc §State schema change). */
-exports.WRITE_GATE_VALUES = ["ask", "deny", "off"];
+/**
+ * Valid values for the optional write-gate field (design doc §State schema change).
+ * `strict` = `deny` semantics PLUS Phase-B Bash-mediated-write enforcement (G4).
+ */
+exports.WRITE_GATE_VALUES = ["ask", "deny", "off", "strict"];
+/** Project mode: greenfield (default) or brownfield = adopting an existing codebase (G5). */
+exports.PROJECT_MODES = ["greenfield", "brownfield"];
 /** Canonical field order → deterministic serialization → stable content hashes. */
 exports.STATE_FIELD_ORDER = [
     "schema_version",
@@ -45,6 +50,7 @@ exports.STATE_FIELD_ORDER = [
     "drift_open_blocking",
     "revise_loop_counts",
     "write_gate",
+    "project_mode",
 ];
 /** Fresh state written by `th init` — unclassified, implementation not yet allowed. */
 function initialState() {
@@ -170,6 +176,12 @@ function validateState(value) {
     if (v.write_gate !== undefined) {
         if (typeof v.write_gate !== "string" || !exports.WRITE_GATE_VALUES.includes(v.write_gate)) {
             issues.push({ path: "write_gate", message: `must be one of ${exports.WRITE_GATE_VALUES.join(", ")} or absent` });
+        }
+    }
+    // Optional project_mode field (G5 — brownfield).
+    if (v.project_mode !== undefined) {
+        if (typeof v.project_mode !== "string" || !exports.PROJECT_MODES.includes(v.project_mode)) {
+            issues.push({ path: "project_mode", message: `must be one of ${exports.PROJECT_MODES.join(", ")} or absent` });
         }
     }
     // Cross-field invariant — the veto FLOOR (spec §5): Tier 0 is forbidden when

@@ -1,17 +1,19 @@
 # PreToolUse Write-Gate — Design (target: v0.3.0)
 
-> Status: **Implemented in v0.3.0 (2026-06-10)**.
+> Status: **Implemented in v0.3.0 (2026-06-10)**; conservative Phase-A Bash heuristic added
+> post-v0.3.0; opt-in `strict` mode (Phase-B Bash enforcement) added in **v0.6.2 (G4)**.
 > The Stop hook catches a false "done" *after the fact*. This gate provides a strong default
 > guardrail for the Write/Edit path — "no implementation before the gates clear" enforced on
 > the standard write tools — consistent with the project's own principle: instructions don't
-> enforce, code does (spec §11). Bash-mediated writes are deliberately out of scope (see
-> "Deliberately out of scope" below).
+> enforce, code does (spec §11). Bash-mediated writes are out of scope by default; the
+> conservative Phase-A heuristic and opt-in `strict` Phase-B enforcement *narrow* (do not
+> close) that gap (see "Deliberately out of scope" below).
 
 ## Resolved design decisions
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Semantics when the gate fires | **Configurable: `ask` \| `deny` \| `off`, default `ask`** — new optional `write_gate` state field | `ask` keeps manual sessions one click away from proceeding while still hard-stopping headless agents; `deny` available for strict runs; `off` for opt-out. Absent field ⇒ `ask`. |
+| Semantics when the gate fires | **Configurable: `ask` \| `deny` \| `off` \| `strict`, default `ask`** — new optional `write_gate` state field | `ask` keeps manual sessions one click away from proceeding while still hard-stopping headless agents; `deny` available for strict runs; `off` for opt-out; `strict` = `deny` semantics PLUS Phase-B Bash-mediated-write enforcement (see step i below). Absent field ⇒ `ask`. |
 | Activation | **Automatic during runs** — active whenever `state.json` exists and gating conditions apply; nothing for the orchestrator to remember | The orchestrator-must-remember pattern is exactly what TwinHarness distrusts. Projects without TwinHarness state are completely unaffected (fast-path allow). |
 | Path policy | **Derived from the slice plan**, with an allowlist fallback before slices exist | Components in `state.slices` become the gate's path universe once `th slices sync` has run; before that, block everything except doc/state paths. |
 
@@ -48,6 +50,17 @@
    `in-progress` → fire (`ask`) — a likely §16 component-boundary violation / drift race.
    Writes to in-progress slices' components, and paths owned by no slice, → allow
    (new files appear constantly during a build; unowned ≠ forbidden).
+8. **Phase B — Bash-mediated boundary enforcement, `write_gate: "strict"` only** (G4):
+   when `write_gate` is `strict`, `implementation_allowed: true`, `state.slices` is
+   non-empty, and the tool call carries a Bash `command`, apply the same conservative Bash
+   matcher used in Phase A (step c2 — `>`, `>>`, `tee`, `dd of=`, `sed -i`) to mid-build
+   Bash writes. A target owned **solely** by slices that are not `in-progress` → fire
+   (`deny`). Fail-open on everything else: unparseable commands, out-of-root targets,
+   doc/state-allowlisted targets, unowned in-root paths, and targets with an in-progress
+   owner all fall through. This check runs **before** the "no `file_path` → allow"
+   short-circuit (step d), because a Bash tool call has a `command` but no `file_path`/
+   `notebook_path` — otherwise it would be unreachable. Default modes (`ask` / `deny` /
+   `off` / absent) leave Phase-B Bash writes **ungated**, exactly as before strict shipped.
 
 Phase B is the payoff of slice-derived paths: the per-Builder "do not modify files owned by
 another slice" rule in `agents/builder.md` becomes mechanically enforced instead of promised.
@@ -70,10 +83,16 @@ scheduling only). For gating they must be resolvable to paths:
 
 ## State schema change
 
-- New optional field `write_gate?: "ask" | "deny" | "off"` — validator accepts the three
-  values or absence; canonical serializer includes it only when present (preserves the
-  hash-stability of existing state files); `th state set write_gate deny` works because the
+- Optional field `write_gate?: "ask" | "deny" | "off" | "strict"` — validator accepts the
+  four values or absence; canonical serializer includes it only when present (preserves the
+  hash-stability of existing state files); `th state set write_gate strict` works because the
   field joins the known-keys list.
+- `strict` (added in v0.6.2 / G4) is a **backward-compatible superset of `deny`**: it carries
+  `deny` semantics everywhere `deny` fires (Phase-A file writes, the Phase-A Bash heuristic),
+  and additionally adds the Phase-B Bash-mediated boundary enforcement of step i above. The
+  Phase-B Write/Edit boundary check still fires `ask` under strict (it is a likely-drift
+  signal, not a hard pre-implementation block) — strict's added bite is on the Bash path,
+  where a redirection would otherwise sidestep the §16 rule entirely.
 
 ## Test matrix (REQ-anchored, like the stop-gate suite)
 
@@ -83,6 +102,15 @@ configured) · Tier-0 (implementation_allowed immediately true) → never fires 
 mid-build write inside in-progress slice → allow · mid-build write to a pending/done slice's
 path-like component → ask · abstract component names → no Phase-B effect · legacy
 `.agentic-sdlc` projects → identical behavior · reason text contains stage + unlock path.
+
+Strict-mode matrix (`tests/write-gate-strict.test.ts`, G4): strict + Phase-B Bash write into
+a non-in-progress slice → **deny** (reason names strict + owning slice) · strict + Phase-B
+Bash write into an in-progress slice → allow · strict + Phase-B Bash write to an unowned
+in-root path / doc-allowlist path / out-of-root path / non-redirecting command → allow
+(fail-open) · strict + empty slices → allow · strict + Phase-A file write → deny · strict +
+Phase-A Bash write → deny · strict Phase-B **Write/Edit** boundary → still ask (unchanged) ·
+default `ask` / explicit `deny` / `off` + Phase-B Bash write → allow (strict not active —
+backward-compatible) · `TH_DISABLE_WRITE_GATE=1` overrides strict.
 
 ## Rollout
 
@@ -106,3 +134,21 @@ path-like component → ask · abstract component names → no Phase-B effect ·
   > `dd of=`, and `sed -i` into in-root implementation paths, fail-open on anything it
   > cannot clearly parse. The position above still holds as a *guarantee*: Bash writes
   > remain out of scope; the matcher narrows the gap, it does not close it (see SECURITY.md).
+
+  > **Status update (v0.6.2 — `strict` mode, G4):** the same conservative Bash matcher is
+  > now *also* applied in Phase B when `write_gate: "strict"` is set, enforcing the §16
+  > component-boundary rule on mid-build Bash redirections (`deny` on a target owned solely
+  > by non-in-progress slices). This is **opt-in** and does **not** change default-mode
+  > behaviour: `ask` / `deny` / `off` / absent all still leave Phase-B Bash writes ungated.
+  >
+  > **Honest scope of `strict`.** It *narrows*, it does **not** *close*, the Bash bypass.
+  > The matcher is a regex over the literal command string; it still does **not** cover:
+  > here-documents (`cat <<EOF > file`), subshells / command substitution
+  > (`(cd src && echo x > a.ts)`, `$(...)`), variable indirection (`f=src/a.ts; echo x > "$f"`),
+  > shell globbing / brace expansion (`echo x > src/*.ts`), `printf`/`python -c`/`node -e`
+  > writers, and any write performed by an invoked program rather than a redirection. As
+  > with Phase A it is **fail-open**: anything it cannot clearly parse falls through to allow.
+  > The fundamental caveat from SECURITY.md is unchanged — these are guardrails for a
+  > *compliant* agent, not a sandbox. A determined or non-compliant agent can still write via
+  > an unparsed Bash construct; `strict` raises the bar for the common, accidental redirection
+  > cases, nothing more.

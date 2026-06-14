@@ -729,7 +729,7 @@ process.
 ```
 .claude-plugin/   plugin manifest + marketplace.json (installation wiring)
 .github/          CI workflow (ci.yml — typecheck, build, dist-sync, test on every push/PR)
-agents/           9 agent prompt files
+agents/           10 agent prompt files
 commands/         4 Claude Code command files (th-run, th-status, th-drift, th-escalate)
 dist/             compiled CLI — committed on purpose; no build step at install time
 hooks/            Stop hook wiring (hooks.json → th hook stop-gate)
@@ -746,6 +746,31 @@ SECURITY.md       threat model (gate scope, Bash bypass, global hook, prompt inj
 CI (`npm ci` → `npm run typecheck` → `npm test` → `npm run build` → `git diff --exit-code dist/`)
 runs on every push and pull request, enforcing the committed-`dist/` invariant. See
 `CONTRIBUTING.md` for the full developer setup and plugin-packaging rules.
+
+### New in 0.6.2 — preview · scorecard · telemetry · brownfield · strict gate
+
+- **`th preview [--tier T<n>]`** — a pre-run view of the pipeline shape: the engaged stages for
+  a tier, which carry a human gate, and each stage's Critic mode, plus a stages/gates/reviews
+  summary line. Tier resolves from `--tier`, else the recorded `state.tier`, else T2 (and says so).
+  Read-only.
+- **`th scorecard [--json]`** — a read-only one-screen post-run summary: tier/stage, coverage
+  (planned/implemented/tested), slice progress, suite status (from the last `th verify run`, `—` if
+  none), drift (entries + open blocking), and revise escalations. If telemetry is on, each call also
+  appends a timestamped snapshot.
+- **`th telemetry on|off|status`** — opt-in, **local-only** run telemetry stored next to `state.json`
+  (`telemetry.json` + `telemetry.jsonl`), off by default. Nothing is ever transmitted; `on` starts
+  recording `th scorecard` snapshots, `off` stops, `status` shows the flag and record count.
+- **Brownfield (`th init --brownfield`)** — stamps `project_mode: "brownfield"` and shifts the
+  pipeline to overlay reality: the Orchestrator invokes the Codebase-Inspector to map the existing
+  repo before tiering, Slice 0 becomes a characterization test around the adoption seam, and the
+  Builder reuses existing code that already satisfies a requirement. Existing auth/money/migrations in
+  touched code remain blast-radius (never Tier 0).
+- **`write_gate: "strict"`** (`th state set write_gate strict`) — a backward-compatible superset of
+  `deny`: it additionally holds mid-build (Phase B) **Bash-mediated** writes to the §16
+  component-boundary rule (`echo x > src/api.ts`, `sed -i`, `tee`, `dd of=` into a path owned by a
+  slice that is not `in-progress` is denied). Fail-open and conservative — it narrows, but does not
+  close, the Bash bypass (here-docs, subshells, variable indirection, and globbing are not parsed;
+  see `SECURITY.md`). Default modes leave Phase-B Bash writes ungated, exactly as before.
 
 ### Templates
 

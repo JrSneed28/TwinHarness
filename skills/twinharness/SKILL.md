@@ -52,7 +52,9 @@ CLI — never hand-edit `state.json`, never eyeball traceability, never "remembe
 > **On-demand agents** (you invoke when the situation calls for it, like the Critic): the **Researcher**
 > (`agents/researcher.md`) — conditional, only when a project needs unfamiliar external knowledge; emits
 > source-cited `docs/00-research/`. The **Debugger** (`agents/debugger.md`) — fresh-context, evidence-first,
-> on a failing suite or grounded defect; starts from `th debug pack`, records via `th debug log`. During
+> on a failing suite or grounded defect; starts from `th debug pack`, records via `th debug log`. The
+> **Codebase-Inspector** (`agents/codebase-inspector.md`) — fresh-context, on a **brownfield** run; maps
+> the existing repo and emits source-anchored `docs/00-existing-codebase-analysis.md`. During
 > the build, dispatch parallel Builders with `th build next-wave` and guard collisions with `th build claim`.
 
 Run `th` with `--json` whenever you need to parse the result. The CLI **records and computes; it
@@ -70,6 +72,17 @@ each stage. This section is the compact routing guide.
 ### 1. Init
 
 Run `th init` in the project root (creates `docs/`, `.twinharness/state.json`, `drift-log.md`).
+
+**Greenfield vs. brownfield.** Default runs are greenfield (a fresh project). If the user is
+building INTO an existing repo, run `th init --brownfield` instead (stamps
+`project_mode: "brownfield"`) and invoke the **Codebase-Inspector** to map ground truth before
+tiering. Brownfield shifts three things: Slice 0 becomes a characterization test around the
+adoption seam (not a fresh walking skeleton), the architecture is an overlay on existing components
+(what's new vs. reused), and the Builder reuses existing code that already satisfies a REQ rather
+than reimplementing it. Existing auth/money/migrations in touched code are §5 blast-radius. See the
+*Brownfield adaptations* notes in
+`${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference/pipeline-stages.md` and
+`${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference/build-and-verify.md`.
 
 ### 2. Requirements stage
 
@@ -197,6 +210,7 @@ Stage 10 (implementation) and Stage 11 (final verification) are described in the
 - **Builder** (`agents/builder.md`) — write code + tests, run checks, drift write-back (Stage 10).
 - **UI Designer** (`agents/ui-designer.md`) — user-centered UI design in fresh context (Stage 4b, conditional on project having a UI).
 - **Doc-Writer** (`agents/doc-writer.md`) — tier-scaled documentation generation from contracts and implementation (Stage 10.5).
+- **Codebase-Inspector** (`agents/codebase-inspector.md`) — fresh-context existing-codebase mapper on a brownfield run; emits source-anchored `docs/00-existing-codebase-analysis.md` (on-demand, like the Researcher/Debugger).
 - **Orchestrator** (`agents/orchestrator.md`) — your own playbook for tiering, routing, gates, state.
 
 ## Model & effort routing (automatic)

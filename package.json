@@ -23,7 +23,10 @@
     "th": "node dist/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify": "npm run typecheck && npm run build && npm test && git diff --exit-code dist/",
+    "dist-sync-check": "git diff --exit-code dist/",
+    "prepare": "git config core.hooksPath .githooks || exit 0"
   },
   "engines": {
     "node": ">=18"

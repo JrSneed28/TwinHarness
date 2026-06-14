@@ -7,9 +7,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.6.2] — 2026-06-14
 
+Gap-remediation release: end-to-end test coverage, write-gate hardening, a product surface (preview/scorecard/telemetry), brownfield support, release automation, and contributor DX. **460 tests** (was 413).
+
+### Added
+
+- **Brownfield support (G5).** `th init --brownfield` records `project_mode: "brownfield"`; a new on-demand **Codebase-Inspector** agent (the 10th agent) maps an existing repo into `docs/00-existing-codebase-analysis.md`. In brownfield mode Slice 0 becomes a characterization test around the adoption seam, the architecture overlays existing components, and the Builder reuses code that already satisfies a requirement instead of reimplementing it.
+- **`th preview [--tier T<n>]` (G6).** Pre-run view of the engaged stages for a tier — human gates, Critic modes, and a stages/gates/reviews summary.
+- **`th scorecard` (G7).** Read-only one-screen post-run summary: tier/stage, coverage, slice progress, suite status, drift, and revise escalations (`--json` for the structured form).
+- **`th telemetry on|off|status` (G7).** Opt-in, **local-only** run telemetry (`<stateDir>/telemetry.{json,jsonl}`); off by default, never makes a network call, and `th scorecard` appends a snapshot only when enabled.
+- **`write_gate: "strict"` mode (G4).** `deny` semantics plus conservative Phase-B Bash-mediated-write enforcement of the §16 component-boundary rule — narrows, does not close, the documented Bash bypass (here-docs/subshells/variable-indirection/globbing remain unparsed).
+- **Release automation (G8).** `.github/workflows/release.yml` cuts a GitHub Release from a pushed `v*` tag, using the matching `CHANGELOG.md` section as the body.
+- **Contributor DX (G9).** `npm run verify` one-shot gate (typecheck → build → test → dist-sync), a zero-dependency `core.hooksPath` pre-commit hook (rebuild-dist guard + typecheck, no new dependency), and GitHub issue/PR templates.
+- **Deterministic end-to-end orchestration test (G3)** (`tests/orchestration-e2e.test.ts`): drives a full run — init → tier → artifact → slices → build waves → write-gate → coverage → final-verification stop-gate — through the CLI, with no LLM.
+
+### Changed
+
+- **Claude Code version pin (G10, documentation-only).** `.claude-plugin/plugin.json` declares `metadata.requiresClaudeCode` (`>=1.0.0`; hook + agent schema v1); `th doctor` echoes it as a non-fatal compatibility note that never changes the exit code.
+- Agent count 9 → 10 (added Codebase-Inspector). Optional `project_mode` and the `strict` `write_gate` value were added to the state schema and the published JSON Schema — both additive, so existing artifact hashes are unaffected (no migration).
+
 ### Removed
 
-- **Bundled worked examples** (`examples/autocoder/`, `examples/twinrunner/`) removed from the repository. They were development-reference artifacts, not part of the installed plugin (never in `package.json` `files` or the plugin manifest), so installs are unaffected. Examples will be regenerated from real end-to-end runs. README and USAGE updated to drop the now-absent `examples/` references.
+- **Bundled worked examples** (`examples/autocoder/`, `examples/twinrunner/`) removed from the repository. They were development-reference artifacts, not part of the installed plugin (never in `package.json` `files` or the plugin manifest), so installs are unaffected. Examples will be regenerated from real end-to-end runs.
 
 ## [0.6.1] — 2026-06-13
 
