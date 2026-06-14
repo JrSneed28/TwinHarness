@@ -90,7 +90,10 @@ Usage:
   th build plan [--include-done]    Schedule slices into conflict-free build waves (§16: disjoint parallelize, shared serialize)
   th build next-wave                Live oracle: slices dispatchable in parallel now (deps done, components free)
   th build claim|release <SLICE-ID> Take/release a live component lease (collision guard for parallel Builders)
-  th build leases                   List the live component leases
+  th build sub-claim <PARENT-SLICE> --components <c1,c2,...>
+                                    Open a SUB-lease for a scoped sub-Builder (subset of an in-progress parent's components)
+  th build sub-release <SUB-ID>     Release a sub-lease (parent settling already makes it stale)
+  th build leases                   List the live component leases (and sub-leases)
   th debug pack [--slice ID|--req REQ]  Assemble a read-only evidence bundle for a failure (Debugger agent)
   th debug log add --ref … --symptom … [--evidence …] [--root-cause …] [--status open|resolved]
   th debug log list                 List debug-log evidence entries + open count
@@ -135,6 +138,7 @@ Global flags:
   --code <dir>      (coverage report) Code directory scanned for implemented (default src)
   --tier <T0-T3>    (preview) Tier whose engaged pipeline to preview (default: state.tier, else T2)
   --slice <id>      (context pack, debug pack) Frame the pack for a specific slice (SLICE-ID)
+  --components <l>  (build sub-claim) Comma-separated component subset for the sub-lease
   --req <REQ-ID>    (debug pack) Frame the pack for a specific REQ-ID
   --symptom <s>     (debug log add) The observed failure
   --evidence <s>    (debug log add) Anchored evidence (file:line / captured output)
@@ -182,6 +186,7 @@ const STRING_FLAGS = {
     "--code": "code",
     "--tier": "tier",
     "--slice": "slice",
+    "--components": "components",
     "--req": "req",
     "--symptom": "symptom",
     "--evidence": "evidence",
@@ -450,6 +455,15 @@ function dispatch(parsed) {
                     return (0, build_1.runBuildClaim)(paths, rest[0]);
                 case "release":
                     return (0, build_1.runBuildRelease)(paths, rest[0]);
+                case "sub-claim": {
+                    const components = (parsed.flags.components ?? "")
+                        .split(",")
+                        .map((c) => c.trim())
+                        .filter(Boolean);
+                    return (0, build_1.runBuildSubClaim)(paths, rest[0], components);
+                }
+                case "sub-release":
+                    return (0, build_1.runBuildSubRelease)(paths, rest[0]);
                 case "leases":
                     return (0, build_1.runBuildLeases)(paths);
                 default:

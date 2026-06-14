@@ -4,6 +4,8 @@ exports.runBuildPlan = runBuildPlan;
 exports.runBuildNextWave = runBuildNextWave;
 exports.runBuildClaim = runBuildClaim;
 exports.runBuildRelease = runBuildRelease;
+exports.runBuildSubClaim = runBuildSubClaim;
+exports.runBuildSubRelease = runBuildSubRelease;
 exports.runBuildLeases = runBuildLeases;
 const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
@@ -158,6 +160,131 @@ function runBuildRelease(paths, sliceId) {
         return (0, output_1.success)({ data: { slice: sliceId, released: held?.components ?? [] }, human: `released ${sliceId}.` });
     });
 }
+/* ------------------------------------------------------------------ *
+ * Sub-leases (Phase 5): a scoped sub-Builder works on a SUBSET of an  *
+ * in-progress parent slice's components, nested under the parent's     *
+ * already-held top-level lease.                                        *
+ * ------------------------------------------------------------------ */
+/**
+ * `th build sub-claim <PARENT-SLICE> --components <c1,c2,...>` — open a SUB-lease
+ * nested under an in-progress parent's top-level lease, scoping a sub-Builder to a
+ * subset of the parent's components (Phase 5). The parent already holds those
+ * components, so a plain `th build claim` would refuse them; the sub-lease instead
+ * guards only against OVERLAPPING SIBLING sub-leases under the same parent (so two
+ * concurrent sub-Builders can't touch the same component). Serialized under the
+ * state lock — mirrors {@link runBuildClaim}'s collision-guard semantics.
+ *
+ *   - parent must exist and be `in-progress` (it holds the top-level lease), else
+ *     `slice_not_found` / `parent_not_in_progress`.
+ *   - `components` must be a non-empty SUBSET of the parent's declared components,
+ *     else `not_a_subset`.
+ *   - `components` must be DISJOINT from every LIVE sibling sub-lease, else
+ *     `sub_lease_conflict` (exit 1).
+ */
+function runBuildSubClaim(paths, parentSlice, components) {
+    if (!parentSlice)
+        return (0, output_1.failure)({ human: "usage: th build sub-claim <PARENT-SLICE> --components <c1,c2,...>" });
+    if (!components || components.length === 0) {
+        return (0, output_1.failure)({ human: "usage: th build sub-claim <PARENT-SLICE> --components <c1,c2,...>", data: { error: "no_components" } });
+    }
+    return (0, state_store_1.withStateLock)(paths, () => {
+        const r = (0, state_store_1.readState)(paths);
+        if (!r.exists)
+            return guards_1.NOT_INIT;
+        if (!r.state)
+            return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+        const parent = r.state.slices.find((s) => s.id === parentSlice);
+        if (!parent) {
+            return (0, output_1.failure)({ human: `Parent slice not found: ${parentSlice}. Known: ${r.state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", parent: parentSlice } });
+        }
+        if (parent.status !== "in-progress") {
+            return (0, output_1.failure)({
+                human: `Cannot sub-claim under ${parentSlice}: it is "${parent.status}", not in-progress (the parent must hold the top-level lease).`,
+                data: { error: "parent_not_in_progress", parent: parentSlice, status: parent.status },
+            });
+        }
+        // Must be a non-empty SUBSET of the parent's declared components.
+        const parentComponents = new Set(parent.components);
+        const notInParent = components.filter((c) => !parentComponents.has(c));
+        if (notInParent.length > 0) {
+            return (0, output_1.failure)({
+                human: `Cannot sub-claim under ${parentSlice}: ${notInParent.join(", ")} not in the parent's components (${parent.components.join(", ") || "(none)"}). A sub-lease must be a subset.`,
+                data: { error: "not_a_subset", parent: parentSlice, requested: components, parentComponents: parent.components, extra: notInParent },
+            });
+        }
+        // Must be DISJOINT from every LIVE sibling sub-lease under the same parent.
+        // A sibling sub-lease is live exactly when the parent is in-progress (which it
+        // is here), so the active sibling set is the live set — mirror runBuildClaim.
+        const siblings = (0, leases_1.subLeasesOf)(paths, parentSlice);
+        const live = new Set((0, leases_1.liveLeases)(paths, r.state.slices).map((l) => l.slice));
+        const owners = new Map();
+        for (const sib of siblings) {
+            if (!live.has(sib.slice))
+                continue; // ignore a released/stale sibling
+            for (const c of sib.components)
+                if (!owners.has(c))
+                    owners.set(c, sib.slice);
+        }
+        const conflicts = components
+            .map((c) => ({ component: c, owner: owners.get(c) }))
+            .filter((x) => x.owner !== undefined);
+        if (conflicts.length > 0) {
+            return (0, output_1.failure)({
+                exitCode: 1,
+                human: `Cannot sub-claim under ${parentSlice}: ${conflicts.map((c) => `${c.component} held by sibling ${c.owner}`).join(", ")}. Serialize behind it.`,
+                data: { error: "sub_lease_conflict", parent: parentSlice, conflicts },
+            });
+        }
+        // Generate a unique sub-owner id: `${parent}#sub-${n}`, n = existing sub-leases + 1.
+        // Count by distinct sub-owner ids ever opened under this parent (claims +
+        // releases), so a re-claim after a release never reuses a retired id.
+        const everSubIds = new Set(readLeaseEventsForParent(paths, parentSlice));
+        const subId = `${parentSlice}#sub-${everSubIds.size + 1}`;
+        (0, leases_1.appendLeaseEvent)(paths, { event: "claim", slice: subId, components, parent: parentSlice });
+        (0, log_1.structuredLog)({ cmd: "build sub-claim", subId, parent: parentSlice, components });
+        return (0, output_1.success)({
+            data: { subId, parent: parentSlice, components },
+            human: `sub-claimed ${subId} under ${parentSlice}: ${components.join(", ")}`,
+        });
+    });
+}
+/**
+ * `th build sub-release <SUB-ID>` — close a sub-lease. Verifies the id names an
+ * ACTIVE sub-lease (a claim with a `parent`, not yet released), then appends a
+ * `release` event. A parent reaching done/blocked already makes its sub-leases
+ * STALE via reconciliation (no extra auto-release), so this is the explicit
+ * "sub-Builder finished cleanly" path.
+ */
+function runBuildSubRelease(paths, subId) {
+    if (!subId)
+        return (0, output_1.failure)({ human: "usage: th build sub-release <SUB-ID>" });
+    return (0, state_store_1.withStateLock)(paths, () => {
+        const r = (0, state_store_1.readState)(paths);
+        if (!r.exists)
+            return guards_1.NOT_INIT;
+        if (!r.state)
+            return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+        const held = (0, leases_1.activeLeases)(paths).find((l) => l.slice === subId && l.parent !== undefined);
+        if (!held) {
+            return (0, output_1.failure)({
+                human: `No active sub-lease: ${subId}. Active sub-leases: ${(0, leases_1.activeLeases)(paths).filter((l) => l.parent !== undefined).map((l) => l.slice).join(", ") || "(none)"}`,
+                data: { error: "sub_lease_not_found", subId },
+            });
+        }
+        (0, leases_1.appendLeaseEvent)(paths, { event: "release", slice: subId, components: held.components, parent: held.parent });
+        (0, log_1.structuredLog)({ cmd: "build sub-release", subId, parent: held.parent });
+        return (0, output_1.success)({ data: { subId, parent: held.parent, released: held.components }, human: `released sub-lease ${subId}.` });
+    });
+}
+/** Distinct sub-owner ids ever opened under `parentSlice` (claim events), for id minting. */
+function readLeaseEventsForParent(paths, parentSlice) {
+    const ids = new Set();
+    for (const e of (0, leases_1.readLeaseEvents)(paths)) {
+        if (e.event === "claim" && e.parent === parentSlice)
+            ids.add(e.slice);
+    }
+    return [...ids];
+}
 /**
  * `th build leases` — list the live component leases, reconciled against slice
  * state. Leases whose owning slice has settled (done/blocked) or vanished are
@@ -176,14 +303,29 @@ function runBuildLeases(paths) {
     }
     const live = (0, leases_1.liveLeases)(paths, r.state.slices);
     const stale = (0, leases_1.staleLeases)(paths, r.state.slices);
+    // liveLeases/staleLeases reconcile top-level AND sub-leases together (a sub-lease
+    // against its parent); split them so each kind reports in a labeled section.
+    const isSub = (l) => l.parent !== undefined;
+    const liveTop = live.filter((l) => !isSub(l));
+    const liveSub = live.filter(isSub);
+    const staleTop = stale.filter((l) => !isSub(l));
+    const staleSub = stale.filter(isSub);
     const lines = [];
-    lines.push(live.length ? "Live leases:" : "Live leases: (none)");
-    for (const l of live)
+    lines.push(liveTop.length ? "Live leases:" : "Live leases: (none)");
+    for (const l of liveTop)
         lines.push(`  ${l.slice}: ${l.components.join(", ") || "(no components)"}`);
-    if (stale.length) {
+    lines.push(liveSub.length ? "Live sub-leases:" : "Live sub-leases: (none)");
+    for (const l of liveSub)
+        lines.push(`  ${l.slice} (under ${l.parent}): ${l.components.join(", ") || "(no components)"}`);
+    if (staleTop.length) {
         lines.push("STALE leases (owning slice is done/blocked/missing — `th build release <ID>` to clear):");
-        for (const l of stale)
+        for (const l of staleTop)
             lines.push(`  ${l.slice}: ${l.components.join(", ")}`);
     }
-    return (0, output_1.success)({ data: { leases: live, stale }, human: lines.join("\n") });
+    if (staleSub.length) {
+        lines.push("STALE sub-leases (parent slice is done/blocked/missing — `th build sub-release <ID>` to clear):");
+        for (const l of staleSub)
+            lines.push(`  ${l.slice} (under ${l.parent}): ${l.components.join(", ")}`);
+    }
+    return (0, output_1.success)({ data: { leases: liveTop, subLeases: liveSub, stale: staleTop, staleSubLeases: staleSub }, human: lines.join("\n") });
 }

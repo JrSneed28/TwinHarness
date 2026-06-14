@@ -15,6 +15,15 @@ describe("parseArgs", () => {
     expect(parseArgs(["--cap=7"]).flags.cap).toBe(7);
   });
 
+  it("parses --components as a recognized string flag (build sub-claim), both forms", () => {
+    // The handler splits this on commas; the parser only needs to capture the value
+    // (and NOT record it as an unknown flag — the wiring guard for sub-claim).
+    const p1 = parseArgs(["build", "sub-claim", "SLICE-1", "--components", "api,db"]);
+    expect(p1.flags.components).toBe("api,db");
+    expect(p1.unknownFlags).toEqual([]);
+    expect(parseArgs(["--components=ui"]).flags.components).toBe("ui");
+  });
+
   it("collects positionals and leaves flags clean", () => {
     const p = parseArgs(["state", "get", "slices"]);
     expect(p.positionals).toEqual(["state", "get", "slices"]);

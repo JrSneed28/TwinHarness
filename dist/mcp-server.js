@@ -15983,7 +15983,10 @@ function readLeaseEvents(paths) {
     try {
       const parsed = JSON.parse(trimmed);
       if (parsed && (parsed.event === "claim" || parsed.event === "release") && typeof parsed.slice === "string") {
-        out.push({ ...parsed, components: Array.isArray(parsed.components) ? parsed.components : [] });
+        const ev = { ...parsed, components: Array.isArray(parsed.components) ? parsed.components : [] };
+        if (typeof parsed.parent === "string") ev.parent = parsed.parent;
+        else delete ev.parent;
+        out.push(ev);
       }
     } catch {
     }
@@ -15996,22 +15999,29 @@ function appendLeaseEvent(paths, event, now = () => /* @__PURE__ */ new Date()) 
   fs5.appendFileSync(leasesPath(paths), line, "utf8");
 }
 function activeLeases(paths) {
-  const bySlice = /* @__PURE__ */ new Map();
+  const byOwner = /* @__PURE__ */ new Map();
   for (const e of readLeaseEvents(paths)) {
-    bySlice.set(e.slice, e.event === "claim" ? e.components : null);
+    byOwner.set(e.slice, e.event === "claim" ? { components: e.components, parent: e.parent } : null);
   }
   const out = [];
-  for (const [slice, components] of bySlice) {
-    if (components !== null) out.push({ slice, components });
+  for (const [slice, held] of byOwner) {
+    if (held === null) continue;
+    const lease = { slice, components: held.components };
+    if (typeof held.parent === "string") lease.parent = held.parent;
+    out.push(lease);
   }
   return out;
 }
 function isLiveSlice(status) {
   return status === "pending" || status === "in-progress";
 }
+function isLeaseLive(lease, statusById) {
+  const governing = lease.parent ?? lease.slice;
+  return isLiveSlice(statusById.get(governing));
+}
 function liveLeases(paths, slices) {
   const statusById = new Map(slices.map((s) => [s.id, s.status]));
-  return activeLeases(paths).filter((l) => isLiveSlice(statusById.get(l.slice)));
+  return activeLeases(paths).filter((l) => isLeaseLive(l, statusById));
 }
 function occupiedComponents(paths, slices) {
   const occ = /* @__PURE__ */ new Map();
