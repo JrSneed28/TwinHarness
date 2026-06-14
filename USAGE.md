@@ -645,7 +645,9 @@ artifact → classify the tier → produce/register the current stage's artifact
 gate → finish/block remaining slices (at final verification) → human sign-off → advance to the next
 engaged stage. The JSON form carries a stable `kind` token plus the human `action`. Like `th stage
 current`, it reports a mechanical obligation; it never chooses strategy — consult it when unsure
-what the run owes next, especially after a long context window (F7).
+what the run owes next, especially after a long context window (F7). Add `--explain` to also get a
+short **WHY** string (in `data.why` and a `why:` line) explaining why that obligation outranks the
+others right now; without the flag the output is unchanged.
 
 ```
 th context estimate
@@ -798,8 +800,9 @@ runs on every push and pull request, enforcing the committed-`dist/` invariant. 
   Read-only.
 - **`th scorecard [--json]`** — a read-only one-screen post-run summary: tier/stage, coverage
   (planned/implemented/tested), slice progress, suite status (from the last `th verify run`, `—` if
-  none), drift (entries + open blocking), and revise escalations. If telemetry is on, each call also
-  appends a timestamped snapshot.
+  none), drift (entries + open blocking), revise escalations, and a **Routing** line summarizing
+  recorded `th route` telemetry (`—` when none). If telemetry is on, each call also appends a
+  timestamped snapshot.
 - **`th telemetry on|off|status`** — opt-in, **local-only** run telemetry stored next to `state.json`
   (`telemetry.json` + `telemetry.jsonl`), off by default. Nothing is ever transmitted; `on` starts
   recording `th scorecard` snapshots, `off` stops, `status` shows the flag and record count.
@@ -814,6 +817,29 @@ runs on every push and pull request, enforcing the committed-`dist/` invariant. 
   slice that is not `in-progress` is denied). Fail-open and conservative — it narrows, but does not
   close, the Bash bypass (here-docs, subshells, variable indirection, and globbing are not parsed;
   see `SECURITY.md`). Default modes leave Phase-B Bash writes ungated, exactly as before.
+
+### New in Phase 5 — component sub-leases · worktree merge protocol · nested sub-agents
+
+- **`th build sub-claim` / `sub-release`** — a Builder or Debugger may carve a **subset** of its own
+  in-progress slice's components into a **sub-lease** (`<PARENT>#sub-<n>`) for a single scoped
+  sub-Builder, validated as a disjoint subset of the parent's components; `th build leases` lists
+  sub-leases. A parent settling to `done`/`blocked` makes its sub-leases stale automatically. See
+  *Sub-leases & nested sub-agents* above.
+- **Nested sub-agents (bounded).** Builders and Debuggers carry the `Agent` tool and may spawn either
+  a read-only advisory child (Researcher / fresh-context Critic / Debugger, run in the foreground) or
+  one scoped sub-Builder under a sub-lease — never a top-level Builder, never `th build next-wave` or
+  a top-level claim. Nesting is capped at one level. The Orchestrator remains the sole **top-level**
+  coordinator. Guardrails live in `agents/builder.md` / `agents/debugger.md`.
+- **Worktree isolation + merge-back.** Parallel Builders run in isolated git worktrees
+  (`isolation: worktree`) while `.twinharness/` stays a **shared** coordination plane (state/lease/
+  drift commands from a worktree target the main root via `--cwd` or the `mcp__plugin_twinharness_th__*`
+  tools). On Critic PASS the Orchestrator merges each worktree branch back in wave order; a non-clean
+  merge between plan-disjoint slices opens **blocking** drift. See *Worktrees & the merge-back
+  protocol* above.
+- **`th next --explain`** — the next-action oracle gains a `--explain` flag that adds a short WHY
+  string explaining why the reported obligation is the highest-priority one right now.
+- **`th scorecard` Routing line** — the scorecard now shows a read-only **Routing** summary of
+  recorded `th route` telemetry (per-model tally of route calls), or `—` when none.
 
 ### Templates
 
