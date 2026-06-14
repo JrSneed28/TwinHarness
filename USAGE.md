@@ -753,6 +753,125 @@ The hook fires on two matchers:
 
 See Part 2 — "The write-gate" for full semantics.
 
+### Repo-understanding layer (`th repo`)
+
+SLICE-0..5 adds a deterministic repo-understanding layer — three CLI commands and four MCP tools — that gives TwinHarness a mechanical spine for understanding an existing codebase before it plans or builds into it (REQ-RU-001..096). The layer treats all repository content as **untrusted data**: it records build/test commands as inert strings but never executes them.
+
+#### `th repo map`
+
+```
+th repo map [--write | --no-write] [--format <summary|json|md>] [--json] [--cwd <dir>]
+```
+
+Scans the repository and writes two artifacts:
+
+- `.twinharness/repo-map.json` — the byte-stable, versioned machine map (`schema_version: 1`). POSIX-relative paths only; deterministic across OS; no timestamps, no absolute paths, no run-specific data. Every collection is sorted lexicographically so two runs on an unchanged repo produce byte-identical files (REQ-NFR-001).
+- `docs/00-repo-map.md` — a compact human/agent summary: languages, package managers, source/test/docs roots, components, entrypoints, blast-radius signals, and counts. Never a full map dump (REQ-NFR-004).
+
+Bare `th repo map` **writes** both artifacts (REQ-RU-014). Use `--no-write` for a dry/preview run that builds the map in memory without touching the filesystem.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--write` | on | Write the two artifacts (the default; bare invocation writes) |
+| `--no-write` | — | Dry/preview: build in memory, emit the summary, write nothing |
+| `--format summary\|json\|md` | `summary` | Text rendering: compact counts (default), JSON data payload, or the markdown body |
+| `--json` | off | Emit the structured `{ ok, schemaVersion, wrote, artifacts, counts, blastRadiusFlags, scanReport }` envelope |
+
+The map build detects: languages, package managers, candidate build/test commands (inert strings — **never executed**, RULE-004), source/test/docs roots, components, entrypoints, public API surface (heuristic), ownership hints, file-to-component mapping, REQ anchors, and blast-radius signals (authentication, authorization, data-integrity, money, migrations).
+
+The `repo-map` persisted JSON is the **durable source of truth** — it moves with the code. The Codebase-Inspector writes prose analysis (`docs/00-existing-codebase-analysis.md`) while `th repo map` produces the machine-readable `repo-map`; they are complementary, but only the machine `repo-map` is versioned and recomputable (REQ-RU-060). Prose can rot; the map is always regenerable.
+
+#### `th repo relevant`
+
+```
+th repo relevant (--slice <ID> | --req <REQ-ID> | --file <path> | --query <kw>)
+                 [--maxResults <n>] [--format <slice|req|file|json>] [--json] [--cwd <dir>]
+```
+
+Reads the persisted `repo-map.json` and returns precision context for a selector. Exactly one selector is required. Read-only with respect to both `state.json` and `repo-map.json` (REQ-RU-026).
+
+**Selectors (exactly one required):**
+
+| Flag | Meaning |
+|---|---|
+| `--slice <ID>` | SLICE-ID; resolves components from `state.slices` (REQ-RU-027) |
+| `--req <REQ-ID>` | REQ-ID; finds files anchored to it |
+| `--file <path>` | A root-contained file path (path guard fires first — REQ-RU-024/042) |
+| `--query <kw>` | Keyword or phrase matched against file/component/REQ tokens |
+
+**Output categories** (each item carries a non-empty WHY — REQ-RU-022):
+
+- `readFirst` — highest-priority files to read before editing
+- `related` — related files in the same components or via REQ anchors
+- `tests` — likely test files for the selection
+- `owningComponents` — component names that own the relevant files
+- `doNotTouch` — generated/excluded paths (avoid these)
+- `risks` — blast-radius signals active for the scope
+- `verifyCandidates` — suggested build/test commands (recorded as suggestions, never executed)
+
+`--maxResults <n>` (default 20) caps the combined `readFirst + related + tests` count; `truncated: true` is set when items were dropped. A selector matching nothing yields empty arrays and `truncated: false` — success, not a failure (REQ-RU-020).
+
+#### `th repo impact`
+
+```
+th repo impact (--file <path> | --component <name|path>)
+               [--format <file|json>] [--json] [--cwd <dir>]
+```
+
+Pre-edit blast-radius analysis over the persisted `repo-map.json`. Reads no state (REQ-RU-033). Exactly one selector required.
+
+**Selectors (exactly one required):**
+
+| Flag | Meaning |
+|---|---|
+| `--file <path>` | Root-contained file path (path guard fires first — REQ-RU-032/042) |
+| `--component <name\|path>` | Component name (e.g. `src/commands`) or path form |
+
+**Output** (each item carries a WHY — REQ-RU-022):
+
+- `impactedComponents` — components that will be affected
+- `relatedTests` — tests likely to exercise the changed scope
+- `downstreamFeatures` — downstream features and REQ anchors in the impact scope
+- `reqAnchors` — REQ-IDs in the impact scope
+- `riskFlags` — blast-radius signals intersecting the scope
+- `verifyCandidates` — recommended build/test commands (never executed)
+
+#### Error responses common to `th repo relevant` and `th repo impact`
+
+| Error code (`data.error`) | Condition | Action |
+|---|---|---|
+| `path_outside_root` | `--file` or path-form `--component` escapes the project root | Fix the path; guard runs before any read |
+| `no_selector` | No selector supplied | Supply exactly one of `--slice`/`--req`/`--file`/`--query` (or `--file`/`--component`) |
+| `multiple_selectors` | More than one selector | Supply exactly one |
+| `map_missing` | `.twinharness/repo-map.json` absent | Run `th repo map` first |
+| `map_invalid-json` / `map_schema` / `map_version` | Map file malformed or unknown version | Run `th repo map` to regenerate |
+| `unknown_slice` | `--slice` names no known slice | Check `th state status` for valid slice IDs |
+
+#### MCP tools (registered count 9 → 13)
+
+Four MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin (REQ-RU-051 — identical code path):
+
+| Tool name | CLI equivalent | Notes |
+|---|---|---|
+| `th_repo_map` | `th repo map` | `write` (boolean, default true), `format` (string enum) |
+| `th_repo_relevant` | `th repo relevant` | `slice`, `req`, `file`, `query`, `maxResults` inputs |
+| `th_repo_impact` | `th repo impact` | `file`, `component` inputs |
+| `th_context_pack` | `th context pack` | `slice` input; wraps the existing handler |
+
+All four schemas are strict and closed (`additionalProperties: false`). Output mirrors the CLI structured payload (`result.data`) as `structuredContent` plus the human text block. Compact by default — the full `repo-map.json` is never dumped into a prompt (REQ-NFR-004).
+
+#### Brownfield workflow (REQ-RU-060/062)
+
+In a brownfield run (`th init --brownfield`), the repo-understanding layer integrates into the pipeline:
+
+1. The Codebase-Inspector writes prose analysis (`docs/00-existing-codebase-analysis.md`). This is human-readable orientation; it can rot.
+2. `th repo map` produces the machine-readable `repo-map` — the durable, byte-stable source of truth that moves with the code.
+3. Slice 0 characterizes the adoption seam; the Builder uses `th repo relevant` to find related files and `th repo impact` to assess blast radius before editing.
+4. The Critic compares ownership (component membership in the map vs. what the slice claims to touch).
+5. The Debugger uses `th repo impact` and `th repo relevant` to find related files and tests when tracing a defect.
+
+The prose (`docs/00-existing-codebase-analysis.md`) and the machine `repo-map` are complementary. The machine map is the mechanical input to `th repo relevant`/`impact`; the prose is human orientation. Both are produced once per run; the map is always regenerable with `th repo map`.
+
 ### Using `th` in CI
 
 The exit-code gates compose into CI checks for a TwinHarness-built project:

@@ -46,6 +46,8 @@ import { runBuildNextWave, runBuildClaim, runBuildRelease } from "./commands/bui
 import { runCoverageCheck } from "./commands/coverage";
 import { runRoute } from "./commands/route";
 import { runNext } from "./commands/next";
+import { runRepoMap, runRepoRelevant, runRepoImpact } from "./commands/repo";
+import { runContextPack } from "./commands/context";
 
 /* ------------------------------------------------------------------ *
  * Project-paths resolution                                            *
@@ -68,7 +70,7 @@ export function resolvePathsForCall(): ProjectPaths {
 
 /** A single JSON Schema property (kept intentionally small; mirrors a CLI flag). */
 interface JsonSchemaProp {
-  type: "string" | "boolean";
+  type: "string" | "boolean" | "number";
   description?: string;
   enum?: readonly string[];
 }
@@ -135,11 +137,18 @@ function optString(args: ToolArgs, key: string): string | undefined {
 
 const stringProp = (description: string): JsonSchemaProp => ({ type: "string", description });
 const boolProp = (description: string): JsonSchemaProp => ({ type: "boolean", description });
+const numberProp = (description: string): JsonSchemaProp => ({ type: "number", description });
 
 /** Coerce an arg to a boolean, or undefined. */
 function optBool(args: ToolArgs, key: string): boolean | undefined {
   const v = args[key];
   return typeof v === "boolean" ? v : undefined;
+}
+
+/** Coerce an arg to a finite number, or undefined. */
+function optNumber(args: ToolArgs, key: string): number | undefined {
+  const v = args[key];
+  return typeof v === "number" && isFinite(v) ? v : undefined;
 }
 
 /**
@@ -292,6 +301,74 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       "Next-action oracle: the single highest-priority MECHANICAL obligation the run owes next (blocking drift, revise caps, failing suite, artifact drift, tier, stage obligations, build waves, …). Reports a mechanical obligation; it never chooses strategy. Read-only.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runNext(paths),
+  },
+  // Anchor: REQ-RU-044
+  // Anchor: REQ-RU-047
+  // Anchor: REQ-RU-048
+  // Anchor: REQ-RU-049
+  // Anchor: REQ-RU-050
+  // Anchor: REQ-RU-051
+  {
+    name: "th_repo_map",
+    description:
+      "Scan the governed project and build the dual repo-map artifacts (.twinharness/repo-map.json + docs/00-repo-map.md). With write:false (default for MCP), returns the compact summary in memory only — nothing written.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        write: boolProp("Write the two artifacts to disk (default false for MCP preview). Set true to persist."),
+        format: { type: "string", description: "Text rendering: summary (default) | json | md.", enum: ["summary", "json", "md"] },
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) => runRepoMap(paths, { write: optBool(args, "write"), format: optString(args, "format") }),
+  },
+  // Anchor: REQ-RU-045
+  // Anchor: REQ-RU-094
+  {
+    name: "th_repo_relevant",
+    description:
+      "Read the persisted repo-map and return the files most relevant to a given selector (slice, REQ-ID, file, or free-text query). Read-only. Run th_repo_map first to build/refresh the map.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slice: stringProp("SLICE-ID selector (e.g. SLICE-3). Resolves the slice's component set from state."),
+        req: stringProp("REQ-ID selector (e.g. REQ-001). Returns files whose anchors match."),
+        file: stringProp("File-path selector (relative to project root). Returns files relevant to the given file."),
+        query: stringProp("Free-text query selector. Fuzzy-matches against component names, paths, and anchors."),
+        maxResults: numberProp("Cap on combined emitted items (default 20; ≤0 → default)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) => runRepoRelevant(paths, { slice: optString(args, "slice"), req: optString(args, "req"), file: optString(args, "file"), query: optString(args, "query"), maxResults: optNumber(args, "maxResults") }),
+  },
+  // Anchor: REQ-RU-046
+  {
+    name: "th_repo_impact",
+    description:
+      "Read the persisted repo-map and return the blast-radius impact of changing a file or component. Read-only. Run th_repo_map first to build/refresh the map.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: stringProp("File-path selector (relative to project root). Returns components impacted by changing this file."),
+        component: stringProp("Component name selector. Returns files and tests impacted by changing this component."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) => runRepoImpact(paths, { file: optString(args, "file"), component: optString(args, "component") }),
+  },
+  // Anchor: REQ-RU-052
+  {
+    name: "th_context_pack",
+    description:
+      "Assemble the §9 handoff bundle: Summary blocks of every approved artifact, plus (when slice is given) the slice record, its components, and overlap with other slices. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slice: stringProp("SLICE-ID to frame the pack for (e.g. SLICE-3). Adds slice record and component-overlap awareness."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) => runContextPack(paths, { slice: optString(args, "slice") }),
   },
 ] as const;
 

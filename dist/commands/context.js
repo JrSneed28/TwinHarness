@@ -41,6 +41,10 @@ const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const summary_1 = require("../core/summary");
 const log_1 = require("../core/log");
+const repo_1 = require("./repo");
+// Anchor: REQ-RU-061
+// Anchor: REQ-RU-095
+// Anchor: REQ-RU-063
 /**
  * `th context estimate` — approximate the context/token cost of the plugin's
  * prompt surface (Phase 3; the Goose/Windsurf "no token visibility" gap, and
@@ -169,8 +173,31 @@ function runContextPack(paths, opts = {}) {
             .filter((x) => x.shared.length > 0);
         sliceBlock = { id: target.id, status: target.status, components: target.components, sharesWith };
     }
+    // REQ-RU-061 / REQ-RU-095: when --slice is given, augment the bundle with
+    // repo-relevant files/tests sourced from the persisted repo-map (READ-ONLY —
+    // no re-scan; uses runRepoRelevant which reads .twinharness/repo-map.json).
+    // If the map is missing or malformed, we include an informational note but do
+    // NOT fail the overall pack (the §9 bundle is still usable).
+    let repoRelevantFiles = [];
+    let repoRelevantNote = null;
+    if (opts.slice && sliceBlock) {
+        const relResult = (0, repo_1.runRepoRelevant)(paths, { slice: opts.slice });
+        if (relResult.ok && relResult.data) {
+            const d = relResult.data;
+            for (const item of d.readFirst ?? [])
+                repoRelevantFiles.push({ ...item, kind: "readFirst" });
+            for (const item of d.related ?? [])
+                repoRelevantFiles.push({ ...item, kind: "related" });
+            for (const item of d.tests ?? [])
+                repoRelevantFiles.push({ ...item, kind: "tests" });
+        }
+        else if (!relResult.ok) {
+            // Map missing / not initialized: surface as a note, do NOT fail the pack.
+            repoRelevantNote = `(repo-relevant layer unavailable: ${relResult.data?.error ?? "unknown error"} — run \`th repo map\` first)`;
+        }
+    }
     const totalTokens = packed.reduce((sum, p) => sum + p.tokens, 0);
-    (0, log_1.structuredLog)({ cmd: "context pack", slice: opts.slice ?? null, artifacts: packed.length, tokens: totalTokens });
+    (0, log_1.structuredLog)({ cmd: "context pack", slice: opts.slice ?? null, artifacts: packed.length, tokens: totalTokens, repoRelevantFiles: repoRelevantFiles.length });
     const header = opts.slice
         ? `Context pack for ${opts.slice} — ${packed.length} artifact summary block(s), ~${totalTokens} tokens`
         : `Context pack — ${packed.length} artifact summary block(s), ~${totalTokens} tokens`;
@@ -183,6 +210,23 @@ function runContextPack(paths, opts = {}) {
                 : "  No component overlap with other slices (safe to parallelize).",
         ]
         : [];
+    // REQ-RU-061: repo-relevant section in human text.
+    const repoRelevantLines = [];
+    if (opts.slice) {
+        repoRelevantLines.push("");
+        if (repoRelevantNote) {
+            repoRelevantLines.push(`Repo-relevant files: ${repoRelevantNote}`);
+        }
+        else if (repoRelevantFiles.length === 0) {
+            repoRelevantLines.push("Repo-relevant files: (none matched — repo-map may be empty for this slice)");
+        }
+        else {
+            repoRelevantLines.push(`Repo-relevant files (${repoRelevantFiles.length} from repo-understanding layer):`);
+            for (const f of repoRelevantFiles) {
+                repoRelevantLines.push(`  [${f.kind}] ${f.path}  — ${f.why}`);
+            }
+        }
+    }
     const artifactLines = packed.length === 0
         ? ["", "(no approved artifacts yet — nothing to pack)"]
         : packed.flatMap((p) => [
@@ -190,9 +234,16 @@ function runContextPack(paths, opts = {}) {
             `### ${p.file} (v${p.version})${p.exists ? "" : " — MISSING ON DISK"}${p.summary === null && p.exists && !p.isDir ? " — no Summary block (head shown)" : ""}`,
             p.text || "(empty)",
         ]);
-    const human = [header, ...sliceLines, ...artifactLines].join("\n");
+    const human = [header, ...sliceLines, ...repoRelevantLines, ...artifactLines].join("\n");
     return (0, output_1.success)({
-        data: { slice: sliceBlock ?? null, artifacts: packed, totalTokens },
+        data: {
+            slice: sliceBlock ?? null,
+            artifacts: packed,
+            totalTokens,
+            // REQ-RU-061: repo-relevant data included in structured response.
+            repoRelevantFiles,
+            repoRelevantNote: repoRelevantNote ?? null,
+        },
         human,
     });
 }
