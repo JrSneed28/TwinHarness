@@ -27,6 +27,7 @@ import { runManifestExport } from "./commands/manifest";
 import { runPreview } from "./commands/preview";
 import { runScorecard } from "./commands/scorecard";
 import { runTelemetrySet, runTelemetryStatus } from "./commands/telemetry";
+import { runRoute } from "./commands/route";
 
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
@@ -76,6 +77,8 @@ Usage:
   th next                           The next mechanical obligation the run owes (next-action oracle)
   th preview [--tier T<n>]          Pre-run view: engaged stages, human gates, and Critic modes for a tier
   th scorecard                      Post-run one-screen summary (tier/coverage/slices/suite/drift/revise)
+  th route [--agent A] [--mode M] [--tier T] [--component-blast] [--summarization]
+                                    Advisory model+effort for an agent spawn (computes; the Orchestrator applies)
   th telemetry on|off|status        Toggle/report opt-in, LOCAL-ONLY run telemetry (never sent off-machine)
   th context estimate               Approximate the prompt-surface token cost (flags oversized files)
   th context pack [--slice <ID>]    Assemble the §9 handoff bundle (artifact Summary blocks + slice framing)
@@ -129,6 +132,11 @@ export interface ParsedArgs {
     json: boolean;
     force: boolean;
     cwd: string;
+    agent?: string;
+    mode?: string;
+    brief?: string;
+    componentBlast: boolean;
+    summarization: boolean;
     cap?: number;
     version?: number;
     reqs?: string;
@@ -176,6 +184,8 @@ const BOOLEAN_FLAGS: Record<string, FlagField> = {
   "--dry-run": "dryRun",
   "--remove-missing": "removeMissing",
   "--brownfield": "brownfield",
+  "--component-blast": "componentBlast",
+  "--summarization": "summarization",
 };
 
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
@@ -201,6 +211,9 @@ const STRING_FLAGS: Record<string, FlagField> = {
   "--action": "action",
   "--escalation": "escalation",
   "--source": "source",
+  "--agent": "agent",
+  "--mode": "mode",
+  "--brief": "brief",
 };
 
 /** Flags that consume a numeric value. */
@@ -228,6 +241,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     dryRun: false,
     removeMissing: false,
     brownfield: false,
+    componentBlast: false,
+    summarization: false,
   };
   const positionals: string[] = [];
   const unknownFlags: string[] = [];
@@ -324,6 +339,15 @@ function dispatch(parsed: ParsedArgs): CommandResult {
       return runPreview(paths, { tier: parsed.flags.tier });
     case "scorecard":
       return runScorecard(paths, { json: parsed.flags.json });
+    case "route":
+      return runRoute(paths, {
+        agent: parsed.flags.agent,
+        mode: parsed.flags.mode,
+        tier: parsed.flags.tier,
+        brief: parsed.flags.brief,
+        componentBlast: parsed.flags.componentBlast,
+        summarization: parsed.flags.summarization,
+      });
     case "telemetry":
       switch (sub) {
         case "on":

@@ -63,6 +63,7 @@ const manifest_1 = require("./commands/manifest");
 const preview_1 = require("./commands/preview");
 const scorecard_1 = require("./commands/scorecard");
 const telemetry_1 = require("./commands/telemetry");
+const route_1 = require("./commands/route");
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
@@ -111,6 +112,8 @@ Usage:
   th next                           The next mechanical obligation the run owes (next-action oracle)
   th preview [--tier T<n>]          Pre-run view: engaged stages, human gates, and Critic modes for a tier
   th scorecard                      Post-run one-screen summary (tier/coverage/slices/suite/drift/revise)
+  th route [--agent A] [--mode M] [--tier T] [--component-blast] [--summarization]
+                                    Advisory model+effort for an agent spawn (computes; the Orchestrator applies)
   th telemetry on|off|status        Toggle/report opt-in, LOCAL-ONLY run telemetry (never sent off-machine)
   th context estimate               Approximate the prompt-surface token cost (flags oversized files)
   th context pack [--slice <ID>]    Assemble the §9 handoff bundle (artifact Summary blocks + slice framing)
@@ -165,6 +168,8 @@ const BOOLEAN_FLAGS = {
     "--dry-run": "dryRun",
     "--remove-missing": "removeMissing",
     "--brownfield": "brownfield",
+    "--component-blast": "componentBlast",
+    "--summarization": "summarization",
 };
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
 const STRING_FLAGS = {
@@ -189,6 +194,9 @@ const STRING_FLAGS = {
     "--action": "action",
     "--escalation": "escalation",
     "--source": "source",
+    "--agent": "agent",
+    "--mode": "mode",
+    "--brief": "brief",
 };
 /** Flags that consume a numeric value. */
 const NUMBER_FLAGS = {
@@ -214,6 +222,8 @@ function parseArgs(argv) {
         dryRun: false,
         removeMissing: false,
         brownfield: false,
+        componentBlast: false,
+        summarization: false,
     };
     const positionals = [];
     const unknownFlags = [];
@@ -316,6 +326,15 @@ function dispatch(parsed) {
             return (0, preview_1.runPreview)(paths, { tier: parsed.flags.tier });
         case "scorecard":
             return (0, scorecard_1.runScorecard)(paths, { json: parsed.flags.json });
+        case "route":
+            return (0, route_1.runRoute)(paths, {
+                agent: parsed.flags.agent,
+                mode: parsed.flags.mode,
+                tier: parsed.flags.tier,
+                brief: parsed.flags.brief,
+                componentBlast: parsed.flags.componentBlast,
+                summarization: parsed.flags.summarization,
+            });
         case "telemetry":
             switch (sub) {
                 case "on":
