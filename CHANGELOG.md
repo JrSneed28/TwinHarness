@@ -7,10 +7,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-Post-0.6.2 infrastructure work (Phases 1–5), not yet cut as a versioned release. **566 tests** (was 460).
+Post-0.6.2 infrastructure work (Phases 1–5 + SLICE-0..5 repo-understanding layer), not yet cut as a versioned release. **756 tests** (was 460).
 
 ### Added
 
+- **`th repo` — deterministic repo-understanding layer (SLICE-0..5).** Three CLI commands and four MCP tools give brownfield TwinHarness runs a mechanical spine for adopting an existing codebase (REQ-RU-001..096):
+  - `th repo map [--write|--no-write] [--format <summary|json|md>]` — scans the repo; writes `.twinharness/repo-map.json` (byte-stable, versioned, `schema_version: 1`) and `docs/00-repo-map.md` (compact human summary). Bare invocation writes; `--no-write` is dry/preview. Deterministic: two runs on an unchanged repo are byte-identical.
+  - `th repo relevant (--slice | --req | --file | --query) [--maxResults <n>]` — precision context retrieval over the persisted map: read-first files, related files, tests, owning components, do-not-touch paths, blast-radius risks, verify candidates — each with a WHY. Read-only.
+  - `th repo impact (--file | --component)` — pre-edit blast-radius analysis: impacted components, related tests, downstream features, REQ anchors, risk flags, verify candidates. Reads the persisted map; reads no state.
+  - Four MCP tools (`th_repo_map`, `th_repo_relevant`, `th_repo_impact`, `th_context_pack`) registered in `dist/mcp-server.js` as thin one-liner adapters over the same handlers (tool count 9 → 13; REQ-RU-044..052).
+  - The layer treats all repository content as untrusted data: candidate build/test commands are recorded as inert strings and never executed (RULE-004; sentinel-verified in `tests/repo.test.ts`). All user-supplied paths are root-contained via `resolveWithinRoot`. No network I/O. No timestamps or absolute paths in the persisted map.
 - **`th route` — automatic model/effort routing (Phase 2).** A mechanical routing oracle recording the recommended model/effort per stage; surfaced as a Routing line in `th scorecard`.
 - **`th` as a plugin-scoped MCP server (Phase 4).** `dist/mcp-server.js` exposes the CLI's read/compute surface as MCP tools (`th_next`, `th_build_claim`, …); the CLI itself stays zero-runtime-dependency.
 - **Component sub-leases (Phase 5).** `th build sub-claim` / `sub-release` scope a sub-Builder to a subset of an in-progress parent slice's components, nested under the parent's top-level lease and guarded against overlapping siblings.

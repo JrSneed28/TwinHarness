@@ -2985,7 +2985,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve6.call(this, root, ref);
+      let _sch = resolve8.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3012,7 +3012,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve6(root, ref) {
+    function resolve8(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3230,8 +3230,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path13) {
-      let input = path13;
+    function removeDotSegments(path16) {
+      let input = path16;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3483,8 +3483,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path13, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path13 && path13 !== "/" ? path13 : void 0;
+        const [path16, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path16 && path16 !== "/" ? path16 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -3643,55 +3643,55 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve6(baseURI, relativeURI, options) {
+    function resolve8(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative6, options, skipNormalization) {
+    function resolveComponent(base, relative8, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative6 = parse3(serialize(relative6, options), options);
+        relative8 = parse3(serialize(relative8, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative6.scheme) {
-        target.scheme = relative6.scheme;
-        target.userinfo = relative6.userinfo;
-        target.host = relative6.host;
-        target.port = relative6.port;
-        target.path = removeDotSegments(relative6.path || "");
-        target.query = relative6.query;
+      if (!options.tolerant && relative8.scheme) {
+        target.scheme = relative8.scheme;
+        target.userinfo = relative8.userinfo;
+        target.host = relative8.host;
+        target.port = relative8.port;
+        target.path = removeDotSegments(relative8.path || "");
+        target.query = relative8.query;
       } else {
-        if (relative6.userinfo !== void 0 || relative6.host !== void 0 || relative6.port !== void 0) {
-          target.userinfo = relative6.userinfo;
-          target.host = relative6.host;
-          target.port = relative6.port;
-          target.path = removeDotSegments(relative6.path || "");
-          target.query = relative6.query;
+        if (relative8.userinfo !== void 0 || relative8.host !== void 0 || relative8.port !== void 0) {
+          target.userinfo = relative8.userinfo;
+          target.host = relative8.host;
+          target.port = relative8.port;
+          target.path = removeDotSegments(relative8.path || "");
+          target.query = relative8.query;
         } else {
-          if (!relative6.path) {
+          if (!relative8.path) {
             target.path = base.path;
-            if (relative6.query !== void 0) {
-              target.query = relative6.query;
+            if (relative8.query !== void 0) {
+              target.query = relative8.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative6.path[0] === "/") {
-              target.path = removeDotSegments(relative6.path);
+            if (relative8.path[0] === "/") {
+              target.path = removeDotSegments(relative8.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative6.path;
+                target.path = "/" + relative8.path;
               } else if (!base.path) {
-                target.path = relative6.path;
+                target.path = relative8.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative6.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative8.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative6.query;
+            target.query = relative8.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3699,7 +3699,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative6.fragment;
+      target.fragment = relative8.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -3901,7 +3901,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve6,
+      resolve: resolve8,
       resolveComponent,
       equal,
       serialize,
@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs14, exportName) {
+    function addFormats(ajv, list, fs17, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs14[f]);
+        ajv.addFormat(f, fs17[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -7141,10 +7141,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path13) {
-  if (!path13)
+function getElementAtPath(obj, path16) {
+  if (!path16)
     return obj;
-  return path13.reduce((acc, key) => acc?.[key], obj);
+  return path16.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7553,11 +7553,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path13, issues) {
+function prefixIssues(path16, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path13);
+    iss.path.unshift(path16);
     return iss;
   });
 }
@@ -7704,16 +7704,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path13 = []) => {
+  const processError = (error3, path16 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path13, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path16, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path13, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path13, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
       } else {
-        const fullpath = [...path13, ...issue2.path];
+        const fullpath = [...path16, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -14219,7 +14219,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve6) => setTimeout(resolve6, pollInterval));
+        await new Promise((resolve8) => setTimeout(resolve8, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -14236,7 +14236,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve6, reject) => {
+    return new Promise((resolve8, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -14314,7 +14314,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve6(parseResult.data);
+            resolve8(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -14575,12 +14575,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve6, reject) => {
+    return new Promise((resolve8, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve6, interval);
+      const timeoutId = setTimeout(resolve8, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -15450,12 +15450,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve6) => {
+    return new Promise((resolve8) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve6();
+        resolve8();
       } else {
-        this._stdout.once("drain", resolve6);
+        this._stdout.once("drain", resolve8);
       }
     });
   }
@@ -15758,6 +15758,20 @@ var NOT_INIT = failure({
 function formatIssues(issues) {
   return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
 }
+function requireState(paths) {
+  const r = readState(paths);
+  if (!r.exists) return { result: NOT_INIT };
+  if (!r.state) {
+    return {
+      result: failure({
+        human: `state.json is invalid:
+${formatIssues(r.issues)}`,
+        data: { error: "invalid_state", issues: r.issues }
+      })
+    };
+  }
+  return { state: r.state };
+}
 
 // src/commands/state.ts
 var UNSAFE_KEY_SEGMENTS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constructor"]);
@@ -15917,8 +15931,8 @@ function readDriftLog(paths) {
 }
 function appendDriftLog(paths, block) {
   const current = readDriftLog(paths);
-  const sep5 = current.endsWith("\n") ? "" : "\n";
-  fs4.writeFileSync(paths.driftLog, `${current}${sep5}${block}`, "utf8");
+  const sep7 = current.endsWith("\n") ? "" : "\n";
+  fs4.writeFileSync(paths.driftLog, `${current}${sep7}${block}`, "utf8");
 }
 function runDriftAdd(paths, opts) {
   return withStateLock(paths, () => runDriftAddLocked(paths, opts));
@@ -16987,6 +17001,1509 @@ why: ${next.why}` : `next: ${next.action}`;
   return success({ data, human });
 }
 
+// src/commands/repo.ts
+var fs15 = __toESM(require("node:fs"));
+var path14 = __toESM(require("node:path"));
+
+// src/core/repo-map/scanner.ts
+var fs14 = __toESM(require("node:fs"));
+var path13 = __toESM(require("node:path"));
+
+// src/core/repo-map/schema.ts
+var REPO_MAP_SCHEMA_VERSION = 1;
+function emptyRepoMap(repoRoot) {
+  return {
+    schema_version: REPO_MAP_SCHEMA_VERSION,
+    repoRoot,
+    scanReport: { filesScanned: 0, filesSkipped: 0, capHit: null },
+    languages: [],
+    package_managers: [],
+    candidate_commands: [],
+    source_roots: [],
+    test_roots: [],
+    docs_roots: [],
+    generated_paths: [],
+    components: [],
+    entrypoints: [],
+    public_api: null,
+    ownership_hints: [],
+    files: [],
+    req_anchors: [],
+    blast_radius_signals: []
+  };
+}
+function toPosix(p) {
+  return p.replace(/\\/g, "/");
+}
+function sortStrings(arr) {
+  return [...arr].map(toPosix).sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+}
+function byKey(arr, key) {
+  return [...arr].sort((a, b) => {
+    const ka = key(a);
+    const kb = key(b);
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
+}
+function serializeRepoMap(map) {
+  const ordered = {
+    schema_version: map.schema_version,
+    languages: byKey(
+      map.languages.map((l) => ({
+        name: l.name,
+        evidence: sortStrings(l.evidence),
+        source: l.source
+      })),
+      (l) => l.name
+    ),
+    package_managers: byKey(
+      map.package_managers.map((pm) => ({
+        name: pm.name,
+        manifest_paths: sortStrings(pm.manifest_paths)
+      })),
+      (pm) => pm.name
+    ),
+    candidate_commands: byKey(
+      map.candidate_commands.map((c) => ({
+        label: c.label,
+        raw: c.raw,
+        source_file: toPosix(c.source_file),
+        kind: c.kind
+      })),
+      // Stable across runs even when two commands share a source file/kind.
+      (c) => `${toPosix(c.source_file)}\0${c.kind}\0${c.label}\0${c.raw}`
+    ),
+    source_roots: sortStrings(map.source_roots),
+    test_roots: sortStrings(map.test_roots),
+    docs_roots: sortStrings(map.docs_roots),
+    generated_paths: sortStrings(map.generated_paths),
+    components: byKey(
+      map.components.map((c) => ({
+        name: toPosix(c.name),
+        path: toPosix(c.path),
+        file_count: c.file_count
+      })),
+      (c) => toPosix(c.name)
+    ),
+    entrypoints: byKey(
+      map.entrypoints.map((e) => ({
+        name: e.name,
+        path: toPosix(e.path),
+        source: e.source
+      })),
+      (e) => `${toPosix(e.path)}\0${e.source}\0${e.name}`
+    ),
+    public_api: map.public_api ? {
+      hints: byKey(
+        map.public_api.hints.map((h) => ({ name: h.name, source: h.source })),
+        (h) => `${h.name}\0${h.source}`
+      ),
+      confidence: map.public_api.confidence
+    } : null,
+    ownership_hints: byKey(
+      map.ownership_hints.map((o) => ({
+        path_prefix: toPosix(o.path_prefix),
+        component: toPosix(o.component)
+      })),
+      (o) => toPosix(o.path_prefix)
+    ),
+    files: byKey(
+      map.files.map((f) => ({
+        path: toPosix(f.path),
+        component: f.component === null ? null : toPosix(f.component),
+        language: f.language,
+        is_test: f.is_test,
+        req_ids: sortStrings(f.req_ids)
+      })),
+      (f) => toPosix(f.path)
+    ),
+    req_anchors: byKey(
+      map.req_anchors.map((r) => ({
+        req_id: r.req_id,
+        locations: sortStrings(r.locations)
+      })),
+      (r) => r.req_id
+    ),
+    blast_radius_signals: byKey(
+      map.blast_radius_signals.map((s) => ({
+        flag: s.flag,
+        matching_paths: sortStrings(s.matching_paths),
+        trigger_patterns: sortStrings(s.trigger_patterns)
+      })),
+      (s) => s.flag
+    )
+  };
+  return JSON.stringify(ordered, null, 2) + "\n";
+}
+function isPlainObject5(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+function isStringArray(v) {
+  return Array.isArray(v) && v.every((x) => typeof x === "string");
+}
+var LANGUAGE_SOURCES = ["extension", "manifest", "both"];
+var COMMAND_KINDS = ["build", "test", "lint", "other"];
+function parseRepoMap(raw) {
+  if (raw === null || raw === void 0) {
+    return { ok: false, error: "map_missing" };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, error: "map_invalid-json" };
+  }
+  if (!isPlainObject5(parsed)) {
+    return { ok: false, error: "map_schema" };
+  }
+  const ver = parsed.schema_version;
+  if (typeof ver !== "number" || !Number.isInteger(ver)) {
+    return { ok: false, error: "map_schema" };
+  }
+  if (ver !== REPO_MAP_SCHEMA_VERSION) {
+    return { ok: false, error: "map_version" };
+  }
+  if (!validateRepoMapShape(parsed)) {
+    return { ok: false, error: "map_schema" };
+  }
+  const p = parsed;
+  const map = {
+    schema_version: ver,
+    repoRoot: "",
+    scanReport: { filesScanned: 0, filesSkipped: 0, capHit: null },
+    languages: p.languages,
+    package_managers: p.package_managers,
+    candidate_commands: p.candidate_commands,
+    source_roots: p.source_roots,
+    test_roots: p.test_roots,
+    docs_roots: p.docs_roots,
+    generated_paths: p.generated_paths,
+    components: p.components,
+    entrypoints: p.entrypoints,
+    public_api: p.public_api ?? null,
+    ownership_hints: p.ownership_hints,
+    files: p.files,
+    req_anchors: p.req_anchors,
+    blast_radius_signals: p.blast_radius_signals
+  };
+  return { ok: true, map };
+}
+function validateRepoMapShape(v) {
+  if (!Array.isArray(v.languages) || !v.languages.every((l) => isPlainObject5(l) && typeof l.name === "string" && isStringArray(l.evidence) && typeof l.source === "string" && LANGUAGE_SOURCES.includes(l.source))) return false;
+  if (!Array.isArray(v.package_managers) || !v.package_managers.every((pm) => isPlainObject5(pm) && typeof pm.name === "string" && isStringArray(pm.manifest_paths))) return false;
+  if (!Array.isArray(v.candidate_commands) || !v.candidate_commands.every((c) => isPlainObject5(c) && typeof c.label === "string" && typeof c.raw === "string" && typeof c.source_file === "string" && typeof c.kind === "string" && COMMAND_KINDS.includes(c.kind))) return false;
+  if (!isStringArray(v.source_roots)) return false;
+  if (!isStringArray(v.test_roots)) return false;
+  if (!isStringArray(v.docs_roots)) return false;
+  if (!isStringArray(v.generated_paths)) return false;
+  if (!Array.isArray(v.components) || !v.components.every((c) => isPlainObject5(c) && typeof c.name === "string" && typeof c.path === "string" && typeof c.file_count === "number" && Number.isInteger(c.file_count) && c.file_count >= 0)) return false;
+  if (!Array.isArray(v.entrypoints) || !v.entrypoints.every((e) => isPlainObject5(e) && typeof e.name === "string" && typeof e.path === "string" && typeof e.source === "string")) return false;
+  if (v.public_api !== null && v.public_api !== void 0) {
+    const pa = v.public_api;
+    if (!isPlainObject5(pa)) return false;
+    if (pa.confidence !== "heuristic") return false;
+    if (!Array.isArray(pa.hints) || !pa.hints.every((h) => isPlainObject5(h) && typeof h.name === "string" && typeof h.source === "string")) return false;
+  }
+  if (!Array.isArray(v.ownership_hints) || !v.ownership_hints.every((o) => isPlainObject5(o) && typeof o.path_prefix === "string" && typeof o.component === "string")) return false;
+  if (!Array.isArray(v.files) || !v.files.every((f) => isPlainObject5(f) && typeof f.path === "string" && (f.component === null || typeof f.component === "string") && (f.language === null || typeof f.language === "string") && typeof f.is_test === "boolean" && isStringArray(f.req_ids))) return false;
+  const reqIdRe = new RegExp(`^${REQ_ID_PATTERN}$`);
+  if (!Array.isArray(v.req_anchors) || !v.req_anchors.every((r) => isPlainObject5(r) && typeof r.req_id === "string" && reqIdRe.test(r.req_id) && isStringArray(r.locations))) return false;
+  const flags = BLAST_RADIUS_FLAGS;
+  if (!Array.isArray(v.blast_radius_signals) || !v.blast_radius_signals.every((s) => isPlainObject5(s) && typeof s.flag === "string" && flags.includes(s.flag) && isStringArray(s.matching_paths) && isStringArray(s.trigger_patterns))) return false;
+  return true;
+}
+function renderRepoMapMarkdown(map) {
+  const serialized = JSON.parse(serializeRepoMap(map));
+  const lines = [];
+  lines.push("# Repo Map");
+  lines.push("");
+  lines.push("## Languages");
+  if (serialized.languages.length === 0) lines.push("(none detected)");
+  else for (const l of serialized.languages) lines.push(`- ${l.name} (${l.source})`);
+  lines.push("");
+  lines.push("## Package managers");
+  if (serialized.package_managers.length === 0) lines.push("(none detected)");
+  else for (const pm of serialized.package_managers) lines.push(`- ${pm.name} (${pm.manifest_paths.length} manifest(s))`);
+  lines.push("");
+  lines.push("## Roots");
+  lines.push(`- Source: ${serialized.source_roots.join(", ") || "(none)"}`);
+  lines.push(`- Test: ${serialized.test_roots.join(", ") || "(none)"}`);
+  lines.push(`- Docs: ${serialized.docs_roots.join(", ") || "(none)"}`);
+  lines.push("");
+  lines.push("## Components");
+  if (serialized.components.length === 0) lines.push("(none detected)");
+  else for (const c of serialized.components) lines.push(`- ${c.name} (${c.file_count} file(s))`);
+  lines.push("");
+  lines.push("## Entrypoints");
+  if (serialized.entrypoints.length === 0) lines.push("(none detected)");
+  else for (const e of serialized.entrypoints) lines.push(`- ${e.name} \u2014 ${e.path} (${e.source})`);
+  lines.push("");
+  lines.push("## Public API");
+  lines.push(serialized.public_api ? `${serialized.public_api.hints.length} hint(s) (heuristic)` : "(not detected)");
+  lines.push("");
+  lines.push("## Blast-radius signals");
+  if (serialized.blast_radius_signals.length === 0) lines.push("(none detected)");
+  else for (const s of serialized.blast_radius_signals) lines.push(`- ${s.flag} (${s.matching_paths.length} match(es))`);
+  lines.push("");
+  lines.push("## Counts");
+  lines.push(`- Files: ${serialized.files.length}`);
+  lines.push(`- REQ anchors: ${serialized.req_anchors.length}`);
+  lines.push(`- Candidate commands: ${serialized.candidate_commands.length}`);
+  lines.push(`- Generated dirs: ${serialized.generated_paths.length}`);
+  return lines.join("\n") + "\n";
+}
+
+// src/core/repo-map/scanner.ts
+var FILE_COUNT_CAP = 25e3;
+var TOTAL_BYTES_CAP = 64 * 1024 * 1024;
+var GENERATED_DIRS = /* @__PURE__ */ new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "target",
+  "out",
+  ".git",
+  ".svn",
+  ".hg",
+  ".cache",
+  ".next",
+  ".nuxt",
+  ".turbo",
+  ".gradle",
+  ".idea",
+  ".vscode",
+  "__pycache__",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".tox",
+  "coverage",
+  "vendor",
+  "bin",
+  "obj",
+  ".venv",
+  "venv"
+]);
+var PRODUCER_DIRS = /* @__PURE__ */ new Set([".twinharness", ".agentic-sdlc"]);
+var GENERATED_ARTIFACTS = /* @__PURE__ */ new Set(["docs/00-repo-map.md"]);
+var MAX_READ_BYTES = 2 * 1024 * 1024;
+var EXT_LANG = {
+  ".ts": "TypeScript",
+  ".tsx": "TypeScript",
+  ".mts": "TypeScript",
+  ".cts": "TypeScript",
+  ".js": "JavaScript",
+  ".jsx": "JavaScript",
+  ".mjs": "JavaScript",
+  ".cjs": "JavaScript",
+  ".py": "Python",
+  ".go": "Go",
+  ".rs": "Rust",
+  ".java": "Java",
+  ".kt": "Kotlin",
+  ".kts": "Kotlin",
+  ".rb": "Ruby",
+  ".php": "PHP",
+  ".cs": ".NET",
+  ".fs": ".NET",
+  ".vb": ".NET"
+};
+var MANIFEST_LANG = {
+  "package.json": "JavaScript/TypeScript",
+  "tsconfig.json": "TypeScript",
+  "go.mod": "Go",
+  "cargo.toml": "Rust",
+  "pom.xml": "Java",
+  "build.gradle": "Java",
+  "build.gradle.kts": "Kotlin",
+  "requirements.txt": "Python",
+  "pyproject.toml": "Python",
+  "setup.py": "Python",
+  "pipfile": "Python",
+  "gemfile": "Ruby",
+  "composer.json": "PHP"
+};
+var PM_MANIFEST = {
+  "package.json": "npm",
+  "package-lock.json": "npm",
+  "yarn.lock": "yarn",
+  "pnpm-lock.yaml": "pnpm",
+  "go.mod": "go modules",
+  "go.sum": "go modules",
+  "cargo.toml": "cargo",
+  "cargo.lock": "cargo",
+  "requirements.txt": "pip",
+  "pipfile": "pipenv",
+  "pyproject.toml": "pip",
+  "poetry.lock": "poetry",
+  "gemfile": "bundler",
+  "gemfile.lock": "bundler",
+  "composer.json": "composer",
+  "composer.lock": "composer",
+  "pom.xml": "maven",
+  "build.gradle": "gradle",
+  "build.gradle.kts": "gradle"
+};
+var SOURCE_ROOT_NAMES = /* @__PURE__ */ new Set(["src", "lib", "app", "pkg", "internal", "cmd"]);
+var TEST_ROOT_NAMES = /* @__PURE__ */ new Set(["tests", "test", "__tests__", "spec", "specs"]);
+var DOCS_ROOT_NAMES = /* @__PURE__ */ new Set(["docs", "doc", "documentation"]);
+var ENTRY_FILES = /* @__PURE__ */ new Set([
+  "index.ts",
+  "index.js",
+  "main.ts",
+  "main.js",
+  "main.py",
+  "main.go",
+  "main.rs",
+  "__main__.py",
+  "cli.ts",
+  "cli.js",
+  "app.ts",
+  "app.js",
+  "server.ts",
+  "server.js"
+]);
+var BLAST_PATTERNS = {
+  authentication: ["auth", "login", "logout", "session", "credential", "password", "oauth", "token"],
+  authorization: ["authz", "permission", "rbac", "acl", "role", "policy", "scope", "grant"],
+  "data-integrity": ["migration", "schema", "transaction", "integrity", "constraint", "checksum"],
+  money: ["payment", "billing", "invoice", "charge", "price", "currency", "stripe", "paypal"],
+  migrations: ["migration", "migrate", "schema_migration", "flyway", "liquibase", "alembic"]
+};
+function isTestPath(relPosix2) {
+  const lower = relPosix2.toLowerCase();
+  if (/(^|\/)(tests?|__tests__|specs?)(\/|$)/.test(lower)) return true;
+  if (/\.(test|spec)\.[a-z0-9]+$/.test(lower)) return true;
+  if (/_test\.[a-z0-9]+$/.test(lower)) return true;
+  if (/test_[^/]*\.py$/.test(lower)) return true;
+  return false;
+}
+function relPosix(root, abs) {
+  return path13.relative(root, abs).split(path13.sep).join("/");
+}
+function safeParseJson(text) {
+  try {
+    const v = JSON.parse(text);
+    return typeof v === "object" && v !== null && !Array.isArray(v) ? v : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function classifyCommand(name) {
+  const n = name.toLowerCase();
+  if (n.includes("test") || n.includes("spec") || n.includes("check")) return "test";
+  if (n.includes("lint") || n.includes("format") || n.includes("fmt")) return "lint";
+  if (n.includes("build") || n.includes("compile") || n.includes("bundle")) return "build";
+  return "other";
+}
+function scanRepo(root, opts = {}) {
+  const absRoot = path13.resolve(root);
+  const map = emptyRepoMap(absRoot);
+  const fileCountCap = opts.fileCountCap ?? FILE_COUNT_CAP;
+  const totalBytesCap = opts.totalBytesCap ?? TOTAL_BYTES_CAP;
+  if (!fs14.existsSync(absRoot) || !fs14.statSync(absRoot).isDirectory()) {
+    return map;
+  }
+  const st = { filesScanned: 0, filesSkipped: 0, totalBytes: 0, capHit: null };
+  const langs = /* @__PURE__ */ new Map();
+  const pms = /* @__PURE__ */ new Map();
+  const commands = [];
+  const sourceRoots = /* @__PURE__ */ new Set();
+  const testRoots = /* @__PURE__ */ new Set();
+  const docsRoots = /* @__PURE__ */ new Set();
+  const generatedPaths = /* @__PURE__ */ new Set();
+  const componentFileCounts = /* @__PURE__ */ new Map();
+  const entrypoints = [];
+  const ownershipHints = /* @__PURE__ */ new Map();
+  const files = [];
+  const blastMatches = /* @__PURE__ */ new Map();
+  const apiHints = [];
+  const recordLang = (name, evidence, source) => {
+    let e = langs.get(name);
+    if (!e) {
+      e = { evidence: /* @__PURE__ */ new Set(), sources: /* @__PURE__ */ new Set() };
+      langs.set(name, e);
+    }
+    e.evidence.add(evidence);
+    e.sources.add(source);
+  };
+  const recordBlast = (relFile) => {
+    const lower = relFile.toLowerCase();
+    for (const flag of BLAST_RADIUS_FLAGS) {
+      for (const token of BLAST_PATTERNS[flag]) {
+        if (lower.includes(token)) {
+          let m = blastMatches.get(flag);
+          if (!m) {
+            m = { paths: /* @__PURE__ */ new Set(), triggers: /* @__PURE__ */ new Set() };
+            blastMatches.set(flag, m);
+          }
+          m.paths.add(relFile);
+          m.triggers.add(token);
+        }
+      }
+    }
+  };
+  const componentForFile = (rel) => {
+    const parts = rel.split("/");
+    if (parts.length < 2) return null;
+    const top = parts[0];
+    if (!SOURCE_ROOT_NAMES.has(top)) return null;
+    return `${parts[0]}/${parts[1]}`;
+  };
+  const walk = (absDir, depth) => {
+    if (st.capHit) return;
+    let entries;
+    try {
+      entries = fs14.readdirSync(absDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (st.capHit) return;
+      const abs = path13.join(absDir, entry.name);
+      const rel = relPosix(absRoot, abs);
+      if (entry.isDirectory()) {
+        if (PRODUCER_DIRS.has(entry.name)) continue;
+        if (GENERATED_DIRS.has(entry.name)) {
+          generatedPaths.add(rel);
+          continue;
+        }
+        if (depth === 0) {
+          const lower = entry.name.toLowerCase();
+          if (SOURCE_ROOT_NAMES.has(lower)) sourceRoots.add(rel);
+          if (TEST_ROOT_NAMES.has(lower)) testRoots.add(rel);
+          if (DOCS_ROOT_NAMES.has(lower)) docsRoots.add(rel);
+        }
+        walk(abs, depth + 1);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (GENERATED_ARTIFACTS.has(rel)) continue;
+      if (st.filesScanned >= fileCountCap) {
+        st.capHit = "file-count";
+        return;
+      }
+      let size = 0;
+      try {
+        size = fs14.statSync(abs).size;
+      } catch {
+        st.filesSkipped++;
+        continue;
+      }
+      if (st.totalBytes + size > totalBytesCap) {
+        st.capHit = "total-bytes";
+        return;
+      }
+      st.totalBytes += size;
+      st.filesScanned++;
+      const nameLower = entry.name.toLowerCase();
+      const ext = path13.extname(entry.name).toLowerCase();
+      const langName = EXT_LANG[ext];
+      if (langName) recordLang(langName, rel, "extension");
+      const manifestLang = MANIFEST_LANG[nameLower];
+      if (manifestLang) recordLang(manifestLang, rel, "manifest");
+      const pmName = PM_MANIFEST[nameLower];
+      if (pmName) {
+        let set = pms.get(pmName);
+        if (!set) {
+          set = /* @__PURE__ */ new Set();
+          pms.set(pmName, set);
+        }
+        set.add(rel);
+      }
+      const isTest = isTestPath(rel);
+      const component = componentForFile(rel);
+      if (component) {
+        componentFileCounts.set(component, (componentFileCounts.get(component) ?? 0) + 1);
+        ownershipHints.set(component, component);
+      }
+      files.push({
+        path: rel,
+        component,
+        language: langName ?? null,
+        is_test: isTest,
+        req_ids: []
+        // filled from scanDirForReqIds below.
+      });
+      recordBlast(rel);
+      if (nameLower === "package.json" && size <= MAX_READ_BYTES) {
+        let text;
+        try {
+          text = fs14.readFileSync(abs, "utf8");
+        } catch {
+          text = void 0;
+        }
+        const json = text ? safeParseJson(text) : void 0;
+        if (json) {
+          const scripts = json.scripts;
+          if (typeof scripts === "object" && scripts !== null && !Array.isArray(scripts)) {
+            for (const [label, raw] of Object.entries(scripts)) {
+              if (typeof raw === "string") {
+                commands.push({ label, raw, source_file: rel, kind: classifyCommand(label) });
+              }
+            }
+          }
+          const bin = json.bin;
+          const dir = path13.dirname(rel) === "." ? "" : path13.dirname(rel) + "/";
+          if (typeof bin === "string") {
+            entrypoints.push({ name: path13.basename(rel, ".json"), path: dir + bin, source: "package.json:bin" });
+          } else if (typeof bin === "object" && bin !== null && !Array.isArray(bin)) {
+            for (const [bname, bpath] of Object.entries(bin)) {
+              if (typeof bpath === "string") {
+                entrypoints.push({ name: bname, path: dir + bpath, source: "package.json:bin" });
+              }
+            }
+          }
+          if (typeof json.main === "string") {
+            entrypoints.push({ name: "main", path: dir + json.main, source: "package.json:main" });
+          }
+          if (typeof json.module === "string") {
+            entrypoints.push({ name: "module", path: dir + json.module, source: "package.json:module" });
+          }
+          if (json.exports !== void 0) {
+            apiHints.push({ name: path13.basename(rel), source: "package.json:exports" });
+          }
+        }
+      } else if (nameLower === "makefile" && size <= MAX_READ_BYTES) {
+        let text;
+        try {
+          text = fs14.readFileSync(abs, "utf8");
+        } catch {
+          text = void 0;
+        }
+        if (text) {
+          for (const line of text.split(/\r?\n/)) {
+            const m = /^([A-Za-z0-9_.-]+):(?!=)/.exec(line);
+            if (m && m[1] && m[1] !== ".PHONY") {
+              commands.push({ label: m[1], raw: `make ${m[1]}`, source_file: rel, kind: classifyCommand(m[1]) });
+            }
+          }
+        }
+      }
+      if (ENTRY_FILES.has(nameLower)) {
+        entrypoints.push({ name: entry.name, path: rel, source: "convention" });
+      }
+    }
+  };
+  walk(absRoot, 0);
+  const isExcludedLocation = (loc) => {
+    if (GENERATED_ARTIFACTS.has(loc)) return true;
+    const first = loc.split("/")[0];
+    return first !== void 0 && (GENERATED_DIRS.has(first) || PRODUCER_DIRS.has(first));
+  };
+  const reqIdToFiles = scanDirForReqIds(absRoot);
+  const reqAnchors = [];
+  const fileToReqIds = /* @__PURE__ */ new Map();
+  for (const [reqId, locations] of reqIdToFiles.entries()) {
+    const kept = [...locations].filter((loc) => !isExcludedLocation(loc));
+    if (kept.length === 0) continue;
+    reqAnchors.push({ req_id: reqId, locations: kept });
+    for (const loc of kept) {
+      const existing = fileToReqIds.get(loc);
+      if (existing) existing.push(reqId);
+      else fileToReqIds.set(loc, [reqId]);
+    }
+  }
+  for (const f of files) {
+    const ids = fileToReqIds.get(f.path);
+    if (ids) f.req_ids = ids;
+  }
+  map.languages = [...langs.entries()].map(([name, e]) => ({
+    name,
+    evidence: [...e.evidence],
+    source: e.sources.has("extension") && e.sources.has("manifest") ? "both" : e.sources.has("manifest") ? "manifest" : "extension"
+  }));
+  map.package_managers = [...pms.entries()].map(([name, set]) => ({
+    name,
+    manifest_paths: [...set]
+  }));
+  map.candidate_commands = commands;
+  map.source_roots = [...sourceRoots];
+  map.test_roots = [...testRoots];
+  map.docs_roots = [...docsRoots];
+  map.generated_paths = [...generatedPaths];
+  map.components = [...componentFileCounts.entries()].map(([name, file_count]) => ({
+    name,
+    path: name,
+    file_count
+  }));
+  map.entrypoints = entrypoints;
+  map.public_api = apiHints.length > 0 ? { hints: apiHints, confidence: "heuristic" } : null;
+  map.ownership_hints = [...ownershipHints.entries()].map(([prefix, component]) => ({
+    path_prefix: prefix,
+    component
+  }));
+  map.files = files;
+  map.req_anchors = reqAnchors;
+  map.blast_radius_signals = [...blastMatches.entries()].map(([flag, m]) => ({
+    flag,
+    matching_paths: [...m.paths],
+    trigger_patterns: [...m.triggers]
+  }));
+  map.scanReport = {
+    filesScanned: st.filesScanned,
+    filesSkipped: st.filesSkipped,
+    capHit: st.capHit
+  };
+  return map;
+}
+
+// src/core/repo-map/query.ts
+var DEFAULT_MAX_RESULTS = 20;
+var WEIGHTS = {
+  /** Exact file-path match to the selector (--file or --query matching path). */
+  exactPath: 100,
+  /** File carries the REQ-ID in its req_ids (--req selector). */
+  reqIdOnFile: 90,
+  /** File belongs to an owning component of the selected slice. */
+  sliceComponent: 80,
+  /** File path contains the query keyword (case-insensitive substring). */
+  queryPathMatch: 70,
+  /** REQ-ID appears in a file's req_ids (query hits a req token). */
+  queryReqMatch: 60,
+  /** File is a sibling of an exact-match file (same component). */
+  siblingComponent: 40,
+  /** File matches a blast-radius signal's matching_paths. */
+  blastRadius: 30,
+  /** Related test file for a selected source file. */
+  testRelated: 50
+};
+function toPosix2(p) {
+  return p.replace(/\\/g, "/");
+}
+function sortedUniq(arr) {
+  return [...new Set(arr)].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+}
+function containsCI(haystack, needle) {
+  return haystack.toLowerCase().includes(needle.toLowerCase());
+}
+function stableSort(items) {
+  items.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const ap = a.file.path;
+    const bp = b.file.path;
+    return ap < bp ? -1 : ap > bp ? 1 : 0;
+  });
+}
+function toCmd(c) {
+  return {
+    label: c.label,
+    raw: c.raw,
+    sourceFile: c.source_file,
+    kind: c.kind
+  };
+}
+function toSignal(s) {
+  return {
+    flag: s.flag,
+    matchingPaths: [...s.matching_paths],
+    triggerPatterns: [...s.trigger_patterns]
+  };
+}
+function resolveSeeds(map, selector) {
+  const seedPaths = /* @__PURE__ */ new Set();
+  const seedComponents = /* @__PURE__ */ new Set();
+  switch (selector.kind) {
+    case "file": {
+      const target = toPosix2(selector.value);
+      for (const f of map.files) {
+        if (f.path === target) {
+          seedPaths.add(f.path);
+          if (f.component) seedComponents.add(f.component);
+        }
+      }
+      break;
+    }
+    case "req": {
+      const reqId = selector.value;
+      for (const f of map.files) {
+        if (f.req_ids.includes(reqId)) {
+          seedPaths.add(f.path);
+          if (f.component) seedComponents.add(f.component);
+        }
+      }
+      break;
+    }
+    case "slice": {
+      const comps = new Set(selector.sliceComponents ?? []);
+      for (const f of map.files) {
+        if (f.component && comps.has(f.component)) {
+          seedPaths.add(f.path);
+          seedComponents.add(f.component);
+        }
+      }
+      break;
+    }
+    case "query": {
+      const kw = selector.value;
+      for (const f of map.files) {
+        if (containsCI(f.path, kw)) {
+          seedPaths.add(f.path);
+          if (f.component) seedComponents.add(f.component);
+        }
+        for (const rid of f.req_ids) {
+          if (containsCI(rid, kw)) {
+            seedPaths.add(f.path);
+            if (f.component) seedComponents.add(f.component);
+          }
+        }
+      }
+      break;
+    }
+  }
+  return { seedPaths, seedComponents };
+}
+function scoreFiles(map, selector, seedPaths, seedComponents) {
+  const scored = [];
+  const blastPaths = /* @__PURE__ */ new Set();
+  for (const sig of map.blast_radius_signals) {
+    for (const mp of sig.matching_paths) blastPaths.add(mp);
+  }
+  for (const file of map.files) {
+    let score = 0;
+    const whyParts = [];
+    if (selector.kind === "file") {
+      const target = toPosix2(selector.value);
+      if (file.path === target) {
+        score += WEIGHTS.exactPath;
+        whyParts.push(`exact match for --file ${target}`);
+      } else if (file.component && seedComponents.has(file.component)) {
+        score += WEIGHTS.siblingComponent;
+        whyParts.push(`same component (${file.component}) as --file target`);
+      }
+    }
+    if (selector.kind === "req") {
+      const reqId = selector.value;
+      if (file.req_ids.includes(reqId)) {
+        score += WEIGHTS.reqIdOnFile;
+        whyParts.push(`carries anchor ${reqId}`);
+      } else if (file.component && seedComponents.has(file.component)) {
+        score += WEIGHTS.siblingComponent;
+        whyParts.push(`same component (${file.component}) as ${reqId} files`);
+      }
+    }
+    if (selector.kind === "slice") {
+      const comps = new Set(selector.sliceComponents ?? []);
+      if (file.component && comps.has(file.component)) {
+        score += WEIGHTS.sliceComponent;
+        whyParts.push(`owned by component ${file.component} (slice ${selector.value})`);
+      } else if (file.component && seedComponents.has(file.component)) {
+        score += WEIGHTS.siblingComponent;
+        whyParts.push(`adjacent to slice component ${file.component}`);
+      }
+    }
+    if (selector.kind === "query") {
+      const kw = selector.value;
+      if (containsCI(file.path, kw)) {
+        score += WEIGHTS.queryPathMatch;
+        whyParts.push(`path contains query "${kw}"`);
+      }
+      for (const rid of file.req_ids) {
+        if (containsCI(rid, kw)) {
+          score += WEIGHTS.queryReqMatch;
+          whyParts.push(`REQ-ID ${rid} matches query "${kw}"`);
+          break;
+        }
+      }
+      if (score === 0 && file.component && seedComponents.has(file.component)) {
+        score += WEIGHTS.siblingComponent;
+        whyParts.push(`same component (${file.component}) as query-matched files`);
+      }
+    }
+    if (blastPaths.has(file.path) && score > 0) {
+      score += WEIGHTS.blastRadius;
+      const flags = map.blast_radius_signals.filter((s) => s.matching_paths.includes(file.path)).map((s) => s.flag).join(", ");
+      whyParts.push(`blast-radius signal: ${flags}`);
+    }
+    if (file.is_test && seedPaths.has(file.path)) {
+      if (score < WEIGHTS.testRelated) score = Math.max(score, WEIGHTS.testRelated);
+    }
+    if (score > 0) {
+      const why = whyParts.join("; ");
+      scored.push({ file, score, why });
+    }
+  }
+  return scored;
+}
+function computeRelevance(map, selector, opts = {}) {
+  const maxResults = opts.maxResults !== void 0 && opts.maxResults > 0 ? opts.maxResults : DEFAULT_MAX_RESULTS;
+  const { seedPaths, seedComponents } = resolveSeeds(map, selector);
+  const scored = scoreFiles(map, selector, seedPaths, seedComponents);
+  stableSort(scored);
+  const readFirstCandidates = [];
+  const testCandidates = [];
+  const relatedCandidates = [];
+  for (const sf of scored) {
+    if (sf.file.is_test) {
+      testCandidates.push(sf);
+    } else if (seedPaths.has(sf.file.path)) {
+      readFirstCandidates.push(sf);
+    } else {
+      relatedCandidates.push(sf);
+    }
+  }
+  let budget = maxResults;
+  let truncated = false;
+  function applyBudget(candidates) {
+    const out = [];
+    for (const sf of candidates) {
+      if (budget <= 0) {
+        truncated = true;
+        break;
+      }
+      const why = sf.why || `scored ${sf.score} for selector ${selector.kind}:${selector.value}`;
+      out.push({ path: sf.file.path, why, score: sf.score });
+      budget--;
+    }
+    return out;
+  }
+  const readFirst = applyBudget(readFirstCandidates);
+  const tests = applyBudget(testCandidates);
+  const related = applyBudget(relatedCandidates);
+  const owningComponentSet = /* @__PURE__ */ new Set();
+  for (const sf of scored) {
+    if (sf.file.component) owningComponentSet.add(sf.file.component);
+  }
+  const owningComponents = sortedUniq([...owningComponentSet]);
+  const doNotTouch = sortedUniq(
+    map.generated_paths.map((p) => toPosix2(p))
+  );
+  const relevantFilePaths = new Set(scored.map((sf) => sf.file.path));
+  const risks = map.blast_radius_signals.filter((sig) => sig.matching_paths.some((mp) => relevantFilePaths.has(mp))).map(toSignal);
+  const verifyCandidates = map.candidate_commands.map(toCmd);
+  return {
+    selectorKind: selector.kind,
+    selectorValue: selector.value,
+    readFirst,
+    related,
+    tests,
+    owningComponents,
+    doNotTouch,
+    risks,
+    verifyCandidates,
+    truncated
+  };
+}
+function computeImpact(map, selector) {
+  const seedPaths = /* @__PURE__ */ new Set();
+  const seedComponents = /* @__PURE__ */ new Set();
+  if (selector.kind === "file") {
+    const target = toPosix2(selector.value);
+    for (const f of map.files) {
+      if (f.path === target) {
+        seedPaths.add(f.path);
+        if (f.component) seedComponents.add(f.component);
+      }
+    }
+  } else {
+    const compName = toPosix2(selector.value);
+    for (const f of map.files) {
+      if (f.component === compName || f.component && f.component.startsWith(compName + "/")) {
+        seedPaths.add(f.path);
+        seedComponents.add(f.component);
+      }
+    }
+    for (const c of map.components) {
+      if (toPosix2(c.name) === compName) {
+        seedComponents.add(c.name);
+      }
+    }
+  }
+  if (seedPaths.size === 0 && seedComponents.size === 0) {
+    return {
+      selectorKind: selector.kind,
+      selectorValue: selector.value,
+      impactedComponents: [],
+      relatedTests: [],
+      downstreamFeatures: [],
+      reqAnchors: [],
+      artifactStageImplications: [],
+      riskFlags: [],
+      verifyCandidates: map.candidate_commands.map(toCmd)
+    };
+  }
+  const impactedFilePaths = new Set(seedPaths);
+  for (const f of map.files) {
+    if (f.component && seedComponents.has(f.component)) {
+      impactedFilePaths.add(f.path);
+    }
+  }
+  const impactedComponents = [];
+  const seenComponents = /* @__PURE__ */ new Set();
+  for (const compName of sortedUniq([...seedComponents])) {
+    if (seenComponents.has(compName)) continue;
+    seenComponents.add(compName);
+    let why;
+    if (selector.kind === "file") {
+      why = `contains --file target ${toPosix2(selector.value)}`;
+    } else {
+      why = `matches --component selector "${selector.value}"`;
+    }
+    impactedComponents.push({ name: compName, why });
+  }
+  const scopeReqIds = /* @__PURE__ */ new Set();
+  for (const f of map.files) {
+    if (impactedFilePaths.has(f.path)) {
+      for (const rid of f.req_ids) scopeReqIds.add(rid);
+    }
+  }
+  const relatedTests = [];
+  const seenTestPaths = /* @__PURE__ */ new Set();
+  for (const f of map.files) {
+    if (!f.is_test) continue;
+    if (seenTestPaths.has(f.path)) continue;
+    let whyParts = [];
+    if (f.component && seedComponents.has(f.component)) {
+      whyParts.push(`test in component ${f.component} (part of impact scope)`);
+    }
+    const overlapping = f.req_ids.filter((rid) => scopeReqIds.has(rid));
+    if (overlapping.length > 0) {
+      whyParts.push(`covers REQ-IDs in scope: ${overlapping.join(", ")}`);
+    }
+    if (whyParts.length > 0) {
+      seenTestPaths.add(f.path);
+      relatedTests.push({ name: f.path, why: whyParts.join("; ") });
+    }
+  }
+  const downstreamFeatures = [];
+  const seenFeatures = /* @__PURE__ */ new Set();
+  for (const ep of map.entrypoints) {
+    if (seenFeatures.has(ep.name)) continue;
+    const epPath = toPosix2(ep.path);
+    if (impactedFilePaths.has(epPath)) {
+      seenFeatures.add(ep.name);
+      downstreamFeatures.push({
+        name: ep.name,
+        why: `entrypoint at ${epPath} is in the impact scope`
+      });
+    }
+  }
+  for (const hint of map.ownership_hints) {
+    const prefix = toPosix2(hint.path_prefix);
+    if (seedComponents.has(hint.component) && !seenFeatures.has(hint.component)) {
+      seenFeatures.add(hint.component);
+      downstreamFeatures.push({
+        name: hint.component,
+        why: `ownership hint at ${prefix} is in the impact scope (component: ${hint.component})`
+      });
+    }
+  }
+  const reqAnchors = sortedUniq([...scopeReqIds]);
+  const artifactStageImplications = [];
+  if (reqAnchors.length > 0) {
+    artifactStageImplications.push(
+      `${reqAnchors.length} REQ-ID(s) in scope \u2014 review docs/01-requirements.md for impact on acceptance criteria`
+    );
+  }
+  if (impactedComponents.length > 0) {
+    const compList = impactedComponents.map((c) => c.name).join(", ");
+    artifactStageImplications.push(
+      `Component(s) affected: ${compList} \u2014 update docs/09-implementation-plan.md if slice scope changes`
+    );
+  }
+  const riskFlags = map.blast_radius_signals.filter((sig) => sig.matching_paths.some((mp) => impactedFilePaths.has(mp))).map(toSignal);
+  const verifyCandidates = map.candidate_commands.map(toCmd);
+  return {
+    selectorKind: selector.kind,
+    selectorValue: selector.value,
+    impactedComponents,
+    relatedTests,
+    downstreamFeatures,
+    reqAnchors,
+    artifactStageImplications,
+    riskFlags,
+    verifyCandidates
+  };
+}
+
+// src/commands/repo.ts
+var FORMATS = ["summary", "json", "md"];
+var REPO_MAP_JSON_REL = ".twinharness/repo-map.json";
+var REPO_MAP_MD_REL = "docs/00-repo-map.md";
+function atomicWrite(absFile, content) {
+  const dir = path14.dirname(absFile);
+  fs15.mkdirSync(dir, { recursive: true });
+  const tmp = path14.join(dir, `${path14.basename(absFile)}.tmp-${process.pid}`);
+  fs15.writeFileSync(tmp, content, "utf8");
+  fs15.renameSync(tmp, absFile);
+}
+function runRepoMap(paths, opts = {}) {
+  const write = opts.write !== false;
+  const format = opts.format ?? "summary";
+  if (!FORMATS.includes(format)) {
+    structuredLog({ cmd: "repo map", error: "bad_format", format: opts.format });
+    return failure({
+      human: `invalid --format "${opts.format}". Expected one of: ${FORMATS.join(", ")}.`,
+      data: { error: "bad_format", format: opts.format }
+    });
+  }
+  const map = scanRepo(paths.root);
+  const json = serializeRepoMap(map);
+  const md = renderRepoMapMarkdown(map);
+  const counts = {
+    languages: map.languages.length,
+    packageManagers: map.package_managers.length,
+    sourceRoots: map.source_roots.length,
+    testRoots: map.test_roots.length,
+    docsRoots: map.docs_roots.length,
+    components: map.components.length,
+    entrypoints: map.entrypoints.length,
+    files: map.files.length,
+    reqAnchors: map.req_anchors.length,
+    candidateCommands: map.candidate_commands.length,
+    generatedPaths: map.generated_paths.length,
+    blastRadiusSignals: map.blast_radius_signals.length
+  };
+  const blastRadiusFlags = [...new Set(map.blast_radius_signals.map((s) => s.flag))].sort();
+  let artifacts = [];
+  if (write) {
+    const jsonAbs = path14.join(paths.stateDir, "repo-map.json");
+    const mdAbs = path14.join(paths.docsDir, "00-repo-map.md");
+    try {
+      atomicWrite(jsonAbs, json);
+    } catch {
+      structuredLog({ cmd: "repo map", error: "write_failed", file: REPO_MAP_JSON_REL });
+      return failure({ human: `failed to write ${REPO_MAP_JSON_REL}`, data: { error: "write_failed", file: REPO_MAP_JSON_REL } });
+    }
+    try {
+      atomicWrite(mdAbs, md);
+    } catch {
+      structuredLog({ cmd: "repo map", error: "write_failed", file: REPO_MAP_MD_REL });
+      return failure({ human: `failed to write ${REPO_MAP_MD_REL}`, data: { error: "write_failed", file: REPO_MAP_MD_REL } });
+    }
+    artifacts = [REPO_MAP_JSON_REL, REPO_MAP_MD_REL];
+  }
+  const data = {
+    schemaVersion: map.schema_version,
+    wrote: write,
+    artifacts,
+    counts,
+    blastRadiusFlags,
+    scanReport: map.scanReport
+  };
+  let human;
+  if (format === "md") {
+    human = md;
+  } else if (format === "json") {
+    human = JSON.stringify(data, null, 2);
+  } else {
+    const capLine = map.scanReport.capHit === null ? `scanned ${map.scanReport.filesScanned} file(s), skipped ${map.scanReport.filesSkipped}` : `PARTIAL scan \u2014 cap hit: ${map.scanReport.capHit} (scanned ${map.scanReport.filesScanned})`;
+    human = [
+      "Repo map:",
+      `  languages: ${counts.languages}  package managers: ${counts.packageManagers}`,
+      `  roots \u2014 source: ${counts.sourceRoots}  test: ${counts.testRoots}  docs: ${counts.docsRoots}`,
+      `  components: ${counts.components}  entrypoints: ${counts.entrypoints}  files: ${counts.files}`,
+      `  REQ anchors: ${counts.reqAnchors}  candidate commands: ${counts.candidateCommands}  generated dirs: ${counts.generatedPaths}`,
+      `  blast-radius flags: ${blastRadiusFlags.length ? blastRadiusFlags.join(", ") : "(none)"}`,
+      `  ${capLine}`,
+      write ? `wrote ${artifacts.length} artifact(s): ${artifacts.join(", ")}` : "(dry-run \u2014 nothing written)"
+    ].join("\n");
+  }
+  structuredLog({
+    cmd: "repo map",
+    wrote: write,
+    files: counts.files,
+    capHit: map.scanReport.capHit,
+    blastRadiusFlags: blastRadiusFlags.length
+  });
+  return success({ data, human });
+}
+var REPO_MAP_REL = "repo-map.json";
+function runRepoRelevant(paths, opts = {}) {
+  if (opts.file !== void 0) {
+    const resolved = resolveWithinRoot(paths.root, opts.file);
+    if (resolved === null) {
+      structuredLog({ cmd: "repo relevant", error: "path_outside_root", file: opts.file });
+      return failure({
+        human: `--file "${opts.file}" is outside the project root.`,
+        data: { error: "path_outside_root", file: opts.file }
+      });
+    }
+  }
+  const mapJsonPath = path14.join(paths.stateDir, REPO_MAP_REL);
+  let rawMap = null;
+  try {
+    rawMap = fs15.readFileSync(mapJsonPath, "utf8");
+  } catch {
+    rawMap = null;
+  }
+  const parsed = parseRepoMap(rawMap);
+  if (!parsed.ok || !parsed.map) {
+    const errorCode = rawMap === null ? "map_missing" : parsed.error ?? "map_missing";
+    const human2 = errorCode === "map_missing" ? "No repo-map.json found. Run `th repo map` first." : `repo-map.json is invalid: ${errorCode}. Run \`th repo map\` to regenerate.`;
+    structuredLog({ cmd: "repo relevant", error: errorCode });
+    return failure({ human: human2, data: { error: errorCode } });
+  }
+  const map = parsed.map;
+  const selectors = [];
+  if (opts.slice !== void 0) selectors.push({ kind: "slice", value: opts.slice });
+  if (opts.req !== void 0) selectors.push({ kind: "req", value: opts.req });
+  if (opts.file !== void 0) selectors.push({ kind: "file", value: opts.file });
+  if (opts.query !== void 0) selectors.push({ kind: "query", value: opts.query });
+  if (selectors.length === 0) {
+    structuredLog({ cmd: "repo relevant", error: "no_selector" });
+    return failure({
+      human: "Provide exactly one selector: --slice, --req, --file, or --query.\n\nRun `th help` for usage.",
+      data: { error: "no_selector" }
+    });
+  }
+  if (selectors.length > 1) {
+    const given = selectors.map((s) => `--${s.kind}`);
+    structuredLog({ cmd: "repo relevant", error: "multiple_selectors", given });
+    return failure({
+      human: `Only one selector is allowed. Got: ${given.join(", ")}.`,
+      data: { error: "multiple_selectors", given }
+    });
+  }
+  const selectorEntry = selectors[0];
+  const selector = {
+    kind: selectorEntry.kind,
+    value: selectorEntry.value
+  };
+  if (selectorEntry.kind === "slice") {
+    const stateResult = requireState(paths);
+    if (stateResult.result) {
+      structuredLog({ cmd: "repo relevant", error: "not_initialized" });
+      return stateResult.result;
+    }
+    const state = stateResult.state;
+    const sliceEntry = state.slices.find((s) => s.id === selectorEntry.value);
+    if (!sliceEntry) {
+      const known = state.slices.map((s) => s.id);
+      structuredLog({ cmd: "repo relevant", error: "unknown_slice", slice: selectorEntry.value });
+      return failure({
+        human: `Unknown slice: ${selectorEntry.value}. Known: ${known.join(", ") || "(none)"}`,
+        data: { error: "unknown_slice", slice: selectorEntry.value, known }
+      });
+    }
+    selector.sliceComponents = sliceEntry.components;
+  }
+  const result = computeRelevance(map, selector, { maxResults: opts.maxResults });
+  const data = { ...result };
+  const human = formatRelevanceHuman(result, opts.format);
+  structuredLog({
+    cmd: "repo relevant",
+    selectorKind: result.selectorKind,
+    selectorValue: result.selectorValue,
+    readFirst: result.readFirst.length,
+    related: result.related.length,
+    tests: result.tests.length,
+    truncated: result.truncated
+  });
+  return success({ data, human });
+}
+function formatRelevanceHuman(result, format) {
+  if (format === "json") {
+    return JSON.stringify(result, null, 2);
+  }
+  const lines = [];
+  lines.push(`Relevant context for ${result.selectorKind}: ${result.selectorValue}`);
+  if (result.readFirst.length > 0) {
+    lines.push("\nRead first:");
+    for (const item of result.readFirst) {
+      lines.push(`  ${item.path}  [${item.why}]`);
+    }
+  }
+  if (result.related.length > 0) {
+    lines.push("\nRelated:");
+    for (const item of result.related) {
+      lines.push(`  ${item.path}  [${item.why}]`);
+    }
+  }
+  if (result.tests.length > 0) {
+    lines.push("\nLikely tests:");
+    for (const item of result.tests) {
+      lines.push(`  ${item.path}  [${item.why}]`);
+    }
+  }
+  if (result.owningComponents.length > 0) {
+    lines.push(`
+Owning components: ${result.owningComponents.join(", ")}`);
+  }
+  if (result.doNotTouch.length > 0) {
+    lines.push(`
+Do not touch (generated): ${result.doNotTouch.join(", ")}`);
+  }
+  if (result.risks.length > 0) {
+    lines.push("\nRisks:");
+    for (const sig of result.risks) {
+      lines.push(`  ${sig.flag}: ${sig.matchingPaths.length} match(es)`);
+    }
+  }
+  if (result.verifyCandidates.length > 0) {
+    lines.push("\nVerify candidates (suggestions only \u2014 never executed):");
+    for (const cmd of result.verifyCandidates) {
+      lines.push(`  [${cmd.kind}] ${cmd.label}: ${cmd.raw}`);
+    }
+  }
+  if (result.truncated) {
+    lines.push("\n(Results truncated by maxResults \u2014 use --maxResults to see more.)");
+  }
+  if (result.readFirst.length === 0 && result.related.length === 0 && result.tests.length === 0) {
+    lines.push("\n(No matching files found \u2014 selector matches nothing. This is not an error.)");
+  }
+  return lines.join("\n");
+}
+function runRepoImpact(paths, opts = {}) {
+  if (opts.file !== void 0) {
+    const resolved = resolveWithinRoot(paths.root, opts.file);
+    if (resolved === null) {
+      structuredLog({ cmd: "repo impact", error: "path_outside_root", file: opts.file });
+      return failure({
+        human: `--file "${opts.file}" is outside the project root.`,
+        data: { error: "path_outside_root", file: opts.file }
+      });
+    }
+  }
+  if (opts.component !== void 0 && (opts.component.includes("/") || opts.component.includes("\\"))) {
+    const resolved = resolveWithinRoot(paths.root, opts.component);
+    if (resolved === null) {
+      structuredLog({ cmd: "repo impact", error: "path_outside_root", component: opts.component });
+      return failure({
+        human: `--component "${opts.component}" is outside the project root.`,
+        data: { error: "path_outside_root", component: opts.component }
+      });
+    }
+  }
+  const mapJsonPath = path14.join(paths.stateDir, REPO_MAP_REL);
+  let rawMap = null;
+  try {
+    rawMap = fs15.readFileSync(mapJsonPath, "utf8");
+  } catch {
+    rawMap = null;
+  }
+  const parsed = parseRepoMap(rawMap);
+  if (!parsed.ok || !parsed.map) {
+    const errorCode = rawMap === null ? "map_missing" : parsed.error ?? "map_missing";
+    const human2 = errorCode === "map_missing" ? "No repo-map.json found. Run `th repo map` first." : `repo-map.json is invalid: ${errorCode}. Run \`th repo map\` to regenerate.`;
+    structuredLog({ cmd: "repo impact", error: errorCode });
+    return failure({ human: human2, data: { error: errorCode } });
+  }
+  const map = parsed.map;
+  const selectors = [];
+  if (opts.file !== void 0) selectors.push({ kind: "file", value: opts.file });
+  if (opts.component !== void 0) selectors.push({ kind: "component", value: opts.component });
+  if (selectors.length === 0) {
+    structuredLog({ cmd: "repo impact", error: "no_selector" });
+    return failure({
+      human: "Provide exactly one selector: --file or --component.\n\nRun `th help` for usage.",
+      data: { error: "no_selector" }
+    });
+  }
+  if (selectors.length > 1) {
+    const given = selectors.map((s) => `--${s.kind}`);
+    structuredLog({ cmd: "repo impact", error: "multiple_selectors", given });
+    return failure({
+      human: `Only one selector is allowed. Got: ${given.join(", ")}.`,
+      data: { error: "multiple_selectors", given }
+    });
+  }
+  const selectorEntry = selectors[0];
+  const selector = {
+    kind: selectorEntry.kind,
+    value: selectorEntry.value
+  };
+  const result = computeImpact(map, selector);
+  const data = { ...result };
+  const human = formatImpactHuman(result, opts.format);
+  structuredLog({
+    cmd: "repo impact",
+    selectorKind: result.selectorKind,
+    selectorValue: result.selectorValue,
+    impactedComponents: result.impactedComponents.length,
+    relatedTests: result.relatedTests.length,
+    riskFlags: result.riskFlags.length
+  });
+  return success({ data, human });
+}
+function formatImpactHuman(result, format) {
+  if (format === "json") {
+    return JSON.stringify(result, null, 2);
+  }
+  const lines = [];
+  lines.push(`Impact analysis for ${result.selectorKind}: ${result.selectorValue}`);
+  if (result.impactedComponents.length > 0) {
+    lines.push("\nImpacted components:");
+    for (const item of result.impactedComponents) {
+      lines.push(`  ${item.name}  [${item.why}]`);
+    }
+  }
+  if (result.relatedTests.length > 0) {
+    lines.push("\nRelated tests:");
+    for (const item of result.relatedTests) {
+      lines.push(`  ${item.name}  [${item.why}]`);
+    }
+  }
+  if (result.downstreamFeatures.length > 0) {
+    lines.push("\nDownstream features:");
+    for (const item of result.downstreamFeatures) {
+      lines.push(`  ${item.name}  [${item.why}]`);
+    }
+  }
+  if (result.reqAnchors.length > 0) {
+    lines.push(`
+REQ anchors in scope: ${result.reqAnchors.join(", ")}`);
+  }
+  if (result.artifactStageImplications.length > 0) {
+    lines.push("\nArtifact/stage implications:");
+    for (const impl of result.artifactStageImplications) {
+      lines.push(`  - ${impl}`);
+    }
+  }
+  if (result.riskFlags.length > 0) {
+    lines.push("\nRisk flags (blast radius):");
+    for (const sig of result.riskFlags) {
+      lines.push(`  ${sig.flag}: ${sig.matchingPaths.length} match(es)`);
+    }
+  }
+  if (result.verifyCandidates.length > 0) {
+    lines.push("\nVerify candidates (suggestions only \u2014 never executed):");
+    for (const cmd of result.verifyCandidates) {
+      lines.push(`  [${cmd.kind}] ${cmd.label}: ${cmd.raw}`);
+    }
+  }
+  if (result.impactedComponents.length === 0 && result.relatedTests.length === 0 && result.downstreamFeatures.length === 0) {
+    lines.push("\n(Selector matches nothing in the map \u2014 no impact found. This is not an error.)");
+  }
+  return lines.join("\n");
+}
+
+// src/commands/context.ts
+var fs16 = __toESM(require("node:fs"));
+var path15 = __toESM(require("node:path"));
+
+// src/core/summary.ts
+var SUMMARY_HEADING_RE = /^(#{1,3})\s+summary\b/i;
+var ANY_HEADING_RE = /^#{1,3}\s+/;
+function extractSummary(markdown, headLines = 8) {
+  const lines = markdown.split(/\r?\n/);
+  let startIdx = -1;
+  let level = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const m = SUMMARY_HEADING_RE.exec(lines[i]);
+    if (m) {
+      startIdx = i;
+      level = m[1].length;
+      break;
+    }
+  }
+  if (startIdx >= 0) {
+    const body = [];
+    for (let i = startIdx + 1; i < lines.length; i++) {
+      const line = lines[i];
+      const h = ANY_HEADING_RE.exec(line);
+      if (h) {
+        const hLevel = /^#+/.exec(line)?.[0].length ?? 99;
+        if (hLevel <= level) break;
+      }
+      body.push(line);
+    }
+    return { summary: body.join("\n").trim(), head: headFallback(lines, headLines) };
+  }
+  return { summary: null, head: headFallback(lines, headLines) };
+}
+function headFallback(lines, headLines) {
+  const out = [];
+  for (const line of lines) {
+    if (out.length >= headLines) break;
+    if (line.trim().length === 0 && out.length === 0) continue;
+    out.push(line);
+  }
+  return out.join("\n").trim();
+}
+
+// src/commands/context.ts
+var TOKENS_PER_CHAR = 1 / 4;
+function runContextPack(paths, opts = {}) {
+  const r = readState(paths);
+  if (!r.exists) return failure({ human: "No state.json found. Run `th init` first.", data: { error: "not_initialized" } });
+  if (!r.state) return failure({ human: "state.json is invalid.", data: { error: "invalid_state", issues: r.issues } });
+  const s = r.state;
+  const packed = s.approved_artifacts.map((a) => {
+    const abs = path15.resolve(paths.root, a.file);
+    let exists = false;
+    let isDir = false;
+    let content = "";
+    if (fs16.existsSync(abs)) {
+      const stat = fs16.statSync(abs);
+      if (stat.isFile()) {
+        exists = true;
+        content = fs16.readFileSync(abs, "utf8");
+      } else if (stat.isDirectory()) {
+        exists = true;
+        isDir = true;
+      }
+    }
+    const { summary, head } = extractSummary(content);
+    const text = isDir ? `(directory artifact \u2014 read ${a.file}/ on demand)` : summary ?? head;
+    return { file: a.file, version: a.version, summary, text, tokens: Math.round(text.length / 4), exists, isDir };
+  });
+  let sliceBlock;
+  if (opts.slice) {
+    const target = s.slices.find((sl) => sl.id === opts.slice);
+    if (!target) {
+      return failure({
+        human: `Unknown slice: ${opts.slice}. Known: ${s.slices.map((sl) => sl.id).join(", ") || "(none)"}`,
+        data: { error: "unknown_slice", slice: opts.slice }
+      });
+    }
+    const components = new Set(target.components);
+    const sharesWith = s.slices.filter((sl) => sl.id !== target.id).map((sl) => ({ id: sl.id, shared: sl.components.filter((c) => components.has(c)) })).filter((x) => x.shared.length > 0);
+    sliceBlock = { id: target.id, status: target.status, components: target.components, sharesWith };
+  }
+  let repoRelevantFiles = [];
+  let repoRelevantNote = null;
+  if (opts.slice && sliceBlock) {
+    const relResult = runRepoRelevant(paths, { slice: opts.slice });
+    if (relResult.ok && relResult.data) {
+      const d = relResult.data;
+      for (const item of d.readFirst ?? []) repoRelevantFiles.push({ ...item, kind: "readFirst" });
+      for (const item of d.related ?? []) repoRelevantFiles.push({ ...item, kind: "related" });
+      for (const item of d.tests ?? []) repoRelevantFiles.push({ ...item, kind: "tests" });
+    } else if (!relResult.ok) {
+      repoRelevantNote = `(repo-relevant layer unavailable: ${relResult.data?.error ?? "unknown error"} \u2014 run \`th repo map\` first)`;
+    }
+  }
+  const totalTokens = packed.reduce((sum, p) => sum + p.tokens, 0);
+  structuredLog({ cmd: "context pack", slice: opts.slice ?? null, artifacts: packed.length, tokens: totalTokens, repoRelevantFiles: repoRelevantFiles.length });
+  const header = opts.slice ? `Context pack for ${opts.slice} \u2014 ${packed.length} artifact summary block(s), ~${totalTokens} tokens` : `Context pack \u2014 ${packed.length} artifact summary block(s), ~${totalTokens} tokens`;
+  const sliceLines = sliceBlock ? [
+    "",
+    `Slice ${sliceBlock.id} [${sliceBlock.status}] \u2014 components: ${sliceBlock.components.join(", ") || "(none)"}`,
+    sliceBlock.sharesWith.length ? `  Shares components with (serialize per \xA716): ${sliceBlock.sharesWith.map((x) => `${x.id} (${x.shared.join(", ")})`).join("; ")}` : "  No component overlap with other slices (safe to parallelize)."
+  ] : [];
+  const repoRelevantLines = [];
+  if (opts.slice) {
+    repoRelevantLines.push("");
+    if (repoRelevantNote) {
+      repoRelevantLines.push(`Repo-relevant files: ${repoRelevantNote}`);
+    } else if (repoRelevantFiles.length === 0) {
+      repoRelevantLines.push("Repo-relevant files: (none matched \u2014 repo-map may be empty for this slice)");
+    } else {
+      repoRelevantLines.push(`Repo-relevant files (${repoRelevantFiles.length} from repo-understanding layer):`);
+      for (const f of repoRelevantFiles) {
+        repoRelevantLines.push(`  [${f.kind}] ${f.path}  \u2014 ${f.why}`);
+      }
+    }
+  }
+  const artifactLines = packed.length === 0 ? ["", "(no approved artifacts yet \u2014 nothing to pack)"] : packed.flatMap((p) => [
+    "",
+    `### ${p.file} (v${p.version})${p.exists ? "" : " \u2014 MISSING ON DISK"}${p.summary === null && p.exists && !p.isDir ? " \u2014 no Summary block (head shown)" : ""}`,
+    p.text || "(empty)"
+  ]);
+  const human = [header, ...sliceLines, ...repoRelevantLines, ...artifactLines].join("\n");
+  return success({
+    data: {
+      slice: sliceBlock ?? null,
+      artifacts: packed,
+      totalTokens,
+      // REQ-RU-061: repo-relevant data included in structured response.
+      repoRelevantFiles,
+      repoRelevantNote: repoRelevantNote ?? null
+    },
+    human
+  });
+}
+
 // src/mcp-server.ts
 function resolvePathsForCall() {
   return resolveProjectPaths(process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
@@ -17006,9 +18523,14 @@ function optString(args, key) {
 }
 var stringProp = (description) => ({ type: "string", description });
 var boolProp = (description) => ({ type: "boolean", description });
+var numberProp = (description) => ({ type: "number", description });
 function optBool(args, key) {
   const v = args[key];
   return typeof v === "boolean" ? v : void 0;
+}
+function optNumber(args, key) {
+  const v = args[key];
+  return typeof v === "number" && isFinite(v) ? v : void 0;
 }
 var TOOL_DEFS = [
   {
@@ -17142,6 +18664,70 @@ var TOOL_DEFS = [
     description: "Next-action oracle: the single highest-priority MECHANICAL obligation the run owes next (blocking drift, revise caps, failing suite, artifact drift, tier, stage obligations, build waves, \u2026). Reports a mechanical obligation; it never chooses strategy. Read-only.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runNext(paths)
+  },
+  // Anchor: REQ-RU-044
+  // Anchor: REQ-RU-047
+  // Anchor: REQ-RU-048
+  // Anchor: REQ-RU-049
+  // Anchor: REQ-RU-050
+  // Anchor: REQ-RU-051
+  {
+    name: "th_repo_map",
+    description: "Scan the governed project and build the dual repo-map artifacts (.twinharness/repo-map.json + docs/00-repo-map.md). With write:false (default for MCP), returns the compact summary in memory only \u2014 nothing written.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        write: boolProp("Write the two artifacts to disk (default false for MCP preview). Set true to persist."),
+        format: { type: "string", description: "Text rendering: summary (default) | json | md.", enum: ["summary", "json", "md"] }
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runRepoMap(paths, { write: optBool(args, "write"), format: optString(args, "format") })
+  },
+  // Anchor: REQ-RU-045
+  // Anchor: REQ-RU-094
+  {
+    name: "th_repo_relevant",
+    description: "Read the persisted repo-map and return the files most relevant to a given selector (slice, REQ-ID, file, or free-text query). Read-only. Run th_repo_map first to build/refresh the map.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slice: stringProp("SLICE-ID selector (e.g. SLICE-3). Resolves the slice's component set from state."),
+        req: stringProp("REQ-ID selector (e.g. REQ-001). Returns files whose anchors match."),
+        file: stringProp("File-path selector (relative to project root). Returns files relevant to the given file."),
+        query: stringProp("Free-text query selector. Fuzzy-matches against component names, paths, and anchors."),
+        maxResults: numberProp("Cap on combined emitted items (default 20; \u22640 \u2192 default).")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runRepoRelevant(paths, { slice: optString(args, "slice"), req: optString(args, "req"), file: optString(args, "file"), query: optString(args, "query"), maxResults: optNumber(args, "maxResults") })
+  },
+  // Anchor: REQ-RU-046
+  {
+    name: "th_repo_impact",
+    description: "Read the persisted repo-map and return the blast-radius impact of changing a file or component. Read-only. Run th_repo_map first to build/refresh the map.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: stringProp("File-path selector (relative to project root). Returns components impacted by changing this file."),
+        component: stringProp("Component name selector. Returns files and tests impacted by changing this component.")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runRepoImpact(paths, { file: optString(args, "file"), component: optString(args, "component") })
+  },
+  // Anchor: REQ-RU-052
+  {
+    name: "th_context_pack",
+    description: "Assemble the \xA79 handoff bundle: Summary blocks of every approved artifact, plus (when slice is given) the slice record, its components, and overlap with other slices. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slice: stringProp("SLICE-ID to frame the pack for (e.g. SLICE-3). Adds slice record and component-overlap awareness.")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runContextPack(paths, { slice: optString(args, "slice") })
   }
 ];
 function listTools() {
