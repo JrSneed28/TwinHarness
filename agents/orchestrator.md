@@ -187,22 +187,20 @@ to identify registered downstream artifacts when an upstream artifact changes (�
   After the human answers those questions and the Critic passes, register the artifact and advance
   state.
 
-## Model & effort routing (automatic)
+## Model & effort routing (mechanical)
 
-The Orchestrator selects the model for each agent spawn. The frontmatter `model:` value is the
-default; escalate to opus when the situation matches an escalation row below. Pass a model
-override in the delegation prompt when escalating; otherwise the frontmatter default applies.
+The routing table is CODE, not prose (spec §2). Before each agent spawn, ask the CLI for the
+recommended model and effort, then pass them into the delegation prompt:
 
-| Situation | Model |
-|---|---|
-| Default (all agents) | frontmatter default (sonnet; opus for orchestrator & vertical-slice) |
-| Spec in `architecture`, `security`, `failure-modes`, or `technical-design` mode on a T3 or blast-radius project | opus |
-| Critic in `slice` or `code-review` mode on a blast-radius project | opus |
-| Builder on a slice touching a blast-radius component | opus |
-| Trivial mechanical summarization (e.g. drift-log recap) | haiku |
+```
+th route --agent <agent> --mode <stage/mode> [--component-blast] --json
+```
 
-**Rationale:** effort scales with tier and blast radius, like every other TwinHarness control.
-Cheap by default, expensive where wrong answers are expensive.
+It returns `{model, effort, rationale}` computed from the agent, its mode, the tier, and the
+blast-radius flags (sourced from state). It is **advisory** — it computes; you apply the override at
+spawn (the §3 boundary, exactly like `th tier classify`). If `th route` is unavailable, fall back to
+the frontmatter `model:` default. Rationale: effort scales with tier and blast radius — cheap by
+default, expensive where wrong answers are expensive.
 
 ---
 

@@ -149,6 +149,78 @@ export function runHookStopGate(
   return { stdout: JSON.stringify({}), exitCode: 0 };
 }
 
+/**
+ * The subset of the Claude Code SubagentStop-hook stdin payload the gate cares
+ * about. `stop_hook_active` is true when a subagent is ALREADY continuing because
+ * a SubagentStop hook blocked — the documented signal for preventing infinite
+ * stop loops (mirrors the Stop hook's `stop_hook_active`).
+ */
+export interface SubagentStopHookInput {
+  stop_hook_active?: boolean;
+}
+
+/**
+ * `th hook subagent-stop` — emit a Claude Code SubagentStop-hook decision on
+ * stdout when a delegated subagent (Spec, Critic, Builder, …) finishes a turn.
+ *
+ * Scope: this is a narrow STATE-VALIDITY guard, not the full completion gate.
+ * A subagent stopping is not the run claiming "done" (that is the top-level Stop
+ * hook's job via `evaluateStopGate`/the final-verification checks). What this
+ * hook catches is the one mechanically-decidable failure that matters at every
+ * subagent boundary: a `state.json` that exists but no longer validates against
+ * the schema. If a subagent corrupted state, every downstream delegation would
+ * silently operate on garbage — so we block here and force a repair.
+ *
+ * Decision ladder (fail-open by design):
+ * - No state.json → ALLOW ({}). Non-TwinHarness projects (and Tier-0 bypass runs
+ *   that never scaffold state) must be completely unaffected.
+ * - state.json present-but-invalid → BLOCK with a repair instruction, UNLESS
+ *   `stop_hook_active` is already true (then downgrade to a `systemMessage` so a
+ *   wedged subagent is not spun forever — a human must repair state).
+ * - Otherwise (valid state) → ALLOW.
+ *
+ * Always exits 0 (the JSON on stdout carries the decision). Reuses `readState`
+ * so the present-but-invalid detection is identical to the Stop-gate's.
+ */
+export function runHookSubagentStop(
+  paths: ProjectPaths,
+  input?: SubagentStopHookInput,
+): { stdout: string; exitCode: number } {
+  const r = readState(paths);
+
+  // No state.json → not a TwinHarness run (or a Tier-0 bypass) → allow.
+  if (!r.exists) {
+    return { stdout: JSON.stringify({}), exitCode: 0 };
+  }
+
+  // Present-but-invalid state → block (or downgrade if already looping).
+  if (!r.state) {
+    const reasons = [
+      "state.json is present but does NOT validate against the schema; repair it before this subagent's work is accepted.",
+      ...(r.issues ?? []).map((i) => `${i.path}: ${i.message}`),
+    ];
+    const reason = "TwinHarness subagent-stop gate blocked: " + reasons.join(" ");
+    if (input?.stop_hook_active === true) {
+      return {
+        stdout: JSON.stringify({
+          systemMessage:
+            "TwinHarness subagent-stop gate is STILL blocked, but allowed the stop to avoid an infinite loop. " +
+            "A human must repair state.json. " +
+            reason,
+        }),
+        exitCode: 0,
+      };
+    }
+    return {
+      stdout: JSON.stringify({ decision: "block", reason }),
+      exitCode: 0,
+    };
+  }
+
+  // Valid state → allow.
+  return { stdout: JSON.stringify({}), exitCode: 0 };
+}
+
 // ---------------------------------------------------------------------------
 // PreToolUse write-gate (design doc spec/write-gate-design.md)
 // ---------------------------------------------------------------------------

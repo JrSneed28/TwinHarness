@@ -17,7 +17,14 @@ import { runAnchorsScan } from "./commands/anchors";
 import { runDriftAdd, runDriftList, runDriftResolve } from "./commands/drift";
 import { runTraceRender } from "./commands/trace";
 import { runStale } from "./commands/stale";
-import { runHookStopGate, runHookPretoolGate, type StopHookInput, type PreToolHookInput } from "./commands/hook";
+import {
+  runHookStopGate,
+  runHookPretoolGate,
+  runHookSubagentStop,
+  type StopHookInput,
+  type PreToolHookInput,
+  type SubagentStopHookInput,
+} from "./commands/hook";
 import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
 import { runMigrate } from "./commands/migrate";
 import { runDoctor } from "./commands/doctor";
@@ -72,6 +79,7 @@ Usage:
   th drift resolve <DRIFT-NNN>      Append a resolution note; decrement blocking counter only for requirement-layer entries
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
   th hook pretool-gate              Emit a Claude Code PreToolUse write-gate decision
+  th hook subagent-stop             Emit a Claude Code SubagentStop-hook decision (state-validity guard)
   th migrate                        Upgrade state.json to the current schema version
   th doctor                         Self-diagnostic + run-health audit (env, state, artifacts, coverage, slices, revise loops)
   th next                           The next mechanical obligation the run owes (next-action oracle)
@@ -620,6 +628,12 @@ function main(): void {
         cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : parsed.flags.cwd;
       const paths = resolveProjectPaths(effectiveCwd);
       const out = runHookPretoolGate(paths, stdinPayload);
+      process.stdout.write(out.stdout + "\n");
+      process.exit(out.exitCode);
+    }
+    if (parsed.positionals[1] === "subagent-stop") {
+      const paths = resolveProjectPaths(parsed.flags.cwd);
+      const out = runHookSubagentStop(paths, readHookStdin<SubagentStopHookInput>());
       process.stdout.write(out.stdout + "\n");
       process.exit(out.exitCode);
     }

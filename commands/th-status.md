@@ -1,10 +1,16 @@
 ---
 description: Show the current TwinHarness state — tier, stage, gates, slices, and open drift.
+argument-hint: (no arguments)
+allowed-tools: Bash(node:*)
 ---
 
 Render the current TwinHarness state for this project.
 
-Run (the `th` CLI ships inside this plugin):
+Live state (captured before this prompt runs):
+
+!`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" state status`
+
+If you need to refresh or re-run it (the `th` CLI ships inside this plugin):
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" state status
