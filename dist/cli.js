@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.parseArgs = parseArgs;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const paths_1 = require("./core/paths");
@@ -152,196 +153,116 @@ Global flags:
   --remove-missing  (slices sync) Remove slices absent from the plan
   --force           (init) Reset existing state.json
   --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)`;
+/** Boolean flags (presence = true). */
+const BOOLEAN_FLAGS = {
+    "--json": "json",
+    "--force": "force",
+    "--include-done": "includeDone",
+    "--scan-reqs": "scanReqs",
+    "--scan-tests": "scanTests",
+    "--scan-code": "scanCode",
+    "--strict": "strict",
+    "--dry-run": "dryRun",
+    "--remove-missing": "removeMissing",
+    "--brownfield": "brownfield",
+};
+/** Flags that consume a string value (`--flag v` or `--flag=v`). */
+const STRING_FLAGS = {
+    "--cwd": "cwd",
+    "--reqs": "reqs",
+    "--plan": "plan",
+    "--tests": "tests",
+    "--scope": "scope",
+    "--code": "code",
+    "--tier": "tier",
+    "--slice": "slice",
+    "--req": "req",
+    "--symptom": "symptom",
+    "--evidence": "evidence",
+    "--root-cause": "rootCause",
+    "--status": "status",
+    "--since": "since",
+    "--artifact": "artifact",
+    "--layer": "layer",
+    "--ref": "ref",
+    "--discovery": "discovery",
+    "--action": "action",
+    "--escalation": "escalation",
+    "--source": "source",
+};
+/** Flags that consume a numeric value. */
+const NUMBER_FLAGS = {
+    "--cap": "cap",
+    "--version": "version",
+};
+/**
+ * Table-driven flag parser. Unknown `--flags` and value-less flags are recorded
+ * (rather than silently swallowed as positionals / coerced to NaN — the old
+ * behavior); `main()` rejects them with a clear error. A bare `--` ends flag
+ * parsing so a positional value may legitimately begin with `--`.
+ */
 function parseArgs(argv) {
+    const flags = {
+        json: false,
+        force: false,
+        cwd: process.cwd(),
+        includeDone: false,
+        scanReqs: false,
+        scanTests: false,
+        scanCode: false,
+        strict: false,
+        dryRun: false,
+        removeMissing: false,
+        brownfield: false,
+    };
     const positionals = [];
-    let json = false;
-    let force = false;
-    let cwd = process.cwd();
-    let cap;
-    let version;
-    let reqs;
-    let plan;
-    let tests;
-    let scope;
-    let code;
-    let tier;
-    let slice;
-    let req;
-    let symptom;
-    let evidence;
-    let rootCause;
-    let status;
-    let includeDone = false;
-    let scanReqs = false;
-    let scanTests = false;
-    let scanCode = false;
-    let strict = false;
-    let since;
-    let artifact;
-    let layer;
-    let ref;
-    let discovery;
-    let action;
-    let escalation;
-    let source;
-    let dryRun = false;
-    let removeMissing = false;
-    let brownfield = false;
+    const unknownFlags = [];
+    const errors = [];
+    const assign = (field, value) => {
+        flags[field] = value;
+    };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
-        if (a === "--json")
-            json = true;
-        else if (a === "--force")
-            force = true;
-        else if (a === "--cwd")
-            cwd = argv[++i] ?? process.cwd();
-        else if (a.startsWith("--cwd="))
-            cwd = a.slice("--cwd=".length);
-        else if (a === "--cap")
-            cap = Number(argv[++i]);
-        else if (a.startsWith("--cap="))
-            cap = Number(a.slice("--cap=".length));
-        else if (a === "--version")
-            version = Number(argv[++i]);
-        else if (a.startsWith("--version="))
-            version = Number(a.slice("--version=".length));
-        else if (a === "--reqs")
-            reqs = argv[++i];
-        else if (a.startsWith("--reqs="))
-            reqs = a.slice("--reqs=".length);
-        else if (a === "--plan")
-            plan = argv[++i];
-        else if (a.startsWith("--plan="))
-            plan = a.slice("--plan=".length);
-        else if (a === "--tests")
-            tests = argv[++i];
-        else if (a.startsWith("--tests="))
-            tests = a.slice("--tests=".length);
-        else if (a === "--scope")
-            scope = argv[++i];
-        else if (a.startsWith("--scope="))
-            scope = a.slice("--scope=".length);
-        else if (a === "--code")
-            code = argv[++i];
-        else if (a.startsWith("--code="))
-            code = a.slice("--code=".length);
-        else if (a === "--tier")
-            tier = argv[++i];
-        else if (a.startsWith("--tier="))
-            tier = a.slice("--tier=".length);
-        else if (a === "--slice")
-            slice = argv[++i];
-        else if (a.startsWith("--slice="))
-            slice = a.slice("--slice=".length);
-        else if (a === "--req")
-            req = argv[++i];
-        else if (a.startsWith("--req="))
-            req = a.slice("--req=".length);
-        else if (a === "--symptom")
-            symptom = argv[++i];
-        else if (a.startsWith("--symptom="))
-            symptom = a.slice("--symptom=".length);
-        else if (a === "--evidence")
-            evidence = argv[++i];
-        else if (a.startsWith("--evidence="))
-            evidence = a.slice("--evidence=".length);
-        else if (a === "--root-cause")
-            rootCause = argv[++i];
-        else if (a.startsWith("--root-cause="))
-            rootCause = a.slice("--root-cause=".length);
-        else if (a === "--status")
-            status = argv[++i];
-        else if (a.startsWith("--status="))
-            status = a.slice("--status=".length);
-        else if (a === "--include-done")
-            includeDone = true;
-        else if (a === "--scan-reqs")
-            scanReqs = true;
-        else if (a === "--scan-tests")
-            scanTests = true;
-        else if (a === "--scan-code")
-            scanCode = true;
-        else if (a === "--strict")
-            strict = true;
-        else if (a === "--since")
-            since = argv[++i];
-        else if (a.startsWith("--since="))
-            since = a.slice("--since=".length);
-        else if (a === "--artifact")
-            artifact = argv[++i];
-        else if (a.startsWith("--artifact="))
-            artifact = a.slice("--artifact=".length);
-        else if (a === "--layer")
-            layer = argv[++i];
-        else if (a.startsWith("--layer="))
-            layer = a.slice("--layer=".length);
-        else if (a === "--ref")
-            ref = argv[++i];
-        else if (a.startsWith("--ref="))
-            ref = a.slice("--ref=".length);
-        else if (a === "--discovery")
-            discovery = argv[++i];
-        else if (a.startsWith("--discovery="))
-            discovery = a.slice("--discovery=".length);
-        else if (a === "--action")
-            action = argv[++i];
-        else if (a.startsWith("--action="))
-            action = a.slice("--action=".length);
-        else if (a === "--escalation")
-            escalation = argv[++i];
-        else if (a.startsWith("--escalation="))
-            escalation = a.slice("--escalation=".length);
-        else if (a === "--source")
-            source = argv[++i];
-        else if (a.startsWith("--source="))
-            source = a.slice("--source=".length);
-        else if (a === "--dry-run")
-            dryRun = true;
-        else if (a === "--remove-missing")
-            removeMissing = true;
-        else if (a === "--brownfield")
-            brownfield = true;
-        else
+        if (a === "--") {
+            for (let j = i + 1; j < argv.length; j++)
+                positionals.push(argv[j]);
+            break;
+        }
+        if (!a.startsWith("--")) {
             positionals.push(a);
+            continue;
+        }
+        const eq = a.indexOf("=");
+        const name = eq >= 0 ? a.slice(0, eq) : a;
+        const inlineVal = eq >= 0 ? a.slice(eq + 1) : undefined;
+        if (name in BOOLEAN_FLAGS) {
+            assign(BOOLEAN_FLAGS[name], true);
+        }
+        else if (name in STRING_FLAGS) {
+            const val = inlineVal ?? argv[++i];
+            if (val === undefined)
+                errors.push(`flag ${name} requires a value`);
+            else
+                assign(STRING_FLAGS[name], val);
+        }
+        else if (name in NUMBER_FLAGS) {
+            const val = inlineVal ?? argv[++i];
+            if (val === undefined) {
+                errors.push(`flag ${name} requires a value`);
+            }
+            else {
+                const n = Number(val);
+                if (!Number.isFinite(n))
+                    errors.push(`flag ${name} requires a number (got "${val}")`);
+                else
+                    assign(NUMBER_FLAGS[name], n);
+            }
+        }
+        else {
+            unknownFlags.push(name);
+        }
     }
-    return {
-        positionals,
-        flags: {
-            json,
-            force,
-            cwd,
-            cap,
-            version,
-            reqs,
-            plan,
-            tests,
-            scope,
-            code,
-            tier,
-            slice,
-            req,
-            symptom,
-            evidence,
-            rootCause,
-            status,
-            includeDone,
-            scanReqs,
-            scanTests,
-            scanCode,
-            strict,
-            since,
-            artifact,
-            layer,
-            ref,
-            discovery,
-            action,
-            escalation,
-            source,
-            dryRun,
-            removeMissing,
-            brownfield,
-        },
-    };
+    return { positionals, unknownFlags, errors, flags };
 }
 /**
  * Read the CLI version from package.json. Tries `__dirname/../package.json`
@@ -640,6 +561,18 @@ function readHookStdin() {
 }
 function main() {
     const parsed = parseArgs(process.argv.slice(2));
+    // Reject unknown flags / value-less flags up front (a typo'd flag must not be
+    // silently swallowed as a positional, the old behavior).
+    if (parsed.unknownFlags.length > 0 || parsed.errors.length > 0) {
+        const human = [...parsed.unknownFlags.map((f) => `unknown flag: ${f}`), ...parsed.errors].join("\n") +
+            "\n\nRun `th help` for usage.";
+        const result = (0, output_1.failure)({
+            human,
+            data: { error: "bad_args", unknownFlags: parsed.unknownFlags, errors: parsed.errors },
+        });
+        process.stdout.write((0, output_1.renderResult)(result, parsed.flags.json) + "\n");
+        process.exit(result.exitCode);
+    }
     // Hook commands speak the Claude Code hook protocol on stdout (not --json).
     if (parsed.positionals[0] === "hook") {
         if (parsed.positionals[1] === "stop-gate") {
@@ -663,4 +596,5 @@ function main() {
     process.stdout.write((0, output_1.renderResult)(result, parsed.flags.json) + "\n");
     process.exit(result.exitCode);
 }
-main();
+if (require.main === module)
+    main();

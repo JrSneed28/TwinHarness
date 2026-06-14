@@ -42,6 +42,7 @@ const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const state_schema_1 = require("../core/state-schema");
 const leases_1 = require("../core/leases");
+const guards_1 = require("../core/guards");
 const log_1 = require("../core/log");
 /** Extract backtick-quoted tokens or comma-separated bare words from a component line/cell. */
 function parseComponentTokens(raw) {
@@ -116,13 +117,6 @@ function parsePlanSlices(planContent) {
     }
     return slices;
 }
-function formatIssues(issues) {
-    return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
-const NOT_INIT = (0, output_1.failure)({
-    human: "No state.json found. Run `th init` first.",
-    data: { error: "not_initialized" },
-});
 /**
  * `th slices sync [--plan <file>] [--dry-run] [--remove-missing]`
  *
@@ -146,10 +140,10 @@ function runSlicesSyncLocked(paths, opts = {}) {
     const planSlices = parsePlanSlices(planContent);
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state) {
         return (0, output_1.failure)({
-            human: `state.json is invalid:\n${formatIssues(r.issues)}`,
+            human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`,
             data: { error: "invalid_state", issues: r.issues },
         });
     }
@@ -187,7 +181,7 @@ function runSlicesSyncLocked(paths, opts = {}) {
     const validation = (0, state_schema_1.validateState)(nextState);
     if (!validation.ok) {
         return (0, output_1.failure)({
-            human: `Refusing to write: result would be invalid:\n${formatIssues(validation.issues)}`,
+            human: `Refusing to write: result would be invalid:\n${(0, guards_1.formatIssues)(validation.issues)}`,
             data: { error: "would_be_invalid", issues: validation.issues },
         });
     }
@@ -233,10 +227,10 @@ function runSliceSetStatusLocked(paths, sliceId, status) {
     }
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state) {
         return (0, output_1.failure)({
-            human: `state.json is invalid; fix it before updating slice status:\n${formatIssues(r.issues)}`,
+            human: `state.json is invalid; fix it before updating slice status:\n${(0, guards_1.formatIssues)(r.issues)}`,
             data: { error: "invalid_state", issues: r.issues },
         });
     }
@@ -252,7 +246,7 @@ function runSliceSetStatusLocked(paths, sliceId, status) {
     const validation = (0, state_schema_1.validateState)(nextState);
     if (!validation.ok) {
         return (0, output_1.failure)({
-            human: `Refusing to write: result would be invalid:\n${formatIssues(validation.issues)}`,
+            human: `Refusing to write: result would be invalid:\n${(0, guards_1.formatIssues)(validation.issues)}`,
             data: { error: "would_be_invalid", issues: validation.issues },
         });
     }

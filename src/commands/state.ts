@@ -1,9 +1,10 @@
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState, writeState, withStateLock } from "../core/state-store";
-import { type ValidationIssue, validateState, STATE_FIELD_ORDER } from "../core/state-schema";
+import { validateState, STATE_FIELD_ORDER } from "../core/state-schema";
 import { structuredLog } from "../core/log";
 import { appendLedger, GATE_LEDGER_KEYS } from "../core/ledger";
+import { NOT_INIT, formatIssues } from "../core/guards";
 
 /** Key segments that must never be written through a dotted path (proto-pollution guard, S3). */
 const UNSAFE_KEY_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
@@ -15,10 +16,6 @@ const MANAGED_FIELDS: Record<string, string> = {
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function formatIssues(issues: ValidationIssue[] | undefined): string {
-  return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
 }
 
 function parseValue(raw: string): unknown {
@@ -58,11 +55,6 @@ function setByPath(obj: Record<string, unknown>, dotted: string, value: unknown)
   }
   cur[parts[parts.length - 1]!] = value;
 }
-
-const NOT_INIT = failure({
-  human: "No state.json found. Run `th init` first.",
-  data: { error: "not_initialized" },
-});
 
 /** `th state get [dotted.path]` */
 export function runStateGet(paths: ProjectPaths, dottedPath?: string): CommandResult {

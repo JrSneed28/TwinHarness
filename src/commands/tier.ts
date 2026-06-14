@@ -5,6 +5,7 @@ import { type CommandResult, success, failure } from "../core/output";
 import { type ValidationIssue } from "../core/state-schema";
 import { loadBriefFromFile, type TaskBrief } from "../core/brief";
 import { structuredLog } from "../core/log";
+import { formatIssues } from "../core/guards";
 
 /**
  * `th tier` — the Tier-0 classifier (spec §5).
@@ -23,10 +24,6 @@ import { structuredLog } from "../core/log";
 
 /** Exit code for a blast-radius veto (distinct from the generic failure 1). */
 export const VETO_EXIT_CODE = 3;
-
-function formatIssues(issues: ValidationIssue[] | undefined): string {
-  return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
 
 function briefLoadFailure(briefPath: string, issues: ValidationIssue[]): CommandResult {
   return failure({

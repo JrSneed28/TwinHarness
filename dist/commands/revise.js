@@ -8,6 +8,7 @@ const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const state_schema_1 = require("../core/state-schema");
 const log_1 = require("../core/log");
+const guards_1 = require("../core/guards");
 /**
  * `th revise` — the mechanical revise-loop cap (spec §18 "Loop termination").
  *
@@ -19,16 +20,9 @@ const log_1 = require("../core/log");
  */
 /** Default Agent↔Critic revise-loop cap (spec §18). */
 exports.DEFAULT_REVISE_CAP = 3;
-function formatIssues(issues) {
-    return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
-const NOT_INIT = (0, output_1.failure)({
-    human: "No state.json found. Run `th init` first.",
-    data: { error: "not_initialized" },
-});
 function invalidState(issues) {
     return (0, output_1.failure)({
-        human: `state.json is invalid:\n${formatIssues(issues)}`,
+        human: `state.json is invalid:\n${(0, guards_1.formatIssues)(issues)}`,
         data: { error: "invalid_state", issues },
     });
 }
@@ -43,7 +37,7 @@ function runReviseBump(paths, mode, cap = exports.DEFAULT_REVISE_CAP) {
 function runReviseBumpLocked(paths, mode, cap = exports.DEFAULT_REVISE_CAP) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state)
         return invalidState(r.issues);
     const current = r.state.revise_loop_counts[mode] ?? 0;
@@ -52,7 +46,7 @@ function runReviseBumpLocked(paths, mode, cap = exports.DEFAULT_REVISE_CAP) {
     const validation = (0, state_schema_1.validateState)(next);
     if (!validation.ok) {
         return (0, output_1.failure)({
-            human: `Refusing to write: result would be invalid:\n${formatIssues(validation.issues)}`,
+            human: `Refusing to write: result would be invalid:\n${(0, guards_1.formatIssues)(validation.issues)}`,
             data: { error: "would_be_invalid", issues: validation.issues },
         });
     }
@@ -71,7 +65,7 @@ function runReviseBumpLocked(paths, mode, cap = exports.DEFAULT_REVISE_CAP) {
 function runReviseStatus(paths, mode, cap = exports.DEFAULT_REVISE_CAP) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state)
         return invalidState(r.issues);
     const count = r.state.revise_loop_counts[mode] ?? 0;
@@ -91,14 +85,14 @@ function runReviseReset(paths, mode) {
 function runReviseResetLocked(paths, mode) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state)
         return invalidState(r.issues);
     const next = { ...r.state, revise_loop_counts: { ...r.state.revise_loop_counts, [mode]: 0 } };
     const validation = (0, state_schema_1.validateState)(next);
     if (!validation.ok) {
         return (0, output_1.failure)({
-            human: `Refusing to write: result would be invalid:\n${formatIssues(validation.issues)}`,
+            human: `Refusing to write: result would be invalid:\n${(0, guards_1.formatIssues)(validation.issues)}`,
             data: { error: "would_be_invalid", issues: validation.issues },
         });
     }

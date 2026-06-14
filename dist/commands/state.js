@@ -9,6 +9,7 @@ const state_store_1 = require("../core/state-store");
 const state_schema_1 = require("../core/state-schema");
 const log_1 = require("../core/log");
 const ledger_1 = require("../core/ledger");
+const guards_1 = require("../core/guards");
 /** Key segments that must never be written through a dotted path (proto-pollution guard, S3). */
 const UNSAFE_KEY_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
 /** Fields owned by a dedicated command; `state set` refuses them to keep the owning invariant. */
@@ -17,9 +18,6 @@ const MANAGED_FIELDS = {
 };
 function isRecord(v) {
     return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-function formatIssues(issues) {
-    return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
 }
 function parseValue(raw) {
     try {
@@ -62,17 +60,13 @@ function setByPath(obj, dotted, value) {
     }
     cur[parts[parts.length - 1]] = value;
 }
-const NOT_INIT = (0, output_1.failure)({
-    human: "No state.json found. Run `th init` first.",
-    data: { error: "not_initialized" },
-});
 /** `th state get [dotted.path]` */
 function runStateGet(paths, dottedPath) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state)
-        return (0, output_1.failure)({ human: `state.json is invalid:\n${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+        return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
     if (!dottedPath) {
         return (0, output_1.success)({ data: { state: r.state }, human: JSON.stringify(r.state, null, 2) });
     }
@@ -120,16 +114,16 @@ function runStateSetLocked(paths, key, rawValue) {
     }
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state)
-        return (0, output_1.failure)({ human: `Existing state.json is invalid; fix it before setting values:\n${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+        return (0, output_1.failure)({ human: `Existing state.json is invalid; fix it before setting values:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
     const value = parseValue(rawValue);
     const next = JSON.parse(JSON.stringify(r.state));
     setByPath(next, key, value);
     const validation = (0, state_schema_1.validateState)(next);
     if (!validation.ok) {
         return (0, output_1.failure)({
-            human: `Refusing to write: result would be invalid:\n${formatIssues(validation.issues)}`,
+            human: `Refusing to write: result would be invalid:\n${(0, guards_1.formatIssues)(validation.issues)}`,
             data: { error: "would_be_invalid", issues: validation.issues },
         });
     }
@@ -147,9 +141,9 @@ function runStateSetLocked(paths, key, rawValue) {
 function runStateStatus(paths) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state)
-        return (0, output_1.failure)({ human: `state.json is invalid:\n${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+        return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
     const s = r.state;
     const human = [
         `Tier:                ${s.tier ?? "(unclassified)"}`,
@@ -170,6 +164,6 @@ function runStateVerify(paths) {
     if (!r.exists)
         return (0, output_1.failure)({ human: "No state.json found.", data: { valid: false, error: "not_initialized" } });
     if (!r.state)
-        return (0, output_1.failure)({ human: `state.json INVALID:\n${formatIssues(r.issues)}`, data: { valid: false, issues: r.issues } });
+        return (0, output_1.failure)({ human: `state.json INVALID:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { valid: false, issues: r.issues } });
     return (0, output_1.success)({ data: { valid: true }, human: "state.json is valid." });
 }

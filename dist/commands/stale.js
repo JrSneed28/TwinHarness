@@ -41,6 +41,7 @@ const state_store_1 = require("../core/state-store");
 const hash_1 = require("../core/hash");
 const pipeline_1 = require("../core/pipeline");
 const log_1 = require("../core/log");
+const guards_1 = require("../core/guards");
 /**
  * `th stale --since <hash>` — diff-scoped cascade re-verification (spec §18).
  *
@@ -51,13 +52,6 @@ const log_1 = require("../core/log");
  * command only computes the diff-scoped downstream set so the Critic can re-run
  * "only against the diff" rather than the whole project (§18).
  */
-function formatIssues(issues) {
-    return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
-const NOT_INIT = (0, output_1.failure)({
-    human: "No state.json found. Run `th init` first.",
-    data: { error: "not_initialized" },
-});
 /**
  * Normalize a path to a root-relative forward-slash key, matching the shape
  * stored in artifact.file (same as artifact.ts toRelKey).
@@ -92,10 +86,10 @@ function runStale(paths, sinceHash, artifactFile) {
     }
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state) {
         return (0, output_1.failure)({
-            human: `state.json is invalid:\n${formatIssues(r.issues)}`,
+            human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`,
             data: { error: "invalid_state", issues: r.issues },
         });
     }

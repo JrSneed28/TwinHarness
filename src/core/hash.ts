@@ -24,15 +24,50 @@ export function shortHash(content: string): string {
 const HASH_SKIP_DIRS = new Set([".git", "node_modules", "dist"]);
 
 /**
+ * Guardrails so a misdirected `th artifact register <huge-dir>` (e.g. a path that
+ * sidesteps the skip-list, or a vendored tree) fails fast with a clear message
+ * instead of walking millions of files / reading gigabytes into memory and
+ * hanging the CLI. An *artifact* is a governed document set, never a build/vendor
+ * tree, so these ceilings are far above any legitimate artifact directory.
+ */
+export const MAX_HASH_FILES = 5_000;
+export const MAX_HASH_TOTAL_BYTES = 50 * 1024 * 1024; // 50 MB
+export const MAX_HASH_FILE_BYTES = 10 * 1024 * 1024; // 10 MB per file
+
+export interface HashLimits {
+  maxFiles: number;
+  maxTotalBytes: number;
+  maxFileBytes: number;
+}
+
+/** Default guardrails; injectable so the caps are testable without huge fixtures. */
+export const DEFAULT_HASH_LIMITS: HashLimits = {
+  maxFiles: MAX_HASH_FILES,
+  maxTotalBytes: MAX_HASH_TOTAL_BYTES,
+  maxFileBytes: MAX_HASH_FILE_BYTES,
+};
+
+/** Thrown by {@link hashDir} when a directory exceeds a hashing guardrail. */
+export class HashLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HashLimitError";
+  }
+}
+
+/**
  * Deterministic hash of a DIRECTORY's contents (the ADR artifact `docs/05-adrs/`
  * is a directory of `ADR-NNN-*.md` files — spec §15.S; stage contract
  * `produces: docs/05-adrs/`). Walks every file, builds a manifest of
  * `relpath\0filehash` lines, sorts it (order-independent), and hashes the join.
  * Clock-free and order-stable: the same tree always yields the same digest,
- * regardless of readdir order or platform.
+ * regardless of readdir order or platform. Bounded by the MAX_HASH_* guardrails
+ * (throws {@link HashLimitError} on exceed).
  */
-export function hashDir(absDir: string): string {
+export function hashDir(absDir: string, limits: HashLimits = DEFAULT_HASH_LIMITS): string {
   const entries: string[] = [];
+  let fileCount = 0;
+  let totalBytes = 0;
   const walk = (abs: string): void => {
     for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
       if (e.isDirectory()) {
@@ -40,7 +75,24 @@ export function hashDir(absDir: string): string {
         walk(path.join(abs, e.name));
       } else if (e.isFile()) {
         const p = path.join(abs, e.name);
+        if (++fileCount > limits.maxFiles) {
+          throw new HashLimitError(
+            `directory has more than ${limits.maxFiles} files — too large to hash as one artifact; register a narrower path`,
+          );
+        }
         const rel = path.relative(absDir, p).split(path.sep).join("/");
+        const size = fs.statSync(p).size;
+        if (size > limits.maxFileBytes) {
+          throw new HashLimitError(
+            `file "${rel}" exceeds ${limits.maxFileBytes} bytes — artifacts are governed documents, not binaries; register a narrower path`,
+          );
+        }
+        totalBytes += size;
+        if (totalBytes > limits.maxTotalBytes) {
+          throw new HashLimitError(
+            `directory exceeds ${limits.maxTotalBytes} bytes total — too large to hash as one artifact; register a narrower path`,
+          );
+        }
         entries.push(`${rel}\0${hashContent(fs.readFileSync(p, "utf8"))}`);
       }
     }

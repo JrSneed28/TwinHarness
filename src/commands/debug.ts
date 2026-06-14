@@ -13,6 +13,7 @@ import {
 } from "../core/debug-log";
 import { readVerifyReport } from "../core/verify";
 import { structuredLog } from "../core/log";
+import { NOT_INIT } from "../core/guards";
 
 /**
  * `th debug` — mechanical support for the Debugger agent (evidence-first
@@ -26,8 +27,6 @@ import { structuredLog } from "../core/log";
 function debugLogPath(paths: ProjectPaths): string {
   return path.join(paths.root, "debug-log.md");
 }
-
-const NOT_INIT = failure({ human: "No state.json found. Run `th init` first.", data: { error: "not_initialized" } });
 
 export interface DebugPackOptions {
   slice?: string;

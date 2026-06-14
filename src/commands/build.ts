@@ -1,11 +1,12 @@
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState, withStateLock } from "../core/state-store";
-import { type SliceState, type ValidationIssue } from "../core/state-schema";
+import { type SliceState } from "../core/state-schema";
 import { scheduleWaves, conflictPairs } from "../core/schedule";
 import { activeLeases, liveLeases, staleLeases, occupiedComponents, appendLeaseEvent } from "../core/leases";
 import { computeWave, validateDeps, hasDepIssues } from "../core/wave";
 import { structuredLog } from "../core/log";
+import { NOT_INIT, formatIssues } from "../core/guards";
 
 /**
  * `th build plan` — the mechanical parallel-build serializer (spec §16; build
@@ -15,15 +16,6 @@ import { structuredLog } from "../core/log";
  * conflicts / drift races). Pure traceability arithmetic over `state.slices` —
  * it never decides *whether* a Builder runs, only the conflict-free ordering.
  */
-
-function formatIssues(issues: ValidationIssue[] | undefined): string {
-  return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
-
-const NOT_INIT = failure({
-  human: "No state.json found. Run `th init` first.",
-  data: { error: "not_initialized" },
-});
 
 export interface BuildPlanOptions {
   /** Include slices with status `done` (default: only schedule unfinished slices). */

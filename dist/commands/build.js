@@ -11,21 +11,7 @@ const schedule_1 = require("../core/schedule");
 const leases_1 = require("../core/leases");
 const wave_1 = require("../core/wave");
 const log_1 = require("../core/log");
-/**
- * `th build plan` — the mechanical parallel-build serializer (spec §16; build
- * plan §4 Slice 7 (b)). It computes a deterministic wave schedule over the
- * slices: disjoint-component slices share a wave (Builders may run concurrently),
- * shared-component slices are split across waves (serialized to avoid merge
- * conflicts / drift races). Pure traceability arithmetic over `state.slices` —
- * it never decides *whether* a Builder runs, only the conflict-free ordering.
- */
-function formatIssues(issues) {
-    return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
-const NOT_INIT = (0, output_1.failure)({
-    human: "No state.json found. Run `th init` first.",
-    data: { error: "not_initialized" },
-});
+const guards_1 = require("../core/guards");
 /**
  * `th build plan [--include-done]` — schedule the slices into conflict-free
  * build waves. By default only unfinished slices (pending/in-progress/blocked)
@@ -34,10 +20,10 @@ const NOT_INIT = (0, output_1.failure)({
 function runBuildPlan(paths, opts = {}) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state) {
         return (0, output_1.failure)({
-            human: `state.json is invalid:\n${formatIssues(r.issues)}`,
+            human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`,
             data: { error: "invalid_state", issues: r.issues },
         });
     }
@@ -84,9 +70,9 @@ function runBuildPlan(paths, opts = {}) {
 function runBuildNextWave(paths) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state) {
-        return (0, output_1.failure)({ human: `state.json is invalid:\n${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+        return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
     }
     const slices = r.state.slices;
     const anyInProgress = slices.some((s) => s.status === "in-progress");
@@ -127,9 +113,9 @@ function runBuildClaim(paths, sliceId) {
     return (0, state_store_1.withStateLock)(paths, () => {
         const r = (0, state_store_1.readState)(paths);
         if (!r.exists)
-            return NOT_INIT;
+            return guards_1.NOT_INIT;
         if (!r.state)
-            return (0, output_1.failure)({ human: `state.json is invalid:\n${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+            return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
         const slice = r.state.slices.find((s) => s.id === sliceId);
         if (!slice) {
             return (0, output_1.failure)({ human: `Slice not found: ${sliceId}. Known: ${r.state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", sliceId } });
@@ -163,9 +149,9 @@ function runBuildRelease(paths, sliceId) {
     return (0, state_store_1.withStateLock)(paths, () => {
         const r = (0, state_store_1.readState)(paths);
         if (!r.exists)
-            return NOT_INIT;
+            return guards_1.NOT_INIT;
         if (!r.state)
-            return (0, output_1.failure)({ human: `state.json is invalid:\n${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+            return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
         const held = (0, leases_1.activeLeases)(paths).find((l) => l.slice === sliceId);
         (0, leases_1.appendLeaseEvent)(paths, { event: "release", slice: sliceId, components: held?.components ?? [] });
         (0, log_1.structuredLog)({ cmd: "build release", slice: sliceId });
@@ -181,7 +167,7 @@ function runBuildRelease(paths, sliceId) {
 function runBuildLeases(paths) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     // Without valid state we cannot reconcile; fall back to the raw active set.
     if (!r.state) {
         const leases = (0, leases_1.activeLeases)(paths);

@@ -3,13 +3,9 @@ import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState, writeState, withStateLock } from "../core/state-store";
-import {
-  type SliceState,
-  type ValidationIssue,
-  SLICE_STATUSES,
-  validateState,
-} from "../core/state-schema";
+import { type SliceState, SLICE_STATUSES, validateState } from "../core/state-schema";
 import { activeLeases, appendLeaseEvent } from "../core/leases";
+import { NOT_INIT, formatIssues } from "../core/guards";
 import { structuredLog } from "../core/log";
 
 /**
@@ -116,15 +112,6 @@ export function parsePlanSlices(planContent: string): PlanSlice[] {
 
   return slices;
 }
-
-function formatIssues(issues: ValidationIssue[] | undefined): string {
-  return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
-
-const NOT_INIT = failure({
-  human: "No state.json found. Run `th init` first.",
-  data: { error: "not_initialized" },
-});
 
 /**
  * `th slices sync [--plan <file>] [--dry-run] [--remove-missing]`

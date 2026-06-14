@@ -42,6 +42,7 @@ const state_store_1 = require("../core/state-store");
 const drift_log_1 = require("../core/drift-log");
 const log_1 = require("../core/log");
 const ledger_1 = require("../core/ledger");
+const guards_1 = require("../core/guards");
 /**
  * `th drift` — append-only access to the bidirectional drift log (spec §10).
  * Mechanical only (plan §3 boundary rule): the CLI records discoveries and tracks
@@ -70,13 +71,6 @@ Action    : ...
 Escalation: ...
 \`\`\`
 `;
-function formatIssues(issues) {
-    return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
-const NOT_INIT = (0, output_1.failure)({
-    human: "No state.json found. Run `th init` first.",
-    data: { error: "not_initialized" },
-});
 /** Read drift-log.md, creating it from the header if absent. */
 function readDriftLog(paths) {
     if (!fs.existsSync(paths.driftLog)) {
@@ -111,10 +105,10 @@ function runDriftAddLocked(paths, opts) {
     }
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state) {
         return (0, output_1.failure)({
-            human: `Existing state.json is invalid; fix it before logging drift:\n${formatIssues(r.issues)}`,
+            human: `Existing state.json is invalid; fix it before logging drift:\n${(0, guards_1.formatIssues)(r.issues)}`,
             data: { error: "invalid_state", issues: r.issues },
         });
     }
@@ -151,10 +145,10 @@ function runDriftAddLocked(paths, opts) {
 function runDriftList(paths) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state) {
         return (0, output_1.failure)({
-            human: `state.json is invalid:\n${formatIssues(r.issues)}`,
+            human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`,
             data: { error: "invalid_state", issues: r.issues },
         });
     }
@@ -184,10 +178,10 @@ function runDriftResolveLocked(paths, id) {
         return (0, output_1.failure)({ human: "usage: th drift resolve <DRIFT-NNN>" });
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state) {
         return (0, output_1.failure)({
-            human: `Existing state.json is invalid; fix it before resolving drift:\n${formatIssues(r.issues)}`,
+            human: `Existing state.json is invalid; fix it before resolving drift:\n${(0, guards_1.formatIssues)(r.issues)}`,
             data: { error: "invalid_state", issues: r.issues },
         });
     }

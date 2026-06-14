@@ -6,7 +6,12 @@ on:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    name: ci (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -28,8 +33,19 @@ jobs:
       - name: Build
         run: npm run build
 
+      # dist/ is the committed, shipped artifact; assert the build matches it.
+      # Linux only — it is the canonical build OS, and cross-OS line-ending
+      # normalization would make a byte-exact diff flaky elsewhere.
       - name: Assert dist/ is in sync with build
+        if: matrix.os == 'ubuntu-latest'
         run: git diff --exit-code dist/
 
       - name: Test
         run: npm test
+
+      # The shipped plugin has zero runtime dependencies; assert the production
+      # tree carries no known-vulnerable packages. Dev-only advisories are not
+      # shipped and are reviewed separately.
+      - name: Audit production dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: npm audit --omit=dev

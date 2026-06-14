@@ -42,6 +42,7 @@ const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const hash_1 = require("../core/hash");
 const log_1 = require("../core/log");
+const guards_1 = require("../core/guards");
 /**
  * `th artifact` — content-hash and record an approved, versioned artifact
  * (spec §12: "each artifact is versioned with a content hash referenced by
@@ -51,13 +52,6 @@ const log_1 = require("../core/log");
  * content hash and records the version it is told. It never decides *whether* an
  * artifact is approved — the caller supplies the version when it approves.
  */
-function formatIssues(issues) {
-    return (issues ?? []).map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-}
-const NOT_INIT = (0, output_1.failure)({
-    human: "No state.json found. Run `th init` first.",
-    data: { error: "not_initialized" },
-});
 /** Normalize a root-relative path to forward slashes for cross-platform stable storage. */
 function toRelKey(root, file) {
     const abs = path.resolve(root, file);
@@ -93,14 +87,26 @@ function runArtifactRegisterLocked(paths, file, version) {
     }
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state) {
         return (0, output_1.failure)({
-            human: `Existing state.json is invalid; fix it before registering:\n${formatIssues(r.issues)}`,
+            human: `Existing state.json is invalid; fix it before registering:\n${(0, guards_1.formatIssues)(r.issues)}`,
             data: { error: "invalid_state", issues: r.issues },
         });
     }
-    const hash = (0, hash_1.shortHashPath)(abs);
+    let hash;
+    try {
+        hash = (0, hash_1.shortHashPath)(abs);
+    }
+    catch (e) {
+        if (e instanceof hash_1.HashLimitError) {
+            return (0, output_1.failure)({
+                human: `Cannot register ${file}: ${e.message}`,
+                data: { error: "artifact_too_large", file },
+            });
+        }
+        throw e;
+    }
     const relKey = toRelKey(paths.root, file);
     const entry = { file: relKey, version, hash };
     const next = { ...r.state, approved_artifacts: [...r.state.approved_artifacts] };
@@ -120,10 +126,10 @@ function runArtifactRegisterLocked(paths, file, version) {
 function runArtifactList(paths) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
-        return NOT_INIT;
+        return guards_1.NOT_INIT;
     if (!r.state) {
         return (0, output_1.failure)({
-            human: `state.json is invalid:\n${formatIssues(r.issues)}`,
+            human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`,
             data: { error: "invalid_state", issues: r.issues },
         });
     }
