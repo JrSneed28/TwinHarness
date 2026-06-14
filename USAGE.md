@@ -491,7 +491,10 @@ raw plan file — always run `th slices sync` first.
 th build next-wave               Slices dispatchable in parallel right now (live)
 th build claim <SLICE-ID>        Take a live component lease (refuses an overlapping claim)
 th build release <SLICE-ID>      Release the slice's lease
-th build leases                  List active component leases
+th build sub-claim <PARENT-SLICE> --components <c1,c2,...>
+                                 Open a SUB-lease under an in-progress parent (for a scoped sub-Builder)
+th build sub-release <SUB-ID>    Release a sub-lease
+th build leases                  List active component leases (and sub-leases)
 ```
 
 `th build plan` schedules from the *static* plan; these commands coordinate the *live* build. The
@@ -518,7 +521,47 @@ validates the graph). Break the cycle / fix the reference in the plan and re-syn
 
 Slices may declare `depends_on` (parsed by `th slices sync` from a `Depends on: SLICE-1, SLICE-2`
 line) so a feature slice waits for the walking skeleton even when their components are disjoint. One
-coordinator (the Orchestrator) drives N Builders — there is no second controller to collide with.
+**top-level** coordinator (the Orchestrator) drives N Builders — only it calls `th build next-wave`
+and the top-level `th build claim` — so there is no second top-level controller to collide with.
+
+### Sub-leases & nested sub-agents (scoped, bounded)
+
+A Builder or Debugger holds the `Agent` tool and may, within a tight charter, spawn a nested
+sub-agent. There are exactly two allowed kinds of child: a **read-only advisory agent** (a
+Researcher, a fresh-context Critic, or a Debugger — runs in the foreground, looks and reports, never
+writes), or a **single scoped sub-Builder** constrained to a **subset** of the parent slice's
+components. Before that sub-Builder writes anything, the parent opens a **component sub-lease**:
+
+```
+th build sub-claim <PARENT-SLICE> --components <subset>   # mints <PARENT>#sub-<n>
+th build sub-release <SUB-ID>                             # release when the child is done
+```
+
+`sub-claim` validates that the subset belongs to an **in-progress** parent slice and is **disjoint**
+from any sibling sub-lease; the sub-Builder operates strictly within the parent slice's already-held
+top-level lease — it **never** opens a new top-level claim and **never** calls `th build next-wave`,
+so there is still exactly **one top-level controller**. A parent slice settling to `done`/`blocked`
+makes every sub-lease under it stale, so a forgotten `sub-release` can't wedge the schedule (release
+explicitly anyway). Nesting is capped at one level, with a small per-slice spawn cost cap. See the
+"Spawning sub-agents (Phase 5)" section of `agents/builder.md` / `agents/debugger.md`.
+
+### Worktrees & the merge-back protocol
+
+Parallel Builders (and any scoped sub-Builder) run in **isolated git worktrees**
+(`isolation: worktree`), so concurrent slices never see each other's half-written files. The
+load-bearing rule: **code is isolated; `.twinharness/` is shared.** A per-worktree copy of the state
+dir would give each Builder its own lease ledger and the cross-process lock would protect nothing —
+so every `th` state/lease/drift command issued from inside a worktree MUST target the **main project
+root** (pass `--cwd <main-root>`, or use the typed `mcp__plugin_twinharness_th__*` MCP tools, which
+resolve `${CLAUDE_PROJECT_DIR}` to the stable project root). On a slice's Critic PASS the Orchestrator
+merges its worktree branch back **in wave order**: the `th build plan` schedule already serializes
+shared-component slices, so within a wave the branches are component-disjoint and merge cleanly. A
+**non-clean** merge between plan-disjoint slices is the mechanical signal of accidental shared-state
+coupling — it is opened as **blocking** drift (`th drift add --layer requirement`) for human
+resolution; a clean merge → `th build release <SLICE-ID>`. The lease stays the live scheduler oracle;
+the worktree adds filesystem-level enforcement and the merge a second conflict check (deliberate,
+useful redundancy). Full protocol: `skills/twinharness/reference/build-and-verify.md` (Stage 10) and
+`agents/orchestrator.md` (parallel-build coordination).
 
 ### Debug — evidence-first defect tracing (the Debugger agent)
 

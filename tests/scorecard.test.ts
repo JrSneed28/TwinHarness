@@ -18,6 +18,7 @@ import { writeVerifyReport } from "../src/core/verify";
 import { writeTelemetryConfig, readTelemetryLog } from "../src/core/telemetry";
 import type { SliceState } from "../src/core/state-schema";
 import { runScorecard } from "../src/commands/scorecard";
+import { runRoute } from "../src/commands/route";
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
@@ -153,5 +154,52 @@ describe("REQ-SCORECARD-002: opt-in telemetry snapshot", () => {
     runScorecard(tp.paths, {});
     runScorecard(tp.paths, {});
     expect(readTelemetryLog(tp.paths)).toHaveLength(0);
+  });
+});
+
+interface RoutingSummary {
+  events: number;
+  models: Record<string, number>;
+}
+const routingData = (data: unknown): RoutingSummary => (data as { routing: RoutingSummary }).routing;
+
+describe("REQ-SCORECARD-003: Routing line summarizes recorded th route telemetry", () => {
+  it("shows '—' when no route telemetry has been recorded", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runStateSet(tp.paths, "tier", "T2");
+    const res = runScorecard(tp.paths, {});
+    const routing = routingData(res.data);
+    expect(routing.events).toBe(0);
+    expect(routing.models).toEqual({});
+    expect(res.human).toMatch(/Routing\s+: —/);
+  });
+
+  it("tallies recorded route events by model (read-only; --json-compatible)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    // Blast-radius flags route a blast-component Builder to opus; a plain spec stays sonnet.
+    runStateSet(tp.paths, "tier", "T3");
+    runStateSet(tp.paths, "blast_radius_flags", JSON.stringify(["authentication"]));
+    writeTelemetryConfig(tp.paths, { enabled: true });
+
+    // Record three route calls (each appends a "route" telemetry event).
+    runRoute(tp.paths, { agent: "builder", mode: "code-review", componentBlast: true });
+    runRoute(tp.paths, { agent: "builder", mode: "code-review", componentBlast: true });
+    runRoute(tp.paths, { agent: "spec", mode: "scope" });
+
+    const res = runScorecard(tp.paths, { json: true });
+    const routing = routingData(res.data);
+    expect(routing.events).toBe(3);
+    // Per-model tally totals the number of route events.
+    const total = Object.values(routing.models).reduce((a, b) => a + b, 0);
+    expect(total).toBe(3);
+    // The human line names the per-model counts (e.g. "opus×2").
+    expect(res.human).toMatch(/Routing\s+: 3 route calls \(/);
+    expect(res.human).toMatch(/×\d/);
+
+    // The scorecard's own snapshot append (telemetry on) must NOT be counted as a route event.
+    runScorecard(tp.paths, {});
+    expect(routingData(runScorecard(tp.paths, {}).data).events).toBe(3);
   });
 });

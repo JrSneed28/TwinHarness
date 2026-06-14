@@ -220,26 +220,30 @@ context, like the Critic.
   contradicts a contract. It starts from `th debug pack`, records anchored evidence via `th debug
   log`, and is reviewed in `debug-review` mode. It proposes the minimal fix; the owning slice's
   Builder applies it; a requirement contradiction becomes blocking drift.
-- **Codebase-Inspector (`agents/codebase-inspector.md`) — on a brownfield run.** Spawn it at the
-  start of a brownfield run (see *Brownfield mode* below) to map the existing repo: language/build,
-  module layout, public APIs, test framework, and any blast-radius surfaces already present (auth,
-  authz, money, data-integrity, migrations). It emits source-anchored
+- **Codebase-Inspector (`agents/codebase-inspector.md`) — MANDATORY on a brownfield run.** On a
+  brownfield run you **MUST invoke it before tiering** (see *Brownfield mode* below) to map the
+  existing repo: language/build, module layout, public APIs, test framework, and any blast-radius
+  surfaces already present (auth, authz, money, data-integrity, migrations). It emits source-anchored
   `docs/00-existing-codebase-analysis.md` (register with
   `th artifact register docs/00-existing-codebase-analysis.md --version N`). It gathers ground truth;
-  you and the design stages decide what is new vs. reused. Greenfield runs skip it.
+  you and the design stages decide what is new vs. reused. It is not optional on brownfield — its
+  output feeds `th tier classify` / `th tier veto-check`. Greenfield runs skip it.
 
 ## Brownfield mode (adopting an existing codebase)
 
 By default a run is **greenfield** — a fresh project. When the user is building INTO an existing
 repo (adding a feature to, or changing, code that already exists), run brownfield mode:
 
-1. **Record the mode** at init: `th init --brownfield` stamps `project_mode: "brownfield"` in
-   `state.json`. (Plain `th init` stays greenfield.)
-2. **Map ground truth first (recommended).** Invoke the **Codebase-Inspector** (fresh context)
-   before tiering so the existing language, modules, public APIs, test framework, and any existing
-   blast-radius surfaces are known facts feeding `th tier classify` / `th tier veto-check`. Existing
-   auth/authz/money/migrations in the code the new work touches are §5 blast-radius just as much as
-   new ones — the veto applies to them.
+1. **Choose greenfield vs. brownfield at init — an explicit decision, not a default you drift into.**
+   Before scaffolding, determine whether the run is greenfield or brownfield and pick the matching
+   init: plain `th init` (greenfield) or `th init --brownfield` (brownfield), which stamps
+   `project_mode: "brownfield"` in `state.json`. If you chose brownfield, step 2 is mandatory.
+2. **Map ground truth first — MANDATORY on brownfield.** You **MUST invoke the Codebase-Inspector**
+   (fresh context) **before tiering** so the existing language, modules, public APIs, test framework,
+   and any existing blast-radius surfaces are known facts feeding `th tier classify` /
+   `th tier veto-check`. This is a hard prerequisite of a brownfield run, not a recommendation —
+   tiering a brownfield repo blind is forbidden. Existing auth/authz/money/migrations in the code the
+   new work touches are §5 blast-radius just as much as new ones — the veto applies to them.
 3. **Tier and design as an overlay, not a clean sheet.** The Spec agent's architecture is an overlay
    on existing components (what is new vs. reused, acknowledged by path); the Vertical-Slice agent's
    Slice 0 becomes a **characterization** test around the adoption seam, not a fresh walking
@@ -253,17 +257,64 @@ radius is real even when the diff looks small.
 
 ## Parallel build coordination (§16)
 
-During implementation, drive the Builders mechanically — you are the sole coordinator, so there is
-no second controller to collide with:
+During implementation, drive the Builders mechanically. You are the sole **TOP-LEVEL** coordinator:
+**only you** call `th build next-wave` and the top-level `th build claim`/`th build release`. That
+is what makes the top-level schedule single-controller. Phase 5 adds a *bounded* exception that does
+NOT introduce a second top-level controller: a diagnostic agent (a Builder, or a Debugger) MAY spawn
+a **scoped sub-Builder** that operates **strictly within its parent slice's already-held lease** via
+a component **sub-lease** (`th build sub-claim <PARENT-SLICE> --components <subset>` →
+`th build sub-release <SUB-ID>`). A sub-lease never opens a new top-level claim and never calls
+`th build next-wave`, so there is still exactly one top-level controller — you. (See the
+"Spawning sub-agents (Phase 5)" section of `agents/builder.md` / `agents/debugger.md` for the child
+side of this contract.)
 
 1. `th build next-wave` → the slices dispatchable in parallel now (deps done, components free).
 2. For each: set it in-progress, `th build claim <SLICE-ID>` (refuses an overlapping claim — the
    collision guard), then spawn its Builder. Builders on a blast-radius component → opus.
-3. On Critic PASS: set the slice done and `th build release <SLICE-ID>`; on failure, set it blocked,
-   release, and engage the Debugger. Re-run `th build next-wave`.
+3. On Critic PASS: merge the slice's worktree branch back (see below), set the slice done and
+   `th build release <SLICE-ID>`; on failure, set it blocked, release, and engage the Debugger.
+   Re-run `th build next-wave`.
 
 `th next` will tell you which of these you owe at any moment (`dispatch-wave` / `await-builders` /
 `investigate-failure`).
+
+### Worktree isolation + merge-back protocol (§21)
+
+Parallel Builders (and any scoped sub-Builder they spawn) run in **isolated git worktrees**
+(`isolation: worktree` in `agents/builder.md`) so concurrent slices never see each other's
+half-written files. The protocol:
+
+1. **Code is isolated; coordination state is SHARED.** This is the load-bearing gotcha:
+   `.twinharness/` (state, leases, drift) must stay **shared, not per-worktree** — a per-worktree
+   copy would give each Builder its own lease ledger and the cross-process lock would protect
+   nothing. So worktrees isolate **CODE only**: every `th` state/lease/drift command issued from
+   inside a worktree MUST target the **main project root** — pass `--cwd <main-root>`, or use the
+   typed `mcp__plugin_twinharness_th__*` MCP tools (they resolve `${CLAUDE_PROJECT_DIR}` to the
+   stable project root). One shared coordination plane; isolated code trees. Restate this in every
+   Builder/sub-Builder delegation prompt.
+2. **Merge back in WAVE ORDER on Critic PASS.** When a slice's code-review Critic passes, merge its
+   worktree branch back into the main branch. Do this **wave by wave**: the `th build plan` schedule
+   already serializes any slices that share a component, so within a wave the branches are
+   component-disjoint and merge cleanly.
+3. **A non-clean merge is a mechanical signal.** If two slices the plan believed disjoint produce a
+   merge **conflict**, that is the signal of accidental shared-state coupling the static plan missed.
+   Do NOT hand-resolve it silently — open it as **BLOCKING** drift so the stop-gate refuses
+   completion until a human decides:
+   ```
+   th drift add --layer requirement \
+     --ref "<SLICE-A> + <SLICE-B>" \
+     --discovery "merge conflict between plan-disjoint slices — accidental shared-state coupling" \
+     --action "build paused for human resolution"
+   ```
+   A **clean** merge → `th build release <SLICE-ID>` and continue.
+4. **Relationship to leases (acknowledged redundancy).** The lease stays the scheduler's live oracle
+   (`th build claim`/`next-wave` consult it). Worktrees add **filesystem-level** enforcement, and the
+   merge adds a **second** conflict check on top of the lease. That redundancy is deliberate and
+   useful: the lease prevents the collision up front; the merge catches a coupling the static plan
+   never modeled.
+
+Full detail (with the shared-state rationale spelled out) lives in
+`${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference/build-and-verify.md` (Stage 10, parallel waves).
 
 ## Refuse vague mega-briefs
 

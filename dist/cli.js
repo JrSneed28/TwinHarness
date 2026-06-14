@@ -113,7 +113,7 @@ Usage:
   th hook subagent-stop             Emit a Claude Code SubagentStop-hook decision (state-validity guard)
   th migrate                        Upgrade state.json to the current schema version
   th doctor                         Self-diagnostic + run-health audit (env, state, artifacts, coverage, slices, revise loops)
-  th next                           The next mechanical obligation the run owes (next-action oracle)
+  th next [--explain]               The next mechanical obligation the run owes (next-action oracle); --explain adds a WHY
   th preview [--tier T<n>]          Pre-run view: engaged stages, human gates, and Critic modes for a tier
   th scorecard                      Post-run one-screen summary (tier/coverage/slices/suite/drift/revise)
   th route [--agent A] [--mode M] [--tier T] [--component-blast] [--summarization]
@@ -159,6 +159,7 @@ Global flags:
   --source <s>      (drift add) Who logged the entry (default: Builder)
   --dry-run         (slices sync) Compute without writing state
   --remove-missing  (slices sync) Remove slices absent from the plan
+  --explain         (next) Include a WHY string: why this obligation is the highest-priority one
   --force           (init) Reset existing state.json
   --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)`;
 /** Boolean flags (presence = true). */
@@ -175,6 +176,7 @@ const BOOLEAN_FLAGS = {
     "--brownfield": "brownfield",
     "--component-blast": "componentBlast",
     "--summarization": "summarization",
+    "--explain": "explain",
 };
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
 const STRING_FLAGS = {
@@ -230,6 +232,7 @@ function parseArgs(argv) {
         brownfield: false,
         componentBlast: false,
         summarization: false,
+        explain: false,
     };
     const positionals = [];
     const unknownFlags = [];
@@ -327,7 +330,7 @@ function dispatch(parsed) {
         case "doctor":
             return (0, doctor_1.runDoctor)(paths);
         case "next":
-            return (0, next_1.runNext)(paths);
+            return (0, next_1.runNext)(paths, { explain: parsed.flags.explain });
         case "preview":
             return (0, preview_1.runPreview)(paths, { tier: parsed.flags.tier });
         case "scorecard":

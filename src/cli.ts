@@ -93,7 +93,7 @@ Usage:
   th hook subagent-stop             Emit a Claude Code SubagentStop-hook decision (state-validity guard)
   th migrate                        Upgrade state.json to the current schema version
   th doctor                         Self-diagnostic + run-health audit (env, state, artifacts, coverage, slices, revise loops)
-  th next                           The next mechanical obligation the run owes (next-action oracle)
+  th next [--explain]               The next mechanical obligation the run owes (next-action oracle); --explain adds a WHY
   th preview [--tier T<n>]          Pre-run view: engaged stages, human gates, and Critic modes for a tier
   th scorecard                      Post-run one-screen summary (tier/coverage/slices/suite/drift/revise)
   th route [--agent A] [--mode M] [--tier T] [--component-blast] [--summarization]
@@ -139,6 +139,7 @@ Global flags:
   --source <s>      (drift add) Who logged the entry (default: Builder)
   --dry-run         (slices sync) Compute without writing state
   --remove-missing  (slices sync) Remove slices absent from the plan
+  --explain         (next) Include a WHY string: why this obligation is the highest-priority one
   --force           (init) Reset existing state.json
   --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)`;
 
@@ -188,6 +189,7 @@ export interface ParsedArgs {
     dryRun: boolean;
     removeMissing: boolean;
     brownfield: boolean;
+    explain: boolean;
   };
 }
 
@@ -207,6 +209,7 @@ const BOOLEAN_FLAGS: Record<string, FlagField> = {
   "--brownfield": "brownfield",
   "--component-blast": "componentBlast",
   "--summarization": "summarization",
+  "--explain": "explain",
 };
 
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
@@ -265,6 +268,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     brownfield: false,
     componentBlast: false,
     summarization: false,
+    explain: false,
   };
   const positionals: string[] = [];
   const unknownFlags: string[] = [];
@@ -356,7 +360,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
     case "doctor":
       return runDoctor(paths);
     case "next":
-      return runNext(paths);
+      return runNext(paths, { explain: parsed.flags.explain });
     case "preview":
       return runPreview(paths, { tier: parsed.flags.tier });
     case "scorecard":

@@ -73,10 +73,14 @@ each stage. This section is the compact routing guide.
 
 Run `th init` in the project root (creates `docs/`, `.twinharness/state.json`, `drift-log.md`).
 
-**Greenfield vs. brownfield.** Default runs are greenfield (a fresh project). If the user is
-building INTO an existing repo, run `th init --brownfield` instead (stamps
-`project_mode: "brownfield"`) and invoke the **Codebase-Inspector** to map ground truth before
-tiering. Brownfield shifts three things: Slice 0 becomes a characterization test around the
+**Greenfield vs. brownfield — an explicit decision at init.** Before scaffolding, decide whether
+this is a greenfield run (a fresh project) or a brownfield run (building INTO an existing repo) and
+pick the matching init: plain `th init` for greenfield, `th init --brownfield` (stamps
+`project_mode: "brownfield"`) for brownfield. On a brownfield run you **MUST invoke the
+Codebase-Inspector before tiering** — mapping the existing language, modules, public APIs, test
+framework, and any existing blast-radius surfaces (auth/authz/money/data-integrity/migrations) is a
+prerequisite for `th tier classify` / `th tier veto-check`, not an optional nicety. Brownfield
+shifts three things: Slice 0 becomes a characterization test around the
 adoption seam (not a fresh walking skeleton), the architecture is an overlay on existing components
 (what's new vs. reused), and the Builder reuses existing code that already satisfies a REQ rather
 than reimplementing it. Existing auth/money/migrations in touched code are §5 blast-radius. See the
