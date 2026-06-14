@@ -201,11 +201,10 @@ All commands accept `--json` for machine-readable output. The full reference is 
 - PreToolUse write-gate: blocks the Write/Edit/NotebookEdit path by default before gates clear and across slice-component boundaries during the build, plus a conservative pre-implementation Bash matcher; Bash writes remain out of scope as a guarantee (v0.3.0+).
 - Gate-mutation audit ledger, managed drift counter, schema-versioned state with `th migrate`, and run inspection via `th doctor` / `th stage` / `th manifest export` / `th context estimate`.
 - Context-budgeted prompts: every always-loaded skill/agent file fits Claude Code's ~500-line / ~5k-token guidance; per-stage and per-mode detail loads on demand from `skills/twinharness/reference/`.
-- A complete worked example: `examples/autocoder/` — a T3 run producing an autocoder CLI tool, 11 slices, Stage 11 verified and human-signed.
 
 **Not yet done:**
 
-- **Limited real-world mileage.** The pipeline has been exercised on internal examples but not yet validated across a broad range of real projects.
+- **Limited real-world mileage.** The pipeline has been exercised internally but not yet validated across a broad range of real projects.
 - **Breaking changes before 1.0.** Artifact schemas, state fields, and CLI flags may change.
 
 ---
@@ -225,7 +224,6 @@ spec/             design spec (TwinHarness-Plan.md) and the write-gate design
 src/              TypeScript source for the th CLI
 templates/        artifact skeletons for each SDLC stage
 tests/            REQ-anchored vitest suite
-examples/         complete worked example (autocoder T3 run)
 ```
 
 The agents and skill are the brains; `src/dist` is the mechanical spine; `templates/` are the artifact skeletons; `hooks/` is the completion gate. Deeper documentation lives in [USAGE.md](./USAGE.md) and [spec/](./spec/).

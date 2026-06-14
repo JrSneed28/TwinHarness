@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.6.2] — 2026-06-14
+
+### Removed
+
+- **Bundled worked examples** (`examples/autocoder/`, `examples/twinrunner/`) removed from the repository. They were development-reference artifacts, not part of the installed plugin (never in `package.json` `files` or the plugin manifest), so installs are unaffected. Examples will be regenerated from real end-to-end runs. README and USAGE updated to drop the now-absent `examples/` references.
+
 ## [0.6.1] — 2026-06-13
 
 Robustness hardening from a self-audit of the 0.6.0 coordination features. **413 tests** (was 392).

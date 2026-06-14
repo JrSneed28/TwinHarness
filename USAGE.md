@@ -739,7 +739,6 @@ spec/             frozen spec (TwinHarness-Plan.md) + build plan (build-plan.md)
 src/              TypeScript source for the th CLI
 templates/        artifact skeletons for each SDLC stage (01 through 10 + task-file.md)
 tests/            REQ-anchored vitest suite
-examples/         example TwinHarness runs
 CONTRIBUTING.md   dev loop, committed-dist/ invariant, plugin-packaging invariants
 SECURITY.md       threat model (gate scope, Bash bypass, global hook, prompt injection, path containment)
 ```
