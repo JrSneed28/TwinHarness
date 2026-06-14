@@ -182,9 +182,13 @@ describe("REQ-MCP-PATHS-001: project root resolution prefers CLAUDE_PROJECT_DIR"
   it("resolvePathsForCall honors CLAUDE_PROJECT_DIR, falling back to cwd", () => {
     const saved = process.env.CLAUDE_PROJECT_DIR;
     try {
-      const dir = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "th-mcp-root-"));
+      // Normalize through realpath up front: on macOS os.tmpdir() is a symlink
+      // (/var -> /private/var) and resolveProjectPaths uses path.resolve (not
+      // realpath), so the dir must already be real for the equality to hold on
+      // every OS (Linux/Windows tmpdirs aren't symlinked, so this is a no-op there).
+      const dir = fs.realpathSync(fs.mkdtempSync(path.join(require("node:os").tmpdir(), "th-mcp-root-")));
       process.env.CLAUDE_PROJECT_DIR = dir;
-      expect(resolvePathsForCall().root).toBe(fs.realpathSync(dir));
+      expect(resolvePathsForCall().root).toBe(dir);
       fs.rmSync(dir, { recursive: true, force: true });
     } finally {
       if (saved === undefined) delete process.env.CLAUDE_PROJECT_DIR;
