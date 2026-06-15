@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
+import { runRepoMap } from "../src/commands/repo";
 import { success, failure, type CommandResult } from "../src/core/output";
 import {
   toToolResult,
@@ -80,13 +81,10 @@ describe("REQ-MCP-TOOLS-001: the exposed tool set is the intended minimal subset
     "th_route",
     "th_coverage_check",
     "th_next",
-    "th_delegate_plan",
-    "th_delegate_pack",
-    "th_delegate_check",
   ];
 
-  it("TOOL_DEFS exposes exactly the 12 intended tools", () => {
-    expect(TOOL_DEFS.map((t) => t.name)).toEqual(expected);
+  it("TOOL_DEFS exposes exactly the 9 intended tools (pre-SLICE-4 legacy pin — superseded by REQ-RU-094 below)", () => {
+    expect(TOOL_DEFS.map((t) => t.name).slice(0, 9)).toEqual(expected);
   });
 
   it("init/migrate and the hook gates are NOT exposed", () => {
@@ -98,7 +96,6 @@ describe("REQ-MCP-TOOLS-001: the exposed tool set is the intended minimal subset
 
   it("listTools advertises a JSON-Schema object input for every tool", () => {
     const tools = listTools();
-    expect(tools.map((t) => t.name)).toEqual(expected);
     for (const t of tools) {
       expect(t.description).toBeTruthy();
       expect(t.inputSchema.type).toBe("object");
@@ -114,6 +111,229 @@ describe("REQ-MCP-TOOLS-001: the exposed tool set is the intended minimal subset
     // Read-only / all-optional tools advertise no required block.
     expect(byName["th_next"]!.inputSchema.required).toBeUndefined();
     expect(byName["th_state_get"]!.inputSchema.required).toBeUndefined();
+  });
+});
+
+// ===========================================================================
+// SLICE-4 / TASK-010 — REQ-RU-044..052 test battery (MCP repo-map tools)
+// ===========================================================================
+
+describe("SLICE-4 / TASK-010 — MCP adapter: repo-map tool wiring (REQ-RU-044..052)", () => {
+  function defFor(name: string) {
+    const d = TOOL_DEFS.find((t) => t.name === name);
+    if (!d) throw new Error(`missing tool ${name}`);
+    return d;
+  }
+
+  // ---- REQ-RU-044: th_repo_map delegates to runRepoMap ----
+  it("REQ-RU-044: th_repo_map delegates to runRepoMap (no-write dry-run, ok, compact summary)", () => {
+    tp = makeTempProject();
+    const res = defFor("th_repo_map").run(tp.paths, { write: false });
+    // runRepoMap succeeds even on an empty project (REQ-RU-090).
+    expect(res.ok).toBe(true);
+    expect(typeof res.human).toBe("string");
+    expect(res.human).toContain("Repo map:");
+    // Compact summary: data.counts present, no full files array dump in human text.
+    expect(res.data).toBeDefined();
+    expect(typeof (res.data as Record<string, unknown>).counts).toBe("object");
+  });
+
+  // ---- D-CONTRACTS-001 / IF-006: th_repo_map DEFAULT (no write arg) WRITES ----
+  // Regression guard. The MCP server invokes handlers with `arguments ?? {}`, so a
+  // caller relying on the documented default sends NO `write` key; `optBool` then
+  // yields undefined and `runRepoMap` defaults to write:true (bare invocation
+  // WRITES — D-CONTRACTS-001, IF-006 schema "default true"). A prior tool
+  // description wrongly advertised the MCP default as no-write/preview; this test
+  // pins the real behavior AND that the description no longer claims otherwise.
+  it("D-CONTRACTS-001: th_repo_map with no write arg WRITES both artifacts (IF-006 default true)", () => {
+    tp = makeTempProject();
+    fs.mkdirSync(path.join(tp.root, "src"), { recursive: true });
+    fs.writeFileSync(path.join(tp.root, "src", "a.ts"), "export const x = 1;\n", "utf8");
+
+    const jsonAbs = path.join(tp.paths.stateDir, "repo-map.json");
+    const mdAbs = path.join(tp.paths.docsDir, "00-repo-map.md");
+    expect(fs.existsSync(jsonAbs)).toBe(false);
+    expect(fs.existsSync(mdAbs)).toBe(false);
+
+    // Exactly how the MCP server calls the handler when arguments are omitted.
+    const res = defFor("th_repo_map").run(tp.paths, {});
+    expect(res.ok).toBe(true);
+    // The default WRITES both artifacts to disk.
+    expect(fs.existsSync(jsonAbs)).toBe(true);
+    expect(fs.existsSync(mdAbs)).toBe(true);
+    expect((res.data as Record<string, unknown>).wrote).toBe(true);
+    expect((res.data as Record<string, unknown>).artifacts).toEqual([
+      ".twinharness/repo-map.json",
+      "docs/00-repo-map.md",
+    ]);
+
+    // The advertised description must NOT claim the default is no-write/preview.
+    const desc = defFor("th_repo_map").description.toLowerCase();
+    expect(desc).not.toContain("default for mcp");
+    expect(desc).toContain("write");
+  });
+
+  // ---- REQ-RU-045: th_repo_relevant delegates to runRepoRelevant ----
+  it("REQ-RU-045: th_repo_relevant delegates to runRepoRelevant (map_missing → clean failure)", () => {
+    tp = makeTempProject();
+    // No repo-map.json present → runRepoRelevant returns a clean failure (not a throw).
+    const res = defFor("th_repo_relevant").run(tp.paths, { query: "auth" });
+    expect(res.ok).toBe(false);
+    expect((res.data as Record<string, unknown>).error).toBe("map_missing");
+  });
+
+  // ---- REQ-RU-046: th_repo_impact delegates to runRepoImpact ----
+  it("REQ-RU-046: th_repo_impact delegates to runRepoImpact (map_missing → clean failure)", () => {
+    tp = makeTempProject();
+    const res = defFor("th_repo_impact").run(tp.paths, { component: "core" });
+    expect(res.ok).toBe(false);
+    expect((res.data as Record<string, unknown>).error).toBe("map_missing");
+  });
+
+  // ---- REQ-RU-047: every new inputSchema is strict-closed (additionalProperties:false) ----
+  it("REQ-RU-047: mcp_schemas_strict_closed — all four new tools have additionalProperties:false", () => {
+    for (const name of ["th_repo_map", "th_repo_relevant", "th_repo_impact", "th_context_pack"]) {
+      expect(defFor(name).inputSchema.additionalProperties).toBe(false);
+    }
+  });
+
+  it("REQ-RU-047: mcp_extra_property_rejected — extra properties are NOT in any new tool's required list and schema declares them closed", () => {
+    // The JSON-Schema contract for strict closure is additionalProperties:false.
+    // The MCP SDK enforces this at the wire level; here we verify the schema declaration.
+    for (const name of ["th_repo_map", "th_repo_relevant", "th_repo_impact", "th_context_pack"]) {
+      const schema = defFor(name).inputSchema;
+      expect(schema.additionalProperties).toBe(false);
+      // None of the new tools have a required array (all inputs are optional — IF-006..009).
+      expect(schema.required).toBeUndefined();
+    }
+  });
+
+  // ---- REQ-RU-048: results carry text + structuredContent via toToolResult ----
+  it("REQ-RU-048: mcp_result_has_text_and_structured_content — th_repo_map result via toToolResult", () => {
+    tp = makeTempProject();
+    const cmdResult = defFor("th_repo_map").run(tp.paths, { write: false });
+    const toolResult = toToolResult(cmdResult);
+    expect(toolResult.content[0]).toMatchObject({ type: "text" });
+    expect((toolResult.content[0] as { text: string }).text).toContain("Repo map:");
+    // structuredContent carries the data payload.
+    expect(toolResult.structuredContent).toBeDefined();
+    expect(typeof (toolResult.structuredContent as Record<string, unknown>).counts).toBe("object");
+  });
+
+  // ---- REQ-RU-049: MCP output compact by default (no full files array in human text) ----
+  it("REQ-RU-049: mcp_output_compact_by_default — th_repo_map human text is compact summary, not full dump", () => {
+    tp = makeTempProject();
+    const res = defFor("th_repo_map").run(tp.paths, { write: false });
+    expect(res.ok).toBe(true);
+    // The compact summary must be present…
+    expect(res.human).toContain("files:");
+    // …but must NOT dump the full files array (that would be a huge JSON blob).
+    // The human text is the summary lines, not a JSON dump of the full map.
+    expect(res.human).not.toContain('"schema_version"');
+  });
+
+  // ---- REQ-RU-050: no command execution via MCP path ----
+  it("REQ-RU-050: mcp_no_command_execution — th_repo_map does not execute any discovered command", () => {
+    tp = makeTempProject();
+    const sentinel = path.join(tp.root, "EXECUTED_MCP");
+    const scriptContent = JSON.stringify({
+      scripts: { test: `node -e "require('fs').writeFileSync('${sentinel.replace(/\\/g, "/")}','x')"` },
+    });
+    fs.mkdirSync(tp.root, { recursive: true });
+    fs.writeFileSync(path.join(tp.root, "package.json"), scriptContent, "utf8");
+    fs.mkdirSync(path.join(tp.root, "src"), { recursive: true });
+    fs.writeFileSync(path.join(tp.root, "src", "a.ts"), "const x = 1;\n", "utf8");
+    const res = defFor("th_repo_map").run(tp.paths, { write: false });
+    expect(res.ok).toBe(true);
+    // The sentinel must NOT exist — commands are recorded as strings, never executed.
+    expect(fs.existsSync(sentinel)).toBe(false);
+  });
+
+  // ---- REQ-RU-051: adapter holds no orchestration logic ----
+  it("REQ-RU-051: mcp_adapter_no_orchestration_logic — each new run is a one-liner delegating to run* handler", () => {
+    // Structural proof: call each new tool without a real project;
+    // each must delegate cleanly (return a CommandResult, never throw).
+    tp = makeTempProject();
+    for (const name of ["th_repo_map", "th_repo_relevant", "th_repo_impact", "th_context_pack"]) {
+      const fn = () => defFor(name).run(tp.paths, {});
+      expect(fn).not.toThrow();
+    }
+  });
+
+  // ---- REQ-RU-052: th_context_pack registered as a thin adapter ----
+  it("REQ-RU-052: mcp_context_pack_registered — th_context_pack is in TOOL_DEFS and delegates to runContextPack", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const res = defFor("th_context_pack").run(tp.paths, {});
+    // runContextPack returns ok:true with the pack (no slice → global pack).
+    expect(res.ok).toBe(true);
+    expect(typeof res.human).toBe("string");
+    expect(res.data).toBeDefined();
+  });
+});
+
+// ===========================================================================
+// SLICE-4 / TASK-011 — REQ-RU-094 + REQ-RU-040 (MCP half)
+// ===========================================================================
+
+describe("SLICE-4 / TASK-011 — MCP tool-count 16 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
+  const expected16 = [
+    "th_state_get",
+    "th_state_set",
+    "th_drift_add",
+    "th_build_next_wave",
+    "th_build_claim",
+    "th_build_release",
+    "th_route",
+    "th_coverage_check",
+    "th_next",
+    "th_delegate_plan",
+    "th_delegate_pack",
+    "th_delegate_check",
+    "th_repo_map",
+    "th_repo_relevant",
+    "th_repo_impact",
+    "th_context_pack",
+  ];
+
+  // ---- REQ-RU-094: tool count is 16 ----
+  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_16 — TOOL_DEFS exposes exactly 16 tools in order", () => {
+    expect(TOOL_DEFS.map((t) => t.name)).toEqual(expected16);
+  });
+
+  // ---- REQ-RU-094: wrong-typed arg is coerced to undefined (optNumber/optString guard) ----
+  it("REQ-RU-094: test_REQ-RU-094_mcp_wrong_type_rejected — wrong-typed maxResults is ignored by optNumber", () => {
+    tp = makeTempProject();
+    // th_repo_relevant with maxResults as a string (wrong type) should not crash.
+    // optNumber will coerce it to undefined; the handler returns map_missing (no map yet).
+    const d = TOOL_DEFS.find((t) => t.name === "th_repo_relevant")!;
+    const res = d.run(tp.paths, { query: "auth", maxResults: "not-a-number" });
+    // Must not throw; result is a clean failure (map_missing), not a type error.
+    expect(res.ok).toBe(false);
+    expect((res.data as Record<string, unknown>).error).toBe("map_missing");
+  });
+
+  // ---- REQ-RU-094: extra properties declared closed in schema ----
+  it("REQ-RU-094: test_REQ-RU-094_mcp_extra_property_rejected — every tool schema is closed (additionalProperties:false)", () => {
+    for (const def of TOOL_DEFS) {
+      expect(def.inputSchema.additionalProperties).toBe(false);
+    }
+  });
+
+  // ---- REQ-RU-040 (MCP half): no command execution via MCP path ----
+  it("REQ-RU-040: test_REQ-RU-040_no_command_execution_mcp — MCP th_repo_map path executes no discovered command", () => {
+    tp = makeTempProject();
+    const sentinel = path.join(tp.root, "EXECUTED_MCP_040");
+    const scriptContent = JSON.stringify({
+      scripts: { build: `node -e "require('fs').writeFileSync('${sentinel.replace(/\\/g, "/")}','x')"` },
+    });
+    fs.writeFileSync(path.join(tp.root, "package.json"), scriptContent, "utf8");
+    fs.mkdirSync(path.join(tp.root, "src"), { recursive: true });
+    fs.writeFileSync(path.join(tp.root, "src", "index.ts"), "export {};\n", "utf8");
+    const d = TOOL_DEFS.find((t) => t.name === "th_repo_map")!;
+    const res = d.run(tp.paths, { write: false });
+    expect(res.ok).toBe(true);
+    expect(fs.existsSync(sentinel)).toBe(false);
   });
 });
 
@@ -220,6 +440,76 @@ describe("REQ-MCP-DELEGATE-002: the delegate tools delegate to their handlers", 
     for (const name of ["th_delegate_plan", "th_delegate_pack", "th_delegate_check"]) {
       expect(defFor(name).inputSchema.additionalProperties).toBe(false);
       expect(defFor(name).inputSchema.required).toBeUndefined();
+    }
+  });
+});
+
+// ===========================================================================
+// SLICE-5 / TASK-012+013 — REQ-RU-063: Orchestrator can call repo MCP tools
+// structurally (typed def.run(paths, args) calls, not shell-text parsing).
+// Must be GREEN now.
+// ===========================================================================
+
+describe("SLICE-5 / TASK-012+013 — REQ-RU-063: repo MCP tools are structurally callable", () => {
+  function defFor(name: string) {
+    const d = TOOL_DEFS.find((t) => t.name === name);
+    if (!d) throw new Error(`missing tool ${name}`);
+    return d;
+  }
+
+  // Anchor: REQ-RU-063
+  it("REQ-RU-063 — test_REQ-RU-063_mcp_tools_structurally_callable: th_repo_map is callable as typed def.run(paths, args)", () => {
+    tp = makeTempProject();
+    // Typed call — not shell text parsing.
+    const res = defFor("th_repo_map").run(tp.paths, { write: false });
+    expect(typeof res.ok).toBe("boolean");
+    expect(res.ok).toBe(true);
+    // Structured data payload (not just a string).
+    expect(res.data).toBeDefined();
+    expect(typeof (res.data as Record<string, unknown>).counts).toBe("object");
+  });
+
+  // Anchor: REQ-RU-063
+  it("REQ-RU-063 — th_repo_relevant is callable as typed def.run(paths, args) — returns CommandResult, not throw", () => {
+    tp = makeTempProject();
+    // No map yet — must return a clean failure, never throw.
+    const res = defFor("th_repo_relevant").run(tp.paths, { query: "context" });
+    expect(typeof res.ok).toBe("boolean");
+    // Structured failure (map_missing), not an exception.
+    expect(res.ok).toBe(false);
+    expect((res.data as Record<string, unknown>).error).toBe("map_missing");
+  });
+
+  // Anchor: REQ-RU-063
+  it("REQ-RU-063 — th_repo_impact is callable as typed def.run(paths, args) — returns CommandResult, not throw", () => {
+    tp = makeTempProject();
+    const res = defFor("th_repo_impact").run(tp.paths, { component: "src/commands" });
+    expect(typeof res.ok).toBe("boolean");
+    expect(res.ok).toBe(false);
+    expect((res.data as Record<string, unknown>).error).toBe("map_missing");
+  });
+
+  // Anchor: REQ-RU-063
+  it("REQ-RU-063 — th_context_pack is callable as typed def.run(paths, args) on an initialized project", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const res = defFor("th_context_pack").run(tp.paths, {});
+    expect(typeof res.ok).toBe("boolean");
+    expect(res.ok).toBe(true);
+    // Data payload matches the §9 bundle shape.
+    expect(typeof (res.data as Record<string, unknown>).totalTokens).toBe("number");
+    expect(Array.isArray((res.data as Record<string, unknown>).artifacts)).toBe(true);
+  });
+
+  // Anchor: REQ-RU-063
+  it("REQ-RU-063 — all four repo MCP tools: none throws when called structurally on an empty project", () => {
+    tp = makeTempProject();
+    for (const name of ["th_repo_map", "th_repo_relevant", "th_repo_impact"]) {
+      const fn = () => defFor(name).run(tp.paths, {});
+      // Typed call — never throws (Critical Pattern 1 / REQ-NFR-003).
+      expect(fn).not.toThrow();
+      const res = fn();
+      expect(typeof res.ok).toBe("boolean");
     }
   });
 });

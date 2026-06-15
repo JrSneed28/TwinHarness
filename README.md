@@ -2,7 +2,7 @@
 
 **Turns "build me X" into working, tested software** by forcing the idea through requirements, scope, design, and slice-by-slice implementation with verification gates — as a Claude Code plugin.
 
-> **Early development notice.** TwinHarness is at v0.6.x. The pipeline has been exercised end-to-end and ships 566 passing tests, but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
+> **Early development notice.** TwinHarness is at v0.6.x. The pipeline has been exercised end-to-end and ships 756 passing tests (756 total), but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
 
 ---
 
@@ -193,8 +193,25 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 | `th context estimate` / `th context pack` | Approximate prompt-surface token cost · assemble the §9 slice/agent handoff bundle |
 | `th delegate plan\|pack\|capsule\|check` | Context-preservation layer: recommend delegate vs keep-main · assemble a bounded child handoff · emit/validate the return capsule |
 | `th migrate` | Upgrade `state.json` to the current schema version (forward-only) |
+| `th repo map` | Scan the repo; write `.twinharness/repo-map.json` + `docs/00-repo-map.md` (writes by default; `--no-write` = dry preview) |
+| `th repo relevant` | Precision context retrieval: read-first / related / tests / risks for a slice, REQ-ID, file, or keyword query |
+| `th repo impact` | Pre-edit blast radius: impacted components, related tests, downstream features, risk flags, verify candidates |
 
 All commands accept `--json` for machine-readable output. The full reference is in [USAGE.md](./USAGE.md) Part 3.
+
+### Repo-understanding layer (`th repo`)
+
+SLICE-0..5 adds a deterministic repo-understanding layer that gives brownfield TwinHarness runs a mechanical spine for adopting an existing codebase (REQ-RU-001..096). Three CLI commands and four MCP tools compose the layer:
+
+**CLI commands:**
+
+- `th repo map [--write|--no-write] [--format <summary|json|md>]` — scans the repository and writes `.twinharness/repo-map.json` (the byte-stable machine map) and `docs/00-repo-map.md` (the human summary). Bare invocation writes; `--no-write` is dry/preview mode. Output is deterministic: two runs on an unchanged repo produce byte-identical files.
+- `th repo relevant (--slice <ID> | --req <REQ-ID> | --file <path> | --query <kw>) [--maxResults <n>] [--format <slice|req|file|json>]` — reads the persisted map and returns precision context for a selector: read-first files, related files, likely tests, owning components, do-not-touch paths, blast-radius risks, and verify candidates — each with a WHY. Read-only.
+- `th repo impact (--file <path> | --component <name|path>) [--format <file|json>]` — pre-edit blast-radius analysis: impacted components, related tests, downstream features, REQ anchors, risk flags, and verify candidates. Reads the persisted map; reads no state.
+
+**MCP tools (registered count 9 → 13):** `th_repo_map`, `th_repo_relevant`, `th_repo_impact`, `th_context_pack` — thin adapters over the same handlers as the CLI commands; strict closed schemas (`additionalProperties: false`).
+
+The layer treats all repository content as untrusted data: discovered build/test commands are recorded as inert strings and never executed. See [SECURITY.md](./SECURITY.md) for the full trust boundary.
 
 ---
 
@@ -203,7 +220,7 @@ All commands accept `--json` for machine-readable output. The full reference is 
 **What works today:**
 
 - Full T0–T3 pipeline, all 10 agents, all stages.
-- `th` CLI with 566 passing tests covering CLI behavior, plugin-packaging integrity, security containment (path traversal, proto-pollution), and a real cross-process concurrency race test; CI runs typecheck, build, a dist-sync assertion, and the full suite on every push and PR.
+- `th` CLI with 756 passing tests (756 total) covering CLI behavior, plugin-packaging integrity, security containment (path traversal, proto-pollution), the deterministic repo-understanding layer (scanner, schema, relevance, impact, MCP tools), and a real cross-process concurrency race test; CI runs typecheck, build, a dist-sync assertion, and the full suite on every push and PR.
 - Validated Claude Code plugin packaging (`claude plugin validate` + `--plugin-dir` load pass).
 - PreToolUse write-gate: blocks the Write/Edit/NotebookEdit path by default before gates clear and across slice-component boundaries during the build, plus a conservative pre-implementation Bash matcher; Bash writes remain out of scope as a guarantee (v0.3.0+).
 - Gate-mutation audit ledger, managed drift counter, schema-versioned state with `th migrate`, and run inspection via `th doctor` / `th stage` / `th manifest export` / `th context estimate`.

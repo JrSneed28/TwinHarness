@@ -5,6 +5,11 @@ import { type CommandResult, success, failure } from "../core/output";
 import { readState } from "../core/state-store";
 import { extractSummary } from "../core/summary";
 import { structuredLog } from "../core/log";
+import { runRepoRelevant } from "./repo";
+
+// Anchor: REQ-RU-061
+// Anchor: REQ-RU-095
+// Anchor: REQ-RU-063
 
 /**
  * `th context estimate` — approximate the context/token cost of the plugin's
@@ -169,8 +174,33 @@ export function runContextPack(paths: ProjectPaths, opts: ContextPackOptions = {
     sliceBlock = { id: target.id, status: target.status, components: target.components, sharesWith };
   }
 
+  // REQ-RU-061 / REQ-RU-095: when --slice is given, augment the bundle with
+  // repo-relevant files/tests sourced from the persisted repo-map (READ-ONLY —
+  // no re-scan; uses runRepoRelevant which reads .twinharness/repo-map.json).
+  // If the map is missing or malformed, we include an informational note but do
+  // NOT fail the overall pack (the §9 bundle is still usable).
+  let repoRelevantFiles: Array<{ path: string; why: string; kind: "readFirst" | "related" | "tests" }> = [];
+  let repoRelevantNote: string | null = null;
+
+  if (opts.slice && sliceBlock) {
+    const relResult = runRepoRelevant(paths, { slice: opts.slice });
+    if (relResult.ok && relResult.data) {
+      const d = relResult.data as {
+        readFirst?: Array<{ path: string; why: string }>;
+        related?: Array<{ path: string; why: string }>;
+        tests?: Array<{ path: string; why: string }>;
+      };
+      for (const item of d.readFirst ?? []) repoRelevantFiles.push({ ...item, kind: "readFirst" });
+      for (const item of d.related ?? []) repoRelevantFiles.push({ ...item, kind: "related" });
+      for (const item of d.tests ?? []) repoRelevantFiles.push({ ...item, kind: "tests" });
+    } else if (!relResult.ok) {
+      // Map missing / not initialized: surface as a note, do NOT fail the pack.
+      repoRelevantNote = `(repo-relevant layer unavailable: ${(relResult.data as Record<string, unknown>)?.error ?? "unknown error"} — run \`th repo map\` first)`;
+    }
+  }
+
   const totalTokens = packed.reduce((sum, p) => sum + p.tokens, 0);
-  structuredLog({ cmd: "context pack", slice: opts.slice ?? null, artifacts: packed.length, tokens: totalTokens });
+  structuredLog({ cmd: "context pack", slice: opts.slice ?? null, artifacts: packed.length, tokens: totalTokens, repoRelevantFiles: repoRelevantFiles.length });
 
   const header = opts.slice
     ? `Context pack for ${opts.slice} — ${packed.length} artifact summary block(s), ~${totalTokens} tokens`
@@ -186,6 +216,22 @@ export function runContextPack(paths: ProjectPaths, opts: ContextPackOptions = {
       ]
     : [];
 
+  // REQ-RU-061: repo-relevant section in human text.
+  const repoRelevantLines: string[] = [];
+  if (opts.slice) {
+    repoRelevantLines.push("");
+    if (repoRelevantNote) {
+      repoRelevantLines.push(`Repo-relevant files: ${repoRelevantNote}`);
+    } else if (repoRelevantFiles.length === 0) {
+      repoRelevantLines.push("Repo-relevant files: (none matched — repo-map may be empty for this slice)");
+    } else {
+      repoRelevantLines.push(`Repo-relevant files (${repoRelevantFiles.length} from repo-understanding layer):`);
+      for (const f of repoRelevantFiles) {
+        repoRelevantLines.push(`  [${f.kind}] ${f.path}  — ${f.why}`);
+      }
+    }
+  }
+
   const artifactLines =
     packed.length === 0
       ? ["", "(no approved artifacts yet — nothing to pack)"]
@@ -195,10 +241,17 @@ export function runContextPack(paths: ProjectPaths, opts: ContextPackOptions = {
           p.text || "(empty)",
         ]);
 
-  const human = [header, ...sliceLines, ...artifactLines].join("\n");
+  const human = [header, ...sliceLines, ...repoRelevantLines, ...artifactLines].join("\n");
 
   return success({
-    data: { slice: sliceBlock ?? null, artifacts: packed, totalTokens },
+    data: {
+      slice: sliceBlock ?? null,
+      artifacts: packed,
+      totalTokens,
+      // REQ-RU-061: repo-relevant data included in structured response.
+      repoRelevantFiles,
+      repoRelevantNote: repoRelevantNote ?? null,
+    },
     human,
   });
 }

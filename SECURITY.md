@@ -95,12 +95,25 @@ README text, or data files) could influence the orchestrator's decisions.
 Treat all repository content as data; do not rely on the orchestrator to
 validate or sanitize it.
 
+### Repo-understanding trust boundary
+
+The `th repo` layer (SLICE-0..5 — `th repo map`, `th repo relevant`, `th repo impact`, and the four MCP tools `th_repo_map`, `th_repo_relevant`, `th_repo_impact`, `th_context_pack`) reads **untrusted repository content**: file contents, manifests, lockfiles, and build scripts from the target repository.
+
+The following guarantees hold across all three commands and their MCP equivalents:
+
+- **Candidate commands are never executed.** The scanner reads `scripts`, `Makefile` targets, CI workflow steps, and similar build/test declarations and records them as inert strings (`CandidateCommand.raw`). These candidate commands are recorded and surfaced as suggestions, never executed (RULE-004). The no-exec guarantee is verified by a sentinel-file test in `tests/repo.test.ts` (`REQ-RU-091`).
+- **All user-supplied paths are root-contained via `resolveWithinRoot()`.** Every `--file` and path-form `--component` argument is validated by `resolveWithinRoot` before any filesystem read. A path that resolves outside the project root is rejected with `path_outside_root` before any I/O is performed; symlinks are not followed (REQ-RU-024/032/042/092). This is the same helper used by `th artifact register`, `th coverage`, and `th tier`.
+- **No network I/O anywhere in the layer.** The map build (`th repo map`) and both query commands (`th repo relevant`, `th repo impact`) make no outbound network requests (REQ-NFR-008). The layer is entirely local and read-only with respect to external services.
+- **No PII or credentials are persisted.** The `.twinharness/repo-map.json` schema stores only file paths, detection keywords, and REQ anchor IDs. No file contents, no secrets, and no absolute paths are written to disk.
+- **Byte-stable, no run-specific data.** The persisted map contains no timestamps, PIDs, absolute paths, or nonces — only POSIX-relative paths and sorted collections. Two runs on an unchanged repo produce byte-identical output (REQ-NFR-001).
+- **Generated directories are excluded before being read.** Directories such as `node_modules`, `dist`, `build`, and `target` are identified and excluded from the file walk before any of their contents are opened (REQ-RU-006/041).
+
 ### Path handling
 
 `th` commands that accept file-path arguments (`th artifact register`,
-`th coverage`, `th tier`, etc.) resolve paths relative to the **project root**
-and reject traversals outside it. This is enforced in the CLI; raw Bash
-subshells bypass it.
+`th coverage`, `th tier`, `th repo relevant`, `th repo impact`, etc.) resolve
+paths relative to the **project root** via `resolveWithinRoot` and reject
+traversals outside it. This is enforced in the CLI; raw Bash subshells bypass it.
 
 ---
 

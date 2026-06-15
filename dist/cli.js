@@ -65,6 +65,7 @@ const scorecard_1 = require("./commands/scorecard");
 const telemetry_1 = require("./commands/telemetry");
 const route_1 = require("./commands/route");
 const delegate_1 = require("./commands/delegate");
+const repo_1 = require("./commands/repo");
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
@@ -128,6 +129,13 @@ Usage:
                                     Assemble a bounded child-agent handoff (reuses context pack for a slice)
   th delegate capsule               Print the blank Delegation Capsule skeleton (the strict return format)
   th delegate check --capsule <path>  Validate a returned capsule has every required section (presence only)
+  th repo map [--write|--no-write] [--format <summary|json|md>]
+                                    Scan the repo; write .twinharness/repo-map.json + docs/00-repo-map.md (writes by default; --no-write = dry/preview)
+  th repo relevant (--slice <ID> | --req <REQ-ID> | --file <path> | --query <kw>)
+                   [--maxResults <n>] [--format <slice|req|file|json>]
+                                    Precision context: read-first/related/tests/risks for a selector (reads persisted map)
+  th repo impact (--file <path> | --component <name|path>) [--format <file|json>]
+                                    Pre-edit blast-radius: impacted components, tests, features, risk flags (reads persisted map; no state read)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
   th version                        Print the CLI version
@@ -175,7 +183,14 @@ Global flags:
   --agent <a>       (route, delegate pack) The agent being spawned / delegated to
   --capsule <path>  (delegate check) Capsule file to validate
   --force           (init) Reset existing state.json
-  --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)`;
+  --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)
+  --write           (repo map) Write the artifacts (default; bare \`th repo map\` writes)
+  --no-write        (repo map) Dry/preview: build in memory, write nothing (alias of --dry-run)
+  --format <f>      (repo map) Text rendering: summary (default) | json | md
+                    (repo relevant) Text rendering: slice | req | file | json
+  --query <kw>      (repo relevant) Keyword/phrase selector (exact one of --slice/--req/--file/--query required)
+  --maxResults <n>  (repo relevant) Cap on combined emitted items (default 20; ≤0 = default)
+  --component <n>   (repo impact) Component name or path selector (exact one of --file/--component required)`;
 /** Boolean flags (presence = true). */
 const BOOLEAN_FLAGS = {
     "--json": "json",
@@ -193,6 +208,8 @@ const BOOLEAN_FLAGS = {
     "--explain": "explain",
     "--writes": "writes",
     "--noisy": "noisy",
+    "--write": "write",
+    "--no-write": "noWrite",
 };
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
 const STRING_FLAGS = {
@@ -224,12 +241,17 @@ const STRING_FLAGS = {
     "--intent": "intent",
     "--task": "task",
     "--capsule": "capsule",
+    "--format": "format",
+    "--query": "query",
+    "--file": "file",
+    "--component": "component",
 };
 /** Flags that consume a numeric value. */
 const NUMBER_FLAGS = {
     "--cap": "cap",
     "--version": "version",
     "--files": "files",
+    "--maxResults": "maxResults",
 };
 /**
  * Table-driven flag parser. Unknown `--flags` and value-less flags are recorded
@@ -255,6 +277,8 @@ function parseArgs(argv) {
         explain: false,
         writes: false,
         noisy: false,
+        write: false,
+        noWrite: false,
     };
     const positionals = [];
     const unknownFlags = [];
@@ -410,6 +434,41 @@ function dispatch(parsed) {
                     return (0, delegate_1.runDelegateCheck)(paths, { file: parsed.flags.capsule });
                 default:
                     return (0, output_1.failure)({ human: `unknown 'delegate' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "repo":
+            switch (sub) {
+                case "map": {
+                    // D-CONTRACTS-001: bare `th repo map` WRITES; --no-write (alias
+                    // --dry-run) builds in memory only. --write is accepted (it is the
+                    // default). --no-write/--dry-run wins when both are given.
+                    const noWrite = parsed.flags.noWrite || parsed.flags.dryRun;
+                    return (0, repo_1.runRepoMap)(paths, { write: !noWrite, format: parsed.flags.format });
+                }
+                case "relevant":
+                    // Anchor: REQ-RU-020 — four selectors (--slice/--req/--file/--query)
+                    // Anchor: REQ-RU-024 — path guard first (inside runRepoRelevant)
+                    // Anchor: REQ-RU-025 — map-load failure
+                    // Anchor: REQ-RU-026 — read-only
+                    return (0, repo_1.runRepoRelevant)(paths, {
+                        slice: parsed.flags.slice,
+                        req: parsed.flags.req,
+                        file: parsed.flags.file,
+                        query: parsed.flags.query,
+                        maxResults: parsed.flags.maxResults,
+                        format: parsed.flags.format,
+                    });
+                case "impact":
+                    // Anchor: REQ-RU-030 — two selectors (--file/--component)
+                    // Anchor: REQ-RU-032 — path guard first (inside runRepoImpact)
+                    // Anchor: REQ-RU-033 — no state read
+                    // Anchor: REQ-RU-034 — map-load failure
+                    return (0, repo_1.runRepoImpact)(paths, {
+                        file: parsed.flags.file,
+                        component: parsed.flags.component,
+                        format: parsed.flags.format,
+                    });
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'repo' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
         case "stage":
             switch (sub) {
