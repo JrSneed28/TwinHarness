@@ -42,7 +42,7 @@ import type { CommandResult } from "./core/output";
 
 import { runStateGet, runStateSet } from "./commands/state";
 import { runDriftAdd } from "./commands/drift";
-import { runBuildNextWave, runBuildClaim, runBuildRelease } from "./commands/build";
+import { runBuildNextWave, runBuildClaim, runBuildRelease, runBuildSubClaim, runBuildSubRelease } from "./commands/build";
 import { runCoverageCheck } from "./commands/coverage";
 import { runRoute } from "./commands/route";
 import { runNext } from "./commands/next";
@@ -446,6 +446,42 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       additionalProperties: false,
     },
     run: (paths, args) => runContextPack(paths, { slice: optString(args, "slice") }),
+  },
+  // Anchor: REQ-101
+  // Anchor: REQ-102
+  {
+    name: "th_build_sub_claim",
+    description:
+      "Open a sub-lease on a SUBSET of a parent slice's components for a scoped sub-Builder. The parent slice must be in-progress. Components must be a non-empty subset of the parent's declared components and disjoint from any live sibling sub-lease.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        parentSlice: stringProp("The PARENT-SLICE id holding the top-level lease (e.g. SLICE-3)."),
+        components: stringProp("Comma-separated subset of the parent's components to sub-lease; split/trim/drop-empties."),
+      },
+      required: ["parentSlice", "components"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      const components = (optString(args, "components") ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+      return runBuildSubClaim(paths, optString(args, "parentSlice"), components);
+    },
+  },
+  // Anchor: REQ-103
+  // Anchor: REQ-104
+  {
+    name: "th_build_sub_release",
+    description:
+      "Release a sub-lease after the sub-Builder finishes or blocks. Verifies the id names an active sub-lease.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subId: stringProp("The SUB-ID to release (e.g. SLICE-3#sub-1)."),
+      },
+      required: ["subId"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runBuildSubRelease(paths, optString(args, "subId")),
   },
 ] as const;
 
