@@ -137,6 +137,41 @@ describe("SLICE-4 / TASK-010 — MCP adapter: repo-map tool wiring (REQ-RU-044..
     expect(typeof (res.data as Record<string, unknown>).counts).toBe("object");
   });
 
+  // ---- D-CONTRACTS-001 / IF-006: th_repo_map DEFAULT (no write arg) WRITES ----
+  // Regression guard. The MCP server invokes handlers with `arguments ?? {}`, so a
+  // caller relying on the documented default sends NO `write` key; `optBool` then
+  // yields undefined and `runRepoMap` defaults to write:true (bare invocation
+  // WRITES — D-CONTRACTS-001, IF-006 schema "default true"). A prior tool
+  // description wrongly advertised the MCP default as no-write/preview; this test
+  // pins the real behavior AND that the description no longer claims otherwise.
+  it("D-CONTRACTS-001: th_repo_map with no write arg WRITES both artifacts (IF-006 default true)", () => {
+    tp = makeTempProject();
+    fs.mkdirSync(path.join(tp.root, "src"), { recursive: true });
+    fs.writeFileSync(path.join(tp.root, "src", "a.ts"), "export const x = 1;\n", "utf8");
+
+    const jsonAbs = path.join(tp.paths.stateDir, "repo-map.json");
+    const mdAbs = path.join(tp.paths.docsDir, "00-repo-map.md");
+    expect(fs.existsSync(jsonAbs)).toBe(false);
+    expect(fs.existsSync(mdAbs)).toBe(false);
+
+    // Exactly how the MCP server calls the handler when arguments are omitted.
+    const res = defFor("th_repo_map").run(tp.paths, {});
+    expect(res.ok).toBe(true);
+    // The default WRITES both artifacts to disk.
+    expect(fs.existsSync(jsonAbs)).toBe(true);
+    expect(fs.existsSync(mdAbs)).toBe(true);
+    expect((res.data as Record<string, unknown>).wrote).toBe(true);
+    expect((res.data as Record<string, unknown>).artifacts).toEqual([
+      ".twinharness/repo-map.json",
+      "docs/00-repo-map.md",
+    ]);
+
+    // The advertised description must NOT claim the default is no-write/preview.
+    const desc = defFor("th_repo_map").description.toLowerCase();
+    expect(desc).not.toContain("default for mcp");
+    expect(desc).toContain("write");
+  });
+
   // ---- REQ-RU-045: th_repo_relevant delegates to runRepoRelevant ----
   it("REQ-RU-045: th_repo_relevant delegates to runRepoRelevant (map_missing → clean failure)", () => {
     tp = makeTempProject();
