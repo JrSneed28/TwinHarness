@@ -15703,14 +15703,14 @@ function withStateLock(paths, fn) {
     } catch (e) {
       const code = e.code;
       if (!isLockHeldError(code)) throw e;
-      if ((code === "EPERM" || code === "EACCES") && !fs2.existsSync(lockDir)) throw e;
       try {
         const age = Date.now() - fs2.statSync(lockDir).mtimeMs;
         if (age > STALE_MS) {
           fs2.rmSync(lockDir, { recursive: true, force: true });
           continue;
         }
-      } catch {
+      } catch (statErr) {
+        if (code === "EPERM" || code === "EACCES") throw e;
         continue;
       }
       if (Date.now() > deadline) {

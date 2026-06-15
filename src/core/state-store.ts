@@ -109,20 +109,21 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if (!isLockHeldError(code)) throw e;
-      // EPERM/EACCES can also signal a genuine permission problem (read-only
-      // directory, ACL restriction, antivirus interception) rather than lock
-      // contention. Only treat them as contention when the lock directory
-      // actually exists; otherwise rethrow so the caller sees the real cause.
-      if ((code === "EPERM" || code === "EACCES") && !fs.existsSync(lockDir)) throw e;
       // Held: steal if stale, else wait until the deadline.
+      // statSync doubles as the existence check and mtime fetch in one call,
+      // avoiding a redundant existsSync + statSync pair. If it throws, the lock
+      // dir is absent or inaccessible: for EPERM/EACCES that means a genuine
+      // permission error (not contention) so we rethrow the original; for EEXIST
+      // the dir just vanished and we retry.
       try {
         const age = Date.now() - fs.statSync(lockDir).mtimeMs;
         if (age > STALE_MS) {
           fs.rmSync(lockDir, { recursive: true, force: true });
           continue;
         }
-      } catch {
-        continue; // lock vanished between mkdir and stat — retry
+      } catch (statErr) {
+        if (code === "EPERM" || code === "EACCES") throw e; // genuine permission error
+        continue; // EEXIST: lock vanished between mkdir and stat — retry
       }
       if (Date.now() > deadline) {
         throw new Error(`state lock timeout: ${lockDir} is held; remove it if no \`th\` process is running.`);
