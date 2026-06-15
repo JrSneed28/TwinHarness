@@ -21,6 +21,7 @@
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { withStateLock } from "../core/state-store";
+import { requireState } from "../core/guards";
 import {
   appendLeaseEvent,
   activeSectionLeases,
@@ -75,6 +76,9 @@ export function runArtifactClaim(paths: ProjectPaths, opts: ArtifactLeaseOptions
   const { section, holder } = v;
 
   return withStateLock(paths, () => {
+    const g = requireState(paths);
+    if (g.result) return g.result;
+
     // Collision guard: refuse if the SAME section is held by a DIFFERENT holder.
     if (isSectionLeased(paths, section, holder)) {
       const owner = sectionLeaseHolder(paths, section);
@@ -103,6 +107,9 @@ export function runArtifactRelease(paths: ProjectPaths, opts: ArtifactLeaseOptio
   const { section, holder } = v;
 
   return withStateLock(paths, () => {
+    const g = requireState(paths);
+    if (g.result) return g.result;
+
     appendLeaseEvent(paths, { event: "release", slice: section, components: [holder] });
     structuredLog({ cmd: "artifact release", section, holder });
     return success({ data: { section, holder }, human: `released ${section}.` });
@@ -113,6 +120,9 @@ export function runArtifactRelease(paths: ProjectPaths, opts: ArtifactLeaseOptio
  * `th artifact leases` — list the active section leases and their holders.
  */
 export function runArtifactLeases(paths: ProjectPaths): CommandResult {
+  const g = requireState(paths);
+  if (g.result) return g.result;
+
   const leases = activeSectionLeases(paths);
   const human = leases.length
     ? leases.map((l) => `${l.section} → ${l.holder}`).join("\n")
