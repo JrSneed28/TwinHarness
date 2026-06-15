@@ -1,16 +1,19 @@
 ---
 description: Show the current TwinHarness state — tier, stage, gates, slices, and open drift.
 argument-hint: (no arguments)
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node:*), Bash(true), mcp__plugin_twinharness_th__*
 ---
 
 Render the current TwinHarness state for this project.
 
 Live state (captured before this prompt runs):
 
-!`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" state status`
+!`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" state status || true`
 
-If you need to refresh or re-run it (the `th` CLI ships inside this plugin):
+To refresh the state during this turn, **prefer the typed
+`mcp__plugin_twinharness_th__th_state_get` MCP tool** (typed + worktree-safe) and summarize the fields
+below; fall back to the CLI only for verbs not exposed as MCP tools (see `reference/mcp-tools.md`). The
+CLI renders the same snapshot if you'd rather not read raw state:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" state status

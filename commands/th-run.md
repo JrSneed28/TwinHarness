@@ -1,7 +1,7 @@
 ---
 description: Start or resume a TwinHarness Agentic SDLC run — drive an idea through tier-scaled stages to slice-by-slice build.
 argument-hint: <your idea, e.g. "build a CLI todo app">
-allowed-tools: Bash(node:*), mcp__plugin_twinharness_th__*, Task, Agent
+allowed-tools: Bash(node:*), Bash(true), mcp__plugin_twinharness_th__*, Task, Agent
 ---
 
 Start (or resume) a **TwinHarness** orchestration run for: **$ARGUMENTS**
@@ -15,7 +15,7 @@ Start (or resume) a **TwinHarness** orchestration run for: **$ARGUMENTS**
 Existing run state, if any (captured before this prompt runs — use it to decide **resume vs. fresh
 init**; an error or "not initialized" here means no run exists yet, so start from `th init`):
 
-!`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" state status`
+!`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" state status || true`
 
 Follow the `twinharness` skill (the Orchestrator playbook). In brief:
 

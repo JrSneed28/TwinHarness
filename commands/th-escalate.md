@@ -1,22 +1,21 @@
 ---
 description: Surface TwinHarness blocking escalations that need a human decision before work can complete.
 argument-hint: (no arguments)
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node:*), Bash(true), mcp__plugin_twinharness_th__*
 ---
 
 Surface everything currently **blocking** completion of this TwinHarness run (spec §8, §10, §18).
 
 Next mechanical obligation (the run's highest-priority owed action, captured before this prompt runs):
 
-!`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" next`
+!`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" next || true`
 
-Gather state and drift (the `th` CLI ships inside this plugin — `th <args>` below means this
-invocation):
+Gather the blocking signals — **prefer the typed `mcp__plugin_twinharness_th__*` MCP tools** and fall
+back to the CLI only for verbs not exposed as MCP tools (see `reference/mcp-tools.md`):
 
-```
-node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" state status
-node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" drift list --json
-```
+- **`mcp__plugin_twinharness_th__th_next`** — the next mechanical obligation (same as the `!` snapshot above).
+- **`mcp__plugin_twinharness_th__th_state_get`** — tier/stage/gates, `drift_open_blocking`, revise-loop counts, and open questions.
+- `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" drift list --json` — drift entries + open blocking count (no MCP tool yet; CLI only).
 
 Then present, in priority order, anything that requires a human decision:
 
