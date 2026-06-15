@@ -7,9 +7,71 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer), not yet cut as a versioned release. **789 tests** (was 460).
+Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer + self-epic governance), not yet cut as a versioned release. **874 tests, 848 passing** (26 pre-existing failures unrelated to this epic; was 460 at 0.6.2).
 
-### Added
+### Added (self-epic — governance, stale-detection & MCP parity, 2026-06-15)
+
+- **MCP sub-lease parity (REQ-101..105).** `th_build_sub_claim` and `th_build_sub_release` are
+  now registered MCP tools, wrapping the existing `runBuildSubClaim`/`runBuildSubRelease`
+  handlers verbatim. Input schemas are `{ parentSlice, components }` and `{ subId }` respectively
+  (`additionalProperties: false`). Agents driving TwinHarness over MCP now have the same
+  component sub-lease capability as CLI Builders. MCP tool count: 16 → 18 (IF-009, IF-010).
+
+- **`th repo check` — repo-map staleness detection (REQ-201..206).** A new `th repo check`
+  subcommand (`runRepoCheck`, `src/commands/repo.ts`) compares `.twinharness/repo-map.json`
+  against the live working tree using per-file SHA-256 content hashes. Exit codes: 0 = fresh,
+  4 = stale (files added/removed/modified), 5 = no map, 1 = parse failure.
+  `--json` output reports `{ fresh, shape, added[], removed[], modified[] }`. When `fileHashes`
+  is absent from an older map, the command returns stale with `reason: "no_hashes"` (conservative
+  graceful degradation, ADR-002). `runRepoMap` was extended to populate the new additive
+  `fileHashes` field on `RepoMap` (map-level `Record<string, string>`, serialized only when
+  non-empty — REQ-NFR-004). Exposed as `th_repo_check` MCP tool. MCP tool count: 18 → 19 (IF-001, IF-011, DS-002).
+
+- **Brownfield tiering prerequisite gate (REQ-301..305).** `th tier veto-check` now refuses
+  (exit 3, `brownfield_prerequisite_missing`) on a brownfield run (`project_mode === "brownfield"`)
+  that is missing either `.twinharness/repo-map.json` or `docs/00-existing-codebase-analysis.md`.
+  The structured error lists the absent artifact(s) by canonical path. `th tier classify` surfaces
+  the same check as an advisory signal (exits 0 with `brownfield_prerequisite_missing` field).
+  Greenfield and uninitialized runs are byte-identical to pre-epic behavior (REQ-304). Implemented
+  via a `brownfieldPrerequisite` helper in `src/commands/tier.ts` using the existing `readState`
+  function (IF-007).
+
+- **Decision governance — `th decision detect|add|approve|check|list` (REQ-401..408/412/413).**
+  A new decision-governance subsystem records, human-approves, and enforces significant run
+  choices with tamper-evident durability:
+  - **`src/core/decisions.ts`** — new core module: append-only JSONL event log at
+    `.twinharness/decisions.jsonl`, SHA-256 hash-chained (ADR-001), reduced latest-event-wins
+    per id into current `Decision` state. Mirrors the `src/core/leases.ts` sidecar pattern.
+    Single source of truth for governance via `gatingObligations` (RULE-007).
+  - **`th decision add`** — records a `proposed` decision with `title`, `rationale`, `links`,
+    and proposer attribution; mints a stable `DECISION-NNN` id; never auto-approves (REQ-402).
+  - **`th decision approve`** — human-only CLI gate (RULE-011); permanently absent from MCP.
+    Enforces a two-layer barrier: (1) interactive-TTY confirmation — aborts in any agent shell,
+    CI pipeline, or pipe (`no_tty`); (2) interactive `y/N` prompt (`confirmation_declined`).
+    No `--yes` bypass (ADR-003, ratified 2026-06-15). Supports `--reject` and `--supersede`.
+    Verifies the hash-chain tail before every append (`chain_broken` on failure — DRIFT-011).
+  - **`th decision check`** — exits 6 (`DECISION_GATE_EXIT`) while any unapproved decision is
+    linked to the current stage via `stage:<current_stage>` (canonical form — DRIFT-012).
+  - **`th decision detect`** — advisory, read-only; surfaces candidate decisions from ADR files,
+    drift log, scope-change markers, and blast-radius flags (REQ-405, RULE-006).
+  - **`th decision list`** — returns all decisions (reduced, sorted by id) for orchestrator and
+    `th next` consumption (REQ-406).
+
+- **`th next` decision-obligation rung (REQ-501..504).** `runNext` gains a
+  `resolve-decision-obligation` rung inserted after `classify-tier` and before `produce-artifact`.
+  When any unapproved decision is linked to the current stage, `th next` returns
+  `{ kind: "resolve-decision-obligation", action: "Approve DECISION-NNN ..." }`. The obligation
+  is derived from the same `gatingObligations` predicate as `th decision check` (RULE-007) so
+  the two cannot disagree. When no obligation exists, `th next` output is byte-for-byte unchanged
+  (REQ-504, IF-008, DS-003).
+
+- **Seven new MCP tools registered, total 23 (REQ-408, INV-005).** `th_decision_detect`,
+  `th_decision_add`, `th_decision_check`, and `th_decision_list` are appended to `TOOL_DEFS`
+  (count 19 → 23; IF-012..IF-015). `th_decision_approve` is deliberately and permanently absent.
+  Final registered tool count: **23**. Verified by `tests/mcp-adapter.test.ts` and
+  `tests/mcp-parity.test.ts`.
+
+### Added (earlier post-0.6.2 work)
 
 - **`th delegate` — Context Preservation / Delegation Layer (Phase 6).** A mechanical delegate-vs-keep-main oracle (`th delegate plan`) from intent/file-count/writes/noisy signals, a bounded child-agent handoff assembler (`th delegate pack`, reusing `th context pack` for a slice), the strict Delegation Capsule skeleton (`th delegate capsule`), and a presence-only capsule validator (`th delegate check`). Exposed as the MCP tools `th_delegate_plan` / `th_delegate_pack` / `th_delegate_check`. Keeps the main Orchestrator context a control-plane resource — heavy reads/edits/debugging/reviews/inspection are delegated to child agents that return a compact capsule, with long-form detail in `.twinharness/delegations/DEL-###/`. Read-only; no `state.json` mutation; CLI stays zero-runtime-dependency.
 - **`th repo` — deterministic repo-understanding layer (SLICE-0..5).** Three CLI commands and four MCP tools give brownfield TwinHarness runs a mechanical spine for adopting an existing codebase (REQ-RU-001..096):

@@ -3230,8 +3230,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path16) {
-      let input = path16;
+    function removeDotSegments(path18) {
+      let input = path18;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3483,8 +3483,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path16, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path16 && path16 !== "/" ? path16 : void 0;
+        const [path18, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path18 && path18 !== "/" ? path18 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs18, exportName) {
+    function addFormats(ajv, list, fs20, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs18[f]);
+        ajv.addFormat(f, fs20[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -7141,10 +7141,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path16) {
-  if (!path16)
+function getElementAtPath(obj, path18) {
+  if (!path18)
     return obj;
-  return path16.reduce((acc, key) => acc?.[key], obj);
+  return path18.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7553,11 +7553,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path16, issues) {
+function prefixIssues(path18, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path16);
+    iss.path.unshift(path18);
     return iss;
   });
 }
@@ -7704,16 +7704,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path16 = []) => {
+  const processError = (error3, path18 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path16, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path18, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path18, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path18, ...issue2.path]);
       } else {
-        const fullpath = [...path16, ...issue2.path];
+        const fullpath = [...path18, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -16026,6 +16026,9 @@ function activeLeases(paths) {
   }
   return out;
 }
+function subLeasesOf(paths, parentSlice) {
+  return activeLeases(paths).filter((l) => l.parent === parentSlice);
+}
 function isLiveSlice(status) {
   return status === "pending" || status === "in-progress";
 }
@@ -16184,6 +16187,85 @@ ${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } }
     structuredLog({ cmd: "build release", slice: sliceId });
     return success({ data: { slice: sliceId, released: held?.components ?? [] }, human: `released ${sliceId}.` });
   });
+}
+function runBuildSubClaim(paths, parentSlice, components) {
+  if (!parentSlice) return failure({ human: "usage: th build sub-claim <PARENT-SLICE> --components <c1,c2,...>" });
+  if (!components || components.length === 0) {
+    return failure({ human: "usage: th build sub-claim <PARENT-SLICE> --components <c1,c2,...>", data: { error: "no_components" } });
+  }
+  return withStateLock(paths, () => {
+    const r = readState(paths);
+    if (!r.exists) return NOT_INIT;
+    if (!r.state) return failure({ human: `state.json is invalid:
+${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+    const parent = r.state.slices.find((s) => s.id === parentSlice);
+    if (!parent) {
+      return failure({ human: `Parent slice not found: ${parentSlice}. Known: ${r.state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", parent: parentSlice } });
+    }
+    if (parent.status !== "in-progress") {
+      return failure({
+        human: `Cannot sub-claim under ${parentSlice}: it is "${parent.status}", not in-progress (the parent must hold the top-level lease).`,
+        data: { error: "parent_not_in_progress", parent: parentSlice, status: parent.status }
+      });
+    }
+    const parentComponents = new Set(parent.components);
+    const notInParent = components.filter((c) => !parentComponents.has(c));
+    if (notInParent.length > 0) {
+      return failure({
+        human: `Cannot sub-claim under ${parentSlice}: ${notInParent.join(", ")} not in the parent's components (${parent.components.join(", ") || "(none)"}). A sub-lease must be a subset.`,
+        data: { error: "not_a_subset", parent: parentSlice, requested: components, parentComponents: parent.components, extra: notInParent }
+      });
+    }
+    const siblings = subLeasesOf(paths, parentSlice);
+    const live = new Set(liveLeases(paths, r.state.slices).map((l) => l.slice));
+    const owners = /* @__PURE__ */ new Map();
+    for (const sib of siblings) {
+      if (!live.has(sib.slice)) continue;
+      for (const c of sib.components) if (!owners.has(c)) owners.set(c, sib.slice);
+    }
+    const conflicts = components.map((c) => ({ component: c, owner: owners.get(c) })).filter((x) => x.owner !== void 0);
+    if (conflicts.length > 0) {
+      return failure({
+        exitCode: 1,
+        human: `Cannot sub-claim under ${parentSlice}: ${conflicts.map((c) => `${c.component} held by sibling ${c.owner}`).join(", ")}. Serialize behind it.`,
+        data: { error: "sub_lease_conflict", parent: parentSlice, conflicts }
+      });
+    }
+    const everSubIds = new Set(readLeaseEventsForParent(paths, parentSlice));
+    const subId = `${parentSlice}#sub-${everSubIds.size + 1}`;
+    appendLeaseEvent(paths, { event: "claim", slice: subId, components, parent: parentSlice });
+    structuredLog({ cmd: "build sub-claim", subId, parent: parentSlice, components });
+    return success({
+      data: { subId, parent: parentSlice, components },
+      human: `sub-claimed ${subId} under ${parentSlice}: ${components.join(", ")}`
+    });
+  });
+}
+function runBuildSubRelease(paths, subId) {
+  if (!subId) return failure({ human: "usage: th build sub-release <SUB-ID>" });
+  return withStateLock(paths, () => {
+    const r = readState(paths);
+    if (!r.exists) return NOT_INIT;
+    if (!r.state) return failure({ human: `state.json is invalid:
+${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+    const held = activeLeases(paths).find((l) => l.slice === subId && l.parent !== void 0);
+    if (!held) {
+      return failure({
+        human: `No active sub-lease: ${subId}. Active sub-leases: ${activeLeases(paths).filter((l) => l.parent !== void 0).map((l) => l.slice).join(", ") || "(none)"}`,
+        data: { error: "sub_lease_not_found", subId }
+      });
+    }
+    appendLeaseEvent(paths, { event: "release", slice: subId, components: held.components, parent: held.parent });
+    structuredLog({ cmd: "build sub-release", subId, parent: held.parent });
+    return success({ data: { subId, parent: held.parent, released: held.components }, human: `released sub-lease ${subId}.` });
+  });
+}
+function readLeaseEventsForParent(paths, parentSlice) {
+  const ids = /* @__PURE__ */ new Set();
+  for (const e of readLeaseEvents(paths)) {
+    if (e.event === "claim" && e.parent === parentSlice) ids.add(e.slice);
+  }
+  return [...ids];
 }
 
 // src/commands/coverage.ts
@@ -16588,8 +16670,8 @@ function runRoute(paths, opts) {
 }
 
 // src/commands/next.ts
-var fs13 = __toESM(require("node:fs"));
-var path12 = __toESM(require("node:path"));
+var fs14 = __toESM(require("node:fs"));
+var path13 = __toESM(require("node:path"));
 
 // src/core/stages.ts
 var STAGE_PIPELINE = [
@@ -16729,6 +16811,142 @@ function reviseEscalations(state, cap = DEFAULT_REVISE_CAP) {
   return Object.entries(state.revise_loop_counts).filter(([, count]) => count >= cap).map(([mode, count]) => ({ mode, count, cap }));
 }
 
+// src/core/decisions.ts
+var fs13 = __toESM(require("node:fs"));
+var path12 = __toESM(require("node:path"));
+var GENESIS_PREV_HASH = "0".repeat(64);
+function decisionsPath(paths) {
+  return path12.join(paths.stateDir, "decisions.jsonl");
+}
+var CANONICAL_FIELD_ORDER = [
+  "id",
+  "event",
+  "title",
+  "rationale",
+  "links",
+  "supersededBy",
+  "proposer",
+  "proposedAt",
+  "approver",
+  "approvedAt",
+  "prevHash"
+];
+function canonicalText(event) {
+  const ordered = {};
+  for (const key of CANONICAL_FIELD_ORDER) {
+    const val = event[key];
+    if (val === void 0) continue;
+    if (key === "links") {
+      ordered[key] = [...val].sort();
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeRecordHash(event) {
+  return hashContent(canonicalText(event));
+}
+var HEX64 = /^[0-9a-f]{64}$/;
+var ID_RE = /^DECISION-\d{3,}$/;
+var EVENT_TYPES = /* @__PURE__ */ new Set(["proposed", "approved", "rejected", "superseded"]);
+function isValidEvent(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const e = parsed;
+  if (typeof e.id !== "string" || !ID_RE.test(e.id)) return false;
+  if (typeof e.event !== "string" || !EVENT_TYPES.has(e.event)) return false;
+  if (typeof e.prevHash !== "string" || !HEX64.test(e.prevHash)) return false;
+  if (typeof e.recordHash !== "string" || !HEX64.test(e.recordHash)) return false;
+  if (e.links !== void 0 && !Array.isArray(e.links)) return false;
+  return true;
+}
+function readDecisionEvents(paths) {
+  const file = decisionsPath(paths);
+  if (!fs13.existsSync(file)) return [];
+  const out = [];
+  for (const line of fs13.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (isValidEvent(parsed)) out.push(parsed);
+    } catch {
+    }
+  }
+  return out;
+}
+function numericSuffix(id) {
+  const m = /^DECISION-(\d+)$/.exec(id);
+  if (!m) return null;
+  return Number(m[1]);
+}
+function formatDecisionId(n) {
+  return `DECISION-${String(n).padStart(3, "0")}`;
+}
+function mintNextId(events) {
+  let max = 0;
+  for (const e of events) {
+    const n = numericSuffix(e.id);
+    if (n !== null && n > max) max = n;
+  }
+  return formatDecisionId(max + 1);
+}
+function appendDecisionEvent(paths, event) {
+  fs13.mkdirSync(paths.stateDir, { recursive: true });
+  const existing = readDecisionEvents(paths);
+  const prevHash = existing.length > 0 ? existing[existing.length - 1].recordHash : GENESIS_PREV_HASH;
+  const withPrev = { ...event, prevHash };
+  const recordHash = computeRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs13.appendFileSync(decisionsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function reduceDecisions(events) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const e of events) {
+    let d = byId.get(e.id);
+    if (!d) {
+      d = {
+        id: e.id,
+        title: e.title ?? "",
+        rationale: e.rationale ?? "",
+        status: e.event,
+        links: e.links ? [...e.links] : []
+      };
+      byId.set(e.id, d);
+    }
+    if (e.title !== void 0) d.title = e.title;
+    if (e.rationale !== void 0) d.rationale = e.rationale;
+    if (e.links !== void 0) d.links = [...e.links];
+    d.status = e.event;
+    if (e.proposer !== void 0) d.proposer = e.proposer;
+    if (e.proposedAt !== void 0) d.proposedAt = e.proposedAt;
+    if (e.approver !== void 0) d.approver = e.approver;
+    if (e.approvedAt !== void 0) d.approvedAt = e.approvedAt;
+    if (e.supersededBy !== void 0) d.supersededBy = e.supersededBy;
+  }
+  return [...byId.values()];
+}
+function sortDecisions(decisions) {
+  return [...decisions].sort((a, b) => (numericSuffix(a.id) ?? 0) - (numericSuffix(b.id) ?? 0));
+}
+function canonicalStageLink(stage) {
+  return `stage:${stage}`;
+}
+function gatingObligations(decisions, state) {
+  const stage = state?.current_stage;
+  if (!stage) return [];
+  const wanted = canonicalStageLink(stage);
+  const obligations = [];
+  for (const d of sortDecisions(decisions)) {
+    if (d.status === "approved") continue;
+    if (d.links.includes(wanted)) {
+      obligations.push({ decisionId: d.id, blockedStage: stage });
+    }
+  }
+  return obligations;
+}
+
 // src/commands/next.ts
 function runNext(paths, opts = {}) {
   const explain = opts.explain === true;
@@ -16814,13 +17032,30 @@ function runNext(paths, opts = {}) {
       explain
     );
   }
+  {
+    const obligations = gatingObligations(reduceDecisions(readDecisionEvents(paths)), s);
+    if (obligations.length > 0) {
+      const first = obligations[0];
+      const title = reduceDecisions(readDecisionEvents(paths)).find((d) => d.id === first.decisionId)?.title ?? "";
+      const titlePart = title ? ` (title: "${title}")` : "";
+      return emit(
+        {
+          kind: "resolve-decision-obligation",
+          action: `Approve ${first.decisionId}${titlePart} \u2014 it blocks stage '${first.blockedStage}' from proceeding.`,
+          why: `Decision ${first.decisionId} is linked to stage '${first.blockedStage}' and is not yet approved; no stage work can proceed while a gating decision is unmet (RULE-007).`,
+          data: { decisionId: first.decisionId, blockedStage: first.blockedStage }
+        },
+        explain
+      );
+    }
+  }
   const current = s.current_stage;
   const contract = stageContract(current);
   if (contract && contract.produces && current !== "final-verification") {
     const produced = contract.produces.replace(/\/$/, "");
-    const abs = path12.resolve(paths.root, produced);
+    const abs = path13.resolve(paths.root, produced);
     const registered = s.approved_artifacts.some((a) => a.file === produced);
-    const exists = fs13.existsSync(abs);
+    const exists = fs14.existsSync(abs);
     if (!registered) {
       if (!exists) {
         return emit(
@@ -16880,7 +17115,7 @@ function runNext(paths, opts = {}) {
       const produced = contract.produces.replace(/\/$/, "");
       const registered = s.approved_artifacts.some((a) => a.file === produced);
       if (!registered) {
-        const exists = fs13.existsSync(path12.resolve(paths.root, produced));
+        const exists = fs14.existsSync(path13.resolve(paths.root, produced));
         return emit(
           exists ? { kind: "register-artifact", action: `${produced} exists but is not registered \u2014 after the human signs off, run \`th artifact register ${produced} --version <n>\`.`, why: "Slices are settled and coverage is clean, so the only thing standing between here and a governed completion is recording the verification report's hash after the human signs off.", data: { file: produced } } : { kind: "produce-artifact", action: `Produce ${produced} separating coherence (Critic) from correctness (tests + human), then register it.`, why: "Slices are settled and coverage is clean, so the run now owes the verification report itself \u2014 the last artifact, which must separate Critic-certified coherence from test/human-certified correctness.", data: { produces: produced } },
           explain
@@ -17002,11 +17237,11 @@ why: ${next.why}` : `next: ${next.action}`;
 }
 
 // src/commands/delegate.ts
-var fs17 = __toESM(require("node:fs"));
+var fs18 = __toESM(require("node:fs"));
 
 // src/commands/context.ts
-var fs16 = __toESM(require("node:fs"));
-var path15 = __toESM(require("node:path"));
+var fs17 = __toESM(require("node:fs"));
+var path16 = __toESM(require("node:path"));
 
 // src/core/summary.ts
 var SUMMARY_HEADING_RE = /^(#{1,3})\s+summary\b/i;
@@ -17049,12 +17284,12 @@ function headFallback(lines, headLines) {
 }
 
 // src/commands/repo.ts
-var fs15 = __toESM(require("node:fs"));
-var path14 = __toESM(require("node:path"));
+var fs16 = __toESM(require("node:fs"));
+var path15 = __toESM(require("node:path"));
 
 // src/core/repo-map/scanner.ts
-var fs14 = __toESM(require("node:fs"));
-var path13 = __toESM(require("node:path"));
+var fs15 = __toESM(require("node:fs"));
+var path14 = __toESM(require("node:path"));
 
 // src/core/repo-map/schema.ts
 var REPO_MAP_SCHEMA_VERSION = 1;
@@ -17077,6 +17312,7 @@ function emptyRepoMap(repoRoot) {
     files: [],
     req_anchors: [],
     blast_radius_signals: []
+    // fileHashes intentionally absent — omit-when-absent (REQ-NFR-004)
   };
 }
 function toPosix(p) {
@@ -17178,7 +17414,16 @@ function serializeRepoMap(map) {
         trigger_patterns: sortStrings(s.trigger_patterns)
       })),
       (s) => s.flag
-    )
+    ),
+    // DS-002: emit fileHashes ONLY when present and non-empty (omit-when-absent —
+    // REQ-NFR-004). Keys are sorted for byte-stable output (REQ-NFR-002).
+    // Anchor: REQ-NFR-002 — deterministic: sorted keys, CRLF-normalized values (via hashContent).
+    // Anchor: REQ-NFR-004 — backward-compat: absent field → no key emitted → pre-epic byte identity.
+    ...map.fileHashes && Object.keys(map.fileHashes).length > 0 ? {
+      fileHashes: Object.fromEntries(
+        Object.entries(map.fileHashes).map(([k, v]) => [toPosix(k), v]).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+      )
+    } : {}
   };
   return JSON.stringify(ordered, null, 2) + "\n";
 }
@@ -17231,7 +17476,9 @@ function parseRepoMap(raw) {
     ownership_hints: p.ownership_hints,
     files: p.files,
     req_anchors: p.req_anchors,
-    blast_radius_signals: p.blast_radius_signals
+    blast_radius_signals: p.blast_radius_signals,
+    // DS-002: carry fileHashes when present (validated above).
+    ...p.fileHashes !== void 0 && p.fileHashes !== null ? { fileHashes: p.fileHashes } : {}
   };
   return { ok: true, map };
 }
@@ -17257,6 +17504,13 @@ function validateRepoMapShape(v) {
   if (!Array.isArray(v.req_anchors) || !v.req_anchors.every((r) => isPlainObject5(r) && typeof r.req_id === "string" && reqIdRe.test(r.req_id) && isStringArray(r.locations))) return false;
   const flags = BLAST_RADIUS_FLAGS;
   if (!Array.isArray(v.blast_radius_signals) || !v.blast_radius_signals.every((s) => isPlainObject5(s) && typeof s.flag === "string" && flags.includes(s.flag) && isStringArray(s.matching_paths) && isStringArray(s.trigger_patterns))) return false;
+  if (v.fileHashes !== void 0 && v.fileHashes !== null) {
+    if (!isPlainObject5(v.fileHashes)) return false;
+    const hexRe = /^[0-9a-f]{64}$/;
+    for (const val of Object.values(v.fileHashes)) {
+      if (typeof val !== "string" || !hexRe.test(val)) return false;
+    }
+  }
   return true;
 }
 function renderRepoMapMarkdown(map) {
@@ -17425,7 +17679,7 @@ function isTestPath(relPosix2) {
   return false;
 }
 function relPosix(root, abs) {
-  return path13.relative(root, abs).split(path13.sep).join("/");
+  return path14.relative(root, abs).split(path14.sep).join("/");
 }
 function safeParseJson(text) {
   try {
@@ -17443,11 +17697,11 @@ function classifyCommand(name) {
   return "other";
 }
 function scanRepo(root, opts = {}) {
-  const absRoot = path13.resolve(root);
+  const absRoot = path14.resolve(root);
   const map = emptyRepoMap(absRoot);
   const fileCountCap = opts.fileCountCap ?? FILE_COUNT_CAP;
   const totalBytesCap = opts.totalBytesCap ?? TOTAL_BYTES_CAP;
-  if (!fs14.existsSync(absRoot) || !fs14.statSync(absRoot).isDirectory()) {
+  if (!fs15.existsSync(absRoot) || !fs15.statSync(absRoot).isDirectory()) {
     return map;
   }
   const st = { filesScanned: 0, filesSkipped: 0, totalBytes: 0, capHit: null };
@@ -17500,13 +17754,13 @@ function scanRepo(root, opts = {}) {
     if (st.capHit) return;
     let entries;
     try {
-      entries = fs14.readdirSync(absDir, { withFileTypes: true });
+      entries = fs15.readdirSync(absDir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const entry of entries) {
       if (st.capHit) return;
-      const abs = path13.join(absDir, entry.name);
+      const abs = path14.join(absDir, entry.name);
       const rel = relPosix(absRoot, abs);
       if (entry.isDirectory()) {
         if (PRODUCER_DIRS.has(entry.name)) continue;
@@ -17531,7 +17785,7 @@ function scanRepo(root, opts = {}) {
       }
       let size = 0;
       try {
-        size = fs14.statSync(abs).size;
+        size = fs15.statSync(abs).size;
       } catch {
         st.filesSkipped++;
         continue;
@@ -17543,7 +17797,7 @@ function scanRepo(root, opts = {}) {
       st.totalBytes += size;
       st.filesScanned++;
       const nameLower = entry.name.toLowerCase();
-      const ext = path13.extname(entry.name).toLowerCase();
+      const ext = path14.extname(entry.name).toLowerCase();
       const langName = EXT_LANG[ext];
       if (langName) recordLang(langName, rel, "extension");
       const manifestLang = MANIFEST_LANG[nameLower];
@@ -17575,7 +17829,7 @@ function scanRepo(root, opts = {}) {
       if (nameLower === "package.json" && size <= MAX_READ_BYTES) {
         let text;
         try {
-          text = fs14.readFileSync(abs, "utf8");
+          text = fs15.readFileSync(abs, "utf8");
         } catch {
           text = void 0;
         }
@@ -17590,9 +17844,9 @@ function scanRepo(root, opts = {}) {
             }
           }
           const bin = json.bin;
-          const dir = path13.dirname(rel) === "." ? "" : path13.dirname(rel) + "/";
+          const dir = path14.dirname(rel) === "." ? "" : path14.dirname(rel) + "/";
           if (typeof bin === "string") {
-            entrypoints.push({ name: path13.basename(rel, ".json"), path: dir + bin, source: "package.json:bin" });
+            entrypoints.push({ name: path14.basename(rel, ".json"), path: dir + bin, source: "package.json:bin" });
           } else if (typeof bin === "object" && bin !== null && !Array.isArray(bin)) {
             for (const [bname, bpath] of Object.entries(bin)) {
               if (typeof bpath === "string") {
@@ -17607,13 +17861,13 @@ function scanRepo(root, opts = {}) {
             entrypoints.push({ name: "module", path: dir + json.module, source: "package.json:module" });
           }
           if (json.exports !== void 0) {
-            apiHints.push({ name: path13.basename(rel), source: "package.json:exports" });
+            apiHints.push({ name: path14.basename(rel), source: "package.json:exports" });
           }
         }
       } else if (nameLower === "makefile" && size <= MAX_READ_BYTES) {
         let text;
         try {
-          text = fs14.readFileSync(abs, "utf8");
+          text = fs15.readFileSync(abs, "utf8");
         } catch {
           text = void 0;
         }
@@ -18067,11 +18321,11 @@ var FORMATS = ["summary", "json", "md"];
 var REPO_MAP_JSON_REL = ".twinharness/repo-map.json";
 var REPO_MAP_MD_REL = "docs/00-repo-map.md";
 function atomicWrite(absFile, content) {
-  const dir = path14.dirname(absFile);
-  fs15.mkdirSync(dir, { recursive: true });
-  const tmp = path14.join(dir, `${path14.basename(absFile)}.tmp-${process.pid}`);
-  fs15.writeFileSync(tmp, content, "utf8");
-  fs15.renameSync(tmp, absFile);
+  const dir = path15.dirname(absFile);
+  fs16.mkdirSync(dir, { recursive: true });
+  const tmp = path15.join(dir, `${path15.basename(absFile)}.tmp-${process.pid}`);
+  fs16.writeFileSync(tmp, content, "utf8");
+  fs16.renameSync(tmp, absFile);
 }
 function runRepoMap(paths, opts = {}) {
   const write = opts.write !== false;
@@ -18084,6 +18338,20 @@ function runRepoMap(paths, opts = {}) {
     });
   }
   const map = scanRepo(paths.root);
+  {
+    const hashes = {};
+    for (const f of map.files) {
+      const abs = path15.join(paths.root, f.path);
+      try {
+        const content = fs16.readFileSync(abs, "utf8");
+        hashes[f.path] = hashContent(content);
+      } catch {
+      }
+    }
+    if (Object.keys(hashes).length > 0) {
+      map.fileHashes = hashes;
+    }
+  }
   const json = serializeRepoMap(map);
   const md = renderRepoMapMarkdown(map);
   const counts = {
@@ -18103,8 +18371,8 @@ function runRepoMap(paths, opts = {}) {
   const blastRadiusFlags = [...new Set(map.blast_radius_signals.map((s) => s.flag))].sort();
   let artifacts = [];
   if (write) {
-    const jsonAbs = path14.join(paths.stateDir, "repo-map.json");
-    const mdAbs = path14.join(paths.docsDir, "00-repo-map.md");
+    const jsonAbs = path15.join(paths.stateDir, "repo-map.json");
+    const mdAbs = path15.join(paths.docsDir, "00-repo-map.md");
     try {
       atomicWrite(jsonAbs, json);
     } catch {
@@ -18166,10 +18434,10 @@ function runRepoRelevant(paths, opts = {}) {
       });
     }
   }
-  const mapJsonPath = path14.join(paths.stateDir, REPO_MAP_REL);
+  const mapJsonPath = path15.join(paths.stateDir, REPO_MAP_REL);
   let rawMap = null;
   try {
-    rawMap = fs15.readFileSync(mapJsonPath, "utf8");
+    rawMap = fs16.readFileSync(mapJsonPath, "utf8");
   } catch {
     rawMap = null;
   }
@@ -18311,10 +18579,10 @@ function runRepoImpact(paths, opts = {}) {
       });
     }
   }
-  const mapJsonPath = path14.join(paths.stateDir, REPO_MAP_REL);
+  const mapJsonPath = path15.join(paths.stateDir, REPO_MAP_REL);
   let rawMap = null;
   try {
-    rawMap = fs15.readFileSync(mapJsonPath, "utf8");
+    rawMap = fs16.readFileSync(mapJsonPath, "utf8");
   } catch {
     rawMap = null;
   }
@@ -18413,6 +18681,124 @@ REQ anchors in scope: ${result.reqAnchors.join(", ")}`);
   }
   return lines.join("\n");
 }
+var REPO_STALE_EXIT = 4;
+var REPO_NO_MAP_EXIT = 5;
+function runRepoCheck(paths, _opts = {}) {
+  const REPO_MAP_JSON = path15.join(paths.stateDir, "repo-map.json");
+  let rawMap = null;
+  try {
+    rawMap = fs16.readFileSync(REPO_MAP_JSON, "utf8");
+  } catch {
+    structuredLog({ cmd: "repo check", outcome: "no-map" });
+    return {
+      ok: false,
+      exitCode: REPO_NO_MAP_EXIT,
+      data: { ok: false, fresh: false, shape: "no-map" },
+      human: "No repo-map.json found. Run `th repo map` first."
+    };
+  }
+  const parsed = parseRepoMap(rawMap);
+  if (!parsed.ok || !parsed.map) {
+    const errorCode = parsed.error ?? "map_invalid-json";
+    structuredLog({ cmd: "repo check", outcome: "parse-fail", error: errorCode });
+    return {
+      ok: false,
+      exitCode: 1,
+      data: { ok: false, error: errorCode },
+      human: `repo-map.json parse failure: ${errorCode}. Run \`th repo map\` to regenerate.`
+    };
+  }
+  const map = parsed.map;
+  if (!map.fileHashes || Object.keys(map.fileHashes).length === 0) {
+    structuredLog({ cmd: "repo check", outcome: "stale", reason: "no_hashes" });
+    return {
+      ok: false,
+      exitCode: REPO_STALE_EXIT,
+      data: {
+        ok: false,
+        fresh: false,
+        shape: "stale",
+        added: [],
+        removed: [],
+        modified: [],
+        reason: "no_hashes"
+      },
+      human: "repo-map.json exists but has no fileHashes. Run `th repo map` to update it."
+    };
+  }
+  const currentMap = scanRepo(paths.root);
+  const currentHashes = {};
+  for (const f of currentMap.files) {
+    const abs = path15.join(paths.root, f.path);
+    try {
+      const content = fs16.readFileSync(abs, "utf8");
+      currentHashes[f.path] = hashContent(content);
+    } catch {
+    }
+  }
+  const storedHashes = map.fileHashes;
+  const added = [];
+  const removed = [];
+  const modified = [];
+  for (const [p, h] of Object.entries(currentHashes)) {
+    if (!(p in storedHashes)) {
+      added.push(p);
+    } else if (storedHashes[p] !== h) {
+      modified.push(p);
+    }
+  }
+  for (const p of Object.keys(storedHashes)) {
+    if (!(p in currentHashes)) {
+      removed.push(p);
+    }
+  }
+  added.sort();
+  removed.sort();
+  modified.sort();
+  const isFresh = added.length === 0 && removed.length === 0 && modified.length === 0;
+  if (isFresh) {
+    structuredLog({ cmd: "repo check", outcome: "fresh" });
+    return {
+      ok: true,
+      exitCode: 0,
+      data: {
+        ok: true,
+        fresh: true,
+        shape: "fresh",
+        added: [],
+        removed: [],
+        modified: []
+      },
+      human: "repo-map.json is fresh \u2014 working tree matches the persisted map."
+    };
+  }
+  structuredLog({
+    cmd: "repo check",
+    outcome: "stale",
+    added: added.length,
+    removed: removed.length,
+    modified: modified.length
+  });
+  return {
+    ok: false,
+    exitCode: REPO_STALE_EXIT,
+    data: {
+      ok: false,
+      fresh: false,
+      shape: "stale",
+      added,
+      removed,
+      modified
+    },
+    human: [
+      "repo-map.json is stale.",
+      added.length > 0 ? `  added (${added.length}): ${added.slice(0, 5).join(", ")}${added.length > 5 ? " ..." : ""}` : null,
+      removed.length > 0 ? `  removed (${removed.length}): ${removed.slice(0, 5).join(", ")}${removed.length > 5 ? " ..." : ""}` : null,
+      modified.length > 0 ? `  modified (${modified.length}): ${modified.slice(0, 5).join(", ")}${modified.length > 5 ? " ..." : ""}` : null,
+      "Run `th repo map` to update."
+    ].filter(Boolean).join("\n")
+  };
+}
 
 // src/commands/context.ts
 var TOKENS_PER_CHAR = 1 / 4;
@@ -18422,15 +18808,15 @@ function runContextPack(paths, opts = {}) {
   if (!r.state) return failure({ human: "state.json is invalid.", data: { error: "invalid_state", issues: r.issues } });
   const s = r.state;
   const packed = s.approved_artifacts.map((a) => {
-    const abs = path15.resolve(paths.root, a.file);
+    const abs = path16.resolve(paths.root, a.file);
     let exists = false;
     let isDir = false;
     let content = "";
-    if (fs16.existsSync(abs)) {
-      const stat = fs16.statSync(abs);
+    if (fs17.existsSync(abs)) {
+      const stat = fs17.statSync(abs);
       if (stat.isFile()) {
         exists = true;
-        content = fs16.readFileSync(abs, "utf8");
+        content = fs17.readFileSync(abs, "utf8");
       } else if (stat.isDirectory()) {
         exists = true;
         isDir = true;
@@ -18731,13 +19117,13 @@ function runDelegateCheck(paths, opts) {
         data: { error: "path_outside_root", file: opts.file }
       });
     }
-    if (!fs17.existsSync(abs) || !fs17.statSync(abs).isFile()) {
+    if (!fs18.existsSync(abs) || !fs18.statSync(abs).isFile()) {
       return failure({
         human: `Capsule file not found: ${opts.file}`,
         data: { error: "capsule_not_found", file: opts.file }
       });
     }
-    text = fs17.readFileSync(abs, "utf8");
+    text = fs18.readFileSync(abs, "utf8");
   }
   const v = validateCapsule(text);
   structuredLog({ cmd: "delegate check", ok: v.ok, missing: v.missing.length });
@@ -18752,6 +19138,166 @@ function runDelegateCheck(paths, opts) {
     human: `Capsule INVALID \u2014 missing ${v.missing.length} required section(s):
 ${v.missing.map((m) => `  - ${m}`).join("\n")}`
   });
+}
+
+// src/commands/decision.ts
+var fs19 = __toESM(require("node:fs"));
+var path17 = __toESM(require("node:path"));
+var DECISION_GATE_EXIT = 6;
+function runDecisionAdd(paths, opts = {}) {
+  const title = opts.title?.trim();
+  const rationale = opts.rationale?.trim();
+  if (!title) {
+    structuredLog({ cmd: "decision add", error: "missing_field", field: "title" });
+    return failure({
+      human: "Missing required --title.",
+      data: { error: "missing_field", field: "title" }
+    });
+  }
+  if (!rationale) {
+    structuredLog({ cmd: "decision add", error: "missing_field", field: "rationale" });
+    return failure({
+      human: "Missing required --rationale.",
+      data: { error: "missing_field", field: "rationale" }
+    });
+  }
+  const links = opts.links ?? [];
+  const proposer = opts.proposer?.trim() || "orchestrator";
+  const now = opts.now ?? (() => /* @__PURE__ */ new Date());
+  const sealed = withStateLock(paths, () => {
+    const id = mintNextId(readDecisionEvents(paths));
+    return appendDecisionEvent(paths, {
+      id,
+      event: "proposed",
+      title,
+      rationale,
+      links,
+      proposer,
+      proposedAt: now().toISOString()
+    });
+  });
+  structuredLog({ cmd: "decision add", id: sealed.id, status: "proposed", links: links.length });
+  return success({
+    data: { id: sealed.id, status: "proposed", links },
+    human: `Recorded ${sealed.id} (proposed).`
+  });
+}
+function firstHeading(body) {
+  for (const line of body.split(/\r?\n/)) {
+    const m = /^#\s+(.+?)\s*$/.exec(line);
+    if (m) return m[1];
+  }
+  return void 0;
+}
+function runDecisionDetect(paths, _opts = {}) {
+  const candidates = [];
+  const adrDir = path17.join(paths.docsDir, "05-adrs");
+  try {
+    const entries = fs19.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
+    for (const f of entries) {
+      const rel = path17.posix.join("docs/05-adrs", f);
+      let title = f;
+      try {
+        const heading = firstHeading(fs19.readFileSync(path17.join(adrDir, f), "utf8"));
+        if (heading) title = heading;
+      } catch {
+      }
+      candidates.push({ title, source: "adr", sourceRef: rel });
+    }
+  } catch {
+  }
+  try {
+    const driftBody = fs19.readFileSync(paths.driftLog, "utf8");
+    const seen = /* @__PURE__ */ new Set();
+    for (const line of driftBody.split(/\r?\n/)) {
+      const m = /^##\s+(DRIFT-\d+)\b(.*)$/.exec(line);
+      if (!m) continue;
+      const id = m[1];
+      if (/—\s*resolved/i.test(m[2] ?? "")) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      candidates.push({
+        title: `Drift entry ${id}: ${m[2]?.replace(/^\s*[—-]\s*/, "").trim() || "scope-affecting change"}`,
+        source: "drift-log",
+        sourceRef: id,
+        rationale: "Drift entry signals a change that may constitute a significant run choice."
+      });
+    }
+  } catch {
+  }
+  try {
+    const scopeBody = fs19.readFileSync(path17.join(paths.docsDir, "02-scope.md"), "utf8");
+    if (/(^##\s+Changes\b)|(^\s*(ADDED|CHANGED):)/m.test(scopeBody)) {
+      candidates.push({
+        title: "Scope signal: a post-requirements scope change is recorded",
+        source: "scope-change",
+        sourceRef: "docs/02-scope.md",
+        rationale: "Scope document contains change markers indicating a scope addition/change."
+      });
+    }
+  } catch {
+  }
+  const stateResult = readState(paths);
+  const flags = stateResult.state?.blast_radius_flags ?? [];
+  flags.forEach((flag, i) => {
+    candidates.push({
+      title: `Blast-radius flag: ${flag}`,
+      source: "blast-radius-flag",
+      sourceRef: `state.json:blast_radius_flags[${i}]`,
+      rationale: "A blast-radius flag indicates a high-impact choice warranting a formal decision.",
+      suggestedLinks: ["stage:architecture"]
+    });
+  });
+  structuredLog({ cmd: "decision detect", candidates: candidates.length });
+  return success({
+    data: { candidates },
+    human: candidates.length === 0 ? "No decision candidates detected." : `Detected ${candidates.length} decision candidate(s).`
+  });
+}
+function listShape(d) {
+  const out = {
+    id: d.id,
+    title: d.title,
+    rationale: d.rationale,
+    status: d.status,
+    links: d.links
+  };
+  if (d.proposer !== void 0) out.proposer = d.proposer;
+  if (d.proposedAt !== void 0) out.proposedAt = d.proposedAt;
+  if (d.status !== "proposed") {
+    if (d.approver !== void 0) out.approver = d.approver;
+    if (d.approvedAt !== void 0) out.approvedAt = d.approvedAt;
+  }
+  if (d.status === "superseded" && d.supersededBy !== void 0) out.supersededBy = d.supersededBy;
+  return out;
+}
+function runDecisionList(paths, _opts = {}) {
+  const reduced = sortDecisions(reduceDecisions(readDecisionEvents(paths)));
+  const decisions = reduced.map(listShape);
+  structuredLog({ cmd: "decision list", decisions: decisions.length });
+  return success({
+    data: { decisions },
+    human: decisions.length === 0 ? "No decisions recorded." : reduced.map((d) => `${d.id}  [${d.status}]  ${d.title}`).join("\n")
+  });
+}
+function runDecisionCheck(paths, _opts = {}) {
+  const decisions = reduceDecisions(readDecisionEvents(paths));
+  const state = readState(paths).state;
+  const gating = gatingObligations(decisions, state);
+  if (gating.length > 0) {
+    structuredLog({ cmd: "decision check", gating: gating.length });
+    return {
+      ok: false,
+      exitCode: DECISION_GATE_EXIT,
+      data: { ok: false, gating },
+      human: [
+        "Unapproved decisions gate the current stage:",
+        ...gating.map((g) => `  ${g.decisionId} blocks stage '${g.blockedStage}'`)
+      ].join("\n")
+    };
+  }
+  structuredLog({ cmd: "decision check", gating: 0 });
+  return success({ data: { gating: [] }, human: "No unapproved gating decisions." });
 }
 
 // src/mcp-server.ts
@@ -19048,6 +19594,110 @@ var TOOL_DEFS = [
       additionalProperties: false
     },
     run: (paths, args) => runContextPack(paths, { slice: optString(args, "slice") })
+  },
+  // Anchor: REQ-101
+  // Anchor: REQ-102
+  {
+    name: "th_build_sub_claim",
+    description: "Open a sub-lease on a SUBSET of a parent slice's components for a scoped sub-Builder. The parent slice must be in-progress. Components must be a non-empty subset of the parent's declared components and disjoint from any live sibling sub-lease.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        parentSlice: stringProp("The PARENT-SLICE id holding the top-level lease (e.g. SLICE-3)."),
+        components: stringProp("Comma-separated subset of the parent's components to sub-lease; split/trim/drop-empties.")
+      },
+      required: ["parentSlice", "components"],
+      additionalProperties: false
+    },
+    run: (paths, args) => {
+      const components = (optString(args, "components") ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+      return runBuildSubClaim(paths, optString(args, "parentSlice"), components);
+    }
+  },
+  // Anchor: REQ-103
+  // Anchor: REQ-104
+  {
+    name: "th_build_sub_release",
+    description: "Release a sub-lease after the sub-Builder finishes or blocks. Verifies the id names an active sub-lease.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subId: stringProp("The SUB-ID to release (e.g. SLICE-3#sub-1).")
+      },
+      required: ["subId"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runBuildSubRelease(paths, optString(args, "subId"))
+  },
+  // Anchor: REQ-206
+  {
+    name: "th_repo_check",
+    description: "Check whether the persisted repo-map.json is stale (files added/removed/modified since the last `th repo map` run). Exit 0 = fresh; exit 4 = stale; exit 5 = no map; exit 1 = parse failure. Read-only; same behavior as `th repo check`.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false
+    },
+    run: (paths, _args) => runRepoCheck(paths)
+  },
+  // Anchor: REQ-408
+  {
+    name: "th_decision_detect",
+    description: "Surface advisory DecisionCandidate[] from four deterministic on-disk sources (ADRs, drift-log, scope-change signals, state.json blast-radius flags). Read-only; exit 0 always; never writes any state. Same behavior as `th decision detect`.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false
+    },
+    run: (paths, _args) => runDecisionDetect(paths)
+  },
+  // Anchor: REQ-408
+  {
+    name: "th_decision_add",
+    description: "Record one `proposed` decision: mint the next id, set the proposer/proposedAt audit trail. `title` and `rationale` are required. `links` is a comma-separated string (split/trim/drop-empties). Never auto-approves. Same behavior as `th decision add`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: stringProp("Decision title (required)."),
+        rationale: stringProp("Decision rationale (required)."),
+        links: stringProp("Comma-separated list of links to related artifacts (optional)."),
+        proposer: stringProp("Attribution for the proposing agent (default: orchestrator).")
+      },
+      required: ["title", "rationale"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runDecisionAdd(paths, {
+      title: optString(args, "title"),
+      rationale: optString(args, "rationale"),
+      links: optString(args, "links")?.split(",").map((s) => s.trim()).filter(Boolean),
+      proposer: optString(args, "proposer")
+    })
+  },
+  // Anchor: REQ-408
+  {
+    name: "th_decision_check",
+    description: "Fail (exit 6) when any unapproved decision gates the current stage; pass (exit 0) when all gating decisions are approved or none exist. Uses the single gatingObligations predicate (RULE-007). Same behavior as `th decision check`.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false
+    },
+    run: (paths, _args) => runDecisionCheck(paths)
+  },
+  // Anchor: REQ-408
+  {
+    name: "th_decision_list",
+    description: "Return the reduced decision set, sorted by numeric id suffix. Exit 0 always. Audit fields appear only when applicable to the status. Same behavior as `th decision list`.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false
+    },
+    run: (paths, _args) => runDecisionList(paths)
   }
 ];
 function listTools() {

@@ -42,13 +42,14 @@ import type { CommandResult } from "./core/output";
 
 import { runStateGet, runStateSet } from "./commands/state";
 import { runDriftAdd } from "./commands/drift";
-import { runBuildNextWave, runBuildClaim, runBuildRelease } from "./commands/build";
+import { runBuildNextWave, runBuildClaim, runBuildRelease, runBuildSubClaim, runBuildSubRelease } from "./commands/build";
 import { runCoverageCheck } from "./commands/coverage";
 import { runRoute } from "./commands/route";
 import { runNext } from "./commands/next";
 import { runDelegatePlan, runDelegatePack, runDelegateCheck } from "./commands/delegate";
-import { runRepoMap, runRepoRelevant, runRepoImpact } from "./commands/repo";
+import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck } from "./commands/repo";
 import { runContextPack } from "./commands/context";
+import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
 
 /* ------------------------------------------------------------------ *
  * Project-paths resolution                                            *
@@ -446,6 +447,121 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       additionalProperties: false,
     },
     run: (paths, args) => runContextPack(paths, { slice: optString(args, "slice") }),
+  },
+  // Anchor: REQ-101
+  // Anchor: REQ-102
+  {
+    name: "th_build_sub_claim",
+    description:
+      "Open a sub-lease on a SUBSET of a parent slice's components for a scoped sub-Builder. The parent slice must be in-progress. Components must be a non-empty subset of the parent's declared components and disjoint from any live sibling sub-lease.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        parentSlice: stringProp("The PARENT-SLICE id holding the top-level lease (e.g. SLICE-3)."),
+        components: stringProp("Comma-separated subset of the parent's components to sub-lease; split/trim/drop-empties."),
+      },
+      required: ["parentSlice", "components"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      const components = (optString(args, "components") ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+      return runBuildSubClaim(paths, optString(args, "parentSlice"), components);
+    },
+  },
+  // Anchor: REQ-103
+  // Anchor: REQ-104
+  {
+    name: "th_build_sub_release",
+    description:
+      "Release a sub-lease after the sub-Builder finishes or blocks. Verifies the id names an active sub-lease.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subId: stringProp("The SUB-ID to release (e.g. SLICE-3#sub-1)."),
+      },
+      required: ["subId"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runBuildSubRelease(paths, optString(args, "subId")),
+  },
+  // Anchor: REQ-206
+  {
+    name: "th_repo_check",
+    description:
+      "Check whether the persisted repo-map.json is stale (files added/removed/modified since the last `th repo map` run). Exit 0 = fresh; exit 4 = stale; exit 5 = no map; exit 1 = parse failure. Read-only; same behavior as `th repo check`.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+    run: (paths, _args) => runRepoCheck(paths),
+  },
+  // Anchor: REQ-408
+  {
+    name: "th_decision_detect",
+    description:
+      "Surface advisory DecisionCandidate[] from four deterministic on-disk sources (ADRs, drift-log, scope-change signals, state.json blast-radius flags). Read-only; exit 0 always; never writes any state. Same behavior as `th decision detect`.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+    run: (paths, _args) => runDecisionDetect(paths),
+  },
+  // Anchor: REQ-408
+  {
+    name: "th_decision_add",
+    description:
+      "Record one `proposed` decision: mint the next id, set the proposer/proposedAt audit trail. `title` and `rationale` are required. `links` is a comma-separated string (split/trim/drop-empties). Never auto-approves. Same behavior as `th decision add`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: stringProp("Decision title (required)."),
+        rationale: stringProp("Decision rationale (required)."),
+        links: stringProp("Comma-separated list of links to related artifacts (optional)."),
+        proposer: stringProp("Attribution for the proposing agent (default: orchestrator)."),
+      },
+      required: ["title", "rationale"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runDecisionAdd(paths, {
+        title: optString(args, "title"),
+        rationale: optString(args, "rationale"),
+        links: optString(args, "links")
+          ?.split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        proposer: optString(args, "proposer"),
+      }),
+  },
+  // Anchor: REQ-408
+  {
+    name: "th_decision_check",
+    description:
+      "Fail (exit 6) when any unapproved decision gates the current stage; pass (exit 0) when all gating decisions are approved or none exist. Uses the single gatingObligations predicate (RULE-007). Same behavior as `th decision check`.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+    run: (paths, _args) => runDecisionCheck(paths),
+  },
+  // Anchor: REQ-408
+  {
+    name: "th_decision_list",
+    description:
+      "Return the reduced decision set, sorted by numeric id suffix. Exit 0 always. Audit fields appear only when applicable to the status. Same behavior as `th decision list`.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+    run: (paths, _args) => runDecisionList(paths),
   },
 ] as const;
 
