@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { resolveWithinRoot } from "../core/paths";
@@ -6,6 +7,7 @@ import { type ValidationIssue } from "../core/state-schema";
 import { loadBriefFromFile, type TaskBrief } from "../core/brief";
 import { structuredLog } from "../core/log";
 import { formatIssues } from "../core/guards";
+import { readState } from "../core/state-store";
 
 /**
  * `th tier` — the Tier-0 classifier (spec §5).
@@ -24,6 +26,51 @@ import { formatIssues } from "../core/guards";
 
 /** Exit code for a blast-radius veto (distinct from the generic failure 1). */
 export const VETO_EXIT_CODE = 3;
+
+/**
+ * Brownfield prerequisite check (REQ-301..305, IF-007).
+ *
+ * Returns `{ ok: true, missing: [] }` immediately for any non-brownfield run
+ * (including absent/unreadable state.json). Only when `project_mode ===
+ * "brownfield"` does it check for the two required artifacts.
+ *
+ * Short-circuit guarantee (REQ-304, REQ-305): greenfield and uninitialized
+ * projects are byte-identical to pre-epic behavior — this helper changes nothing
+ * for them (no side-effects, no output change, no exit-code change).
+ */
+function brownfieldPrerequisite(
+  paths: ProjectPaths,
+): { ok: true; missing: [] } | { ok: false; missing: string[] } {
+  // Anchor: REQ-305
+  // Read state; tolerate absent or unreadable state.json (falls through as greenfield).
+  const stateResult = readState(paths);
+  if (!stateResult.state || stateResult.state.project_mode !== "brownfield") {
+    // REQ-304: short-circuit — greenfield / uninitialized path, nothing changes.
+    return { ok: true, missing: [] };
+  }
+
+  // Brownfield run: check both prerequisite artifacts.
+  // Anchor: REQ-301
+  const repoMapPath = path.join(paths.stateDir, "repo-map.json");
+  const codebaseAnalysisPath = path.join(paths.docsDir, "00-existing-codebase-analysis.md");
+
+  const missing: string[] = [];
+  if (!fs.existsSync(repoMapPath)) {
+    // Canonical relative path as per contract IF-007.
+    const rel = path.relative(paths.root, repoMapPath).replace(/\\/g, "/");
+    missing.push(rel);
+  }
+  if (!fs.existsSync(codebaseAnalysisPath)) {
+    const rel = path.relative(paths.root, codebaseAnalysisPath).replace(/\\/g, "/");
+    missing.push(rel);
+  }
+
+  if (missing.length > 0) {
+    // Anchor: REQ-302
+    return { ok: false, missing };
+  }
+  return { ok: true, missing: [] };
+}
 
 function briefLoadFailure(briefPath: string, issues: ValidationIssue[]): CommandResult {
   return failure({
@@ -83,6 +130,13 @@ export function runTierClassify(paths: ProjectPaths, briefPath?: string): Comman
     ? "Advisory: T0 — all five Tier-0 conditions hold and no blast-radius flag is present."
     : `Advisory: ≥T1 — Tier 0 not eligible:\n${reasons.map((r) => `  - ${r}`).join("\n")}`;
 
+  // Anchor: REQ-303 — brownfield advisory (exit 0, surfaced in data only).
+  const prereq = brownfieldPrerequisite(paths);
+  const extraData: Record<string, unknown> = {};
+  if (!prereq.ok) {
+    extraData.brownfield_prerequisite_missing = prereq.missing;
+  }
+
   return success({
     data: {
       tier0_eligible,
@@ -90,6 +144,7 @@ export function runTierClassify(paths: ProjectPaths, briefPath?: string): Comman
       blast_radius_flags: loaded.brief.blast_radius_flags,
       advisory,
       reasons,
+      ...extraData,
     },
     human,
   });
@@ -102,6 +157,18 @@ export function runTierClassify(paths: ProjectPaths, briefPath?: string): Comman
  */
 export function runTierVetoCheck(paths: ProjectPaths, briefPath?: string): CommandResult {
   if (!briefPath) return failure({ human: "usage: th tier veto-check <brief.json>" });
+
+  // Anchor: REQ-301, REQ-302 — brownfield hard refusal BEFORE brief-load logic.
+  const prereq = brownfieldPrerequisite(paths);
+  if (!prereq.ok) {
+    structuredLog({ cmd: "tier veto-check", error: "brownfield_prerequisite_missing", missing: prereq.missing });
+    return failure({
+      exitCode: VETO_EXIT_CODE,
+      data: { error: "brownfield_prerequisite_missing", missing: prereq.missing },
+      human: `BLOCKED: brownfield prerequisite artifact(s) missing — run \`th repo map\` and provide docs/00-existing-codebase-analysis.md first:\n${prereq.missing.map((m) => `  - ${m}`).join("\n")}`,
+    });
+  }
+
   // Resolve the brief path against the project root (--cwd), like `th artifact register`.
   const briefFile = resolveWithinRoot(paths.root, briefPath);
   if (briefFile === null) {
