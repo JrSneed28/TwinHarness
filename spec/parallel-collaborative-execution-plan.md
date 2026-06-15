@@ -1,12 +1,14 @@
 # TwinHarness — Parallel & Collaborative Orchestration: Execution Plan
 
-> **Status:** **Phases 0–4 DONE.** P0: REQ-PCO-000..003. P1: doc fan-out
+> **Status:** **ALL PHASES (0–7) DONE.** P0: REQ-PCO-000..003. P1: doc fan-out
 > REQ-PCO-010. P2: Merge-Coordinator REQ-PCO-020 + per-slice triad REQ-PCO-021.
 > P3: parallelism optimizer (`th build plan --advise`) REQ-PCO-030. P4: blackboard
 > collab REQ-PCO-040, section-level artifact leases REQ-PCO-041, debate ledger
-> REQ-PCO-042 (feeds the stop-gate via optional `debate_open_blocking`), Reconciler
-> agent + debate wiring REQ-PCO-043. All green (977 tests; MCP tool count unchanged
-> at 23; agent count now 13). Phases 5–7 planned.
+> REQ-PCO-042 (optional `debate_open_blocking` feeds the stop-gate), Reconciler agent
+> REQ-PCO-043. P5: standing Red-Team REQ-PCO-050. P6: Librarian REQ-PCO-060. P7:
+> soft-dep speculative dispatch REQ-PCO-070 + parallel cascade re-verify / parallel
+> researchers-debuggers REQ-PCO-071. All green (1003 tests; MCP tool count unchanged
+> at 23; agent count now 15).
 > **Companion to:** `spec/parallel-collaborative-orchestration.md` (the design/*what*).
 > This document is the *how, in what order, in which files, with what tests*.
 > **Executor:** this Claude Code session executes the phases directly.

@@ -15609,6 +15609,9 @@ function validateState(value) {
       if (s.depends_on !== void 0 && (!Array.isArray(s.depends_on) || s.depends_on.some((d) => typeof d !== "string"))) {
         issues.push({ path: `slices[${i}].depends_on`, message: "must be an array of strings or absent" });
       }
+      if (s.depends_on_soft !== void 0 && (!Array.isArray(s.depends_on_soft) || s.depends_on_soft.some((d) => typeof d !== "string"))) {
+        issues.push({ path: `slices[${i}].depends_on_soft`, message: "must be an array of strings or absent" });
+      }
     });
   }
   if (typeof v.implementation_allowed !== "boolean") {

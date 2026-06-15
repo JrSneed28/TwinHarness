@@ -8,7 +8,7 @@
 
 ## What it is
 
-TwinHarness is a Claude Code plugin: an agentic SDLC orchestrator that takes a vague software idea and produces working, tested software through a disciplined pipeline. It coordinates 13 specialized agents — Orchestrator, Spec, Critic, Vertical-Slice, Builder, UI-Designer, Doc-Writer, Merge-Coordinator (wave-order worktree merge-back controller), Test-Author (authors REQ-anchored tests alongside the Builder in the per-slice triad), Reconciler (merges parallel fragments and adjudicates design debates into one coherent artifact), plus on-demand Researcher (conditional, source-cited), Debugger (evidence-first defect tracer), and Codebase-Inspector (maps an existing repo for brownfield adoption) — and backs them with a deterministic TypeScript CLI (`th`) that handles every mechanical operation: state, content hashing, REQ-ID traceability, coverage gates, the drift log, and a Stop hook that blocks Claude from claiming "done" while state is invalid or a blocking discovery is open.
+TwinHarness is a Claude Code plugin: an agentic SDLC orchestrator that takes a vague software idea and produces working, tested software through a disciplined pipeline. It coordinates 15 specialized agents — Orchestrator, Spec, Critic, Vertical-Slice, Builder, UI-Designer, Doc-Writer, Merge-Coordinator (wave-order worktree merge-back controller), Test-Author (authors REQ-anchored tests alongside the Builder in the per-slice triad), Reconciler (merges parallel fragments and adjudicates design debates into one coherent artifact), Red-Team (standing adversarial security/failure challenger), Librarian (long-lived repo-understanding / artifact-index service), plus on-demand Researcher (conditional, source-cited), Debugger (evidence-first defect tracer), and Codebase-Inspector (maps an existing repo for brownfield adoption) — and backs them with a deterministic TypeScript CLI (`th`) that handles every mechanical operation: state, content hashing, REQ-ID traceability, coverage gates, the drift log, and a Stop hook that blocks Claude from claiming "done" while state is invalid or a blocking discovery is open.
 
 Three things make it different from asking an agent to build something directly:
 
@@ -225,7 +225,7 @@ The layer treats all repository content as untrusted data: discovered build/test
 
 **What works today:**
 
-- Full T0–T3 pipeline, all 13 agents, all stages.
+- Full T0–T3 pipeline, all 15 agents, all stages.
 - `th` CLI with 271+ targeted tests for the self-epic epic slices covering CLI behavior, plugin-packaging integrity, security containment (path traversal, proto-pollution), the deterministic repo-understanding layer (scanner, schema, relevance, impact, MCP tools), decision governance (hash-chain tamper detection, TTY barrier, gating predicate), repo staleness detection, brownfield tiering gate, `th next` decision-obligation rung, and the full 23-tool MCP surface; CI runs typecheck, build, a dist-sync assertion, and the full suite on every push and PR.
 - Validated Claude Code plugin packaging (`claude plugin validate` + `--plugin-dir` load pass).
 - PreToolUse write-gate: blocks the Write/Edit/NotebookEdit path by default before gates clear and across slice-component boundaries during the build, plus a conservative pre-implementation Bash matcher; Bash writes remain out of scope as a guarantee (v0.3.0+).
@@ -244,7 +244,7 @@ The layer treats all repository content as untrusted data: discovered build/test
 ```
 .claude-plugin/   plugin manifest and marketplace.json
 .github/          CI (typecheck, build, dist-sync assertion, full test suite)
-agents/           13 agent prompt files (lean cores; detail lives in skills/twinharness/reference/)
+agents/           15 agent prompt files (lean cores; detail lives in skills/twinharness/reference/)
 commands/         4 slash command definitions
 dist/             compiled CLI — ships in git (no build step at install time)
 hooks/            hook wiring (hooks.json → th hook stop-gate / pretool-gate)

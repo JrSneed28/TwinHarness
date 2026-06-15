@@ -100,6 +100,17 @@ bounded charter, never to become a second controller. The guardrails are hard li
   tools (preferred — see the MCP Tooling pointer above)). Worktrees isolate CODE only;
   `.twinharness/` stays shared.
 
+## Running concurrently with other Debuggers (Phase 7, Slice 12, REQ-PCO-071)
+
+Multiple Debuggers may be spawned to run **CONCURRENTLY** on **independent failures** — the
+Orchestrator dispatches one per distinct failing slice/topic in a single batched message. To keep
+concurrent Debuggers from colliding, **each is scoped by a component sub-lease to a DISJOINT set of
+components** (the owning slice's `th build sub-claim` boundary above). Stay strictly inside your
+sub-leased components; another Debugger may be tracing a different failure in a sibling worktree at
+the same time, and the shared `.twinharness/` lease ledger is what keeps you from stepping on each
+other. Do not widen your scope to a component another Debugger holds — that is a boundary
+escalation, not a retry.
+
 ## Boundaries
 
 - **You propose; the Builder fixes.** Hand the fix to the Builder for the owning slice. You may apply

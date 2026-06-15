@@ -48,6 +48,16 @@ export interface SliceState {
    * existing slices hash byte-identically.
    */
   depends_on?: string[];
+  /**
+   * INTERFACE-only (soft) dependencies: slice IDs whose CONTRACT this slice
+   * builds against but which need not be `done` first. Such a slice may be
+   * dispatched SPECULATIVELY once its HARD `depends_on` are done, because the
+   * merge-conflict-as-BLOCKING-drift backstop catches a bad speculation
+   * (Phase 7 Slice 11, REQ-PCO-070). Optional: absent ⇒ no soft deps. Same
+   * shape as `depends_on`; omitted from serialization when absent so existing
+   * slices hash byte-identically.
+   */
+  depends_on_soft?: string[];
 }
 
 /**
@@ -235,6 +245,10 @@ export function validateState(value: unknown): ValidationResult {
       }
       if (s.depends_on !== undefined && (!Array.isArray(s.depends_on) || s.depends_on.some((d: unknown) => typeof d !== "string"))) {
         issues.push({ path: `slices[${i}].depends_on`, message: "must be an array of strings or absent" });
+      }
+      // Optional soft (interface-only) deps (REQ-PCO-070); same shape as depends_on, validated only when present.
+      if (s.depends_on_soft !== undefined && (!Array.isArray(s.depends_on_soft) || s.depends_on_soft.some((d: unknown) => typeof d !== "string"))) {
+        issues.push({ path: `slices[${i}].depends_on_soft`, message: "must be an array of strings or absent" });
       }
     });
   }

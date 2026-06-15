@@ -37,8 +37,8 @@ const agentFiles = fs
 const READ_ONLY_AGENTS = ["critic", "codebase-inspector", "researcher"];
 
 describe("REQ-PCO-002: agents can reach the th MCP tools", () => {
-  it("REQ-PCO-002: discovers all thirteen agent files", () => {
-    expect(agentFiles.length).toBe(13);
+  it("REQ-PCO-002: discovers all fifteen agent files", () => {
+    expect(agentFiles.length).toBe(15);
   });
 
   it.each(agentFiles)(

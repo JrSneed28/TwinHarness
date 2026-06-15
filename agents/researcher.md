@@ -62,6 +62,17 @@ recency on a version-sensitive claim, or a finding that does not actually bear o
 loop with `th revise status research --json` / `th revise bump research`; escalate to the human at
 the cap (default 3).
 
+## Running concurrently with other Researchers (Phase 7, Slice 12, REQ-PCO-071)
+
+Multiple Researchers may be spawned to run **CONCURRENTLY** on **independent topics** — the
+Orchestrator dispatches one per distinct topic/REQ-cluster in a single batched message, since
+independent topics have no ordering dependency. Stay scoped to **your** topic and its REQ-IDs
+(per "Scope before you search" above); do not survey a sibling Researcher's topic. Before findings
+feed the design stages, **cross-check across the parallel Researchers**: where two topics touch the
+same decision, reconcile any conflicting claims (and apply the adversarial-verification bar to the
+overlap) so the design receives one coherent, sourced body of evidence rather than contradictory
+per-topic reports.
+
 ## Boundaries
 
 - **You gather; you do not decide.** Findings feed the design; the design stage + human choose.

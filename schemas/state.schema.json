@@ -66,6 +66,11 @@
             "type": "array",
             "items": { "type": "string" },
             "description": "Slice IDs that must reach done before this slice can build. Absent = no explicit dependencies."
+          },
+          "depends_on_soft": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "INTERFACE-only (soft) dependency slice IDs. May be dispatched speculatively against the upstream contract before the upstream is done; the merge-conflict-as-BLOCKING-drift backstop catches bad speculations (REQ-PCO-070). Absent = no soft dependencies."
           }
         }
       }

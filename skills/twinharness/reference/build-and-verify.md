@@ -155,6 +155,28 @@ th slice set-status <SLICE-ID> done          # after the Critic code-review PASS
 The wave schedule from `th build plan` is the mechanical input — not a judgment call. Apply it
 exactly as computed.
 
+**Speculative dispatch against an upstream contract (Slice 11, REQ-PCO-070).** A downstream slice
+that needs only the *interface* of an upstream slice — not its finished implementation — may declare
+that relationship as `depends_on_soft` (an interface-only dependency) rather than a hard
+`depends_on`. A slice whose only unmet dependencies are `depends_on_soft` may be dispatched
+**SPECULATIVELY**: the Orchestrator spawns its Builder against the upstream's **published contract**
+(`docs/07-contracts.md` / the upstream task file's contract block) *before* that upstream slice is
+`done`, instead of waiting a full wave. This widens real parallelism when the interface is stable
+even though the implementation is not.
+
+- **Hard `depends_on` still gates.** A true dependency — where the downstream slice needs the
+  upstream's *behavior*, not just its shape — stays `depends_on` and is serialized into a later wave
+  exactly as before. Speculation applies only to `depends_on_soft` edges. Component-set disjointness
+  (the wave rule above) is still required; speculation relaxes the *ordering* wait, not the
+  shared-component serialization.
+- **The merge backstop catches a bad speculation.** If the upstream contract shifts under the
+  speculation (the interface the downstream built against was wrong), the divergence surfaces at
+  merge-back as a **conflict between plan-disjoint slices** — and the Merge-Coordinator's existing
+  "non-clean merge → BLOCKING drift" backstop (see the worktree merge-back protocol below) catches
+  it: it opens `th drift add --layer requirement` for human resolution rather than hand-resolving.
+  Speculation never needs a new failure path — it rides the existing merge-conflict-as-BLOCKING-drift
+  guard.
+
 ### Worktree isolation + merge-back protocol (§21)
 
 Parallel Builders — and any **scoped sub-Builder** one of them spawns under a component sub-lease
@@ -407,6 +429,18 @@ th revise status <mode> --json     # check the cap before re-running
 The Critic reviews only whether the downstream artifact is coherent against the *changed portion*
 of the upstream summary — not a full re-review from scratch. This keeps re-verification
 proportionate to the actual change.
+
+**Run the stale set CONCURRENTLY (Slice 12, REQ-PCO-071).** The diff-scoped stale set from
+`th stale` is a set of **independent** downstream artifacts — each is re-checked against the same
+upstream diff with no ordering dependency between them. So re-run the matching Critic for **every
+stale downstream artifact concurrently**: emit all the stale-set Critic spawns in **ONE batched
+message / single turn** (spawning them across turns serializes the cascade and defeats the
+parallelism — same mechanical rule as the parallel-wave Builder spawns above). Each stale Critic
+still runs in its own fresh context and respects its own `th revise status <mode>` cap.
+Independent **Researchers** and **Debuggers** likewise run **in parallel** when they are working on
+independent topics or independent slices (Researchers cross-check findings before feeding design;
+Debuggers are scoped by sub-lease to disjoint components) — see `agents/researcher.md` and
+`agents/debugger.md`.
 
 **Step 4 — Escalate genuine conflicts.**
 

@@ -1,16 +1,16 @@
 # Proposal: Parallel & Collaborative Orchestration for TwinHarness
 
-> **Status:** Plan + **Phases 0–4 implemented**. This document is the agreed plan for
-> introducing genuine parallelism and multi-agent collaboration into TwinHarness
-> while preserving its core guarantees. Re-synced to `main`. **Phases 0–4 are now
+> **Status:** Plan + **ALL PHASES (0–7) implemented**. This document is the agreed plan
+> for introducing genuine parallelism and multi-agent collaboration into TwinHarness
+> while preserving its core guarantees. Re-synced to `main`. **All phases are now
 > implemented and green** (P0: lock hardening + spawn-batching + MCP reachability +
 > MCP Tooling Guideline; P1: documentation fan-out; P2: Merge-Coordinator + per-slice
 > triad; P3: slice-plan parallelism optimizer; P4: the new deterministic core —
-> blackboard collab + section-level artifact leases + debate ledger + Reconciler —
-> see the execution plan); Phases 5–7 remain planned.
+> blackboard collab + section-level artifact leases + debate ledger + Reconciler;
+> P5: standing Red-Team; P6: Librarian; P7: soft-dep speculative dispatch + parallel
+> cascade re-verify — see the execution plan).
 >
-> **Scope of this PR:** the plan documents PLUS the Phase 0–4 implementation. Later
-> phases (red-team, Librarian, speculative dispatch) land in follow-up work.
+> **Scope of this PR:** the plan documents PLUS the full Phase 0–7 implementation.
 
 ---
 

@@ -55,6 +55,13 @@ export function computeWave(
     if (s.status !== "pending") continue;
     pending++;
 
+    // HARD deps (`depends_on`) gate as always: every one must be `done` before
+    // the slice can dispatch. `depends_on_soft` deliberately does NOT gate —
+    // soft (interface-only) deps may still be pending and the slice is dispatched
+    // SPECULATIVELY against the upstream contract (REQ-PCO-070); a bad speculation
+    // is caught downstream by the merge-conflict-as-BLOCKING-drift backstop. So a
+    // slice's dispatchability depends ONLY on its HARD deps here, and a slice with
+    // no depends_on_soft is wholly unaffected.
     const unmet = (s.depends_on ?? []).filter((d) => statusById.get(d) !== "done");
     if (unmet.length > 0) {
       held.push({ id: s.id, reason: "dependency", detail: unmet });
