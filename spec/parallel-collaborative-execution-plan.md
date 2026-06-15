@@ -1,15 +1,18 @@
 # TwinHarness — Parallel & Collaborative Orchestration: Execution Plan
 
-> **Status:** Draft execution plan (plan only — no source/build performed).
+> **Status:** Draft execution plan (plan only — no source/build performed yet).
 > **Companion to:** `spec/parallel-collaborative-orchestration.md` (the design/*what*).
 > This document is the *how, in what order, in which files, with what tests*.
-> **Re-sync note:** rebase onto `main` after the in-flight fix session lands before execution.
+> **Executor:** this Claude Code session executes the phases below directly.
+> **Re-sync note:** rebase onto `main` after the in-flight fix session lands, then execute.
 
 ---
 
-## 0. Method & ground rules (dogfooded from `spec/build-plan.md`)
+## 0. Method & ground rules
 
-We build this the way TwinHarness prescribes:
+We build this the way TwinHarness builds itself (the conventions in `spec/build-plan.md`):
+the mechanical/prompt split, vertical slices with a walking skeleton first, REQ-anchored
+unit tests, and a per-slice `npm run verify` gate.
 
 1. **Mechanical truths get code; judgment gets prompts.** New coordination mechanics
    (section leases, debate ledger, blackboard fragment validation, spawn batching oracle)
