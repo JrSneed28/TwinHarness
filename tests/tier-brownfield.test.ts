@@ -12,6 +12,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runTierClassify, runTierVetoCheck, VETO_EXIT_CODE } from "../src/commands/tier";
+import { runRepoMap } from "../src/commands/repo";
+import { serializeRepoMap, emptyRepoMap } from "../src/core/repo-map/schema";
 import { writeState } from "../src/core/state-store";
 import { initialState } from "../src/core/state-schema";
 
@@ -31,16 +33,27 @@ function initBrownfield(t: TempProject): void {
   writeState(t.paths, { ...initialState(), project_mode: "brownfield" });
 }
 
-/** Create a valid repo-map.json so that artifact is present. */
-function writeRepoMap(t: TempProject): void {
+/**
+ * Snapshot the CURRENT working tree into a FRESH repo-map.json via the real
+ * `th repo map`. MUST be called AFTER every other file (brief, codebase-analysis)
+ * is written, so nothing is "added" afterward and `th repo check` reads the map as
+ * fresh at veto/classify time. The temp project always has at least brief.json to
+ * scan, so fileHashes is non-empty (an empty-hashes map would itself read stale).
+ */
+function writeFreshRepoMap(t: TempProject): void {
+  const res = runRepoMap(t.paths, { write: true });
+  if (!res.ok) throw new Error("writeFreshRepoMap: runRepoMap failed");
+}
+
+/**
+ * Write a repo-map.json that is PRESENT but STALE: a valid map with no
+ * `fileHashes` (REQ-NFR-004 → `th repo check` returns no_hashes/exit 4). Models a
+ * map that has drifted from the working tree.
+ */
+function writeStaleRepoMap(t: TempProject): void {
   fs.mkdirSync(t.paths.stateDir, { recursive: true });
-  const repoMap = {
-    version: "1",
-    generatedAt: new Date().toISOString(),
-    root: t.root,
-    files: [],
-  };
-  fs.writeFileSync(path.join(t.paths.stateDir, "repo-map.json"), JSON.stringify(repoMap), "utf8");
+  const map = emptyRepoMap(t.root); // valid map, but no fileHashes ⇒ stale.
+  fs.writeFileSync(path.join(t.paths.stateDir, "repo-map.json"), serializeRepoMap(map), "utf8");
 }
 
 /** Create a minimal docs/00-existing-codebase-analysis.md. */
@@ -117,10 +130,10 @@ describe("SLICE-3 — Brownfield tiering prerequisite gate", () => {
     () => {
       tp = makeTempProject();
       initBrownfield(tp);
-      // Provide repo-map but not codebase-analysis.
-      writeRepoMap(tp);
-
+      // Provide a FRESH repo-map but not codebase-analysis. Generate the map LAST
+      // (after the brief) so it is fresh at check time — only the analysis is missing.
       const briefPath = writeBrief(tp, TRIVIAL_BRIEF);
+      writeFreshRepoMap(tp);
       const res = runTierVetoCheck(tp.paths, briefPath);
 
       expect(res.ok).toBe(false);
@@ -136,13 +149,13 @@ describe("SLICE-3 — Brownfield tiering prerequisite gate", () => {
     () => {
       tp = makeTempProject();
       initBrownfield(tp);
-      writeRepoMap(tp);
       writeCodebaseAnalysis(tp);
-
       const briefPath = writeBrief(tp, TRIVIAL_BRIEF);
+      // Fresh map generated LAST so `th repo check` reads it as fresh.
+      writeFreshRepoMap(tp);
       const res = runTierVetoCheck(tp.paths, briefPath);
 
-      // Should succeed — clean brief, no blast-radius flags.
+      // Should succeed — clean brief, no blast-radius flags, fresh map.
       expect(res.ok).toBe(true);
       expect(res.exitCode).toBe(0);
       expect(res.data?.blocked).toBe(false);
@@ -184,15 +197,83 @@ describe("SLICE-3 — Brownfield tiering prerequisite gate", () => {
     () => {
       tp = makeTempProject();
       initBrownfield(tp);
-      writeRepoMap(tp);
       writeCodebaseAnalysis(tp);
-
       const briefPath = writeBrief(tp, TRIVIAL_BRIEF);
+      // Fresh map generated LAST so `th repo check` reads it as fresh.
+      writeFreshRepoMap(tp);
       const res = runTierClassify(tp.paths, briefPath);
 
       expect(res.ok).toBe(true);
       expect(res.exitCode).toBe(0);
-      // When both artifacts are present, no advisory signal.
+      // When both artifacts are present AND the map is fresh, no advisory signal.
+      expect(res.data?.brownfield_prerequisite_missing).toBeUndefined();
+      expect(res.data?.brownfield_prerequisite_stale).toBeUndefined();
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // REQ-301: repo-map FRESHNESS is a hard gate (not just existence)
+  // -------------------------------------------------------------------------
+  it(
+    "REQ-301: veto-check — brownfield with a PRESENT but STALE repo-map (analysis present) → refuses (exit 3, error 'brownfield_repo_map_stale', stale[] lists the map)",
+    () => {
+      tp = makeTempProject();
+      initBrownfield(tp);
+      writeCodebaseAnalysis(tp);
+      const briefPath = writeBrief(tp, TRIVIAL_BRIEF);
+      // Map present but stale (no fileHashes) — drifted from the tree.
+      writeStaleRepoMap(tp);
+
+      const res = runTierVetoCheck(tp.paths, briefPath);
+
+      expect(res.ok).toBe(false);
+      expect(res.exitCode).toBe(VETO_EXIT_CODE);
+      expect(res.exitCode).toBe(3);
+      // Only the map is stale; nothing is missing.
+      expect(res.data?.error).toBe("brownfield_repo_map_stale");
+      const stale = res.data?.stale as string[];
+      expect(stale).toEqual([".twinharness/repo-map.json"]);
+      expect(res.data?.missing).toEqual([]);
+    },
+  );
+
+  it(
+    "REQ-301: veto-check — stale repo-map AND missing analysis → missing[] reported, error stays 'brownfield_prerequisite_missing', stale[] still lists the map (exit 3)",
+    () => {
+      tp = makeTempProject();
+      initBrownfield(tp);
+      const briefPath = writeBrief(tp, TRIVIAL_BRIEF);
+      writeStaleRepoMap(tp); // present-but-stale; analysis absent.
+
+      const res = runTierVetoCheck(tp.paths, briefPath);
+
+      expect(res.ok).toBe(false);
+      expect(res.exitCode).toBe(3);
+      // A missing artifact takes the error label; staleness is still surfaced.
+      expect(res.data?.error).toBe("brownfield_prerequisite_missing");
+      expect(res.data?.missing).toEqual(["docs/00-existing-codebase-analysis.md"]);
+      expect(res.data?.stale).toEqual([".twinharness/repo-map.json"]);
+    },
+  );
+
+  it(
+    "REQ-303: classify — brownfield with a stale repo-map → advisory (exit 0) surfaces data.brownfield_prerequisite_stale (not _missing)",
+    () => {
+      tp = makeTempProject();
+      initBrownfield(tp);
+      writeCodebaseAnalysis(tp);
+      const briefPath = writeBrief(tp, TRIVIAL_BRIEF);
+      writeStaleRepoMap(tp);
+
+      const res = runTierClassify(tp.paths, briefPath);
+
+      // Classify stays advisory (exit 0) even when the map is stale.
+      expect(res.ok).toBe(true);
+      expect(res.exitCode).toBe(0);
+      const staleAdvisory = res.data?.brownfield_prerequisite_stale as string[];
+      expect(Array.isArray(staleAdvisory)).toBe(true);
+      expect(staleAdvisory).toContain(".twinharness/repo-map.json");
+      // Nothing missing → no missing advisory key.
       expect(res.data?.brownfield_prerequisite_missing).toBeUndefined();
     },
   );

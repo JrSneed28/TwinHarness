@@ -37,9 +37,9 @@ describe("SLICE-0 characterization: MCP tool registry baseline (Seam B)", () => 
    *
    * Anchor: REQ-105
    */
-  it("REQ-105: test_REQ105_tool_count_incremental_path_16_to_23 — TOOL_DEFS.length is exactly 23 at SLICE-6 (th_repo_check + th_decision_detect/add/check/list added; final count)", () => {
-    // The incremental path is 16→18→19→23. SLICE-6 advances the baseline to 23 (final count).
-    expect(TOOL_DEFS.length).toBe(23);
+  it("REQ-105: test_REQ105_tool_count_incremental_path_16_to_35 — TOOL_DEFS.length is exactly 35 after the coordination-primitive layer (th_build_dispatch/plan + th_artifact_*/collab_*/debate_*)", () => {
+    // The coordination-primitive layer advances the baseline from 23 to 35.
+    expect(TOOL_DEFS.length).toBe(35);
   });
 
   /**
@@ -95,15 +95,15 @@ describe("SLICE-0 characterization: th_decision_approve absent from TOOL_DEFS (S
    *
    * Anchor: REQ-408
    */
-  it("REQ-408: test_REQ408_mcp_has_no_decision_approve_tool_count_23 — th_decision_approve absent from TOOL_DEFS; count invariant holds at 23 (SLICE-6 final)", () => {
+  it("REQ-408: test_REQ408_mcp_has_no_decision_approve_tool_count_35 — th_decision_approve absent from TOOL_DEFS; count invariant holds at 35", () => {
     const names = TOOL_DEFS.map((t) => t.name);
 
     // The approve tool must NEVER appear — this invariant is non-negotiable (RULE-011, INV-005).
     expect(names).not.toContain("th_decision_approve");
 
-    // SLICE-6 lands the final count of 23 (th_repo_check + th_decision_detect/add/check/list
-    // appended; th_decision_approve permanently absent).
-    expect(TOOL_DEFS.length).toBe(23);
+    // The coordination-primitive layer lands the count at 35; th_decision_approve stays
+    // permanently absent (decision approval is a human gate, never an MCP tool).
+    expect(TOOL_DEFS.length).toBe(35);
   });
 });
 

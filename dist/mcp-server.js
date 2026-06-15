@@ -1871,8 +1871,8 @@ var require_keyword = __commonJS({
       var _a3;
       const { gen, keyword, schema, parentSchema, $data, it } = cxt;
       checkAsyncKeyword(it, def);
-      const validate = !$data && def.compile ? def.compile.call(it.self, schema, parentSchema, it) : def.validate;
-      const validateRef = useKeyword(gen, keyword, validate);
+      const validate2 = !$data && def.compile ? def.compile.call(it.self, schema, parentSchema, it) : def.validate;
+      const validateRef = useKeyword(gen, keyword, validate2);
       const valid = gen.let("valid");
       cxt.block$data(valid, validateKeyword);
       cxt.ok((_a3 = def.valid) !== null && _a3 !== void 0 ? _a3 : valid);
@@ -2945,28 +2945,28 @@ var require_compile = __commonJS({
         if (this.opts.code.process)
           sourceCode = this.opts.code.process(sourceCode, sch);
         const makeValidate = new Function(`${names_1.default.self}`, `${names_1.default.scope}`, sourceCode);
-        const validate = makeValidate(this, this.scope.get());
-        this.scope.value(validateName, { ref: validate });
-        validate.errors = null;
-        validate.schema = sch.schema;
-        validate.schemaEnv = sch;
+        const validate2 = makeValidate(this, this.scope.get());
+        this.scope.value(validateName, { ref: validate2 });
+        validate2.errors = null;
+        validate2.schema = sch.schema;
+        validate2.schemaEnv = sch;
         if (sch.$async)
-          validate.$async = true;
+          validate2.$async = true;
         if (this.opts.code.source === true) {
-          validate.source = { validateName, validateCode, scopeValues: gen._values };
+          validate2.source = { validateName, validateCode, scopeValues: gen._values };
         }
         if (this.opts.unevaluated) {
           const { props, items } = schemaCxt;
-          validate.evaluated = {
+          validate2.evaluated = {
             props: props instanceof codegen_1.Name ? void 0 : props,
             items: items instanceof codegen_1.Name ? void 0 : items,
             dynamicProps: props instanceof codegen_1.Name,
             dynamicItems: items instanceof codegen_1.Name
           };
-          if (validate.source)
-            validate.source.evaluated = (0, codegen_1.stringify)(validate.evaluated);
+          if (validate2.source)
+            validate2.source.evaluated = (0, codegen_1.stringify)(validate2.evaluated);
         }
-        sch.validate = validate;
+        sch.validate = validate2;
         return sch;
       } catch (e) {
         delete sch.validate;
@@ -3230,8 +3230,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path18) {
-      let input = path18;
+    function removeDotSegments(path20) {
+      let input = path20;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3483,8 +3483,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path18, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path18 && path18 !== "/" ? path18 : void 0;
+        const [path20, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path20 && path20 !== "/" ? path20 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -6579,8 +6579,8 @@ var require_formats = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.formatNames = exports2.fastFormats = exports2.fullFormats = void 0;
-    function fmtDef(validate, compare) {
-      return { validate, compare };
+    function fmtDef(validate2, compare) {
+      return { validate: validate2, compare };
     }
     exports2.fullFormats = {
       // date: http://tools.ietf.org/html/rfc3339#section-5.6
@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs20, exportName) {
+    function addFormats(ajv, list, fs22, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs20[f]);
+        ajv.addFormat(f, fs22[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -7141,10 +7141,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path18) {
-  if (!path18)
+function getElementAtPath(obj, path20) {
+  if (!path20)
     return obj;
-  return path18.reduce((acc, key) => acc?.[key], obj);
+  return path20.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7553,11 +7553,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path18, issues) {
+function prefixIssues(path20, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path18);
+    iss.path.unshift(path20);
     return iss;
   });
 }
@@ -7704,16 +7704,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path18 = []) => {
+  const processError = (error3, path20 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path18, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path20, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path18, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path20, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path18, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path20, ...issue2.path]);
       } else {
-        const fullpath = [...path18, ...issue2.path];
+        const fullpath = [...path20, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -15995,6 +15995,45 @@ ${formatIssues(r.issues)}`,
   });
 }
 
+// src/core/schedule.ts
+function shareComponent(a, b) {
+  const setA = new Set(a.components);
+  for (const c of b.components) {
+    if (setA.has(c)) return true;
+  }
+  return false;
+}
+function scheduleWaves(slices) {
+  const waves = [];
+  for (const slice of slices) {
+    let placed = false;
+    for (const wave of waves) {
+      if (wave.every((member) => !shareComponent(member, slice))) {
+        wave.push(slice);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) waves.push([slice]);
+  }
+  return waves.map((wave) => wave.map((s) => s.id));
+}
+function conflictPairs(slices) {
+  const pairs = [];
+  for (let i = 0; i < slices.length; i++) {
+    const si = slices[i];
+    const setI = new Set(si.components);
+    for (let j = i + 1; j < slices.length; j++) {
+      const sj = slices[j];
+      const shared = sj.components.filter((c) => setI.has(c));
+      if (shared.length > 0) {
+        pairs.push({ a: si.id, b: sj.id, shared });
+      }
+    }
+  }
+  return pairs;
+}
+
 // src/core/leases.ts
 var fs5 = __toESM(require("node:fs"));
 var path4 = __toESM(require("node:path"));
@@ -16065,6 +16104,30 @@ function occupiedComponents(paths, slices) {
     for (const c of lease.components) if (!occ.has(c)) occ.set(c, lease.slice);
   }
   return occ;
+}
+var SECTION_ID = /^[^#\n]+#[^#\n]+$/;
+function isSectionId(id) {
+  return SECTION_ID.test(id);
+}
+function activeSectionLeases(paths) {
+  const out = [];
+  for (const lease of activeLeases(paths)) {
+    if (lease.parent !== void 0) continue;
+    if (!isSectionId(lease.slice)) continue;
+    out.push({ section: lease.slice, holder: lease.components[0] ?? "" });
+  }
+  return out;
+}
+function isSectionLeased(paths, section, holder) {
+  for (const lease of activeSectionLeases(paths)) {
+    if (lease.section !== section) continue;
+    if (holder === void 0) return true;
+    if (lease.holder !== holder) return true;
+  }
+  return false;
+}
+function sectionLeaseHolder(paths, section) {
+  return activeSectionLeases(paths).find((l) => l.section === section)?.holder;
 }
 
 // src/core/wave.ts
@@ -16169,6 +16232,43 @@ function computeRoute(input) {
 }
 
 // src/commands/build.ts
+function runBuildPlan(paths, opts = {}) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: `state.json is invalid:
+${formatIssues(r.issues)}`,
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const selected = opts.includeDone ? r.state.slices : r.state.slices.filter((s) => s.status !== "done");
+  const waves = scheduleWaves(selected);
+  const conflicts = conflictPairs(selected);
+  const parallelism = waves.reduce((max, w) => Math.max(max, w.length), 0);
+  structuredLog({
+    cmd: "build plan",
+    slices: selected.length,
+    waves: waves.length,
+    conflicts: conflicts.length,
+    parallelism
+  });
+  const waveLines = waves.length ? waves.map((w, i) => `Wave ${i + 1} (parallel): ${w.join(", ")}`) : ["(no slices to schedule)"];
+  const conflictLines = conflicts.length ? ["Serialized conflicts (shared components):", ...conflicts.map((c) => `  ${c.a} \xD7 ${c.b} (shared: ${c.shared.join(", ")})`)] : ["Serialized conflicts (shared components): (none)"];
+  const adviseLines = opts.advise ? [
+    "",
+    `ADVISORY (parallelism optimizer, REQ-PCO-030): current max wave width = ${parallelism} across ${waves.length} wave${waves.length === 1 ? "" : "s"}; ${conflicts.length} conflict pair${conflicts.length === 1 ? "" : "s"} serialize the plan. To widen build waves, re-cut slices to MINIMIZE shared components and depends_on edges (the coverage hard-gate and vertical-slice integrity stay unchanged).`
+  ] : [];
+  const human = [
+    ...waveLines,
+    "",
+    ...conflictLines,
+    "",
+    "Within a wave Builders may run concurrently (\xA716); across waves they serialize.",
+    ...adviseLines
+  ].join("\n");
+  return success({ data: { waves, conflicts, parallelism, advise: opts.advise === true }, human });
+}
 function runBuildNextWave(paths) {
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
@@ -16191,6 +16291,54 @@ ${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } }
   if (stalled) lines.push("STALLED: pending slices exist but none can dispatch and none are in progress \u2014 resolve the dependency/component deadlock above.");
   lines.push("", "Set each dispatched slice in-progress and `th build claim <ID>` before spawning its Builder.");
   return success({ data: { wave, held, stalled, deps }, human: lines.join("\n") });
+}
+function runBuildDispatch(paths) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({ human: `state.json is invalid:
+${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+  }
+  const slices = r.state.slices;
+  const anyInProgress = slices.some((s) => s.status === "in-progress");
+  const occupied = occupiedComponents(paths, slices);
+  const { wave, held, stalled } = computeWave(slices, occupied, anyInProgress);
+  const deps = validateDeps(slices);
+  const componentBlast = r.state.blast_radius_flags.length > 0;
+  const byId = new Map(slices.map((s) => [s.id, s]));
+  const dispatch = wave.map((id) => {
+    const slice = byId.get(id);
+    const route = computeRoute({
+      agent: "builder",
+      mode: "slice",
+      tier: r.state.tier,
+      blastFlags: r.state.blast_radius_flags,
+      componentBlast
+    });
+    return { sliceId: id, components: slice.components, model: route.model, effort: route.effort };
+  });
+  const warnings = [];
+  for (const c of deps.cycles) warnings.push(`DEPENDENCY CYCLE: ${c.join(" \u2192 ")} \u2192 ${c[0]} (unsatisfiable \u2014 break the cycle in the plan)`);
+  for (const d of deps.dangling) warnings.push(`DANGLING DEPENDENCY: ${d.slice} depends on unknown slice(s): ${d.missing.join(", ")}`);
+  if (stalled) warnings.push("STALLED: pending slices exist but none can dispatch and none are in progress \u2014 resolve the dependency/component deadlock.");
+  structuredLog({ cmd: "build dispatch", dispatch: dispatch.length, held: held.length, stalled, depIssues: hasDepIssues(deps) });
+  const lines = [
+    dispatch.length ? "Dispatch now (spawn all in ONE message):" : "Dispatch now: (none ready)",
+    ...dispatch.map((d) => `  ${d.sliceId} \u2192 ${d.model}/${d.effort} [${d.components.join(", ") || "(no components)"}]`),
+    ...held.length ? ["Held:", ...held.map((h) => `  ${h.id} \u2014 ${h.reason}: ${h.detail.join(", ")}`)] : ["Held: (none)"],
+    ...warnings,
+    "",
+    "Set each dispatched slice in-progress and `th build claim <ID>` before spawning its Builder."
+  ];
+  return success({
+    data: {
+      wave: dispatch,
+      held,
+      warnings,
+      note: "per-slice model/effort routes Builders via the \xA72 table; componentBlast reflects project-level blast_radius_flags"
+    },
+    human: lines.join("\n")
+  });
 }
 function leaseUsage(action) {
   return failure({ human: `usage: th build ${action} <SLICE-ID>` });
@@ -16684,8 +16832,8 @@ function runRoute(paths, opts) {
 }
 
 // src/commands/next.ts
-var fs14 = __toESM(require("node:fs"));
-var path13 = __toESM(require("node:path"));
+var fs16 = __toESM(require("node:fs"));
+var path15 = __toESM(require("node:path"));
 
 // src/core/stages.ts
 var STAGE_PIPELINE = [
@@ -16961,349 +17109,13 @@ function gatingObligations(decisions, state) {
   return obligations;
 }
 
-// src/commands/next.ts
-function runNext(paths, opts = {}) {
-  const explain = opts.explain === true;
-  const r = readState(paths);
-  if (!r.exists) {
-    return emit(
-      {
-        kind: "init",
-        action: "No TwinHarness run here. Run `th init` to scaffold the project.",
-        why: "There is no `state.json` in this directory, so there is no run to advance \u2014 scaffolding is the only possible first step."
-      },
-      explain
-    );
-  }
-  if (!r.state) {
-    return emit(
-      {
-        kind: "fix-state",
-        action: "state.json is invalid \u2014 fix it before anything else (`th state verify` for details).",
-        why: "An unreadable/invalid state.json means every other signal (tier, stage, slices, drift) is untrustworthy, and the stop-gate already refuses completion \u2014 so repairing it outranks all stage work.",
-        data: { issues: r.issues }
-      },
-      explain
-    );
-  }
-  const s = r.state;
-  if (s.drift_open_blocking > 0) {
-    return emit(
-      {
-        kind: "resolve-blocking-drift",
-        action: `${s.drift_open_blocking} blocking drift entr${s.drift_open_blocking === 1 ? "y is" : "ies are"} open \u2014 resolve or escalate before completion (\`th drift list\` / \`th drift resolve <DRIFT-NNN>\`).`,
-        why: "Open requirement-layer drift is a human-only escalation that the stop-gate already blocks completion on, so it outranks every stage advance \u2014 no later work can be certified while it stands.",
-        data: { drift_open_blocking: s.drift_open_blocking }
-      },
-      explain
-    );
-  }
-  const escalations = reviseEscalations(s);
-  if (escalations.length > 0) {
-    return emit(
-      {
-        kind: "escalate-revise",
-        action: `Revise loop at cap \u2014 escalate to the human: ${escalations.map((e) => `${e.mode} (${e.count}/${e.cap})`).join(", ")}.`,
-        why: "A Critic loop at its cap (\xA718) means the producer\u2194Critic cycle is stuck with open grounded issues; continuing to loop is forbidden, so escalating to the human takes priority over starting any new stage work.",
-        data: { escalations }
-      },
-      explain
-    );
-  }
-  const verifyReport = readVerifyReport(paths);
-  if (verifyReport && !verifyReport.ok) {
-    const failed = verifyReport.results.filter((x) => !x.ok).length;
-    return emit(
-      {
-        kind: "investigate-failure",
-        action: `Test suite failing (${failed} command(s)) \u2014 assemble evidence with \`th debug pack\` and engage the Debugger before advancing.`,
-        why: "The last `th verify run` is red, which is a correctness defect; advancing the pipeline on a known-failing suite would build on broken ground, so tracing the failure (Debugger) comes first.",
-        data: { failed }
-      },
-      explain
-    );
-  }
-  const drifted = artifactIntegrity(paths, s).filter((i) => i.status === "changed");
-  if (drifted.length > 0) {
-    return emit(
-      {
-        kind: "re-register-artifact",
-        action: `Approved artifact changed on disk \u2014 run \`th stale --artifact ${drifted[0].file}\` then re-register: ${drifted.map((i) => i.file).join(", ")}.`,
-        why: "A registered artifact whose on-disk hash no longer matches has silently drifted from what the run governs; re-registering (and cascading the staleness check) must happen before later stages, which would otherwise build on an out-of-date upstream.",
-        data: { changed: drifted.map((i) => i.file) }
-      },
-      explain
-    );
-  }
-  if (s.tier === null) {
-    return emit(
-      {
-        kind: "classify-tier",
-        action: "Tier is unclassified \u2014 classify it (`th tier classify <brief.json>` + `th tier veto-check`) and record `th state set tier T<n>`.",
-        why: "The tier determines which stages are even engaged, so nothing downstream can be sequenced until it is set \u2014 classification gates every design stage.",
-        data: { current_stage: s.current_stage }
-      },
-      explain
-    );
-  }
-  {
-    const obligations = gatingObligations(reduceDecisions(readDecisionEvents(paths)), s);
-    if (obligations.length > 0) {
-      const first = obligations[0];
-      const title = reduceDecisions(readDecisionEvents(paths)).find((d) => d.id === first.decisionId)?.title ?? "";
-      const titlePart = title ? ` (title: "${title}")` : "";
-      return emit(
-        {
-          kind: "resolve-decision-obligation",
-          action: `Approve ${first.decisionId}${titlePart} \u2014 it blocks stage '${first.blockedStage}' from proceeding.`,
-          why: `Decision ${first.decisionId} is linked to stage '${first.blockedStage}' and is not yet approved; no stage work can proceed while a gating decision is unmet (RULE-007).`,
-          data: { decisionId: first.decisionId, blockedStage: first.blockedStage }
-        },
-        explain
-      );
-    }
-  }
-  const current = s.current_stage;
-  const contract = stageContract(current);
-  if (contract && contract.produces && current !== "final-verification") {
-    const produced = contract.produces.replace(/\/$/, "");
-    const abs = path13.resolve(paths.root, produced);
-    const registered = s.approved_artifacts.some((a) => a.file === produced);
-    const exists = fs14.existsSync(abs);
-    if (!registered) {
-      if (!exists) {
-        return emit(
-          {
-            kind: "produce-artifact",
-            action: `Stage "${current}" must produce ${contract.produces} (Critic mode: ${contract.criticMode}${contract.humanGate ? "; human gate" : ""}). Produce it, pass the Critic, then register it.`,
-            why: `The current stage "${current}" owes its artifact (${contract.produces}) and it is not yet on disk; the stage cannot be considered settled \u2014 and the run cannot advance \u2014 until that artifact exists, passes the Critic, and is registered.`,
-            data: { stage: current, produces: contract.produces }
-          },
-          explain
-        );
-      }
-      return emit(
-        {
-          kind: "register-artifact",
-          action: `${produced} exists but is not registered \u2014 after the Critic passes${contract.humanGate ? " and the human gate clears" : ""}, run \`th artifact register ${contract.produces} --version <n>\`.`,
-          why: `${produced} exists but is unregistered, so the run is not yet governing it (no recorded hash); registering it after the Critic${contract.humanGate ? " and human gate" : ""} is what lets the stage settle and the pipeline move on.`,
-          data: { stage: current, file: produced }
-        },
-        explain
-      );
-    }
-  }
-  if (current === "implementation-planning") {
-    const cov = coverageBlocker(paths);
-    if (cov) return emit(cov);
-  }
-  if (current === "final-verification") {
-    const prog = sliceProgress(s);
-    if (!prog.allSettled && prog.total > 0) {
-      const open = s.slices.filter((sl) => sl.status !== "done" && sl.status !== "blocked").map((sl) => sl.id);
-      return emit(
-        {
-          kind: "finish-slices",
-          action: `Final verification is blocked while slices are unfinished \u2014 finish or block: ${open.join(", ")} (\`th slice set-status <SLICE-ID> done|blocked\`).`,
-          why: "At final-verification the stop-gate mechanically refuses completion while any slice is neither done nor blocked, so settling the open slices outranks producing the verification report.",
-          data: { open }
-        },
-        explain
-      );
-    }
-    const verifyCfg = readVerifyConfig(paths);
-    if (verifyCfg.commands.length > 0 && !readVerifyReport(paths)) {
-      return emit(
-        {
-          kind: "run-verify",
-          action: `Final verification needs a green suite \u2014 ${verifyCfg.commands.length} verify command(s) are configured but \`th verify run\` has never been recorded. Run \`th verify run\` and confirm it is green before sign-off.`,
-          why: "At final-verification the stop-gate refuses completion when verify commands are configured but the suite has never been run, so recording a green `th verify run` outranks producing the verification report or seeking the human sign-off.",
-          data: { commands: verifyCfg.commands.length }
-        },
-        explain
-      );
-    }
-    const cov = coverageBlocker(paths);
-    if (cov) return emit(cov, explain);
-    if (contract && contract.produces) {
-      const produced = contract.produces.replace(/\/$/, "");
-      const registered = s.approved_artifacts.some((a) => a.file === produced);
-      if (!registered) {
-        const exists = fs14.existsSync(path13.resolve(paths.root, produced));
-        return emit(
-          exists ? { kind: "register-artifact", action: `${produced} exists but is not registered \u2014 after the human signs off, run \`th artifact register ${produced} --version <n>\`.`, why: "Slices are settled and coverage is clean, so the only thing standing between here and a governed completion is recording the verification report's hash after the human signs off.", data: { file: produced } } : { kind: "produce-artifact", action: `Produce ${produced} separating coherence (Critic) from correctness (tests + human), then register it.`, why: "Slices are settled and coverage is clean, so the run now owes the verification report itself \u2014 the last artifact, which must separate Critic-certified coherence from test/human-certified correctness.", data: { produces: produced } },
-          explain
-        );
-      }
-    }
-    return emit(
-      {
-        kind: "human-signoff",
-        action: "Coherence is gated and coverage is clean \u2014 present `th trace render` + the verification report for the human correctness sign-off (\xA711).",
-        why: "Every mechanical gate is satisfied (slices settled, coverage clean, report registered); what remains is the one thing the CLI cannot certify \u2014 correctness \u2014 which only the human can sign off."
-      },
-      explain
-    );
-  }
-  if (current === "implementation") {
-    const prog = sliceProgress(s);
-    if (prog.total === 0) {
-      return emit(
-        {
-          kind: "sync-slices",
-          action: "Implementation has no slices \u2014 run `th slices sync` to populate them from the implementation plan, then `th build next-wave`.",
-          why: "The stage is `implementation` but `state.slices` is empty, so there is nothing to dispatch; syncing the plan into state is the prerequisite for any build wave."
-        },
-        explain
-      );
-    }
-    const deps = validateDeps(s.slices);
-    const occupied = occupiedComponents(paths, s.slices);
-    const plan = computeWave(s.slices, occupied, prog.inProgress > 0);
-    if (plan.stalled || hasDepIssues(deps)) {
-      const reasons = [
-        ...deps.cycles.map((c) => `cycle ${c.join("\u2192")}`),
-        ...deps.dangling.map((d) => `${d.slice}\u2192unknown ${d.missing.join(",")}`),
-        ...plan.held.map((h) => `${h.id} (${h.reason}: ${h.detail.join(",")})`)
-      ];
-      return emit(
-        {
-          kind: "stalled-build",
-          action: `Build is stalled \u2014 no slice can be dispatched and none are in progress to unblock it. Fix the dependency/component deadlock, then \`th build next-wave\`. Blockers: ${reasons.join("; ")}.`,
-          why: "No pending slice can dispatch (a dependency cycle, a dangling dep, or a component conflict) and nothing is in flight to unblock it \u2014 so the build cannot make progress until the deadlock in the plan is fixed.",
-          data: { held: plan.held, cycles: deps.cycles, dangling: deps.dangling }
-        },
-        explain
-      );
-    }
-    if (plan.wave.length > 0) {
-      return emit(
-        {
-          kind: "dispatch-wave",
-          action: `Dispatch the next parallel build wave: ${plan.wave.join(", ")} \u2014 set each \`in-progress\` and \`th build claim <ID>\` before spawning its Builder (\`th build next-wave\`).`,
-          why: "A conflict-free wave of slices is ready (deps done, components free), so dispatching it is the highest-value next step \u2014 it is the build making forward progress.",
-          data: { wave: plan.wave, pending: prog.pending, inProgress: prog.inProgress }
-        },
-        explain
-      );
-    }
-    if (prog.inProgress > 0) {
-      return emit(
-        {
-          kind: "await-builders",
-          action: `${prog.inProgress} Builder(s) in flight \u2014 on each Critic PASS set the slice \`done\` and \`th build release <ID>\`, then re-check \`th build next-wave\`.`,
-          why: "No new wave can dispatch yet (its components are held by in-flight slices), so the run owes nothing but to await the live Builders and settle each on its Critic PASS before the next wave opens.",
-          data: { inProgress: prog.inProgress }
-        },
-        explain
-      );
-    }
-  }
-  const next = nextStageAfter(current, s.tier);
-  if (next) {
-    return emit(
-      {
-        kind: "advance-stage",
-        action: `Stage "${current}" is settled \u2014 advance to "${next.stage}" (produces ${next.produces || "(no artifact)"}; Critic mode: ${next.criticMode}${next.humanGate ? "; human gate" : "; streams"}). Set it with \`th state set current_stage ${next.stage}\`.`,
-        why: `Stage "${current}" has met all its mechanical obligations and no higher-priority blocker is open, so the only thing left is to move the pipeline forward to the next engaged stage for tier ${s.tier}.`,
-        data: { from: current, to: next.stage, contract: next }
-      },
-      explain
-    );
-  }
-  return emit(
-    {
-      kind: "done",
-      action: "No mechanical obligation outstanding \u2014 the pipeline's last engaged stage is reached. The human owns final sign-off.",
-      why: "Every mechanical gate the CLI can compute is satisfied and there is no further engaged stage for this tier, so nothing mechanical remains \u2014 final authority is the human's.",
-      data: { current_stage: current }
-    },
-    explain
-  );
-}
-function coverageBlocker(paths) {
-  const breakdown = computeBreakdown(paths.root);
-  if ("error" in breakdown) {
-    return {
-      kind: "fix-coverage",
-      action: "Coverage cannot be checked \u2014 author the requirements file first.",
-      why: "Coverage is the hard gate before building, and it cannot even be computed without a requirements file \u2014 so authoring it precedes everything downstream.",
-      data: { error: breakdown.error, reqsFile: breakdown.reqsFile }
-    };
-  }
-  const gaps = breakdown.rows.filter((row) => !row.planned || !row.tested);
-  if (gaps.length > 0) {
-    return {
-      kind: "fix-coverage",
-      action: `Coverage gate failing \u2014 ${gaps.length} REQ-ID(s) lack a slice and/or a test: ${gaps.map((g) => g.req).join(", ")}. Run \`th coverage check\`.`,
-      why: "The coverage gate mechanically blocks the build until every MVP REQ-ID maps to \u22651 slice and \u22651 test; the listed gaps must be closed before implementation may proceed.",
-      data: { gaps: gaps.map((g) => ({ req: g.req, inSlice: g.planned, inTest: g.tested })) }
-    };
-  }
-  return void 0;
-}
-function emit(next, explain = false) {
-  const data = { kind: next.kind, action: next.action, ...next.data ?? {} };
-  if (explain && next.why) data.why = next.why;
-  const human = explain && next.why ? `next: ${next.action}
-why: ${next.why}` : `next: ${next.action}`;
-  return success({ data, human });
-}
-
-// src/commands/delegate.ts
-var fs18 = __toESM(require("node:fs"));
-
-// src/commands/context.ts
-var fs17 = __toESM(require("node:fs"));
-var path16 = __toESM(require("node:path"));
-
-// src/core/summary.ts
-var SUMMARY_HEADING_RE = /^(#{1,3})\s+summary\b/i;
-var ANY_HEADING_RE = /^#{1,3}\s+/;
-function extractSummary(markdown, headLines = 8) {
-  const lines = markdown.split(/\r?\n/);
-  let startIdx = -1;
-  let level = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const m = SUMMARY_HEADING_RE.exec(lines[i]);
-    if (m) {
-      startIdx = i;
-      level = m[1].length;
-      break;
-    }
-  }
-  if (startIdx >= 0) {
-    const body = [];
-    for (let i = startIdx + 1; i < lines.length; i++) {
-      const line = lines[i];
-      const h = ANY_HEADING_RE.exec(line);
-      if (h) {
-        const hLevel = /^#+/.exec(line)?.[0].length ?? 99;
-        if (hLevel <= level) break;
-      }
-      body.push(line);
-    }
-    return { summary: body.join("\n").trim(), head: headFallback(lines, headLines) };
-  }
-  return { summary: null, head: headFallback(lines, headLines) };
-}
-function headFallback(lines, headLines) {
-  const out = [];
-  for (const line of lines) {
-    if (out.length >= headLines) break;
-    if (line.trim().length === 0 && out.length === 0) continue;
-    out.push(line);
-  }
-  return out.join("\n").trim();
-}
-
 // src/commands/repo.ts
-var fs16 = __toESM(require("node:fs"));
-var path15 = __toESM(require("node:path"));
-
-// src/core/repo-map/scanner.ts
 var fs15 = __toESM(require("node:fs"));
 var path14 = __toESM(require("node:path"));
+
+// src/core/repo-map/scanner.ts
+var fs14 = __toESM(require("node:fs"));
+var path13 = __toESM(require("node:path"));
 
 // src/core/repo-map/schema.ts
 var REPO_MAP_SCHEMA_VERSION = 1;
@@ -17693,7 +17505,7 @@ function isTestPath(relPosix2) {
   return false;
 }
 function relPosix(root, abs) {
-  return path14.relative(root, abs).split(path14.sep).join("/");
+  return path13.relative(root, abs).split(path13.sep).join("/");
 }
 function safeParseJson(text) {
   try {
@@ -17711,11 +17523,11 @@ function classifyCommand(name) {
   return "other";
 }
 function scanRepo(root, opts = {}) {
-  const absRoot = path14.resolve(root);
+  const absRoot = path13.resolve(root);
   const map = emptyRepoMap(absRoot);
   const fileCountCap = opts.fileCountCap ?? FILE_COUNT_CAP;
   const totalBytesCap = opts.totalBytesCap ?? TOTAL_BYTES_CAP;
-  if (!fs15.existsSync(absRoot) || !fs15.statSync(absRoot).isDirectory()) {
+  if (!fs14.existsSync(absRoot) || !fs14.statSync(absRoot).isDirectory()) {
     return map;
   }
   const st = { filesScanned: 0, filesSkipped: 0, totalBytes: 0, capHit: null };
@@ -17768,13 +17580,13 @@ function scanRepo(root, opts = {}) {
     if (st.capHit) return;
     let entries;
     try {
-      entries = fs15.readdirSync(absDir, { withFileTypes: true });
+      entries = fs14.readdirSync(absDir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const entry of entries) {
       if (st.capHit) return;
-      const abs = path14.join(absDir, entry.name);
+      const abs = path13.join(absDir, entry.name);
       const rel = relPosix(absRoot, abs);
       if (entry.isDirectory()) {
         if (PRODUCER_DIRS.has(entry.name)) continue;
@@ -17799,7 +17611,7 @@ function scanRepo(root, opts = {}) {
       }
       let size = 0;
       try {
-        size = fs15.statSync(abs).size;
+        size = fs14.statSync(abs).size;
       } catch {
         st.filesSkipped++;
         continue;
@@ -17811,7 +17623,7 @@ function scanRepo(root, opts = {}) {
       st.totalBytes += size;
       st.filesScanned++;
       const nameLower = entry.name.toLowerCase();
-      const ext = path14.extname(entry.name).toLowerCase();
+      const ext = path13.extname(entry.name).toLowerCase();
       const langName = EXT_LANG[ext];
       if (langName) recordLang(langName, rel, "extension");
       const manifestLang = MANIFEST_LANG[nameLower];
@@ -17843,7 +17655,7 @@ function scanRepo(root, opts = {}) {
       if (nameLower === "package.json" && size <= MAX_READ_BYTES) {
         let text;
         try {
-          text = fs15.readFileSync(abs, "utf8");
+          text = fs14.readFileSync(abs, "utf8");
         } catch {
           text = void 0;
         }
@@ -17858,9 +17670,9 @@ function scanRepo(root, opts = {}) {
             }
           }
           const bin = json.bin;
-          const dir = path14.dirname(rel) === "." ? "" : path14.dirname(rel) + "/";
+          const dir = path13.dirname(rel) === "." ? "" : path13.dirname(rel) + "/";
           if (typeof bin === "string") {
-            entrypoints.push({ name: path14.basename(rel, ".json"), path: dir + bin, source: "package.json:bin" });
+            entrypoints.push({ name: path13.basename(rel, ".json"), path: dir + bin, source: "package.json:bin" });
           } else if (typeof bin === "object" && bin !== null && !Array.isArray(bin)) {
             for (const [bname, bpath] of Object.entries(bin)) {
               if (typeof bpath === "string") {
@@ -17875,13 +17687,13 @@ function scanRepo(root, opts = {}) {
             entrypoints.push({ name: "module", path: dir + json.module, source: "package.json:module" });
           }
           if (json.exports !== void 0) {
-            apiHints.push({ name: path14.basename(rel), source: "package.json:exports" });
+            apiHints.push({ name: path13.basename(rel), source: "package.json:exports" });
           }
         }
       } else if (nameLower === "makefile" && size <= MAX_READ_BYTES) {
         let text;
         try {
-          text = fs15.readFileSync(abs, "utf8");
+          text = fs14.readFileSync(abs, "utf8");
         } catch {
           text = void 0;
         }
@@ -18335,11 +18147,11 @@ var FORMATS = ["summary", "json", "md"];
 var REPO_MAP_JSON_REL = ".twinharness/repo-map.json";
 var REPO_MAP_MD_REL = "docs/00-repo-map.md";
 function atomicWrite(absFile, content) {
-  const dir = path15.dirname(absFile);
-  fs16.mkdirSync(dir, { recursive: true });
-  const tmp = path15.join(dir, `${path15.basename(absFile)}.tmp-${process.pid}`);
-  fs16.writeFileSync(tmp, content, "utf8");
-  fs16.renameSync(tmp, absFile);
+  const dir = path14.dirname(absFile);
+  fs15.mkdirSync(dir, { recursive: true });
+  const tmp = path14.join(dir, `${path14.basename(absFile)}.tmp-${process.pid}`);
+  fs15.writeFileSync(tmp, content, "utf8");
+  fs15.renameSync(tmp, absFile);
 }
 function runRepoMap(paths, opts = {}) {
   const write = opts.write !== false;
@@ -18355,9 +18167,9 @@ function runRepoMap(paths, opts = {}) {
   {
     const hashes = {};
     for (const f of map.files) {
-      const abs = path15.join(paths.root, f.path);
+      const abs = path14.join(paths.root, f.path);
       try {
-        const content = fs16.readFileSync(abs, "utf8");
+        const content = fs15.readFileSync(abs, "utf8");
         hashes[f.path] = hashContent(content);
       } catch {
       }
@@ -18385,8 +18197,8 @@ function runRepoMap(paths, opts = {}) {
   const blastRadiusFlags = [...new Set(map.blast_radius_signals.map((s) => s.flag))].sort();
   let artifacts = [];
   if (write) {
-    const jsonAbs = path15.join(paths.stateDir, "repo-map.json");
-    const mdAbs = path15.join(paths.docsDir, "00-repo-map.md");
+    const jsonAbs = path14.join(paths.stateDir, "repo-map.json");
+    const mdAbs = path14.join(paths.docsDir, "00-repo-map.md");
     try {
       atomicWrite(jsonAbs, json);
     } catch {
@@ -18448,10 +18260,10 @@ function runRepoRelevant(paths, opts = {}) {
       });
     }
   }
-  const mapJsonPath = path15.join(paths.stateDir, REPO_MAP_REL);
+  const mapJsonPath = path14.join(paths.stateDir, REPO_MAP_REL);
   let rawMap = null;
   try {
-    rawMap = fs16.readFileSync(mapJsonPath, "utf8");
+    rawMap = fs15.readFileSync(mapJsonPath, "utf8");
   } catch {
     rawMap = null;
   }
@@ -18593,10 +18405,10 @@ function runRepoImpact(paths, opts = {}) {
       });
     }
   }
-  const mapJsonPath = path15.join(paths.stateDir, REPO_MAP_REL);
+  const mapJsonPath = path14.join(paths.stateDir, REPO_MAP_REL);
   let rawMap = null;
   try {
-    rawMap = fs16.readFileSync(mapJsonPath, "utf8");
+    rawMap = fs15.readFileSync(mapJsonPath, "utf8");
   } catch {
     rawMap = null;
   }
@@ -18698,10 +18510,10 @@ REQ anchors in scope: ${result.reqAnchors.join(", ")}`);
 var REPO_STALE_EXIT = 4;
 var REPO_NO_MAP_EXIT = 5;
 function runRepoCheck(paths, _opts = {}) {
-  const REPO_MAP_JSON = path15.join(paths.stateDir, "repo-map.json");
+  const REPO_MAP_JSON = path14.join(paths.stateDir, "repo-map.json");
   let rawMap = null;
   try {
-    rawMap = fs16.readFileSync(REPO_MAP_JSON, "utf8");
+    rawMap = fs15.readFileSync(REPO_MAP_JSON, "utf8");
   } catch {
     structuredLog({ cmd: "repo check", outcome: "no-map" });
     return {
@@ -18743,9 +18555,9 @@ function runRepoCheck(paths, _opts = {}) {
   const currentMap = scanRepo(paths.root);
   const currentHashes = {};
   for (const f of currentMap.files) {
-    const abs = path15.join(paths.root, f.path);
+    const abs = path14.join(paths.root, f.path);
     try {
-      const content = fs16.readFileSync(abs, "utf8");
+      const content = fs15.readFileSync(abs, "utf8");
       currentHashes[f.path] = hashContent(content);
     } catch {
     }
@@ -18812,6 +18624,357 @@ function runRepoCheck(paths, _opts = {}) {
       "Run `th repo map` to update."
     ].filter(Boolean).join("\n")
   };
+}
+
+// src/commands/next.ts
+function runNext(paths, opts = {}) {
+  const explain = opts.explain === true;
+  const r = readState(paths);
+  if (!r.exists) {
+    return emit(
+      {
+        kind: "init",
+        action: "No TwinHarness run here. Run `th init` to scaffold the project.",
+        why: "There is no `state.json` in this directory, so there is no run to advance \u2014 scaffolding is the only possible first step."
+      },
+      explain
+    );
+  }
+  if (!r.state) {
+    return emit(
+      {
+        kind: "fix-state",
+        action: "state.json is invalid \u2014 fix it before anything else (`th state verify` for details).",
+        why: "An unreadable/invalid state.json means every other signal (tier, stage, slices, drift) is untrustworthy, and the stop-gate already refuses completion \u2014 so repairing it outranks all stage work.",
+        data: { issues: r.issues }
+      },
+      explain
+    );
+  }
+  const s = r.state;
+  if (s.drift_open_blocking > 0) {
+    return emit(
+      {
+        kind: "resolve-blocking-drift",
+        action: `${s.drift_open_blocking} blocking drift entr${s.drift_open_blocking === 1 ? "y is" : "ies are"} open \u2014 resolve or escalate before completion (\`th drift list\` / \`th drift resolve <DRIFT-NNN>\`).`,
+        why: "Open requirement-layer drift is a human-only escalation that the stop-gate already blocks completion on, so it outranks every stage advance \u2014 no later work can be certified while it stands.",
+        data: { drift_open_blocking: s.drift_open_blocking }
+      },
+      explain
+    );
+  }
+  const escalations = reviseEscalations(s);
+  if (escalations.length > 0) {
+    return emit(
+      {
+        kind: "escalate-revise",
+        action: `Revise loop at cap \u2014 escalate to the human: ${escalations.map((e) => `${e.mode} (${e.count}/${e.cap})`).join(", ")}.`,
+        why: "A Critic loop at its cap (\xA718) means the producer\u2194Critic cycle is stuck with open grounded issues; continuing to loop is forbidden, so escalating to the human takes priority over starting any new stage work.",
+        data: { escalations }
+      },
+      explain
+    );
+  }
+  const verifyReport = readVerifyReport(paths);
+  if (verifyReport && !verifyReport.ok) {
+    const failed = verifyReport.results.filter((x) => !x.ok).length;
+    return emit(
+      {
+        kind: "investigate-failure",
+        action: `Test suite failing (${failed} command(s)) \u2014 assemble evidence with \`th debug pack\` and engage the Debugger before advancing.`,
+        why: "The last `th verify run` is red, which is a correctness defect; advancing the pipeline on a known-failing suite would build on broken ground, so tracing the failure (Debugger) comes first.",
+        data: { failed }
+      },
+      explain
+    );
+  }
+  const drifted = artifactIntegrity(paths, s).filter((i) => i.status === "changed");
+  if (drifted.length > 0) {
+    return emit(
+      {
+        kind: "re-register-artifact",
+        action: `Approved artifact changed on disk \u2014 run \`th stale --artifact ${drifted[0].file}\` then re-register: ${drifted.map((i) => i.file).join(", ")}.`,
+        why: "A registered artifact whose on-disk hash no longer matches has silently drifted from what the run governs; re-registering (and cascading the staleness check) must happen before later stages, which would otherwise build on an out-of-date upstream.",
+        data: { changed: drifted.map((i) => i.file) }
+      },
+      explain
+    );
+  }
+  if (s.tier === null) {
+    return emit(
+      {
+        kind: "classify-tier",
+        action: "Tier is unclassified \u2014 classify it (`th tier classify <brief.json>` + `th tier veto-check`) and record `th state set tier T<n>`.",
+        why: "The tier determines which stages are even engaged, so nothing downstream can be sequenced until it is set \u2014 classification gates every design stage.",
+        data: { current_stage: s.current_stage }
+      },
+      explain
+    );
+  }
+  if (s.project_mode === "brownfield" && !s.implementation_allowed) {
+    const check = runRepoCheck(paths);
+    if (check.exitCode !== 0) {
+      const absent = check.exitCode === REPO_NO_MAP_EXIT;
+      return emit(
+        {
+          kind: "refresh-repo-map",
+          action: `Brownfield repo-map is ${absent ? "absent" : "stale"} \u2014 run \`th repo map\` to ${absent ? "generate" : "refresh"} it before tiering or planning proceeds.`,
+          why: "In a brownfield run the repo-map grounds every tiering and planning decision; a map that is absent or has drifted from the working tree would let those decisions run on an outdated understanding, so refreshing it outranks stage work.",
+          data: { shape: check.data?.shape ?? "stale" }
+        },
+        explain
+      );
+    }
+  }
+  {
+    const obligations = gatingObligations(reduceDecisions(readDecisionEvents(paths)), s);
+    if (obligations.length > 0) {
+      const first = obligations[0];
+      const title = reduceDecisions(readDecisionEvents(paths)).find((d) => d.id === first.decisionId)?.title ?? "";
+      const titlePart = title ? ` (title: "${title}")` : "";
+      return emit(
+        {
+          kind: "resolve-decision-obligation",
+          action: `Approve ${first.decisionId}${titlePart} \u2014 it blocks stage '${first.blockedStage}' from proceeding.`,
+          why: `Decision ${first.decisionId} is linked to stage '${first.blockedStage}' and is not yet approved; no stage work can proceed while a gating decision is unmet (RULE-007).`,
+          data: { decisionId: first.decisionId, blockedStage: first.blockedStage }
+        },
+        explain
+      );
+    }
+  }
+  const current = s.current_stage;
+  const contract = stageContract(current);
+  if (contract && contract.produces && current !== "final-verification") {
+    const produced = contract.produces.replace(/\/$/, "");
+    const abs = path15.resolve(paths.root, produced);
+    const registered = s.approved_artifacts.some((a) => a.file === produced);
+    const exists = fs16.existsSync(abs);
+    if (!registered) {
+      if (!exists) {
+        return emit(
+          {
+            kind: "produce-artifact",
+            action: `Stage "${current}" must produce ${contract.produces} (Critic mode: ${contract.criticMode}${contract.humanGate ? "; human gate" : ""}). Produce it, pass the Critic, then register it.`,
+            why: `The current stage "${current}" owes its artifact (${contract.produces}) and it is not yet on disk; the stage cannot be considered settled \u2014 and the run cannot advance \u2014 until that artifact exists, passes the Critic, and is registered.`,
+            data: { stage: current, produces: contract.produces }
+          },
+          explain
+        );
+      }
+      return emit(
+        {
+          kind: "register-artifact",
+          action: `${produced} exists but is not registered \u2014 after the Critic passes${contract.humanGate ? " and the human gate clears" : ""}, run \`th artifact register ${contract.produces} --version <n>\`.`,
+          why: `${produced} exists but is unregistered, so the run is not yet governing it (no recorded hash); registering it after the Critic${contract.humanGate ? " and human gate" : ""} is what lets the stage settle and the pipeline move on.`,
+          data: { stage: current, file: produced }
+        },
+        explain
+      );
+    }
+  }
+  if (current === "implementation-planning") {
+    const cov = coverageBlocker(paths);
+    if (cov) return emit(cov);
+  }
+  if (current === "final-verification") {
+    const prog = sliceProgress(s);
+    if (!prog.allSettled && prog.total > 0) {
+      const open = s.slices.filter((sl) => sl.status !== "done" && sl.status !== "blocked").map((sl) => sl.id);
+      return emit(
+        {
+          kind: "finish-slices",
+          action: `Final verification is blocked while slices are unfinished \u2014 finish or block: ${open.join(", ")} (\`th slice set-status <SLICE-ID> done|blocked\`).`,
+          why: "At final-verification the stop-gate mechanically refuses completion while any slice is neither done nor blocked, so settling the open slices outranks producing the verification report.",
+          data: { open }
+        },
+        explain
+      );
+    }
+    const verifyCfg = readVerifyConfig(paths);
+    if (verifyCfg.commands.length > 0 && !readVerifyReport(paths)) {
+      return emit(
+        {
+          kind: "run-verify",
+          action: `Final verification needs a green suite \u2014 ${verifyCfg.commands.length} verify command(s) are configured but \`th verify run\` has never been recorded. Run \`th verify run\` and confirm it is green before sign-off.`,
+          why: "At final-verification the stop-gate refuses completion when verify commands are configured but the suite has never been run, so recording a green `th verify run` outranks producing the verification report or seeking the human sign-off.",
+          data: { commands: verifyCfg.commands.length }
+        },
+        explain
+      );
+    }
+    const cov = coverageBlocker(paths);
+    if (cov) return emit(cov, explain);
+    if (contract && contract.produces) {
+      const produced = contract.produces.replace(/\/$/, "");
+      const registered = s.approved_artifacts.some((a) => a.file === produced);
+      if (!registered) {
+        const exists = fs16.existsSync(path15.resolve(paths.root, produced));
+        return emit(
+          exists ? { kind: "register-artifact", action: `${produced} exists but is not registered \u2014 after the human signs off, run \`th artifact register ${produced} --version <n>\`.`, why: "Slices are settled and coverage is clean, so the only thing standing between here and a governed completion is recording the verification report's hash after the human signs off.", data: { file: produced } } : { kind: "produce-artifact", action: `Produce ${produced} separating coherence (Critic) from correctness (tests + human), then register it.`, why: "Slices are settled and coverage is clean, so the run now owes the verification report itself \u2014 the last artifact, which must separate Critic-certified coherence from test/human-certified correctness.", data: { produces: produced } },
+          explain
+        );
+      }
+    }
+    return emit(
+      {
+        kind: "human-signoff",
+        action: "Coherence is gated and coverage is clean \u2014 present `th trace render` + the verification report for the human correctness sign-off (\xA711).",
+        why: "Every mechanical gate is satisfied (slices settled, coverage clean, report registered); what remains is the one thing the CLI cannot certify \u2014 correctness \u2014 which only the human can sign off."
+      },
+      explain
+    );
+  }
+  if (current === "implementation") {
+    const prog = sliceProgress(s);
+    if (prog.total === 0) {
+      return emit(
+        {
+          kind: "sync-slices",
+          action: "Implementation has no slices \u2014 run `th slices sync` to populate them from the implementation plan, then `th build next-wave`.",
+          why: "The stage is `implementation` but `state.slices` is empty, so there is nothing to dispatch; syncing the plan into state is the prerequisite for any build wave."
+        },
+        explain
+      );
+    }
+    const deps = validateDeps(s.slices);
+    const occupied = occupiedComponents(paths, s.slices);
+    const plan = computeWave(s.slices, occupied, prog.inProgress > 0);
+    if (plan.stalled || hasDepIssues(deps)) {
+      const reasons = [
+        ...deps.cycles.map((c) => `cycle ${c.join("\u2192")}`),
+        ...deps.dangling.map((d) => `${d.slice}\u2192unknown ${d.missing.join(",")}`),
+        ...plan.held.map((h) => `${h.id} (${h.reason}: ${h.detail.join(",")})`)
+      ];
+      return emit(
+        {
+          kind: "stalled-build",
+          action: `Build is stalled \u2014 no slice can be dispatched and none are in progress to unblock it. Fix the dependency/component deadlock, then \`th build next-wave\`. Blockers: ${reasons.join("; ")}.`,
+          why: "No pending slice can dispatch (a dependency cycle, a dangling dep, or a component conflict) and nothing is in flight to unblock it \u2014 so the build cannot make progress until the deadlock in the plan is fixed.",
+          data: { held: plan.held, cycles: deps.cycles, dangling: deps.dangling }
+        },
+        explain
+      );
+    }
+    if (plan.wave.length > 0) {
+      return emit(
+        {
+          kind: "dispatch-wave",
+          action: `Dispatch the next parallel build wave: ${plan.wave.join(", ")} \u2014 run \`th build dispatch\` for the full spawn set (per-slice model/effort in one payload), then set each \`in-progress\` and \`th build claim <ID>\` before spawning its Builder.`,
+          why: "A conflict-free wave of slices is ready (deps done, components free), so dispatching it is the highest-value next step \u2014 it is the build making forward progress. `th build dispatch` emits every wave Builder's spawn descriptor in one payload (it does not mutate state, so each slice still needs in-progress + a component claim before spawning).",
+          data: { wave: plan.wave, pending: prog.pending, inProgress: prog.inProgress }
+        },
+        explain
+      );
+    }
+    if (prog.inProgress > 0) {
+      return emit(
+        {
+          kind: "await-builders",
+          action: `${prog.inProgress} Builder(s) in flight \u2014 on each Critic PASS set the slice \`done\` and \`th build release <ID>\`, then re-check \`th build next-wave\`.`,
+          why: "No new wave can dispatch yet (its components are held by in-flight slices), so the run owes nothing but to await the live Builders and settle each on its Critic PASS before the next wave opens.",
+          data: { inProgress: prog.inProgress }
+        },
+        explain
+      );
+    }
+  }
+  const next = nextStageAfter(current, s.tier);
+  if (next) {
+    return emit(
+      {
+        kind: "advance-stage",
+        action: `Stage "${current}" is settled \u2014 advance to "${next.stage}" (produces ${next.produces || "(no artifact)"}; Critic mode: ${next.criticMode}${next.humanGate ? "; human gate" : "; streams"}). Set it with \`th state set current_stage ${next.stage}\`.`,
+        why: `Stage "${current}" has met all its mechanical obligations and no higher-priority blocker is open, so the only thing left is to move the pipeline forward to the next engaged stage for tier ${s.tier}.`,
+        data: { from: current, to: next.stage, contract: next }
+      },
+      explain
+    );
+  }
+  return emit(
+    {
+      kind: "done",
+      action: "No mechanical obligation outstanding \u2014 the pipeline's last engaged stage is reached. The human owns final sign-off.",
+      why: "Every mechanical gate the CLI can compute is satisfied and there is no further engaged stage for this tier, so nothing mechanical remains \u2014 final authority is the human's.",
+      data: { current_stage: current }
+    },
+    explain
+  );
+}
+function coverageBlocker(paths) {
+  const breakdown = computeBreakdown(paths.root);
+  if ("error" in breakdown) {
+    return {
+      kind: "fix-coverage",
+      action: "Coverage cannot be checked \u2014 author the requirements file first.",
+      why: "Coverage is the hard gate before building, and it cannot even be computed without a requirements file \u2014 so authoring it precedes everything downstream.",
+      data: { error: breakdown.error, reqsFile: breakdown.reqsFile }
+    };
+  }
+  const gaps = breakdown.rows.filter((row) => !row.planned || !row.tested);
+  if (gaps.length > 0) {
+    return {
+      kind: "fix-coverage",
+      action: `Coverage gate failing \u2014 ${gaps.length} REQ-ID(s) lack a slice and/or a test: ${gaps.map((g) => g.req).join(", ")}. Run \`th coverage check\`.`,
+      why: "The coverage gate mechanically blocks the build until every MVP REQ-ID maps to \u22651 slice and \u22651 test; the listed gaps must be closed before implementation may proceed.",
+      data: { gaps: gaps.map((g) => ({ req: g.req, inSlice: g.planned, inTest: g.tested })) }
+    };
+  }
+  return void 0;
+}
+function emit(next, explain = false) {
+  const data = { kind: next.kind, action: next.action, ...next.data ?? {} };
+  if (explain && next.why) data.why = next.why;
+  const human = explain && next.why ? `next: ${next.action}
+why: ${next.why}` : `next: ${next.action}`;
+  return success({ data, human });
+}
+
+// src/commands/delegate.ts
+var fs18 = __toESM(require("node:fs"));
+
+// src/commands/context.ts
+var fs17 = __toESM(require("node:fs"));
+var path16 = __toESM(require("node:path"));
+
+// src/core/summary.ts
+var SUMMARY_HEADING_RE = /^(#{1,3})\s+summary\b/i;
+var ANY_HEADING_RE = /^#{1,3}\s+/;
+function extractSummary(markdown, headLines = 8) {
+  const lines = markdown.split(/\r?\n/);
+  let startIdx = -1;
+  let level = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const m = SUMMARY_HEADING_RE.exec(lines[i]);
+    if (m) {
+      startIdx = i;
+      level = m[1].length;
+      break;
+    }
+  }
+  if (startIdx >= 0) {
+    const body = [];
+    for (let i = startIdx + 1; i < lines.length; i++) {
+      const line = lines[i];
+      const h = ANY_HEADING_RE.exec(line);
+      if (h) {
+        const hLevel = /^#+/.exec(line)?.[0].length ?? 99;
+        if (hLevel <= level) break;
+      }
+      body.push(line);
+    }
+    return { summary: body.join("\n").trim(), head: headFallback(lines, headLines) };
+  }
+  return { summary: null, head: headFallback(lines, headLines) };
+}
+function headFallback(lines, headLines) {
+  const out = [];
+  for (const line of lines) {
+    if (out.length >= headLines) break;
+    if (line.trim().length === 0 && out.length === 0) continue;
+    out.push(line);
+  }
+  return out.join("\n").trim();
 }
 
 // src/commands/context.ts
@@ -19314,6 +19477,480 @@ function runDecisionCheck(paths, _opts = {}) {
   return success({ data: { gating: [] }, human: "No unapproved gating decisions." });
 }
 
+// src/commands/artifact-lease.ts
+var CLAIM_USAGE = "usage: th artifact claim <file>#<section> --holder <id>";
+var RELEASE_USAGE = "usage: th artifact release <file>#<section> --holder <id>";
+function validate(opts, usage) {
+  const section = opts.section;
+  const holder = opts.holder;
+  if (!section || !holder) {
+    return { ok: false, result: failure({ human: usage, data: { error: "missing_args" } }) };
+  }
+  if (!isSectionId(section)) {
+    return {
+      ok: false,
+      result: failure({
+        human: `Invalid section id: "${section}". Expected <file>#<section> (a non-empty file and section separated by a single '#'). ${usage}`,
+        data: { error: "invalid_section_id", section }
+      })
+    };
+  }
+  return { ok: true, section, holder };
+}
+function runArtifactClaim(paths, opts = {}) {
+  const v = validate(opts, CLAIM_USAGE);
+  if (!v.ok) return v.result;
+  const { section, holder } = v;
+  return withStateLock(paths, () => {
+    const r = readState(paths);
+    if (!r.exists) return NOT_INIT;
+    if (!r.state) return failure({ human: `state.json is invalid:
+${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+    if (isSectionLeased(paths, section, holder)) {
+      const owner = sectionLeaseHolder(paths, section);
+      return failure({
+        human: `Cannot claim ${section}: already leased to ${owner}. Co-edit a different section, or wait for it to be released (REQ-PCO-041).`,
+        data: { error: "section_lease_conflict", section, holder: owner }
+      });
+    }
+    appendLeaseEvent(paths, { event: "claim", slice: section, components: [holder] });
+    structuredLog({ cmd: "artifact claim", section, holder });
+    return success({ data: { section, holder }, human: `claimed ${section} for ${holder}` });
+  });
+}
+function runArtifactRelease(paths, opts = {}) {
+  const v = validate(opts, RELEASE_USAGE);
+  if (!v.ok) return v.result;
+  const { section, holder } = v;
+  return withStateLock(paths, () => {
+    const r = readState(paths);
+    if (!r.exists) return NOT_INIT;
+    if (!r.state) return failure({ human: `state.json is invalid:
+${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+    appendLeaseEvent(paths, { event: "release", slice: section, components: [holder] });
+    structuredLog({ cmd: "artifact release", section, holder });
+    return success({ data: { section, holder }, human: `released ${section}.` });
+  });
+}
+function runArtifactLeases(paths) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) return failure({ human: `state.json is invalid:
+${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+  const leases = activeSectionLeases(paths);
+  const human = leases.length ? leases.map((l) => `${l.section} \u2192 ${l.holder}`).join("\n") : "(no active section leases)";
+  return success({ data: { leases }, human });
+}
+
+// src/core/collab.ts
+var fs20 = __toESM(require("node:fs"));
+var path18 = __toESM(require("node:path"));
+function validatePathSegment(segment, label) {
+  if (path18.isAbsolute(segment)) {
+    throw new Error(`collab: ${label} must not be an absolute path: "${segment}"`);
+  }
+  if (segment === ".." || segment.includes("/") || segment.includes("\\")) {
+    throw new Error(`collab: ${label} must be a single path component with no separators or "..": "${segment}"`);
+  }
+}
+var FragmentExistsError = class extends Error {
+  constructor(file) {
+    super(`collab: fragment already exists: ${file}. Pass --force to overwrite it.`);
+    this.file = file;
+    this.name = "FragmentExistsError";
+  }
+  file;
+};
+function collabDir(paths, stage, round) {
+  validatePathSegment(stage, "stage");
+  if (round !== void 0) validatePathSegment(round, "round");
+  const base = path18.join(paths.stateDir, "collab", stage);
+  return round === void 0 ? base : path18.join(base, round);
+}
+function writeFragment(paths, input) {
+  validatePathSegment(input.name, "name");
+  const dir = collabDir(paths, input.stage, input.round);
+  const file = path18.join(dir, input.name);
+  if (!input.force && fs20.existsSync(file)) {
+    throw new FragmentExistsError(file);
+  }
+  fs20.mkdirSync(dir, { recursive: true });
+  fs20.writeFileSync(file, input.content, "utf8");
+  return file;
+}
+function listFragments(paths, stage, round) {
+  const out = [];
+  const readRound = (r) => {
+    const dir = collabDir(paths, stage, r);
+    if (!fs20.existsSync(dir) || !fs20.statSync(dir).isDirectory()) return;
+    const names = fs20.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
+    for (const name of names) {
+      out.push({ stage, round: r, name, path: path18.join(dir, name) });
+    }
+  };
+  if (round !== void 0) {
+    readRound(round);
+    return out;
+  }
+  const stageDir = collabDir(paths, stage);
+  if (!fs20.existsSync(stageDir) || !fs20.statSync(stageDir).isDirectory()) return out;
+  const rounds = fs20.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  for (const r of rounds) readRound(r);
+  return out;
+}
+function mergeFragments(paths, stage, round) {
+  const fragments = listFragments(paths, stage, round);
+  const unanchored = [];
+  for (const f of fragments) {
+    const content = fs20.readFileSync(f.path, "utf8");
+    if (extractReqIds(content).length === 0) unanchored.push(f.name);
+  }
+  if (unanchored.length > 0) {
+    return { ok: false, merged: "", fragments, unanchored };
+  }
+  const parts = fragments.map((f) => {
+    const content = fs20.readFileSync(f.path, "utf8");
+    return content.endsWith("\n") ? content : `${content}
+`;
+  });
+  const merged = parts.join("\n");
+  return { ok: true, merged, fragments, unanchored: [] };
+}
+
+// src/commands/collab.ts
+function runCollabInit(paths, opts) {
+  if (!opts.stage) {
+    return failure({
+      human: "usage: th collab init --stage <stage>",
+      data: { error: "missing_stage" }
+    });
+  }
+  const dir = collabDir(paths, opts.stage);
+  structuredLog({ cmd: "collab init", stage: opts.stage });
+  return success({
+    data: { stage: opts.stage, dir },
+    human: `collab stage '${opts.stage}' \u2192 ${dir}`
+  });
+}
+function runCollabFragment(paths, opts) {
+  if (!opts.stage || !opts.round || !opts.name) {
+    return failure({
+      human: "usage: th collab fragment --stage <stage> --round <round> --name <name> [--text <text>] [--force]",
+      data: { error: "missing_args" }
+    });
+  }
+  let file;
+  try {
+    file = writeFragment(paths, {
+      stage: opts.stage,
+      round: opts.round,
+      name: opts.name,
+      content: opts.text ?? "",
+      force: opts.force ?? false
+    });
+  } catch (e) {
+    if (!(e instanceof FragmentExistsError)) throw e;
+    structuredLog({ cmd: "collab fragment", stage: opts.stage, round: opts.round, name: opts.name, error: "fragment_exists" });
+    return failure({
+      human: e.message,
+      data: { error: "fragment_exists", stage: opts.stage, round: opts.round, name: opts.name }
+    });
+  }
+  structuredLog({ cmd: "collab fragment", stage: opts.stage, round: opts.round, name: opts.name, force: opts.force === true });
+  return success({
+    data: { stage: opts.stage, round: opts.round, name: opts.name, path: file },
+    human: `fragment written: ${file}`
+  });
+}
+function runCollabList(paths, opts) {
+  if (!opts.stage) {
+    return failure({
+      human: "usage: th collab list --stage <stage> [--round <round>]",
+      data: { error: "missing_stage" }
+    });
+  }
+  const fragments = listFragments(paths, opts.stage, opts.round);
+  const human = fragments.length ? fragments.map((f) => `${f.round}/${f.name}`).join("\n") : "(no fragments)";
+  structuredLog({ cmd: "collab list", stage: opts.stage, round: opts.round, count: fragments.length });
+  return success({ data: { stage: opts.stage, round: opts.round, fragments }, human });
+}
+function runCollabMerge(paths, opts) {
+  if (!opts.stage || !opts.round) {
+    return failure({
+      human: "usage: th collab merge --stage <stage> --round <round>",
+      data: { error: "missing_args" }
+    });
+  }
+  const result = mergeFragments(paths, opts.stage, opts.round);
+  if (!result.ok) {
+    structuredLog({
+      cmd: "collab merge",
+      stage: opts.stage,
+      round: opts.round,
+      ok: false,
+      unanchored: result.unanchored
+    });
+    return failure({
+      human: `merge rejected: fragments missing a REQ-ID anchor: ${result.unanchored.join(", ")}`,
+      data: { error: "unanchored_fragments", stage: opts.stage, round: opts.round, unanchored: result.unanchored }
+    });
+  }
+  structuredLog({
+    cmd: "collab merge",
+    stage: opts.stage,
+    round: opts.round,
+    ok: true,
+    count: result.fragments.length
+  });
+  return success({
+    data: {
+      stage: opts.stage,
+      round: opts.round,
+      merged: result.merged,
+      fragments: result.fragments
+    },
+    human: result.merged
+  });
+}
+
+// src/commands/debate.ts
+var fs21 = __toESM(require("node:fs"));
+var path19 = __toESM(require("node:path"));
+
+// src/core/debate-log.ts
+function formatDebateEntry(entry) {
+  const src = entry.source ?? "Builder";
+  const heading = `## ${entry.id}  (${entry.topic}, ${src})  \u2014 ${entry.status}`;
+  return [
+    heading,
+    `Positions  : ${entry.positions ?? ""}`,
+    `Resolution : ${entry.resolution ?? "(pending)"}`,
+    `Links      : ${entry.links ?? ""}`,
+    ""
+  ].join("\n");
+}
+var HEADING_RE = /^##\s+(DEBATE-\d+)\s*\(([^)]+)\)\s*—\s*(open|resolved)/;
+function extractTopic(paren) {
+  const lastComma = paren.lastIndexOf(",");
+  if (lastComma < 0) return paren.trim();
+  return paren.slice(0, lastComma).trim();
+}
+var FIELD_RE = /^(Positions|Resolution|Links)\s*:\s*(.*)$/;
+function parseDebateEntries(text) {
+  const entries = [];
+  const lines = text.split(/\r?\n/);
+  let current;
+  for (const line of lines) {
+    const head = HEADING_RE.exec(line);
+    if (head) {
+      if (current) entries.push(current);
+      current = {
+        id: head[1],
+        topic: extractTopic(head[2]),
+        status: head[3],
+        positions: "",
+        resolution: "",
+        links: ""
+      };
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      if (current) {
+        entries.push(current);
+        current = void 0;
+      }
+      continue;
+    }
+    if (current) {
+      const field = FIELD_RE.exec(line);
+      if (field) {
+        const value = field[2];
+        if (field[1] === "Positions") current.positions = value;
+        else if (field[1] === "Resolution") current.resolution = value;
+        else current.links = value;
+      }
+    }
+  }
+  if (current) entries.push(current);
+  return entries;
+}
+function nextDebateId(text) {
+  let max = 0;
+  for (const m of text.matchAll(/DEBATE-(\d+)/g)) {
+    const n = Number(m[1]);
+    if (n > max) max = n;
+  }
+  return `DEBATE-${String(max + 1).padStart(3, "0")}`;
+}
+
+// src/commands/debate.ts
+var DEBATE_LOG_HEADER = `# Debate Log
+
+Append-only record of debate turns and final reconciliation (REQ-PCO-042). Each
+entry records the topic, the status (open vs. resolved), the positions, the
+resolution, and any links.
+
+Format:
+
+\`\`\`
+## DEBATE-NNN  (topic, Builder)  \u2014 <status>
+Positions  : ...
+Resolution : ...
+Links      : ...
+\`\`\`
+`;
+function debateLogPath(paths) {
+  return path19.join(paths.root, "debate-log.md");
+}
+function readDebateLog(paths) {
+  const file = debateLogPath(paths);
+  if (!fs21.existsSync(file)) {
+    fs21.writeFileSync(file, DEBATE_LOG_HEADER, "utf8");
+    return DEBATE_LOG_HEADER;
+  }
+  return fs21.readFileSync(file, "utf8");
+}
+function appendDebateLog(paths, block) {
+  const current = readDebateLog(paths);
+  const sep7 = current.endsWith("\n") ? "" : "\n";
+  fs21.writeFileSync(debateLogPath(paths), `${current}${sep7}${block}`, "utf8");
+}
+function runDebateAdd(paths, opts) {
+  return withStateLock(paths, () => runDebateAddLocked(paths, opts));
+}
+function runDebateAddLocked(paths, opts) {
+  const topic = opts.topic;
+  if (!topic) {
+    return failure({
+      human: "usage: th debate add --topic <topic> [--positions ...] [--links ...] [--source ...]",
+      data: { error: "missing_topic" }
+    });
+  }
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: `Existing state.json is invalid; fix it before logging a debate:
+${formatIssues(r.issues)}`,
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const current = readDebateLog(paths);
+  const id = nextDebateId(current);
+  const block = formatDebateEntry({
+    id,
+    topic,
+    status: "open",
+    positions: opts.positions ?? "",
+    resolution: "(pending)",
+    links: opts.links ?? "",
+    source: opts.source
+  });
+  appendDebateLog(paths, block);
+  const debateOpenBlocking = (r.state.debate_open_blocking ?? 0) + 1;
+  writeState(paths, { ...r.state, debate_open_blocking: debateOpenBlocking });
+  appendLedger(paths, {
+    event: "debate-blocking-opened",
+    id,
+    topic,
+    debate_open_blocking: debateOpenBlocking
+  });
+  structuredLog({ cmd: "debate add", id, debate_open_blocking: debateOpenBlocking });
+  return success({
+    data: { id, status: "open", debate_open_blocking: debateOpenBlocking },
+    human: `${id} logged (open, BLOCKING). Open blocking debates: ${debateOpenBlocking}.`
+  });
+}
+function runDebateList(paths) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: `state.json is invalid:
+${formatIssues(r.issues)}`,
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const file = debateLogPath(paths);
+  const text = fs21.existsSync(file) ? fs21.readFileSync(file, "utf8") : "";
+  const entries = sortById(effectiveEntries(parseDebateEntries(text)));
+  const openBlocking = r.state.debate_open_blocking ?? 0;
+  const human = entries.length ? entries.map((e) => `${e.id}  (${e.topic})  ${e.status}`).join("\n") : "(no debate entries)";
+  return success({ data: { entries, open_blocking: openBlocking }, human });
+}
+function effectiveEntries(entries) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const e of entries) byId.set(e.id, e);
+  return [...byId.values()];
+}
+function sortById(entries) {
+  return [...entries].sort((a, b) => idNum(a.id) - idNum(b.id));
+}
+function idNum(id) {
+  const m = /DEBATE-(\d+)/.exec(id);
+  return m ? Number(m[1]) : 0;
+}
+function runDebateResolve(paths, opts) {
+  return withStateLock(paths, () => runDebateResolveLocked(paths, opts));
+}
+function runDebateResolveLocked(paths, opts) {
+  const id = opts.id;
+  if (!id) return failure({ human: "usage: th debate resolve <DEBATE-NNN> [--resolution ...]" });
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: `Existing state.json is invalid; fix it before resolving a debate:
+${formatIssues(r.issues)}`,
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const file = debateLogPath(paths);
+  const text = fs21.existsSync(file) ? fs21.readFileSync(file, "utf8") : "";
+  const entries = parseDebateEntries(text);
+  const entry = entries.find((e) => e.id === id);
+  if (!entry) {
+    return failure({
+      human: `Debate entry not found: ${id}. Known entries: ${entries.map((e) => e.id).join(", ") || "(none)"}`,
+      data: { error: "debate_not_found", id }
+    });
+  }
+  const alreadyResolved = text.split(/\r?\n/).some((line) => line.trim() === `## ${id} \u2014 resolved`);
+  if (alreadyResolved) {
+    return failure({
+      human: `${id} is already resolved. Double-resolving is not allowed.`,
+      data: { error: "already_resolved", id }
+    });
+  }
+  const resolution = opts.resolution ?? "(reconciled)";
+  appendDebateLog(
+    paths,
+    formatDebateEntry({
+      id,
+      topic: entry.topic,
+      status: "resolved",
+      positions: entry.positions,
+      resolution,
+      links: entry.links,
+      source: "Builder"
+    })
+  );
+  appendDebateLog(paths, `## ${id} \u2014 resolved
+`);
+  const debateOpenBlocking = Math.max(0, (r.state.debate_open_blocking ?? 0) - 1);
+  writeState(paths, { ...r.state, debate_open_blocking: debateOpenBlocking });
+  appendLedger(paths, {
+    event: "debate-blocking-resolved",
+    id,
+    debate_open_blocking: debateOpenBlocking
+  });
+  structuredLog({ cmd: "debate resolve", id, debate_open_blocking: debateOpenBlocking });
+  return success({
+    data: { id, status: "resolved", debate_open_blocking: debateOpenBlocking },
+    human: `${id} marked resolved. Open blocking debates: ${debateOpenBlocking}.`
+  });
+}
+
 // src/mcp-server.ts
 function resolvePathsForCall() {
   return resolveProjectPaths(process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
@@ -19430,6 +20067,25 @@ var TOOL_DEFS = [
       additionalProperties: false
     },
     run: (paths, args) => runBuildRelease(paths, optString(args, "sliceId"))
+  },
+  {
+    name: "th_build_dispatch",
+    description: "Single-payload parallel-dispatch oracle (REQ-PCO-001): the FULL spawn set for the current live wave in one payload \u2014 each dispatchable slice enriched with a {model, effort} recommendation from the \xA72 routing table \u2014 so every wave Builder can be launched in one message. Carries dependency-graph/stall warnings. Read-only (the Orchestrator still claims + sets in-progress before spawning).",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runBuildDispatch(paths)
+  },
+  {
+    name: "th_build_plan",
+    description: "Schedule the slices into conflict-free build waves (slices sharing a component serialize across waves). By default only unfinished slices are scheduled; includeDone schedules all. advise adds a parallelism-optimizer advisory (REQ-PCO-030). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        includeDone: boolProp("Schedule done slices too (default false)."),
+        advise: boolProp("Append the parallelism-optimizer advisory (REQ-PCO-030).")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runBuildPlan(paths, { includeDone: optBool(args, "includeDone"), advise: optBool(args, "advise") })
   },
   {
     name: "th_route",
@@ -19712,6 +20368,146 @@ var TOOL_DEFS = [
       additionalProperties: false
     },
     run: (paths, _args) => runDecisionList(paths)
+  },
+  // Section leases — fine-grained artifact-section coordination (mirrors build leases).
+  {
+    name: "th_artifact_claim",
+    description: "Take a section lease (<file>#<section>) for a holder before editing that section. Refuses (error) if the exact section is already actively leased to a DIFFERENT holder (collision guard); a re-claim by the same holder is idempotent. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        section: stringProp("Section id of the form <file>#<section> (e.g. docs/04-architecture.md#data-model)."),
+        holder: stringProp("The claiming agent/task id.")
+      },
+      required: ["section", "holder"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runArtifactClaim(paths, { section: optString(args, "section"), holder: optString(args, "holder") })
+  },
+  {
+    name: "th_artifact_release",
+    description: "Release a section lease (<file>#<section>) held by a holder.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        section: stringProp("Section id of the form <file>#<section>."),
+        holder: stringProp("The releasing agent/task id.")
+      },
+      required: ["section", "holder"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runArtifactRelease(paths, { section: optString(args, "section"), holder: optString(args, "holder") })
+  },
+  {
+    name: "th_artifact_leases",
+    description: "List the active section leases ({section, holder}). Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runArtifactLeases(paths)
+  },
+  // Anchor: REQ-PCO-040 — blackboard collab substrate (fragments + reconcile-merge).
+  {
+    name: "th_collab_init",
+    description: "Report the resolved collab directory for a stage (path construction only \u2014 dirs are created on the first fragment write). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: { stage: stringProp("Stage bucket name.") },
+      required: ["stage"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runCollabInit(paths, { stage: optString(args, "stage") })
+  },
+  {
+    name: "th_collab_fragment",
+    description: "Drop a fragment file into <stage>/<round>, creating the round dir on demand. Refuses to overwrite an existing fragment unless force is set (collision guard for parallel writers).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        stage: stringProp("Stage bucket name."),
+        round: stringProp("Round bucket within the stage."),
+        name: stringProp("Fragment file name, unique within the round (a single path component)."),
+        text: stringProp("Fragment body (must carry \u22651 REQ-ID anchor to survive a merge)."),
+        force: boolProp("Overwrite an existing fragment of the same name (default false).")
+      },
+      required: ["stage", "round", "name"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runCollabFragment(paths, {
+      stage: optString(args, "stage"),
+      round: optString(args, "round"),
+      name: optString(args, "name"),
+      text: optString(args, "text"),
+      force: optBool(args, "force")
+    })
+  },
+  {
+    name: "th_collab_list",
+    description: "List fragment descriptors for a stage (optionally one round) in deterministic sorted order. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        stage: stringProp("Stage bucket name."),
+        round: stringProp("Optional round to scope the listing.")
+      },
+      required: ["stage"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runCollabList(paths, { stage: optString(args, "stage"), round: optString(args, "round") })
+  },
+  {
+    name: "th_collab_merge",
+    description: "Reconcile a round: concatenate its fragments in deterministic order (idempotent). Rejects (error) any round containing a fragment without a REQ-ID anchor (traceability \xA717). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        stage: stringProp("Stage bucket name."),
+        round: stringProp("Round bucket to merge.")
+      },
+      required: ["stage", "round"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runCollabMerge(paths, { stage: optString(args, "stage"), round: optString(args, "round") })
+  },
+  // Anchor: REQ-PCO-042 — append-only debate ledger (mirrors the drift ledger).
+  {
+    name: "th_debate_add",
+    description: "Log a proposed (BLOCKING) debate over competing producer positions; increments debate_open_blocking so the stop-gate refuses completion until it is resolved. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topic: stringProp("The debate topic (required)."),
+        positions: stringProp("The competing positions."),
+        links: stringProp("Comma-separated REQ-IDs / ADR-ids the debate concerns."),
+        source: stringProp("Who is logging the entry (default Builder).")
+      },
+      required: ["topic"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runDebateAdd(paths, {
+      topic: optString(args, "topic"),
+      positions: optString(args, "positions"),
+      links: optString(args, "links"),
+      source: optString(args, "source")
+    })
+  },
+  {
+    name: "th_debate_list",
+    description: "List debate entries (collapsed to the latest per id, sorted) plus the open-blocking count. Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runDebateList(paths)
+  },
+  {
+    name: "th_debate_resolve",
+    description: "Mark a debate resolved and decrement debate_open_blocking. Errors if the id is unknown or already resolved. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: stringProp("The DEBATE-NNN id to resolve."),
+        resolution: stringProp("The resolution rationale.")
+      },
+      required: ["id"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runDebateResolve(paths, { id: optString(args, "id"), resolution: optString(args, "resolution") })
   }
 ];
 function listTools() {

@@ -2,6 +2,7 @@ import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import {
   type Fragment,
+  FragmentExistsError,
   collabDir,
   writeFragment,
   listFragments,
@@ -33,6 +34,8 @@ export interface CollabFragmentOptions {
   round?: string;
   name?: string;
   text?: string;
+  /** Overwrite an existing fragment of the same name (collision guard; default off). */
+  force?: boolean;
 }
 
 export interface CollabListOptions {
@@ -73,17 +76,33 @@ export function runCollabInit(paths: ProjectPaths, opts: CollabInitOptions): Com
 export function runCollabFragment(paths: ProjectPaths, opts: CollabFragmentOptions): CommandResult {
   if (!opts.stage || !opts.round || !opts.name) {
     return failure({
-      human: "usage: th collab fragment --stage <stage> --round <round> --name <name> [--text <text>]",
+      human: "usage: th collab fragment --stage <stage> --round <round> --name <name> [--text <text>] [--force]",
       data: { error: "missing_args" },
     });
   }
-  const file = writeFragment(paths, {
-    stage: opts.stage,
-    round: opts.round,
-    name: opts.name,
-    content: opts.text ?? "",
-  });
-  structuredLog({ cmd: "collab fragment", stage: opts.stage, round: opts.round, name: opts.name });
+  // writeFragment throws a FragmentExistsError on a collision (existing fragment,
+  // no --force) — convert ONLY that to a structured failure. Path-validation errors
+  // (absolute / ".." / separator segments) are a distinct, security-relevant failure
+  // mode and must keep propagating as throws (preserved behavior), so they are
+  // re-thrown rather than mislabeled as a collision.
+  let file: string;
+  try {
+    file = writeFragment(paths, {
+      stage: opts.stage,
+      round: opts.round,
+      name: opts.name,
+      content: opts.text ?? "",
+      force: opts.force ?? false,
+    });
+  } catch (e) {
+    if (!(e instanceof FragmentExistsError)) throw e;
+    structuredLog({ cmd: "collab fragment", stage: opts.stage, round: opts.round, name: opts.name, error: "fragment_exists" });
+    return failure({
+      human: e.message,
+      data: { error: "fragment_exists", stage: opts.stage, round: opts.round, name: opts.name },
+    });
+  }
+  structuredLog({ cmd: "collab fragment", stage: opts.stage, round: opts.round, name: opts.name, force: opts.force === true });
   return success({
     data: { stage: opts.stage, round: opts.round, name: opts.name, path: file },
     human: `fragment written: ${file}`,

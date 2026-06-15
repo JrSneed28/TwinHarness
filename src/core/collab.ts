@@ -35,6 +35,19 @@ function validatePathSegment(segment: string, label: string): void {
   }
 }
 
+/**
+ * Thrown by {@link writeFragment} when a fragment of the same name already exists
+ * and `force` is not set. A DISTINCT type so the command layer can convert only a
+ * collision into a structured failure while letting path-validation errors (a
+ * different, security-relevant failure mode) keep propagating as throws.
+ */
+export class FragmentExistsError extends Error {
+  constructor(public readonly file: string) {
+    super(`collab: fragment already exists: ${file}. Pass --force to overwrite it.`);
+    this.name = "FragmentExistsError";
+  }
+}
+
 /** A located fragment in the blackboard tree. */
 export interface Fragment {
   /** Stage bucket the fragment belongs to. */
@@ -55,6 +68,12 @@ export interface WriteFragmentInput {
   name: string;
   /** Fragment body. Must carry ≥1 REQ-ID anchor to survive a merge. */
   content: string;
+  /**
+   * Overwrite an existing fragment of the same name. Default (false/undefined)
+   * REFUSES to clobber a fragment another writer already dropped — a collision
+   * guard for parallel agents sharing a round.
+   */
+  force?: boolean;
 }
 
 /** Structured result of {@link mergeFragments}. */
@@ -84,12 +103,20 @@ export function collabDir(paths: ProjectPaths, stage: string, round?: string): s
 /**
  * Write a fragment file under `<stateDir>/collab/<stage>/<round>/<name>`,
  * creating the round directory tree on demand. Returns the absolute path written.
+ *
+ * Collision guard: refuses to overwrite an existing fragment of the same name
+ * unless `input.force` is set, so two parallel agents dropping the same name into
+ * a round cannot silently clobber each other. Throws a descriptive `Error` on a
+ * collision (the command layer converts it to a structured failure).
  */
 export function writeFragment(paths: ProjectPaths, input: WriteFragmentInput): string {
   validatePathSegment(input.name, "name");
   const dir = collabDir(paths, input.stage, input.round);
-  fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, input.name);
+  if (!input.force && fs.existsSync(file)) {
+    throw new FragmentExistsError(file);
+  }
+  fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(file, input.content, "utf8");
   return file;
 }

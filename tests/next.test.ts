@@ -17,6 +17,7 @@ import { runArtifactRegister } from "../src/commands/artifact";
 import { runSlicesSync } from "../src/commands/slices";
 import { runVerifyAdd, runVerifyRun } from "../src/commands/verify";
 import { runNext } from "../src/commands/next";
+import { runRepoMap } from "../src/commands/repo";
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
@@ -129,13 +130,18 @@ describe("REQ-NEXT-008: a failing suite routes to the Debugger before advancing"
 });
 
 describe("REQ-NEXT-009: implementation stage dispatches build waves", () => {
-  it("pending slices at implementation → kind dispatch-wave", () => {
+  it("pending slices at implementation → kind dispatch-wave, action prefers `th build dispatch`", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
     runStateSet(tp.paths, "tier", "T2");
     runStateSet(tp.paths, "current_stage", "implementation");
     runStateSet(tp.paths, "slices", JSON.stringify([{ id: "SLICE-1", status: "pending", components: ["api"] }]));
-    expect(runNext(tp.paths).data?.kind).toBe("dispatch-wave");
+    const res = runNext(tp.paths);
+    expect(res.data?.kind).toBe("dispatch-wave");
+    // Task 5: the action recommends the single-payload `th build dispatch` …
+    expect(res.data?.action).toContain("th build dispatch");
+    // … while keeping the still-required per-slice claim step (dispatch is read-only).
+    expect(res.data?.action).toContain("th build claim");
   });
 
   it("only in-progress slices remain → kind await-builders", () => {
@@ -157,6 +163,54 @@ describe("REQ-NEXT-009: implementation stage dispatches build waves", () => {
       { id: "SLICE-2", status: "pending", components: ["b"], depends_on: ["SLICE-1"] },
     ]));
     expect(runNext(tp.paths).data?.kind).toBe("stalled-build");
+  });
+});
+
+describe("REQ-NEXT-012: brownfield repo-map freshness gates pre-implementation work", () => {
+  it("brownfield + tier set + NO repo-map → kind refresh-repo-map", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, { brownfield: true });
+    runStateSet(tp.paths, "tier", "T2");
+    // No repo-map.json on disk → `th repo check` is no-map → must refresh first.
+    const res = runNext(tp.paths);
+    expect(res.data?.kind).toBe("refresh-repo-map");
+    expect(res.data?.action).toContain("th repo map");
+  });
+
+  it("brownfield + tier set + STALE repo-map → kind refresh-repo-map", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, { brownfield: true });
+    runStateSet(tp.paths, "tier", "T2");
+    // Build a fresh map, then mutate the tree so it drifts (stale).
+    writeFile(tp, "src/foo.ts", "// REQ-001\nexport const x = 1;\n");
+    runRepoMap(tp.paths, { write: true });
+    writeFile(tp, "src/foo.ts", "// REQ-001\nexport const x = 2;\n"); // modified after snapshot.
+    expect(runNext(tp.paths).data?.kind).toBe("refresh-repo-map");
+  });
+
+  it("brownfield + tier set + FRESH repo-map → does NOT emit refresh-repo-map", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, { brownfield: true });
+    runStateSet(tp.paths, "tier", "T2");
+    writeFile(tp, "src/foo.ts", "// REQ-001\nexport const x = 1;\n");
+    runRepoMap(tp.paths, { write: true }); // fresh snapshot of the current tree.
+    expect(runNext(tp.paths).data?.kind).not.toBe("refresh-repo-map");
+  });
+
+  it("brownfield but implementation already unlocked → NOT refresh-repo-map (no build deadlock)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, { brownfield: true });
+    runStateSet(tp.paths, "tier", "T2");
+    runStateSet(tp.paths, "implementation_allowed", "true"); // building has begun.
+    // No map (would be stale/absent), but the guard skips the gate once implementation is allowed.
+    expect(runNext(tp.paths).data?.kind).not.toBe("refresh-repo-map");
+  });
+
+  it("greenfield + no repo-map → NOT refresh-repo-map (gate is brownfield-only)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {}); // greenfield.
+    runStateSet(tp.paths, "tier", "T2");
+    expect(runNext(tp.paths).data?.kind).not.toBe("refresh-repo-map");
   });
 });
 

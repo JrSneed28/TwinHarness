@@ -3,9 +3,10 @@ import * as fs from "node:fs";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { evaluateStopGate, runHookStopGate } from "../src/commands/hook";
-import { writeState } from "../src/core/state-store";
+import { readState, writeState } from "../src/core/state-store";
 import { initialState } from "../src/core/state-schema";
 import { writeVerifyConfig, writeVerifyReport } from "../src/core/verify";
+import { runDecisionAdd, runDecisionApprove } from "../src/commands/decision";
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
@@ -152,6 +153,85 @@ describe("REQ-GATE-005: final-verification requires a green verify suite when on
     writeVerifyConfig(tp.paths, { commands: ["npm test"] });
     writeVerifyReport(tp.paths, { ok: true, ranAt: "2026-06-13T00:00:00.000Z", results: [{ command: "npm test", exitCode: 0, ok: true, durationMs: 1, outputTail: "" }] });
     settledAtFinal(tp);
+    expect(evaluateStopGate(tp.paths).block).toBe(false);
+  });
+});
+
+describe("RULE-007: stop-gate blocks on an unapproved decision gating the current stage", () => {
+  /** A fixed clock so audit timestamps are deterministic in tests. */
+  const clock = (iso: string) => () => new Date(iso);
+
+  /**
+   * Settle the run at `stage` with NO other blockers: not at final-verification,
+   * no blocking drift, no blocking debate, a valid tier and a non-pending slice.
+   * So the decision gate is the only thing that can flip `block`.
+   */
+  function settledAt(p: TempProject, stage: string): void {
+    const state = readState(p.paths).state!;
+    state.tier = "T1";
+    state.current_stage = stage;
+    state.drift_open_blocking = 0;
+    state.debate_open_blocking = 0;
+    state.slices = [{ id: "SLICE-1", status: "done", components: [] }];
+    writeState(p.paths, state);
+  }
+
+  it("blocks when a PROPOSED decision links the current stage (reason names the id + 'unapproved decision')", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    settledAt(tp, "architecture");
+
+    runDecisionAdd(tp.paths, {
+      title: "Decide architecture approach",
+      rationale: "gates the architecture stage",
+      links: ["stage:architecture"],
+      now: clock("2026-06-15T00:00:00.000Z"),
+    });
+
+    const d = evaluateStopGate(tp.paths);
+    expect(d.block).toBe(true);
+    const reason = d.reasons.join(" ");
+    expect(reason).toContain("DECISION-001");
+    expect(reason).toContain("unapproved decision");
+  });
+
+  it("allows once that gating decision is APPROVED (no other blockers present)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    settledAt(tp, "architecture");
+
+    runDecisionAdd(tp.paths, {
+      title: "Decide architecture approach",
+      rationale: "gates the architecture stage",
+      links: ["stage:architecture"],
+      now: clock("2026-06-15T00:00:00.000Z"),
+    });
+    // Blocked before approval.
+    expect(evaluateStopGate(tp.paths).block).toBe(true);
+
+    runDecisionApprove(tp.paths, "DECISION-001", {
+      as: "alice",
+      tty: { isTTY: true, stdinLine: "y" },
+      now: clock("2026-06-15T01:00:00.000Z"),
+    });
+
+    // Cleared after approval.
+    expect(evaluateStopGate(tp.paths).block).toBe(false);
+  });
+
+  it("does NOT block when a proposed decision links a DIFFERENT stage than current_stage", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    settledAt(tp, "architecture");
+
+    // Linked to "stage:scope" while we sit at "architecture" → not a gate here.
+    runDecisionAdd(tp.paths, {
+      title: "Scope-stage decision",
+      rationale: "gates a different stage",
+      links: ["stage:scope"],
+      now: clock("2026-06-15T00:00:00.000Z"),
+    });
+
     expect(evaluateStopGate(tp.paths).block).toBe(false);
   });
 });

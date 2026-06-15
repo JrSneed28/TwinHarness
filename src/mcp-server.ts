@@ -42,7 +42,7 @@ import type { CommandResult } from "./core/output";
 
 import { runStateGet, runStateSet } from "./commands/state";
 import { runDriftAdd } from "./commands/drift";
-import { runBuildNextWave, runBuildClaim, runBuildRelease, runBuildSubClaim, runBuildSubRelease } from "./commands/build";
+import { runBuildNextWave, runBuildClaim, runBuildRelease, runBuildSubClaim, runBuildSubRelease, runBuildDispatch, runBuildPlan } from "./commands/build";
 import { runCoverageCheck } from "./commands/coverage";
 import { runRoute } from "./commands/route";
 import { runNext } from "./commands/next";
@@ -50,6 +50,9 @@ import { runDelegatePlan, runDelegatePack, runDelegateCheck } from "./commands/d
 import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck } from "./commands/repo";
 import { runContextPack } from "./commands/context";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
+import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
+import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from "./commands/collab";
+import { runDebateAdd, runDebateList, runDebateResolve } from "./commands/debate";
 
 /* ------------------------------------------------------------------ *
  * Project-paths resolution                                            *
@@ -254,6 +257,28 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       additionalProperties: false,
     },
     run: (paths, args) => runBuildRelease(paths, optString(args, "sliceId")),
+  },
+  {
+    name: "th_build_dispatch",
+    description:
+      "Single-payload parallel-dispatch oracle (REQ-PCO-001): the FULL spawn set for the current live wave in one payload — each dispatchable slice enriched with a {model, effort} recommendation from the §2 routing table — so every wave Builder can be launched in one message. Carries dependency-graph/stall warnings. Read-only (the Orchestrator still claims + sets in-progress before spawning).",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runBuildDispatch(paths),
+  },
+  {
+    name: "th_build_plan",
+    description:
+      "Schedule the slices into conflict-free build waves (slices sharing a component serialize across waves). By default only unfinished slices are scheduled; includeDone schedules all. advise adds a parallelism-optimizer advisory (REQ-PCO-030). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        includeDone: boolProp("Schedule done slices too (default false)."),
+        advise: boolProp("Append the parallelism-optimizer advisory (REQ-PCO-030)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runBuildPlan(paths, { includeDone: optBool(args, "includeDone"), advise: optBool(args, "advise") }),
   },
   {
     name: "th_route",
@@ -562,6 +587,154 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       additionalProperties: false,
     },
     run: (paths, _args) => runDecisionList(paths),
+  },
+  // Section leases — fine-grained artifact-section coordination (mirrors build leases).
+  {
+    name: "th_artifact_claim",
+    description:
+      "Take a section lease (<file>#<section>) for a holder before editing that section. Refuses (error) if the exact section is already actively leased to a DIFFERENT holder (collision guard); a re-claim by the same holder is idempotent. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        section: stringProp("Section id of the form <file>#<section> (e.g. docs/04-architecture.md#data-model)."),
+        holder: stringProp("The claiming agent/task id."),
+      },
+      required: ["section", "holder"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runArtifactClaim(paths, { section: optString(args, "section"), holder: optString(args, "holder") }),
+  },
+  {
+    name: "th_artifact_release",
+    description: "Release a section lease (<file>#<section>) held by a holder.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        section: stringProp("Section id of the form <file>#<section>."),
+        holder: stringProp("The releasing agent/task id."),
+      },
+      required: ["section", "holder"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runArtifactRelease(paths, { section: optString(args, "section"), holder: optString(args, "holder") }),
+  },
+  {
+    name: "th_artifact_leases",
+    description: "List the active section leases ({section, holder}). Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runArtifactLeases(paths),
+  },
+  // Anchor: REQ-PCO-040 — blackboard collab substrate (fragments + reconcile-merge).
+  {
+    name: "th_collab_init",
+    description:
+      "Report the resolved collab directory for a stage (path construction only — dirs are created on the first fragment write). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: { stage: stringProp("Stage bucket name.") },
+      required: ["stage"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runCollabInit(paths, { stage: optString(args, "stage") }),
+  },
+  {
+    name: "th_collab_fragment",
+    description:
+      "Drop a fragment file into <stage>/<round>, creating the round dir on demand. Refuses to overwrite an existing fragment unless force is set (collision guard for parallel writers).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        stage: stringProp("Stage bucket name."),
+        round: stringProp("Round bucket within the stage."),
+        name: stringProp("Fragment file name, unique within the round (a single path component)."),
+        text: stringProp("Fragment body (must carry ≥1 REQ-ID anchor to survive a merge)."),
+        force: boolProp("Overwrite an existing fragment of the same name (default false)."),
+      },
+      required: ["stage", "round", "name"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runCollabFragment(paths, {
+        stage: optString(args, "stage"),
+        round: optString(args, "round"),
+        name: optString(args, "name"),
+        text: optString(args, "text"),
+        force: optBool(args, "force"),
+      }),
+  },
+  {
+    name: "th_collab_list",
+    description: "List fragment descriptors for a stage (optionally one round) in deterministic sorted order. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        stage: stringProp("Stage bucket name."),
+        round: stringProp("Optional round to scope the listing."),
+      },
+      required: ["stage"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runCollabList(paths, { stage: optString(args, "stage"), round: optString(args, "round") }),
+  },
+  {
+    name: "th_collab_merge",
+    description:
+      "Reconcile a round: concatenate its fragments in deterministic order (idempotent). Rejects (error) any round containing a fragment without a REQ-ID anchor (traceability §17). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        stage: stringProp("Stage bucket name."),
+        round: stringProp("Round bucket to merge."),
+      },
+      required: ["stage", "round"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runCollabMerge(paths, { stage: optString(args, "stage"), round: optString(args, "round") }),
+  },
+  // Anchor: REQ-PCO-042 — append-only debate ledger (mirrors the drift ledger).
+  {
+    name: "th_debate_add",
+    description:
+      "Log a proposed (BLOCKING) debate over competing producer positions; increments debate_open_blocking so the stop-gate refuses completion until it is resolved. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topic: stringProp("The debate topic (required)."),
+        positions: stringProp("The competing positions."),
+        links: stringProp("Comma-separated REQ-IDs / ADR-ids the debate concerns."),
+        source: stringProp("Who is logging the entry (default Builder)."),
+      },
+      required: ["topic"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runDebateAdd(paths, {
+        topic: optString(args, "topic"),
+        positions: optString(args, "positions"),
+        links: optString(args, "links"),
+        source: optString(args, "source"),
+      }),
+  },
+  {
+    name: "th_debate_list",
+    description: "List debate entries (collapsed to the latest per id, sorted) plus the open-blocking count. Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runDebateList(paths),
+  },
+  {
+    name: "th_debate_resolve",
+    description:
+      "Mark a debate resolved and decrement debate_open_blocking. Errors if the id is unknown or already resolved. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: stringProp("The DEBATE-NNN id to resolve."),
+        resolution: stringProp("The resolution rationale."),
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runDebateResolve(paths, { id: optString(args, "id"), resolution: optString(args, "resolution") }),
   },
 ] as const;
 

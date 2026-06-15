@@ -44,6 +44,7 @@ const brief_1 = require("../core/brief");
 const log_1 = require("../core/log");
 const guards_1 = require("../core/guards");
 const state_store_1 = require("../core/state-store");
+const repo_1 = require("./repo");
 /**
  * `th tier` — the Tier-0 classifier (spec §5).
  *
@@ -77,27 +78,38 @@ function brownfieldPrerequisite(paths) {
     const stateResult = (0, state_store_1.readState)(paths);
     if (!stateResult.state || stateResult.state.project_mode !== "brownfield") {
         // REQ-304: short-circuit — greenfield / uninitialized path, nothing changes.
-        return { ok: true, missing: [] };
+        return { ok: true, missing: [], stale: [] };
     }
-    // Brownfield run: check both prerequisite artifacts.
-    // Anchor: REQ-301
+    // Brownfield run: both prerequisite artifacts must be PRESENT, and the repo-map
+    // must additionally be FRESH (REQ-301). A map that has drifted from the working
+    // tree grounds tiering/planning on an outdated understanding, so it is as
+    // disqualifying as an absent one. Freshness is delegated to the single
+    // `th repo check` oracle (`runRepoCheck`) — no duplicate hashing here.
     const repoMapPath = path.join(paths.stateDir, "repo-map.json");
+    const repoMapRel = path.relative(paths.root, repoMapPath).replace(/\\/g, "/");
     const codebaseAnalysisPath = path.join(paths.docsDir, "00-existing-codebase-analysis.md");
     const missing = [];
-    if (!fs.existsSync(repoMapPath)) {
-        // Canonical relative path as per contract IF-007.
-        const rel = path.relative(paths.root, repoMapPath).replace(/\\/g, "/");
-        missing.push(rel);
+    const stale = [];
+    // Anchor: REQ-301 — repo-map EXISTENCE *and* FRESHNESS via runRepoCheck.
+    const check = (0, repo_1.runRepoCheck)(paths);
+    if (check.exitCode === repo_1.REPO_NO_MAP_EXIT) {
+        // Absent map → unchanged outcome (canonical relative path, contract IF-007).
+        missing.push(repoMapRel);
+    }
+    else if (check.exitCode !== 0) {
+        // REPO_STALE_EXIT (4: drifted / no-hashes) or 1 (unparseable): the map no
+        // longer reflects the tree, so it cannot ground tiering decisions.
+        stale.push(repoMapRel);
     }
     if (!fs.existsSync(codebaseAnalysisPath)) {
         const rel = path.relative(paths.root, codebaseAnalysisPath).replace(/\\/g, "/");
         missing.push(rel);
     }
-    if (missing.length > 0) {
+    if (missing.length > 0 || stale.length > 0) {
         // Anchor: REQ-302
-        return { ok: false, missing };
+        return { ok: false, missing, stale };
     }
-    return { ok: true, missing: [] };
+    return { ok: true, missing: [], stale: [] };
 }
 function briefLoadFailure(briefPath, issues) {
     return (0, output_1.failure)({
@@ -154,7 +166,10 @@ function runTierClassify(paths, briefPath) {
     const prereq = brownfieldPrerequisite(paths);
     const extraData = {};
     if (!prereq.ok) {
-        extraData.brownfield_prerequisite_missing = prereq.missing;
+        if (prereq.missing.length > 0)
+            extraData.brownfield_prerequisite_missing = prereq.missing;
+        if (prereq.stale.length > 0)
+            extraData.brownfield_prerequisite_stale = prereq.stale;
     }
     return (0, output_1.success)({
         data: {
@@ -177,13 +192,22 @@ function runTierVetoCheck(paths, briefPath) {
     if (!briefPath)
         return (0, output_1.failure)({ human: "usage: th tier veto-check <brief.json>" });
     // Anchor: REQ-301, REQ-302 — brownfield hard refusal BEFORE brief-load logic.
+    // Covers a MISSING artifact (absent repo-map / codebase-analysis) and a STALE
+    // repo-map (drifted from the tree) — both forbid Tier 0 until resolved.
     const prereq = brownfieldPrerequisite(paths);
     if (!prereq.ok) {
-        (0, log_1.structuredLog)({ cmd: "tier veto-check", error: "brownfield_prerequisite_missing", missing: prereq.missing });
+        const error = prereq.missing.length > 0 ? "brownfield_prerequisite_missing" : "brownfield_repo_map_stale";
+        (0, log_1.structuredLog)({ cmd: "tier veto-check", error, missing: prereq.missing, stale: prereq.stale });
+        const lines = ["BLOCKED: brownfield prerequisite(s) unmet — Tier 0 forbidden until resolved:"];
+        for (const m of prereq.missing)
+            lines.push(`  - missing: ${m}`);
+        for (const s of prereq.stale)
+            lines.push(`  - stale: ${s} (re-run \`th repo map\` to refresh it)`);
+        lines.push("Run `th repo map` and provide docs/00-existing-codebase-analysis.md, then retry.");
         return (0, output_1.failure)({
             exitCode: exports.VETO_EXIT_CODE,
-            data: { error: "brownfield_prerequisite_missing", missing: prereq.missing },
-            human: `BLOCKED: brownfield prerequisite artifact(s) missing — run \`th repo map\` and provide docs/00-existing-codebase-analysis.md first:\n${prereq.missing.map((m) => `  - ${m}`).join("\n")}`,
+            data: { error, missing: prereq.missing, stale: prereq.stale },
+            human: lines.join("\n"),
         });
     }
     // Resolve the brief path against the project root (--cwd), like `th artifact register`.
