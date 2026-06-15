@@ -59,6 +59,22 @@ Additive, optional fields only (preserves byte-identical round-trips for existin
 - Edited: `agents/orchestrator.md` (gain `Agent` tool / explicit top-level coordinator role + spawn-batching mandate), `agents/spec.md` (debate-mode addendum), `agents/vertical-slice.md` (parallelism-optimizer handshake), `agents/builder.md` (triad blackboard channel), `agents/critic.md` (new `parallelism` + `debate-reconcile` modes).
 - Edited: `skills/twinharness/SKILL.md` + both reference files (wire the patterns into each stage's playbook).
 
+### 1d. MCP tool utilization (design-doc §8) — frontmatter + one guideline doc
+The coordination phases assume the typed `mcp__plugin_twinharness_th__*` surface is actually
+reachable and used; today it is utilized 0% (design doc §8). This is fixed **once, in Phase 0**,
+across all agents — not per phase:
+- **New:** `skills/twinharness/reference/mcp-tools.md` — the single **MCP Tooling Guideline**
+  (canonical "prefer typed MCP over `node dist/cli.js`" rule + dynamic-discovery instruction +
+  non-exhaustive snapshot table mapping each MCP tool to its `th` equivalent). The **only** file
+  that changes when new tools are added.
+- **Edited (all agents):** replace each explicit `tools:` allowlist with *no `tools:`* +
+  a `disallowedTools:` denylist (re-expressing only the prior isolation), so every agent
+  inherits all current **and future** MCP tools without per-agent edits. Add **one pointer
+  line** to the guideline in each agent.
+- **Edited:** `skills/twinharness/SKILL.md` (reframe "Running the `th` CLI" so MCP is primary,
+  `node dist/cli.js` the fallback; add the pointer) + `commands/th-run.md` (same reframe;
+  pre-approve `mcp__plugin_twinharness_th__*`, `Task`, `Agent` in `allowed-tools`).
+
 ---
 
 ## 2. Phased execution (mapped to the design roadmap)
@@ -68,7 +84,7 @@ the biggest wins with no new deterministic primitives; Phase 4 introduces the on
 primitive (blackboard + debate ledger + section leases).
 
 ```
-P0 Walking skeleton ─▶ P1 Doc fan-out ─▶ P2 Build throughput ─▶ P3 Slice optimizer
+P0 Lock + MCP reach + skeleton ─▶ P1 Doc fan-out ─▶ P2 Build throughput ─▶ P3 Slice optimizer
                                                                       │
                           P5 Red-team ◀── P4 Debate primitive ◀──────┘
                                                                       │
@@ -103,8 +119,40 @@ real parallelism + one coordinator merge with no new core primitive beyond a spa
     disjoint two-slice fixture; orchestrator prompt instructs single-message batch spawn.
   - *Gate:* `npm run verify` green; manual: a two-slice fixture run spawns 2 Builders concurrently.
 
+- **Slice 0c — MCP reachability (frontmatter denylist).** Convert every `agents/*.md` from an
+  explicit `tools:` allowlist (which hard-excludes all MCP tools — design doc §8.2) to *no
+  `tools:`* + a `disallowedTools:` denylist that re-expresses only the prior isolation
+  (read-only agents deny `Write, Edit`; non-recursing leaves deny `Agent`; Builder denies
+  nothing). Give `orchestrator.md` the same treatment so it carries `Agent` + all MCP tools
+  (merges with the Slice 0b orchestrator edit). Pre-approve `mcp__plugin_twinharness_th__*`,
+  `Task`, `Agent` in `commands/th-run.md`'s `allowed-tools`.
+  - *Files:* all `agents/*.md`, `commands/th-run.md`, `tests/` (new guard).
+  - *Acceptance (`REQ-PCO-002`):* a guard test (mirroring `tests/mcp-wiring.test.ts`) asserts
+    **no agent frontmatter carries a `tools:` allowlist that omits the MCP surface** — every
+    agent either omits `tools:` or uses `disallowedTools:`; each read-only agent still denies
+    `Write`/`Edit`. Confirm the exact pre-approval pattern for a plugin-bundled server.
+  - *Note:* verify the denylist behaves as documented in the running host (omit-`tools:` ⇒
+    inherits MCP) on a one-agent smoke run before converting all ten.
+
+- **Slice 0d — MCP Tooling Guideline (one doc) + wiring.** Add
+  `skills/twinharness/reference/mcp-tools.md` (canonical prefer-MCP rule, dynamic-discovery
+  instruction, non-exhaustive snapshot table mapping each MCP tool → `th` equivalent). Reframe
+  `skills/twinharness/SKILL.md`'s "Running the `th` CLI" section so MCP is primary and
+  `node dist/cli.js` the documented fallback; replace the scattered MCP parentheticals
+  (`builder.md`, `debugger.md`, `orchestrator.md`, `build-and-verify.md`) with **one pointer
+  line** to the guideline in each agent/skill/command.
+  - *Files:* `skills/twinharness/reference/mcp-tools.md` (new), `skills/twinharness/SKILL.md`,
+    `agents/*.md` (pointer line), `commands/th-run.md`, `tests/` (pointer-presence guard).
+  - *Acceptance (`REQ-PCO-003`):* the guideline doc exists and lists current MCP tools by
+    category with `th` parity; a guard test asserts each agent + `SKILL.md` references it; the
+    guideline names **no** count/enumeration that would have to change per tool (snapshot is
+    explicitly non-exhaustive). No `src/` change.
+  - *Gate:* `npm run verify` green; existing `mcp-wiring`/`mcp-parity` tests unchanged.
+
 **Why first:** isolates the single highest-impact, lowest-risk behavioral fix (batched
-spawns) and proves the coordinator pattern before any new primitive exists.
+spawns) and proves the coordinator pattern before any new primitive exists. **Slices 0c/0d are
+a prerequisite for every later phase** — the parallelism work calls the typed coordination
+surface, which today no agent can reach (design doc §8).
 
 ---
 
@@ -220,7 +268,7 @@ mechanics first, test them, then wire the agents.
 
 | Phase | Depends on | New core primitive? | Boost | Risk |
 |---|---|---|---|---|
-| P0 lock + skeleton | — | lock hardening + spawn descriptor (tiny) | enabler / unblocks CI | low |
+| P0 lock + skeleton + **MCP reachability** | — | lock hardening + spawn descriptor + MCP frontmatter/guideline (no `src/` for 0c/0d) | enabler / unblocks CI **+ makes the typed coord surface usable** | low |
 | P1 docs | P0 | none | moderate (free) | very low |
 | P2 build | P0 | none (reuses leases/worktrees) | **highest raw** | medium |
 | P3 slicer | P2 | `--advise` (read-only) | force-multiplier | low |
@@ -283,6 +331,11 @@ For every slice, confirm:
   grow long; current sections are <100 ms — revisit if Phase 4 contention shows timeouts). Note:
   the **targeted** Windows `EPERM`/`EACCES` hardening is *in scope* as Phase 0, Slice 0a — only
   the larger lock-mechanism swap is deferred.
-- Routing `th` calls through the persistent MCP server to cut node-respawn cost (a separate
-  performance PR; orthogonal to parallelism).
+- ~~Routing `th` calls through the persistent MCP server to cut node-respawn cost (a separate
+  performance PR; orthogonal to parallelism).~~ **Revised:** making the agents/main context
+  actually *use* the already-shipped MCP tools is now **in scope** as Phase 0, Slices 0c/0d
+  (design doc §8) — this is both a correctness fix (the typed coordination surface the
+  parallelism phases depend on is currently unreachable) and the source of the node-respawn
+  saving. Still out of scope: any *further* MCP-server performance work beyond utilization
+  (e.g. pooling, batching CLI calls, transport changes).
 - Any change to the human-gate set or the §3 boundary.

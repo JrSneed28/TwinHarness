@@ -312,7 +312,129 @@ traceable core.
 
 ---
 
-## 8. Note on this PR
+## 8. MCP tool utilization — root-cause trace & fix design
+
+> **Why this is in this plan.** The whole parallelism design above leans on the typed
+> coordination/observability surface (`th build dispatch/claim/release`, leases, `th next`,
+> `th route`, `th delegate *`, the new debate/collab verbs). TwinHarness already ships that
+> surface as an MCP server — **23 tools** (`mcp__plugin_twinharness_th__*`, built into
+> `dist/mcp-server.js`, registered in `.claude-plugin/plugin.json`). But it is currently
+> utilized **0%**: neither the main context nor any agent ever calls a single MCP tool. Every
+> coordination call shells out to `node dist/cli.js` instead. Making the MCP layer actually
+> reachable + used is a prerequisite for the coordination-heavy phases, so the trace and fix
+> are folded in here rather than left to the separate perf PR (§7 of the execution plan).
+
+### 8.1 What was verified (not assumed)
+
+The server itself is correct and live. `plugin.json` declares server key `th`; per the Claude
+Code plugin spec the tools surface as **`mcp__plugin_<plugin>_<server>__<tool>`**, i.e.
+`mcp__plugin_twinharness_th__th_state_get` etc. — which is exactly the string the agent bodies
+already reference, so **the tool names are not the bug**. `${CLAUDE_PLUGIN_ROOT}` expands,
+`CLAUDE_PROJECT_DIR` is set in the server's env, and the bundle ships
+(`tests/mcp-wiring.test.ts` already pins this). The non-utilization has **three distinct,
+each-sufficient causes**:
+
+### 8.2 Cause A — subagent tool allowlists hard-exclude every MCP tool (mechanical; all 10 agents)
+
+Every `agents/*.md` frontmatter sets an explicit `tools:` list drawn only from
+`{Read, Glob, Grep, Write, Edit, Bash, Agent, AskUserQuestion, WebSearch, WebFetch}`. Per the
+Claude Code subagent spec, an explicit `tools:` is a **restrictive allowlist**; a subagent
+inherits MCP tools **only when `tools:` is omitted**, and otherwise MCP tools must be listed
+explicitly. Because no agent lists any `mcp__plugin_twinharness_th__*` entry, those tools are
+**not in any subagent's toolset** — the model *cannot* call them even where the body text says
+"or use the typed mcp tools." This is the dominant, hard cause for every spawned agent
+(Spec, Critic, Builder, Debugger, Codebase-Inspector, Researcher, Doc-Writer, UI-Designer,
+Vertical-Slice). There is **no wildcard** accepted in the `tools:` field, so
+`mcp__plugin_twinharness_th__*` cannot be added there either.
+
+### 8.3 Cause B — the playbook never instructs MCP in the main context (behavioral; the Orchestrator)
+
+Orchestration runs in the **main conversation** (the `/th-run` command and `SKILL.md` both
+say "You are the Orchestrator"; `orchestrator.md` is the main context's own playbook, not a
+spawned subagent). In the main context plugin MCP tools **are** available by default — a
+slash command's `allowed-tools` is *permission pre-approval, not a scope restriction*. Yet the
+playbook routes **everything** to Bash: `SKILL.md`'s "Running the `th` CLI" section says
+*"Wherever this playbook — or any agent or command — says `th <args>`, run
+`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`,"* followed by a need→command table of Bash
+invocations; `th-run.md` repeats the substitution. Measured `th`-Bash vs MCP mentions:
+`SKILL.md` 41 vs 0, `orchestrator.md` 47 vs 1, `pipeline-stages.md` 54 vs 0,
+`build-and-verify.md` 48 vs 1. With **no directive to prefer (or even use) MCP**, the main
+context never calls it.
+
+### 8.4 Cause C — the few MCP mentions are misframed and mostly unreachable (compounding)
+
+The only MCP references (`builder.md:269`, `debugger.md:97`, `orchestrator.md:322`,
+`build-and-verify.md:157`) present MCP solely as an *alternative to `--cwd` inside a worktree*
+— a narrow edge case — never as the normal calling convention. Two of the three live in
+**subagents** (builder, debugger) whose allowlists (Cause A) make the suggestion impossible to
+act on. So MCP is mentioned only where it is unreachable or framed as a rare fallback.
+
+**Secondary:** `orchestrator.md` frontmatter also lacks the `Agent` tool (already flagged in
+§5) and lacks MCP — moot for the live main-context run (main inherits the real session tools)
+but it makes the agent file an inaccurate spec and would hard-block MCP + spawning if the
+orchestrator were ever itself spawned. And nothing **pre-approves** the MCP tools, so even
+after A/B/C are fixed, first use prompts for permission — friction for autonomous runs.
+
+### 8.5 Fix design (two layers + the single guideline doc) — *folded into the execution plan*
+
+The fix has two layers matching the two real causes, plus the one-guideline-document the brief
+asks for. Crucially, since there is **no wildcard** in `tools:`, the only mechanism that grants
+all current MCP tools **and** auto-includes tools added later **without editing each agent** is
+to **omit `tools:` and use a `disallowedTools:` denylist** (the spec states `tools` "inherits
+all tools if omitted"; `disallowedTools` is "removed from the inherited list"; the two may
+combine, denylist first). This is the property the brief wants — *agents always use whatever
+tools are available, including new ones* — and the denylist is the only viable way to get it.
+
+- **Fix 1 — reachability (Cause A).** Convert every subagent from an explicit allowlist to
+  *no `tools:`* + a `disallowedTools:` that re-expresses only the **isolation** the allowlist
+  used to enforce (read-only fact-gatherers — critic, codebase-inspector, researcher — deny
+  `Write, Edit`; leaf agents that must not recurse deny `Agent`; the privileged Builder denies
+  nothing). Every agent then inherits the whole MCP toolset, **including future tools**,
+  automatically.
+  - **Decision point (flag to the human gate):** a denylist means future *mutating* MCP tools
+    auto-flow to read-only agents too. This is acceptable because the mechanical guards live in
+    the `th` **handlers** (state writes serialize under `withStateLock`; `th state set` refuses
+    managed/unknown fields; `th decision approve` is permanently absent — RULE-011; gates fail
+    closed) — a read-only agent calling a mutating tool is still bounded by the handler. The
+    stricter alternative (explicit per-tool allowlists) loses auto-availability and contradicts
+    the brief, so the denylist is **recommended**; the tradeoff is noted so it can be vetoed.
+
+- **Fix 2 — one guideline document (Causes B & C; the brief's explicit ask).** Add a single
+  reference doc — `skills/twinharness/reference/mcp-tools.md`, the **"MCP Tooling Guideline"** —
+  that states the canonical rule once: *prefer the typed `mcp__plugin_twinharness_th__*` tools
+  over shelling `node dist/cli.js` for every coordination/observability/state operation; fall
+  back to Bash `th` only for verbs not yet exposed as MCP tools.* It spells out the benefits
+  (typed structured results instead of stdout-parsing; tools resolve `${CLAUDE_PROJECT_DIR}` so
+  worktree calls need no `--cwd`; one long-lived server instead of a cold `node` spawn per call
+  — the perf win §7 deferred), and it **instructs dynamic discovery**: *"this tool set grows —
+  use whatever `mcp__plugin_twinharness_th__*` tools are currently advertised; do not rely on a
+  hard-coded list,"* with a clearly-labelled **non-exhaustive snapshot** table grouping the
+  current tools (state / coordination / observability / repo / delegation / decision) each
+  mapped to its Bash `th` equivalent. Then every agent + `SKILL.md` + `th-run.md` carry **one
+  pointer line** to this doc instead of enumerating tools inline, and `SKILL.md`'s "Running the
+  `th` CLI" section is reframed so MCP is the primary path and `node dist/cli.js` the documented
+  fallback. This is the low-token shape the brief requires: a one-line pointer per file plus one
+  lazily-loaded reference doc — **no per-agent tool enumeration**, and only this one file
+  changes when tools are added.
+
+- **Fix 3 — pre-approval (friction).** Pre-approve the server's tools so calls don't prompt:
+  add `mcp__plugin_twinharness_th__*` (plus `Task`/`Agent`) to `th-run.md`'s `allowed-tools`,
+  and document the equivalent project `settings.json` `permissions.allow` /
+  `enabledMcpjsonServers` entry. (Confirm the exact accepted pre-approval pattern for a
+  plugin-bundled server during implementation.)
+
+- **Fix 4 — orchestrator frontmatter.** Drop its inaccurate allowlist and give it the same
+  denylist treatment so it carries `Agent` (spawn) + all MCP tools — folding into the
+  already-planned orchestrator edit (execution plan §1c / Phase 0 Slice 0b).
+
+**Why a denylist + one doc, not per-agent MCP lists:** it satisfies the brief's two constraints
+together — agents pick up new tools with zero per-agent edits (denylist), and "which tool when"
+is governed by one updatable document (guideline) — at a cost of one pointer line per file and
+one on-demand reference, well within the token budget.
+
+---
+
+## 9. Note on this PR
 
 This PR contains **the plan only**. A separate session is fixing unrelated issues; once it
 lands, this branch must be **re-synced to `main`** (rebase/merge) before implementation
