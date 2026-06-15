@@ -10,11 +10,18 @@
  * Requires a built dist/ (CI builds before testing, like tests/concurrency.test.ts).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
+
+// Every test here spawns the built `node dist/cli.js` one or more times
+// (the telemetry round-trip does 6 sequential spawns). Node cold-start plus
+// Windows process-creation overhead can exceed vitest's 5s default under full-
+// suite CI load, so raise the ceiling for the whole file — same approach as
+// tests/concurrency.test.ts. The ceiling still catches a genuine hang.
+vi.setConfig({ testTimeout: 30_000 });
 
 const CLI = path.resolve(__dirname, "../dist/cli.js");
 const ROOT = path.resolve(__dirname, "..");
