@@ -15529,6 +15529,7 @@ var STATE_FIELD_ORDER = [
   "implementation_allowed",
   "open_questions",
   "drift_open_blocking",
+  "debate_open_blocking",
   "revise_loop_counts",
   "write_gate",
   "project_mode"
@@ -15618,6 +15619,9 @@ function validateState(value) {
   }
   if (!isInteger(v.drift_open_blocking) || v.drift_open_blocking < 0) {
     issues.push({ path: "drift_open_blocking", message: "must be a non-negative integer" });
+  }
+  if (v.debate_open_blocking !== void 0 && (!isInteger(v.debate_open_blocking) || v.debate_open_blocking < 0)) {
+    issues.push({ path: "debate_open_blocking", message: "must be a non-negative integer" });
   }
   if (!isPlainObject3(v.revise_loop_counts)) {
     issues.push({ path: "revise_loop_counts", message: "must be an object" });
@@ -15737,6 +15741,7 @@ var path3 = __toESM(require("node:path"));
 var GATE_LEDGER_KEYS = /* @__PURE__ */ new Set([
   "implementation_allowed",
   "drift_open_blocking",
+  "debate_open_blocking",
   "write_gate",
   "tier",
   "blast_radius_flags"
@@ -15779,7 +15784,8 @@ ${formatIssues(r.issues)}`,
 // src/commands/state.ts
 var UNSAFE_KEY_SEGMENTS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constructor"]);
 var MANAGED_FIELDS = {
-  drift_open_blocking: "Use `th drift add` / `th drift resolve` \u2014 this counter is owned by the drift flow."
+  drift_open_blocking: "Use `th drift add` / `th drift resolve` \u2014 this counter is owned by the drift flow.",
+  debate_open_blocking: "Use `th debate add` / `th debate resolve` \u2014 this counter is owned by the debate flow."
 };
 function isRecord(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);

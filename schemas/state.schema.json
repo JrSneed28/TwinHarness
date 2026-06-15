@@ -73,6 +73,7 @@
     "implementation_allowed": { "type": "boolean" },
     "open_questions": { "type": "array", "items": { "type": "string" } },
     "drift_open_blocking": { "type": "integer", "minimum": 0 },
+    "debate_open_blocking": { "type": "integer", "minimum": 0 },
     "revise_loop_counts": {
       "type": "object",
       "additionalProperties": { "type": "integer", "minimum": 0 }

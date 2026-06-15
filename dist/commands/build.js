@@ -50,14 +50,25 @@ function runBuildPlan(paths, opts = {}) {
     const conflictLines = conflicts.length
         ? ["Serialized conflicts (shared components):", ...conflicts.map((c) => `  ${c.a} × ${c.b} (shared: ${c.shared.join(", ")})`)]
         : ["Serialized conflicts (shared components): (none)"];
+    const adviseLines = opts.advise
+        ? [
+            "",
+            `ADVISORY (parallelism optimizer, REQ-PCO-030): current max wave width = ${parallelism} ` +
+                `across ${waves.length} wave${waves.length === 1 ? "" : "s"}; ` +
+                `${conflicts.length} conflict pair${conflicts.length === 1 ? "" : "s"} serialize the plan. ` +
+                `To widen build waves, re-cut slices to MINIMIZE shared components and depends_on edges ` +
+                `(the coverage hard-gate and vertical-slice integrity stay unchanged).`,
+        ]
+        : [];
     const human = [
         ...waveLines,
         "",
         ...conflictLines,
         "",
         "Within a wave Builders may run concurrently (§16); across waves they serialize.",
+        ...adviseLines,
     ].join("\n");
-    return (0, output_1.success)({ data: { waves, conflicts, parallelism }, human });
+    return (0, output_1.success)({ data: { waves, conflicts, parallelism, advise: opts.advise === true }, human });
 }
 /* ------------------------------------------------------------------ *
  * Live build coordination: next-wave oracle + dynamic component leases *

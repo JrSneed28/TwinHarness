@@ -15,6 +15,7 @@ const UNSAFE_KEY_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
 /** Fields owned by a dedicated command; `state set` refuses them to keep the owning invariant. */
 const MANAGED_FIELDS = {
     drift_open_blocking: "Use `th drift add` / `th drift resolve` — this counter is owned by the drift flow.",
+    debate_open_blocking: "Use `th debate add` / `th debate resolve` — this counter is owned by the debate flow.",
 };
 function isRecord(v) {
     return typeof v === "object" && v !== null && !Array.isArray(v);

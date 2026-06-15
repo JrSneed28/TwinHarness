@@ -111,3 +111,35 @@ checklist for any mode, read `${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference
 | `ui-design` | `docs/04b-ui-design.md` | Every screen anchored to ≥1 REQ-ID; every user-facing MVP REQ-ID has screen coverage; flows start/end at defined screens; every screen defines loading/empty/error states; vocabulary matches domain-model glossary; no out-of-scope screens; accessibility requirements present; design tokens are concrete values |
 | `research` | `docs/00-research/` | Every claim cited to a real, reachable source with access date; opinion separated from fact; version/recency noted on version-sensitive claims; each finding bears on a named REQ-ID; no fabricated/unverifiable sources; implications stated without making the decision |
 | `debug-review` | Debugger Evidence Report + `debug-log.md` | Root cause (not symptom) anchored to a `file:line`/captured output/state fact; reproduction is a real command; hypotheses have discriminating experiments; fix maps to the owning slice/REQ and stays in its component boundary; a requirement contradiction is opened as BLOCKING drift |
+| `parallelism` | `docs/09-implementation-plan.md` (Phase 3, REQ-PCO-030) | Slice plan minimizes shared components and `depends_on` edges so build waves are wider; consults `th build plan --advise` for current parallelism width + the conflict pairs that serialize the plan; routes concrete re-cut suggestions back to the Vertical-Slice agent. Never weakens vertical-slice integrity or the coverage hard-gate. |
+| `debate-reconcile` | A Reconciler's merged artifact (Phase 4, REQ-PCO-043) | Merged artifact is coherent against the competing inputs it reconciles + the resolved debate-ledger entries; no resolved fork silently dropped or contradicted; every concept still REQ-ID-anchored. Reviewed in fresh context like every other mode. |
+
+## Phase 3 — `parallelism` mode (REQ-PCO-030)
+
+A force-multiplier mode, distinct from `slice`. Where `slice` mode gates *vertical integrity*, this
+mode challenges the *shape of the dependency graph*: it asks whether the plan could be re-cut so more
+slices land in the same build wave. Run `th build plan --advise` — it reports the current
+max-parallelism width and the **conflict pairs** (slices with overlapping component sets or
+`depends_on` edges) that serialize the plan. For each serializing pair, judge whether the overlap is
+*essential* (a genuine shared boundary) or *incidental* (an artifact of how the slice was cut), and
+emit grounded re-cut suggestions — split a shared component along its seam, hoist a shared dependency
+into Slice 0, or re-order to break a needless `depends_on` edge — routed back to the **Vertical-Slice
+agent**, which reconciles the plan (it owns the artifact; you do not edit it).
+
+This mode is **subordinate to the hard gates**: never propose a re-cut that disguises a horizontal
+layer, drops a slice's user-visible capability, or removes REQ coverage. The `slice` coherence gate
+and the `th coverage check` hard-gate run unchanged afterward and override any optimization. Zero
+re-cut suggestions is a valid PASS — a plan that is already maximally wide needs no changes.
+
+## Phase 4 — `debate-reconcile` mode (REQ-PCO-043)
+
+When Domain Model or Architecture runs in **debate mode** (Pattern B: competing Spec producers →
+blackboard fragments → a Reconciler agent merges them — see `agents/spec.md`), this mode gates the
+Reconciler's merged artifact, in fresh context, exactly like every other Critic mode. You check
+**coherence against the inputs the Reconciler was given**: the competing fragments (`th collab list`)
+and the resolved debate-ledger entries (`th debate list`). Grounded defects: a fork the ledger
+records as resolved one way but the merged artifact reflects the other; a competing input silently
+dropped without a ledger entry explaining it; a concept that lost its REQ-ID anchor in the merge; an
+internal contradiction the merge introduced. You do not re-adjudicate the debate (the Reconciler and,
+for genuine forks, the human gate own that) — you certify the merge is internally consistent with
+what was decided.

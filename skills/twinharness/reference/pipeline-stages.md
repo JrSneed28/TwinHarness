@@ -99,6 +99,38 @@ mode**, fresh context, same producer→critic mechanic:
 - Critic **FAIL** → run `th revise bump domain-model`, route grounded defects back to the Spec
   agent, re-run. Repeat until PASS or escalation.
 
+**Debate mode (Phase 4, REQ-PCO-043 — optional augmentation, Pattern B).** For Domain Model the
+Orchestrator may run the stage as a **debate** instead of a single draft, when the design space has
+genuine competing shapes worth surfacing:
+
+1. **Competing producers in fresh contexts.** Spawn 2–3 **Spec agents in `domain-model` mode**, each
+   in a **fresh, isolated context** (`agents/spec.md` debate-mode addendum). Each produces a
+   *competing* model for the same stage; fresh context is the mechanism that surfaces real
+   alternatives instead of one anchored line of thinking.
+2. **Each output is a blackboard fragment** (not the stage artifact). Initialize once with
+   `th collab init --stage domain-model`; each producer writes its position with
+   `th collab fragment --stage domain-model --round <round> --name <name> --text <...>`. Fragments
+   land under `.twinharness/collab/domain-model/<round>/`. `th collab merge --stage domain-model
+   --round <round>` mechanically rejects any round containing a fragment with no REQ-ID anchor (§11
+   enforced at the fragment boundary).
+3. **Reconciler adjudicates.** Spawn the **Reconciler agent (`agents/reconciler.md`)**: it reads the
+   competing fragments (`th collab list --stage domain-model --round <round>`) and merges them into
+   one artifact, recording every contested decision in the **debate ledger** —
+   `th debate add --topic <...>` per fork, `th debate list` to review, `th debate resolve <DEBATE-NNN>
+   --resolution <...>` as each is settled.
+4. **Critic gate on the merge.** Route the merged artifact to the **Critic agent in `debate-reconcile`
+   mode**, fresh context — it certifies the merge is coherent against the competing inputs and the
+   resolved ledger entries (no resolved fork silently dropped or contradicted; every concept still
+   REQ-ID-anchored). This runs *in addition to* the normal `domain-model` critic checks.
+5. **Human sees only the distilled forks.** Genuine, product-meaningful divergences the Reconciler
+   cannot settle on coherence grounds escalate to the human — who sees only the **distilled 1–2
+   forks**, not the full debate. **Recorded reconciliations seed ADR drafts** downstream (Stage 5,
+   T3). When the divergence is a real domain-model fork, it streams as usual once resolved (§8,
+   §14.3 — no standing human gate for domain model otherwise).
+
+When **not** run in debate mode, Domain Model produces a single draft exactly as above; debate mode
+is an Orchestrator-selected augmentation, not the default.
+
 **No human gate (§8, §14.3).** The domain model streams. The user may interrupt at any point but
 is not required to click approve. Once the Critic passes, register the artifact and advance state:
 
@@ -137,6 +169,37 @@ mode**, fresh context:
 - Critic **PASS** → proceed to artifact registration.
 - Critic **FAIL** → run `th revise bump architecture`, route grounded defects back to the Spec
   agent, re-run. Repeat until PASS or escalation.
+
+**Debate mode (Phase 4, REQ-PCO-043 — optional augmentation, Pattern B).** Architecture is the other
+stage that may run as a **debate** rather than a single draft — it is the highest-leverage stage for
+surfacing genuinely competing structures (e.g. monolith vs. service split, sync vs. async backbone)
+before the irreversible-decision gates:
+
+1. **Competing producers in fresh contexts.** Spawn 2–3 **Spec agents in `architecture` mode**, each
+   in a **fresh, isolated context** (`agents/spec.md` debate-mode addendum). Each produces a
+   *competing* architecture for the same stage; independent fresh-context designs surface real
+   structural alternatives rather than one anchored design.
+2. **Each output is a blackboard fragment** (not the stage artifact). `th collab init --stage
+   architecture` once, then each producer writes
+   `th collab fragment --stage architecture --round <round> --name <name> --text <...>`. Fragments
+   land under `.twinharness/collab/architecture/<round>/`; `th collab merge --stage architecture
+   --round <round>` rejects any round with an unanchored fragment (§11 at the fragment boundary).
+3. **Reconciler adjudicates.** The **Reconciler agent (`agents/reconciler.md`)** reads the competing
+   fragments (`th collab list --stage architecture --round <round>`) and merges them into one
+   artifact, recording each contested decision in the **debate ledger** — `th debate add --topic
+   <...>` per fork, `th debate list`, `th debate resolve <DEBATE-NNN> --resolution <...>`.
+4. **Critic gate on the merge.** Route the merged artifact to the **Critic agent in `debate-reconcile`
+   mode**, fresh context, in addition to the normal `architecture` critic checks: it certifies the
+   merge is coherent against the competing inputs and the resolved ledger entries, with every
+   component still REQ-ID-anchored and no resolved fork silently dropped or contradicted.
+5. **Human sees only the distilled forks.** A real, product-meaningful structural divergence the
+   Reconciler cannot settle on coherence grounds escalates to the **irreversible-decision human gate**
+   above — but the human sees only the **distilled 1–2 forks**, not the full debate. **Recorded
+   reconciliations seed ADR drafts** (Stage 5, T3): each resolved ledger entry maps to a candidate
+   ADR for the decision it settled.
+
+When **not** run in debate mode, Architecture produces a single draft exactly as above; debate mode
+is an Orchestrator-selected augmentation, not the default.
 
 Once the Critic passes and the human has answered any irreversible-decision gates, register and
 advance state:
@@ -221,6 +284,25 @@ surfaces slice ordering to the human **only** when the sequencing has real produ
 **Tiering:** all engaged tiers run this stage. **T1** — lightweight (fewer slices, lighter task
 files). **T3** — full detail (per-slice ADR references, detailed component list, full task files
 with contracts and design notes embedded).
+
+**Parallelism-optimizer loop (Phase 3, REQ-PCO-030 — runs BEFORE the slice gate and coverage
+gate).** After the Vertical Slice agent produces the draft plan, run one reconciliation pass that
+widens disjoint-component parallelism, then proceed to the unchanged gates below:
+
+1. Route the draft to the **Critic agent in `parallelism` mode**, fresh context. That Critic
+   consults `th build plan --advise`, which reports the plan's current max-parallelism width and the
+   **conflict pairs** (slices with overlapping component sets or `depends_on` edges that serialize
+   them — computed from `conflictPairs`). It returns concrete re-cut suggestions (split a shared
+   component along its seam, hoist a shared dependency into Slice 0, break a needless `depends_on`
+   edge), routed back to the Vertical Slice agent.
+2. The **Vertical Slice agent reconciles** the plan: re-cuts *incidental* overlaps so more slices
+   land in the same build wave, updating the **Components touched** field and the **Build Order &
+   Dependencies** section. *Essential* shared boundaries are left as-is.
+3. **The hard gates win.** This loop never weakens vertical-slice integrity or REQ coverage — it
+   may not disguise a horizontal layer, drop a slice's user-visible capability, or remove coverage.
+   The `slice` coherence gate and the `th coverage check` hard-gate (both below) run afterward and
+   override any optimization. Zero re-cut suggestions is a valid PASS — an already-wide plan needs
+   no change.
 
 **Critic loop (slice mode).** Route the draft to the **Critic agent (`agents/critic.md`) in
 `slice` mode**, fresh context:

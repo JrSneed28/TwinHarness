@@ -78,6 +78,13 @@ export interface TwinHarnessState {
   implementation_allowed: boolean;
   open_questions: string[];
   drift_open_blocking: number;
+  /**
+   * Count of OPEN blocking debates (Pattern B reconciliation owed) — mirrors
+   * drift_open_blocking for the debate ledger and feeds the stop-gate (REQ-PCO-042).
+   * Optional + omitted from serialization when absent so existing state files hash
+   * identically; absent ⇒ 0. Owned by `th debate add` / `th debate resolve`.
+   */
+  debate_open_blocking?: number;
   revise_loop_counts: Record<string, number>;
   /**
    * Controls the PreToolUse write-gate behaviour (design doc §State schema change).
@@ -116,6 +123,7 @@ export const STATE_FIELD_ORDER: (keyof TwinHarnessState)[] = [
   "implementation_allowed",
   "open_questions",
   "drift_open_blocking",
+  "debate_open_blocking",
   "revise_loop_counts",
   "write_gate",
   "project_mode",
@@ -241,6 +249,11 @@ export function validateState(value: unknown): ValidationResult {
 
   if (!isInteger(v.drift_open_blocking) || (v.drift_open_blocking as number) < 0) {
     issues.push({ path: "drift_open_blocking", message: "must be a non-negative integer" });
+  }
+
+  // Optional (absent ⇒ 0); validated only when present, mirroring drift_open_blocking.
+  if (v.debate_open_blocking !== undefined && (!isInteger(v.debate_open_blocking) || (v.debate_open_blocking as number) < 0)) {
+    issues.push({ path: "debate_open_blocking", message: "must be a non-negative integer" });
   }
 
   if (!isPlainObject(v.revise_loop_counts)) {

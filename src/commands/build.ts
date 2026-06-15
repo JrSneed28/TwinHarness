@@ -30,6 +30,13 @@ import { NOT_INIT, formatIssues } from "../core/guards";
 export interface BuildPlanOptions {
   /** Include slices with status `done` (default: only schedule unfinished slices). */
   includeDone?: boolean;
+  /**
+   * Anchor: REQ-PCO-030 — emit the parallelism-optimizer advisory: the current
+   * max wave width and the conflict pairs whose shared components serialize the
+   * plan, so the Vertical-Slice agent can re-cut to widen build waves. Advisory
+   * only — it never changes the schedule.
+   */
+  advise?: boolean;
 }
 
 /**
@@ -69,15 +76,26 @@ export function runBuildPlan(paths: ProjectPaths, opts: BuildPlanOptions = {}): 
   const conflictLines = conflicts.length
     ? ["Serialized conflicts (shared components):", ...conflicts.map((c) => `  ${c.a} × ${c.b} (shared: ${c.shared.join(", ")})`)]
     : ["Serialized conflicts (shared components): (none)"];
+  const adviseLines = opts.advise
+    ? [
+        "",
+        `ADVISORY (parallelism optimizer, REQ-PCO-030): current max wave width = ${parallelism} ` +
+          `across ${waves.length} wave${waves.length === 1 ? "" : "s"}; ` +
+          `${conflicts.length} conflict pair${conflicts.length === 1 ? "" : "s"} serialize the plan. ` +
+          `To widen build waves, re-cut slices to MINIMIZE shared components and depends_on edges ` +
+          `(the coverage hard-gate and vertical-slice integrity stay unchanged).`,
+      ]
+    : [];
   const human = [
     ...waveLines,
     "",
     ...conflictLines,
     "",
     "Within a wave Builders may run concurrently (§16); across waves they serialize.",
+    ...adviseLines,
   ].join("\n");
 
-  return success({ data: { waves, conflicts, parallelism }, human });
+  return success({ data: { waves, conflicts, parallelism, advise: opts.advise === true }, human });
 }
 
 /* ------------------------------------------------------------------ *
