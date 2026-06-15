@@ -43,6 +43,12 @@ import { runPreview } from "./commands/preview";
 import { runScorecard } from "./commands/scorecard";
 import { runTelemetrySet, runTelemetryStatus } from "./commands/telemetry";
 import { runRoute } from "./commands/route";
+import {
+  runDelegatePlan,
+  runDelegatePack,
+  runDelegateCapsule,
+  runDelegateCheck,
+} from "./commands/delegate";
 import { runRepoMap, runRepoRelevant, runRepoImpact } from "./commands/repo";
 
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
@@ -102,6 +108,12 @@ Usage:
   th telemetry on|off|status        Toggle/report opt-in, LOCAL-ONLY run telemetry (never sent off-machine)
   th context estimate               Approximate the prompt-surface token cost (flags oversized files)
   th context pack [--slice <ID>]    Assemble the §9 handoff bundle (artifact Summary blocks + slice framing)
+  th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
+                                    Recommend delegate vs keep-main for a task (context-preservation oracle)
+  th delegate pack [--agent A] [--slice ID] [--task T] [--intent I]
+                                    Assemble a bounded child-agent handoff (reuses context pack for a slice)
+  th delegate capsule               Print the blank Delegation Capsule skeleton (the strict return format)
+  th delegate check --capsule <path>  Validate a returned capsule has every required section (presence only)
   th repo map [--write|--no-write] [--format <summary|json|md>]
                                     Scan the repo; write .twinharness/repo-map.json + docs/00-repo-map.md (writes by default; --no-write = dry/preview)
   th repo relevant (--slice <ID> | --req <REQ-ID> | --file <path> | --query <kw>)
@@ -125,7 +137,7 @@ Global flags:
   --scope <file>    (coverage) Scope file for MVP filtering (default docs/02-scope.md)
   --code <dir>      (coverage report) Code directory scanned for implemented (default src)
   --tier <T0-T3>    (preview) Tier whose engaged pipeline to preview (default: state.tier, else T2)
-  --slice <id>      (context pack, debug pack) Frame the pack for a specific slice (SLICE-ID)
+  --slice <id>      (context/debug pack, delegate) Frame the pack/handoff for a specific slice (SLICE-ID)
   --components <l>  (build sub-claim) Comma-separated component subset for the sub-lease
   --req <REQ-ID>    (debug pack) Frame the pack for a specific REQ-ID
   --symptom <s>     (debug log add) The observed failure
@@ -148,6 +160,13 @@ Global flags:
   --dry-run         (slices sync) Compute without writing state
   --remove-missing  (slices sync) Remove slices absent from the plan
   --explain         (next) Include a WHY string: why this obligation is the highest-priority one
+  --intent <i>      (delegate) read|write|debug|review|artifact|repo-analysis
+  --files <n>       (delegate plan) Expected file reads (delegate when > 3)
+  --writes          (delegate plan) The task modifies source code
+  --noisy           (delegate plan) The task runs noisy commands / logs / tests / repo scans
+  --task <s>        (delegate) Free-text task label (echoed; not parsed)
+  --agent <a>       (route, delegate pack) The agent being spawned / delegated to
+  --capsule <path>  (delegate check) Capsule file to validate
   --force           (init) Reset existing state.json
   --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)
   --write           (repo map) Write the artifacts (default; bare \`th repo map\` writes)
@@ -205,6 +224,12 @@ export interface ParsedArgs {
     removeMissing: boolean;
     brownfield: boolean;
     explain: boolean;
+    intent?: string;
+    task?: string;
+    capsule?: string;
+    files?: number;
+    writes: boolean;
+    noisy: boolean;
     write: boolean;
     noWrite: boolean;
     format?: string;
@@ -232,6 +257,8 @@ const BOOLEAN_FLAGS: Record<string, FlagField> = {
   "--component-blast": "componentBlast",
   "--summarization": "summarization",
   "--explain": "explain",
+  "--writes": "writes",
+  "--noisy": "noisy",
   "--write": "write",
   "--no-write": "noWrite",
 };
@@ -263,6 +290,9 @@ const STRING_FLAGS: Record<string, FlagField> = {
   "--agent": "agent",
   "--mode": "mode",
   "--brief": "brief",
+  "--intent": "intent",
+  "--task": "task",
+  "--capsule": "capsule",
   "--format": "format",
   "--query": "query",
   "--file": "file",
@@ -273,6 +303,7 @@ const STRING_FLAGS: Record<string, FlagField> = {
 const NUMBER_FLAGS: Record<string, FlagField> = {
   "--cap": "cap",
   "--version": "version",
+  "--files": "files",
   "--maxResults": "maxResults",
 };
 
@@ -298,6 +329,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     componentBlast: false,
     summarization: false,
     explain: false,
+    writes: false,
+    noisy: false,
     write: false,
     noWrite: false,
   };
@@ -424,6 +457,31 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           return runContextPack(paths, { slice: parsed.flags.slice });
         default:
           return failure({ human: `unknown 'context' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    case "delegate":
+      switch (sub) {
+        case "plan":
+          return runDelegatePlan({
+            intent: parsed.flags.intent,
+            files: parsed.flags.files,
+            writes: parsed.flags.writes,
+            noisy: parsed.flags.noisy,
+            task: parsed.flags.task,
+            slice: parsed.flags.slice,
+          });
+        case "pack":
+          return runDelegatePack(paths, {
+            agent: parsed.flags.agent,
+            task: parsed.flags.task,
+            intent: parsed.flags.intent,
+            slice: parsed.flags.slice,
+          });
+        case "capsule":
+          return runDelegateCapsule();
+        case "check":
+          return runDelegateCheck(paths, { file: parsed.flags.capsule });
+        default:
+          return failure({ human: `unknown 'delegate' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
     case "repo":
       switch (sub) {

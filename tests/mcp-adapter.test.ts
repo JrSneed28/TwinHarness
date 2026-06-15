@@ -11,6 +11,7 @@ import {
   listTools,
   resolvePathsForCall,
 } from "../src/mcp-server";
+import { capsuleTemplate } from "../src/core/delegation";
 
 /**
  * Phase 4 — MCP adapter tests.
@@ -275,8 +276,8 @@ describe("SLICE-4 / TASK-010 — MCP adapter: repo-map tool wiring (REQ-RU-044..
 // SLICE-4 / TASK-011 — REQ-RU-094 + REQ-RU-040 (MCP half)
 // ===========================================================================
 
-describe("SLICE-4 / TASK-011 — MCP tool-count 13 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
-  const expected13 = [
+describe("SLICE-4 / TASK-011 — MCP tool-count 16 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
+  const expected16 = [
     "th_state_get",
     "th_state_set",
     "th_drift_add",
@@ -286,15 +287,18 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 13 + schema/no-exec battery (REQ
     "th_route",
     "th_coverage_check",
     "th_next",
+    "th_delegate_plan",
+    "th_delegate_pack",
+    "th_delegate_check",
     "th_repo_map",
     "th_repo_relevant",
     "th_repo_impact",
     "th_context_pack",
   ];
 
-  // ---- REQ-RU-094: tool count is 13 ----
-  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_13 — TOOL_DEFS exposes exactly 13 tools in order", () => {
-    expect(TOOL_DEFS.map((t) => t.name)).toEqual(expected13);
+  // ---- REQ-RU-094: tool count is 16 ----
+  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_16 — TOOL_DEFS exposes exactly 16 tools in order", () => {
+    expect(TOOL_DEFS.map((t) => t.name)).toEqual(expected16);
   });
 
   // ---- REQ-RU-094: wrong-typed arg is coerced to undefined (optNumber/optString guard) ----
@@ -395,6 +399,48 @@ describe("REQ-MCP-DELEGATE-001: tool handlers delegate to the real run* handlers
     expect(res.ok).toBe(true);
     expect(res.data?.model).toBe("opus");
     expect(typeof res.data?.effort).toBe("string");
+  });
+});
+
+describe("REQ-MCP-DELEGATE-002: the delegate tools delegate to their handlers", () => {
+  function defFor(name: string) {
+    const d = TOOL_DEFS.find((t) => t.name === name);
+    if (!d) throw new Error(`missing tool ${name}`);
+    return d;
+  }
+
+  it("th_delegate_plan computes a recommendation (delegate on debug intent)", () => {
+    const res = defFor("th_delegate_plan").run(resolvePathsForCall(), { intent: "debug" });
+    expect(res.ok).toBe(true);
+    expect(res.data?.recommendation).toBe("delegate");
+    expect(res.data?.suggestedAgent).toBe("debugger");
+  });
+
+  it("th_delegate_plan coerces a numeric-string files arg (delegate over threshold)", () => {
+    const res = defFor("th_delegate_plan").run(resolvePathsForCall(), { files: "5" });
+    expect(res.ok).toBe(true);
+    expect(res.data?.recommendation).toBe("delegate");
+  });
+
+  it("th_delegate_check validates inline capsule text (ok and missing)", () => {
+    const good = defFor("th_delegate_check").run(resolvePathsForCall(), { text: capsuleTemplate() });
+    expect(good.ok).toBe(true);
+    const bad = defFor("th_delegate_check").run(resolvePathsForCall(), { text: "DELEGATION CAPSULE\nAgent: x\n" });
+    expect(bad.ok).toBe(false);
+    expect((bad.data?.missing as string[]).length).toBeGreaterThan(0);
+  });
+
+  it("th_delegate_pack emits the handoff envelope", () => {
+    const res = defFor("th_delegate_pack").run(resolvePathsForCall(), { agent: "spec", intent: "artifact" });
+    expect(res.ok).toBe(true);
+    expect(res.data?.agent).toBe("spec");
+  });
+
+  it("the three delegate tools advertise additionalProperties:false", () => {
+    for (const name of ["th_delegate_plan", "th_delegate_pack", "th_delegate_check"]) {
+      expect(defFor(name).inputSchema.additionalProperties).toBe(false);
+      expect(defFor(name).inputSchema.required).toBeUndefined();
+    }
   });
 });
 

@@ -668,6 +668,44 @@ All always-loaded core files are within the guidance.
 shares components with (§16 conflict awareness — which slices must serialize). It **computes** a
 candidate bundle; deciding what to actually route remains the Orchestrator's call.
 
+### Context preservation & delegation
+
+```
+th delegate plan [--intent <i>] [--files <n>] [--writes] [--noisy] [--task <t>] [--slice <ID>]
+th delegate pack [--agent <a>] [--slice <ID>] [--task <t>] [--intent <i>]
+th delegate capsule
+th delegate check --capsule <path>
+```
+
+The **Context Preservation / Delegation Layer** keeps the main Orchestrator context a scarce
+control-plane resource: heavy reads, edits, debugging, reviews, and repo inspection are **delegated**
+to child agents that consume the detail and return a compact capsule. Like `th route` / `th next`,
+every verb **computes or checks**; it never decides — the Orchestrator still owns the call. Read-only
+(no state mutation).
+
+`th delegate plan` is the **delegate-vs-keep-main oracle**. It recommends `delegate` when any signal
+fires — `--intent` is `write|debug|review|artifact|repo-analysis`, expected `--files` exceed the
+threshold (3), the task `--writes` source, or it runs `--noisy` commands — otherwise `keep-main`. The
+output carries the reasons, a suggested agent, the suggested handoff (built only from commands that
+exist: `th context pack`, `th delegate pack`), and whether a capsule is required. `--task` / `--slice`
+are contextual labels (echoed; not parsed — the recommendation is deterministic from the signal flags).
+
+`th delegate pack` assembles a **bounded child-agent handoff**: the delegated-agent envelope (agent /
+task / intent / slice / allowed scope / required behavior) plus the required Delegation Capsule
+format. With `--slice <ID>` it reuses `th context pack` for that slice's artifact Summary blocks and
+component-overlap framing (an unknown slice / uninitialized project surfaces that command's failure).
+
+`th delegate capsule` prints the blank **Delegation Capsule** skeleton — the strict, compact return
+format (Agent, Task, Intent, Inputs used, Files read, Files changed, Commands run, Findings, Risks,
+Tests/checks, Result, Open questions, Recommended next action, Artifacts produced). Long-form detail
+belongs in durable files under `.twinharness/delegations/DEL-###/`, never in the capsule.
+
+`th delegate check --capsule <path>` validates that a returned capsule contains **every** required
+section heading (presence only — content is not judged; a section may read "none"). Success when all
+14 are present; failure lists the missing ones. The same three verbs are exposed as the MCP tools
+`th_delegate_plan` / `th_delegate_pack` / `th_delegate_check` (`check` also accepts the capsule
+inline as `text`).
+
 ### Schema migration
 
 ```

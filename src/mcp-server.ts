@@ -46,6 +46,7 @@ import { runBuildNextWave, runBuildClaim, runBuildRelease } from "./commands/bui
 import { runCoverageCheck } from "./commands/coverage";
 import { runRoute } from "./commands/route";
 import { runNext } from "./commands/next";
+import { runDelegatePlan, runDelegatePack, runDelegateCheck } from "./commands/delegate";
 import { runRepoMap, runRepoRelevant, runRepoImpact } from "./commands/repo";
 import { runContextPack } from "./commands/context";
 
@@ -145,10 +146,12 @@ function optBool(args: ToolArgs, key: string): boolean | undefined {
   return typeof v === "boolean" ? v : undefined;
 }
 
-/** Coerce an arg to a finite number, or undefined. */
+/** Coerce an arg to a finite number (accepts a numeric string), or undefined. */
 function optNumber(args: ToolArgs, key: string): number | undefined {
   const v = args[key];
-  return typeof v === "number" && isFinite(v) ? v : undefined;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) return Number(v);
+  return undefined;
 }
 
 /**
@@ -301,6 +304,80 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       "Next-action oracle: the single highest-priority MECHANICAL obligation the run owes next (blocking drift, revise caps, failing suite, artifact drift, tier, stage obligations, build waves, …). Reports a mechanical obligation; it never chooses strategy. Read-only.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runNext(paths),
+  },
+  {
+    name: "th_delegate_plan",
+    description:
+      "Context-preservation oracle: recommend whether a task should be DELEGATED to a child agent or KEPT in the main context, from mechanical signals (intent, expected file reads, source writes, noisy output). Returns the recommendation, reasons, a suggested agent, and whether a handoff/capsule is needed. Advisory: it COMPUTES; the Orchestrator decides. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        intent: {
+          type: "string",
+          description: "Kind of work.",
+          enum: ["read", "write", "debug", "review", "artifact", "repo-analysis"],
+        },
+        files: numberProp("Expected number of file reads (delegate when > 3)."),
+        writes: boolProp("The task modifies source code."),
+        noisy: boolProp("The task runs noisy commands / inspects logs / runs tests / scans the repo."),
+        task: stringProp("Free-text task label (echoed; not parsed)."),
+        slice: stringProp("Slice the task is scoped to (frames the suggested handoff)."),
+      },
+      additionalProperties: false,
+    },
+    run: (_paths, args) =>
+      runDelegatePlan({
+        intent: optString(args, "intent"),
+        files: optNumber(args, "files"),
+        writes: optBool(args, "writes"),
+        noisy: optBool(args, "noisy"),
+        task: optString(args, "task"),
+        slice: optString(args, "slice"),
+      }),
+  },
+  {
+    name: "th_delegate_pack",
+    description:
+      "Assemble a BOUNDED child-agent handoff: the delegated-agent envelope (agent/task/intent/slice/allowed-scope/required-behavior) plus the required Delegation Capsule format. With a slice it reuses `th context pack` for artifact Summary blocks + component-overlap framing. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent: stringProp("The agent being delegated to (codebase-inspector|debugger|builder|critic|spec|…)."),
+        task: stringProp("What the delegate must do."),
+        intent: {
+          type: "string",
+          description: "Kind of work.",
+          enum: ["read", "write", "debug", "review", "artifact", "repo-analysis"],
+        },
+        slice: stringProp("Slice to frame the handoff (reuses context pack)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runDelegatePack(paths, {
+        agent: optString(args, "agent"),
+        task: optString(args, "task"),
+        intent: optString(args, "intent"),
+        slice: optString(args, "slice"),
+      }),
+  },
+  {
+    name: "th_delegate_check",
+    description:
+      "Validate a returned Delegation Capsule: confirm every required section heading is present (presence only — content is not judged). Pass the capsule inline as `text`, or a `path` to a capsule file within the project root. Error lists the missing sections. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: stringProp("The capsule text to validate inline (preferred over path when both given)."),
+        path: stringProp("Path to a capsule file within the project root."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runDelegateCheck(paths, {
+        text: optString(args, "text"),
+        file: optString(args, "path"),
+      }),
   },
   // Anchor: REQ-RU-044
   // Anchor: REQ-RU-047

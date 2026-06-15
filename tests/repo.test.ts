@@ -86,11 +86,11 @@ describe("REQ-RU-001: dispatch() attachment point — `repo` group now wired (SL
 });
 
 // ---------------------------------------------------------------------------
-// Seam 2: src/mcp-server.ts TOOL_DEFS — exactly 9 tools registered today.
-// SLICE-4 moves this to 13; pinning the count now makes that change deliberate.
+// Seam 2: src/mcp-server.ts TOOL_DEFS — 9 base tools + 3 delegate + 4 repo-map = 16.
+// Pinning the exact count + names makes any future change to the surface deliberate.
 // ---------------------------------------------------------------------------
 
-describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 13 tools registered (SLICE-4 added 4 repo-map tools)", () => {
+describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 16 tools registered (SLICE-4 added 4 repo-map tools; delegate layer added 3)", () => {
   // Anchor: REQ-NFR-002
   const EXPECTED_TOOL_NAMES = [
     "th_state_get",
@@ -102,17 +102,20 @@ describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 13 tools registered (SLICE
     "th_route",
     "th_coverage_check",
     "th_next",
+    "th_delegate_plan",
+    "th_delegate_pack",
+    "th_delegate_check",
     "th_repo_map",
     "th_repo_relevant",
     "th_repo_impact",
     "th_context_pack",
   ] as const;
 
-  it("REQ-NFR-002 — TOOL_DEFS.length === 13 (SLICE-4 added th_repo_map/relevant/impact/context_pack)", () => {
-    expect(TOOL_DEFS.length).toBe(13);
+  it("REQ-NFR-002 — TOOL_DEFS.length === 16 (SLICE-4 added th_repo_map/relevant/impact/context_pack; delegate layer added th_delegate_plan/pack/check)", () => {
+    expect(TOOL_DEFS.length).toBe(16);
   });
 
-  it("REQ-NFR-002 — TOOL_DEFS contains exactly the 13 expected tool names", () => {
+  it("REQ-NFR-002 — TOOL_DEFS contains exactly the 16 expected tool names", () => {
     const names = TOOL_DEFS.map((t) => t.name);
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
   });

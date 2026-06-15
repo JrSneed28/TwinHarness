@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs17, exportName) {
+    function addFormats(ajv, list, fs18, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs17[f]);
+        ajv.addFormat(f, fs18[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -17001,6 +17001,53 @@ why: ${next.why}` : `next: ${next.action}`;
   return success({ data, human });
 }
 
+// src/commands/delegate.ts
+var fs17 = __toESM(require("node:fs"));
+
+// src/commands/context.ts
+var fs16 = __toESM(require("node:fs"));
+var path15 = __toESM(require("node:path"));
+
+// src/core/summary.ts
+var SUMMARY_HEADING_RE = /^(#{1,3})\s+summary\b/i;
+var ANY_HEADING_RE = /^#{1,3}\s+/;
+function extractSummary(markdown, headLines = 8) {
+  const lines = markdown.split(/\r?\n/);
+  let startIdx = -1;
+  let level = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const m = SUMMARY_HEADING_RE.exec(lines[i]);
+    if (m) {
+      startIdx = i;
+      level = m[1].length;
+      break;
+    }
+  }
+  if (startIdx >= 0) {
+    const body = [];
+    for (let i = startIdx + 1; i < lines.length; i++) {
+      const line = lines[i];
+      const h = ANY_HEADING_RE.exec(line);
+      if (h) {
+        const hLevel = /^#+/.exec(line)?.[0].length ?? 99;
+        if (hLevel <= level) break;
+      }
+      body.push(line);
+    }
+    return { summary: body.join("\n").trim(), head: headFallback(lines, headLines) };
+  }
+  return { summary: null, head: headFallback(lines, headLines) };
+}
+function headFallback(lines, headLines) {
+  const out = [];
+  for (const line of lines) {
+    if (out.length >= headLines) break;
+    if (line.trim().length === 0 && out.length === 0) continue;
+    out.push(line);
+  }
+  return out.join("\n").trim();
+}
+
 // src/commands/repo.ts
 var fs15 = __toESM(require("node:fs"));
 var path14 = __toESM(require("node:path"));
@@ -18368,50 +18415,6 @@ REQ anchors in scope: ${result.reqAnchors.join(", ")}`);
 }
 
 // src/commands/context.ts
-var fs16 = __toESM(require("node:fs"));
-var path15 = __toESM(require("node:path"));
-
-// src/core/summary.ts
-var SUMMARY_HEADING_RE = /^(#{1,3})\s+summary\b/i;
-var ANY_HEADING_RE = /^#{1,3}\s+/;
-function extractSummary(markdown, headLines = 8) {
-  const lines = markdown.split(/\r?\n/);
-  let startIdx = -1;
-  let level = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const m = SUMMARY_HEADING_RE.exec(lines[i]);
-    if (m) {
-      startIdx = i;
-      level = m[1].length;
-      break;
-    }
-  }
-  if (startIdx >= 0) {
-    const body = [];
-    for (let i = startIdx + 1; i < lines.length; i++) {
-      const line = lines[i];
-      const h = ANY_HEADING_RE.exec(line);
-      if (h) {
-        const hLevel = /^#+/.exec(line)?.[0].length ?? 99;
-        if (hLevel <= level) break;
-      }
-      body.push(line);
-    }
-    return { summary: body.join("\n").trim(), head: headFallback(lines, headLines) };
-  }
-  return { summary: null, head: headFallback(lines, headLines) };
-}
-function headFallback(lines, headLines) {
-  const out = [];
-  for (const line of lines) {
-    if (out.length >= headLines) break;
-    if (line.trim().length === 0 && out.length === 0) continue;
-    out.push(line);
-  }
-  return out.join("\n").trim();
-}
-
-// src/commands/context.ts
 var TOKENS_PER_CHAR = 1 / 4;
 function runContextPack(paths, opts = {}) {
   const r = readState(paths);
@@ -18504,6 +18507,253 @@ function runContextPack(paths, opts = {}) {
   });
 }
 
+// src/core/delegation.ts
+var DELEGATION_INTENTS = [
+  "read",
+  "write",
+  "debug",
+  "review",
+  "artifact",
+  "repo-analysis"
+];
+var FILE_THRESHOLD = 3;
+var DELEGATE_INTENTS = /* @__PURE__ */ new Set([
+  "write",
+  "debug",
+  "review",
+  "artifact",
+  "repo-analysis"
+]);
+function agentForIntent(intent) {
+  switch (intent) {
+    case "debug":
+      return "debugger";
+    case "review":
+      return "critic";
+    case "artifact":
+      return "spec";
+    case "repo-analysis":
+      return "codebase-inspector";
+    case "write":
+      return "builder";
+    default:
+      return "codebase-inspector";
+  }
+}
+function computeDelegation(signals) {
+  const reasons = [];
+  const intent = signals.intent;
+  const files = signals.files;
+  if (intent && DELEGATE_INTENTS.has(intent)) {
+    reasons.push(`intent "${intent}" is high-context work that belongs in a child agent`);
+  }
+  if (typeof files === "number" && files > FILE_THRESHOLD) {
+    reasons.push(`expected file reads (${files}) exceed the main-context threshold (${FILE_THRESHOLD})`);
+  }
+  if (signals.writes === true) {
+    reasons.push("task modifies source code");
+  }
+  if (signals.noisy === true) {
+    reasons.push("task runs noisy commands / inspects logs / runs tests / scans the repo");
+  }
+  if (reasons.length > 0) {
+    return {
+      recommendation: "delegate",
+      reasons,
+      suggestedAgent: agentForIntent(intent),
+      packRecommended: true,
+      capsuleRequired: true
+    };
+  }
+  return {
+    recommendation: "keep-main",
+    reasons: ["small, read-scoped task below the delegation thresholds \u2014 keep it in the main context"],
+    suggestedAgent: null,
+    packRecommended: false,
+    capsuleRequired: false
+  };
+}
+var CAPSULE_SECTIONS = [
+  "Agent",
+  "Task",
+  "Intent",
+  "Inputs used",
+  "Files read",
+  "Files changed",
+  "Commands run",
+  "Findings",
+  "Risks",
+  "Tests/checks",
+  "Result",
+  "Open questions",
+  "Recommended next action",
+  "Artifacts produced"
+];
+var CAPSULE_TITLE = "DELEGATION CAPSULE";
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+}
+function validateCapsule(text) {
+  const lines = text.split(/\r?\n/);
+  const present = [];
+  const missing = [];
+  for (const section of CAPSULE_SECTIONS) {
+    const re = new RegExp(`^\\s*(?:#{1,6}\\s*)?(?:[-*]\\s*)?${escapeRegExp(section)}(?=:|\\s|$)`, "i");
+    if (lines.some((ln) => re.test(ln))) present.push(section);
+    else missing.push(section);
+  }
+  return { ok: missing.length === 0, present, missing };
+}
+function capsuleTemplate() {
+  return [CAPSULE_TITLE, ...CAPSULE_SECTIONS.map((s) => `${s}:`)].join("\n");
+}
+
+// src/commands/delegate.ts
+function parseIntent(raw) {
+  if (raw === void 0) return {};
+  if (DELEGATION_INTENTS.includes(raw)) return { intent: raw };
+  return { error: `unknown intent "${raw}" \u2014 expected one of: ${DELEGATION_INTENTS.join(", ")}` };
+}
+function runDelegatePlan(opts) {
+  const parsed = parseIntent(opts.intent);
+  if (parsed.error) {
+    return failure({ human: parsed.error, data: { error: "unknown_intent", intent: opts.intent } });
+  }
+  const signals = {
+    intent: parsed.intent,
+    files: opts.files,
+    writes: opts.writes,
+    noisy: opts.noisy
+  };
+  const rec = computeDelegation(signals);
+  const handoff = [];
+  if (rec.recommendation === "delegate") {
+    handoff.push(opts.slice ? `th context pack --slice ${opts.slice}` : "th context pack");
+    handoff.push(
+      `th delegate pack --agent ${rec.suggestedAgent}` + (opts.slice ? ` --slice ${opts.slice}` : "") + (opts.intent ? ` --intent ${opts.intent}` : "")
+    );
+    handoff.push("write long-form detail under .twinharness/delegations/DEL-###/; return only the capsule");
+  }
+  structuredLog({
+    cmd: "delegate plan",
+    recommendation: rec.recommendation,
+    intent: parsed.intent ?? null,
+    files: opts.files ?? null,
+    suggestedAgent: rec.suggestedAgent
+  });
+  const lines = [`recommendation: ${rec.recommendation}`];
+  if (opts.task) lines.push(`task: ${opts.task}`);
+  lines.push("reasons:");
+  for (const r of rec.reasons) lines.push(`- ${r}`);
+  if (rec.suggestedAgent) lines.push(`suggested agent: ${rec.suggestedAgent}`);
+  if (handoff.length > 0) {
+    lines.push("suggested handoff:");
+    for (const h of handoff) lines.push(`- ${h}`);
+  }
+  lines.push(`context pack recommended: ${rec.packRecommended ? "yes" : "no"}`);
+  lines.push(`capsule required: ${rec.capsuleRequired ? "yes" : "no"}`);
+  return success({
+    data: {
+      recommendation: rec.recommendation,
+      reasons: rec.reasons,
+      suggestedAgent: rec.suggestedAgent,
+      suggestedHandoff: handoff,
+      packRecommended: rec.packRecommended,
+      capsuleRequired: rec.capsuleRequired,
+      task: opts.task ?? null,
+      slice: opts.slice ?? null
+    },
+    human: lines.join("\n")
+  });
+}
+function runDelegatePack(paths, opts) {
+  const parsed = parseIntent(opts.intent);
+  if (parsed.error) {
+    return failure({ human: parsed.error, data: { error: "unknown_intent", intent: opts.intent } });
+  }
+  let contextPack = null;
+  if (opts.slice) {
+    const pack = runContextPack(paths, { slice: opts.slice });
+    if (!pack.ok) return pack;
+    contextPack = pack.human ?? null;
+  }
+  const envelope = [
+    "DELEGATED AGENT HANDOFF",
+    `Agent: ${opts.agent ?? "(unspecified \u2014 set --agent)"}`,
+    `Task: ${opts.task ?? "(describe the task)"}`,
+    `Intent: ${parsed.intent ?? "(read|write|debug|review|artifact|repo-analysis)"}`,
+    `Slice: ${opts.slice ?? "(none)"}`,
+    `Allowed scope: ${opts.slice ? `the components of ${opts.slice}; do not edit outside them` : "(state the file/dir/component boundary)"}`,
+    "",
+    "Context pack:",
+    contextPack ?? "(run `th context pack` for approved-artifact Summary blocks)",
+    "",
+    "Required behavior:",
+    "- inspect deeply inside YOUR OWN context; do not return raw scratchwork",
+    "- write durable artifacts under .twinharness/delegations/DEL-###/ when detail is long",
+    "- return ONLY a Delegation Capsule (format below) to the main context",
+    "",
+    "Required Delegation Capsule format:",
+    capsuleTemplate()
+  ];
+  structuredLog({
+    cmd: "delegate pack",
+    agent: opts.agent ?? null,
+    slice: opts.slice ?? null,
+    intent: parsed.intent ?? null,
+    hasContextPack: contextPack !== null
+  });
+  return success({
+    data: {
+      agent: opts.agent ?? null,
+      task: opts.task ?? null,
+      intent: parsed.intent ?? null,
+      slice: opts.slice ?? null,
+      capsuleSections: [...CAPSULE_SECTIONS],
+      hasContextPack: contextPack !== null
+    },
+    human: envelope.join("\n")
+  });
+}
+function runDelegateCheck(paths, opts) {
+  let text = opts.text;
+  if (text === void 0) {
+    if (!opts.file) {
+      return failure({
+        human: "th delegate check requires --capsule <path> (or inline text via MCP).",
+        data: { error: "no_capsule" }
+      });
+    }
+    const abs = resolveWithinRoot(paths.root, opts.file);
+    if (abs === null) {
+      return failure({
+        human: `Capsule path outside project root: ${opts.file}`,
+        data: { error: "path_outside_root", file: opts.file }
+      });
+    }
+    if (!fs17.existsSync(abs) || !fs17.statSync(abs).isFile()) {
+      return failure({
+        human: `Capsule file not found: ${opts.file}`,
+        data: { error: "capsule_not_found", file: opts.file }
+      });
+    }
+    text = fs17.readFileSync(abs, "utf8");
+  }
+  const v = validateCapsule(text);
+  structuredLog({ cmd: "delegate check", ok: v.ok, missing: v.missing.length });
+  if (v.ok) {
+    return success({
+      data: { ok: true, present: v.present, missing: [] },
+      human: `Capsule OK \u2014 all ${v.present.length} required sections present.`
+    });
+  }
+  return failure({
+    data: { ok: false, present: v.present, missing: v.missing },
+    human: `Capsule INVALID \u2014 missing ${v.missing.length} required section(s):
+${v.missing.map((m) => `  - ${m}`).join("\n")}`
+  });
+}
+
 // src/mcp-server.ts
 function resolvePathsForCall() {
   return resolveProjectPaths(process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
@@ -18530,7 +18780,9 @@ function optBool(args, key) {
 }
 function optNumber(args, key) {
   const v = args[key];
-  return typeof v === "number" && isFinite(v) ? v : void 0;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) return Number(v);
+  return void 0;
 }
 var TOOL_DEFS = [
   {
@@ -18664,6 +18916,74 @@ var TOOL_DEFS = [
     description: "Next-action oracle: the single highest-priority MECHANICAL obligation the run owes next (blocking drift, revise caps, failing suite, artifact drift, tier, stage obligations, build waves, \u2026). Reports a mechanical obligation; it never chooses strategy. Read-only.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runNext(paths)
+  },
+  {
+    name: "th_delegate_plan",
+    description: "Context-preservation oracle: recommend whether a task should be DELEGATED to a child agent or KEPT in the main context, from mechanical signals (intent, expected file reads, source writes, noisy output). Returns the recommendation, reasons, a suggested agent, and whether a handoff/capsule is needed. Advisory: it COMPUTES; the Orchestrator decides. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        intent: {
+          type: "string",
+          description: "Kind of work.",
+          enum: ["read", "write", "debug", "review", "artifact", "repo-analysis"]
+        },
+        files: numberProp("Expected number of file reads (delegate when > 3)."),
+        writes: boolProp("The task modifies source code."),
+        noisy: boolProp("The task runs noisy commands / inspects logs / runs tests / scans the repo."),
+        task: stringProp("Free-text task label (echoed; not parsed)."),
+        slice: stringProp("Slice the task is scoped to (frames the suggested handoff).")
+      },
+      additionalProperties: false
+    },
+    run: (_paths, args) => runDelegatePlan({
+      intent: optString(args, "intent"),
+      files: optNumber(args, "files"),
+      writes: optBool(args, "writes"),
+      noisy: optBool(args, "noisy"),
+      task: optString(args, "task"),
+      slice: optString(args, "slice")
+    })
+  },
+  {
+    name: "th_delegate_pack",
+    description: "Assemble a BOUNDED child-agent handoff: the delegated-agent envelope (agent/task/intent/slice/allowed-scope/required-behavior) plus the required Delegation Capsule format. With a slice it reuses `th context pack` for artifact Summary blocks + component-overlap framing. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent: stringProp("The agent being delegated to (codebase-inspector|debugger|builder|critic|spec|\u2026)."),
+        task: stringProp("What the delegate must do."),
+        intent: {
+          type: "string",
+          description: "Kind of work.",
+          enum: ["read", "write", "debug", "review", "artifact", "repo-analysis"]
+        },
+        slice: stringProp("Slice to frame the handoff (reuses context pack).")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runDelegatePack(paths, {
+      agent: optString(args, "agent"),
+      task: optString(args, "task"),
+      intent: optString(args, "intent"),
+      slice: optString(args, "slice")
+    })
+  },
+  {
+    name: "th_delegate_check",
+    description: "Validate a returned Delegation Capsule: confirm every required section heading is present (presence only \u2014 content is not judged). Pass the capsule inline as `text`, or a `path` to a capsule file within the project root. Error lists the missing sections. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: stringProp("The capsule text to validate inline (preferred over path when both given)."),
+        path: stringProp("Path to a capsule file within the project root.")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runDelegateCheck(paths, {
+      text: optString(args, "text"),
+      file: optString(args, "path")
+    })
   },
   // Anchor: REQ-RU-044
   // Anchor: REQ-RU-047

@@ -176,6 +176,36 @@ This records the content hash and version in `.twinharness/state.json` under
 `approved_artifacts`. Downstream stages consult this record; `th stale --artifact <file>` uses it
 to identify registered downstream artifacts when an upstream artifact changes (§18).
 
+## Context preservation & delegation (`th delegate`)
+
+**The main context window is a scarce control-plane resource.** You coordinate; you do not
+personally consume detail. Before doing heavy work *directly*, ask: *will this bloat the main
+context?* If yes, delegate it to a child agent that consumes the detail in its own context and
+returns a compact capsule.
+
+Keep in the main context: the current objective, stage, slice/blocker, compact delegation
+capsules, durable artifact references, and the final accepted mutations to state/docs/code. Do
+**not** retain full contents of large/multiple reads, raw debug traces, raw test output,
+whole-repo scans, long artifact drafts, failed-attempt transcripts, or worker scratchwork.
+
+**Delegate:** broad reads, code edits, artifact drafting, test debugging, long reviews, repo
+inspection, log analysis, and security/UX/architecture/brownfield impact analysis. **Keep in
+main:** a small state query, a tiny read, a one-line update, a short command, a human-approval
+moment, a routing decision, or a `th next` check.
+
+The mechanical spine (advisory — it computes; you decide):
+
+1. `th delegate plan --intent <read|write|debug|review|artifact|repo-analysis> [--files N] [--writes] [--noisy] [--slice <ID>]`
+   → `delegate` / `keep-main`, the reasons, a suggested agent, and whether a capsule is required.
+2. `th delegate pack --agent <agent> [--slice <ID>] [--task <t>] [--intent <i>]` → a **bounded**
+   child handoff (reuses `th context pack` for a slice). Spawn the agent with that prompt.
+3. Require a **Delegation Capsule** back; validate it with `th delegate check --capsule <path>`
+   (or `th delegate capsule` to hand the agent the blank skeleton). Keep only the capsule.
+
+Long-form detail the delegate produces goes in durable files under
+`.twinharness/delegations/DEL-###/` (e.g. `report.md`, `diff-summary.md`, `test-output.txt`) —
+referenced from the capsule, never pasted back into the main context.
+
 ## Domain Model vs. Architecture gate behavior
 
 - **Domain Model streams — no human gate (§8, §14.3).** After the Critic passes, register the
