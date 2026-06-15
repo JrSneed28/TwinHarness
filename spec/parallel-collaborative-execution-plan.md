@@ -77,11 +77,24 @@ P0 Walking skeleton ─▶ P1 Doc fan-out ─▶ P2 Build throughput ─▶ P3 S
 
 ---
 
-### Phase 0 — Walking skeleton (prove the parallel path end-to-end)
-**Goal:** the cheapest possible real parallelism + one coordinator merge, exercised on the
-Documentation stage, with no new core primitive beyond a spawn descriptor.
+### Phase 0 — Lock hardening + walking skeleton (prove the parallel path end-to-end)
+**Goal:** make the concurrency core robust under real contention, then prove the cheapest
+real parallelism + one coordinator merge with no new core primitive beyond a spawn descriptor.
 
-- **Slice 0 — spawn-batching oracle.** Add `th build dispatch --json` returning the full
+- **Slice 0a — `withStateLock` Windows hardening (prerequisite).** The lock's contention
+  path (`state-store.ts:86-87`) only treats `EEXIST` as "held, retry"; on Windows a concurrent
+  `mkdirSync` on a contended dir can throw `EPERM` (and sometimes `EACCES`), which is rethrown
+  and crashes the caller. This already fails `REQ-STATE-LOCK-001` on `windows-latest` CI.
+  Treat `EPERM`/`EACCES` like `EEXIST` (wait/steal-if-stale/retry) so the single deterministic
+  writer is reliable under load. **This is pulled into Phase 0 because every later phase — and
+  Phase 4 especially (debate ledger + section leases add concurrent writers) — depends on a
+  rock-solid lock.**
+  - *Files:* `src/core/state-store.ts`, `tests/concurrency.test.ts` (already exercises it), `dist/` rebuild.
+  - *Acceptance (`REQ-PCO-000`):* `REQ-STATE-LOCK-001` green on all three OS runners; N parallel
+    `drift add` processes each increment with a unique id; no `EPERM` escape.
+  - *Note:* this is the **targeted** EPERM fix, not the full `flock` migration (still §7 out-of-scope).
+
+- **Slice 0b — spawn-batching oracle.** Add `th build dispatch --json` returning the full
   parallel set in one payload (wraps `runBuildNextWave`). Edit the build-and-verify playbook
   + orchestrator to **emit all wave `Agent` calls in a single message**. Give the
   orchestrator the `Agent` tool.
@@ -207,7 +220,7 @@ mechanics first, test them, then wire the agents.
 
 | Phase | Depends on | New core primitive? | Boost | Risk |
 |---|---|---|---|---|
-| P0 skeleton | — | spawn descriptor (tiny) | enabler | low |
+| P0 lock + skeleton | — | lock hardening + spawn descriptor (tiny) | enabler / unblocks CI | low |
 | P1 docs | P0 | none | moderate (free) | very low |
 | P2 build | P0 | none (reuses leases/worktrees) | **highest raw** | medium |
 | P3 slicer | P2 | `--advise` (read-only) | force-multiplier | low |
@@ -266,8 +279,10 @@ For every slice, confirm:
 
 ## 7. Out of scope (explicitly deferred)
 
-- Replacing the `mkdir`-based `withStateLock` with `flock` (only needed if critical sections
-  grow long; current sections are <100 ms — revisit if Phase 4 contention shows timeouts).
+- Full migration of `withStateLock` from `mkdir` to `flock` (only needed if critical sections
+  grow long; current sections are <100 ms — revisit if Phase 4 contention shows timeouts). Note:
+  the **targeted** Windows `EPERM`/`EACCES` hardening is *in scope* as Phase 0, Slice 0a — only
+  the larger lock-mechanism swap is deferred.
 - Routing `th` calls through the persistent MCP server to cut node-respawn cost (a separate
   performance PR; orthogonal to parallelism).
 - Any change to the human-gate set or the §3 boundary.
