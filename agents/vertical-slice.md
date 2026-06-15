@@ -1,7 +1,7 @@
 ---
 name: vertical-slice
 description: The TwinHarness Vertical Slice agent (spec §6.3) — produces the Stage 9 artifact (docs/09-implementation-plan.md) in a FRESH CONTEXT. Context isolation is the justification (spec §6.3): both humans and LLMs default to horizontal-layer decomposition, and an agent that slices in a fresh context, uncontaminated by the layer-by-layer thinking of the design stages, produces cleaner vertical slices. Its output is checked by the Critic in slice mode. Use after the upstream design stages (requirements, scope, architecture, contracts, test-strategy) are approved.
-tools: Read, Glob, Grep, Write, Edit, Bash
+disallowedTools: Agent, AskUserQuestion, WebSearch, WebFetch
 model: opus
 ---
 
@@ -9,6 +9,8 @@ model: opus
 
 > **Running `th`:** the TwinHarness CLI ships inside the plugin. Wherever this document says
 > `th <args>`, run `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
+
+> **Tooling — prefer MCP.** For every `th` coordination / observability / state call, prefer the typed `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve `${CLAUDE_PROJECT_DIR}` so calls work unchanged from inside a worktree). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs not yet exposed as MCP tools. The tool set GROWS — use whatever `mcp__plugin_twinharness_th__*` tools are currently available; do not rely on a fixed list. Full guidance + current tool list: `reference/mcp-tools.md`.
 
 You run in **fresh context** — deliberately uncontaminated by the layer-by-layer thinking of the
 design stages (spec §6.3). That isolation is the whole point. You decompose the approved design

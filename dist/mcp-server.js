@@ -15680,6 +15680,9 @@ function writeState(paths, state) {
   fs2.writeFileSync(tmp, serialized, "utf8");
   fs2.renameSync(tmp, paths.stateFile);
 }
+function isLockHeldError(code) {
+  return code === "EEXIST" || code === "EPERM" || code === "EACCES";
+}
 function withStateLock(paths, fn) {
   if (!fs2.existsSync(paths.stateDir)) return fn();
   const lockDir = path2.join(paths.stateDir, ".state.lock");
@@ -15691,7 +15694,7 @@ function withStateLock(paths, fn) {
       fs2.mkdirSync(lockDir);
       break;
     } catch (e) {
-      if (e.code !== "EEXIST") throw e;
+      if (!isLockHeldError(e.code)) throw e;
       try {
         const age = Date.now() - fs2.statSync(lockDir).mtimeMs;
         if (age > STALE_MS) {
@@ -16113,6 +16116,45 @@ function validateDeps(slices) {
   };
   for (const s of slices) if ((color.get(s.id) ?? WHITE) === WHITE) visit(s.id);
   return { dangling, cycles };
+}
+
+// src/core/routing.ts
+var OPUS_DESIGN_MODES = /* @__PURE__ */ new Set(["architecture", "security", "failure-modes", "technical-design"]);
+var OPUS_CRITIC_MODES = /* @__PURE__ */ new Set(["slice", "code-review"]);
+var OPUS_DEFAULT_AGENTS = /* @__PURE__ */ new Set(["orchestrator", "vertical-slice"]);
+function computeRoute(input) {
+  const agent = input.agent;
+  const mode = input.mode;
+  const tier = input.tier ?? null;
+  const blast = (input.blastFlags?.length ?? 0) > 0;
+  const t3 = tier === "T3";
+  if (input.summarization) {
+    return { model: "haiku", effort: "low", rationale: "trivial mechanical summarization (\xA72)" };
+  }
+  if (mode && OPUS_DESIGN_MODES.has(mode) && (t3 || blast) && agent !== "critic") {
+    if (mode === "security" && t3 && blast) {
+      return { model: "opus", effort: "max", rationale: `security design on a T3 blast-radius project (${mode}, \xA72/\xA715.S)` };
+    }
+    return {
+      model: "opus",
+      effort: t3 && blast ? "xhigh" : "high",
+      rationale: `heavy design mode "${mode}" on ${t3 ? "T3" : "a blast-radius project"} (\xA72)`
+    };
+  }
+  if (agent === "critic" && mode && OPUS_CRITIC_MODES.has(mode) && blast) {
+    return {
+      model: "opus",
+      effort: t3 && blast ? "xhigh" : "high",
+      rationale: `critic "${mode}" on a blast-radius project (\xA72)`
+    };
+  }
+  if (agent === "builder" && (input.componentBlast || blast)) {
+    return { model: "opus", effort: "high", rationale: "builder on a blast-radius component (\xA72)" };
+  }
+  if (agent && OPUS_DEFAULT_AGENTS.has(agent)) {
+    return { model: "opus", effort: t3 || blast ? "high" : "medium", rationale: `${agent} default (opus)` };
+  }
+  return { model: "sonnet", effort: t3 ? "high" : "medium", rationale: "default (sonnet)" };
 }
 
 // src/commands/build.ts
@@ -16545,45 +16587,6 @@ function loadBriefFromFile(filePath) {
     return { ok: false, issues: [{ path: "$", message: `invalid JSON: ${e.message}` }] };
   }
   return validateBrief(parsed);
-}
-
-// src/core/routing.ts
-var OPUS_DESIGN_MODES = /* @__PURE__ */ new Set(["architecture", "security", "failure-modes", "technical-design"]);
-var OPUS_CRITIC_MODES = /* @__PURE__ */ new Set(["slice", "code-review"]);
-var OPUS_DEFAULT_AGENTS = /* @__PURE__ */ new Set(["orchestrator", "vertical-slice"]);
-function computeRoute(input) {
-  const agent = input.agent;
-  const mode = input.mode;
-  const tier = input.tier ?? null;
-  const blast = (input.blastFlags?.length ?? 0) > 0;
-  const t3 = tier === "T3";
-  if (input.summarization) {
-    return { model: "haiku", effort: "low", rationale: "trivial mechanical summarization (\xA72)" };
-  }
-  if (mode && OPUS_DESIGN_MODES.has(mode) && (t3 || blast) && agent !== "critic") {
-    if (mode === "security" && t3 && blast) {
-      return { model: "opus", effort: "max", rationale: `security design on a T3 blast-radius project (${mode}, \xA72/\xA715.S)` };
-    }
-    return {
-      model: "opus",
-      effort: t3 && blast ? "xhigh" : "high",
-      rationale: `heavy design mode "${mode}" on ${t3 ? "T3" : "a blast-radius project"} (\xA72)`
-    };
-  }
-  if (agent === "critic" && mode && OPUS_CRITIC_MODES.has(mode) && blast) {
-    return {
-      model: "opus",
-      effort: t3 && blast ? "xhigh" : "high",
-      rationale: `critic "${mode}" on a blast-radius project (\xA72)`
-    };
-  }
-  if (agent === "builder" && (input.componentBlast || blast)) {
-    return { model: "opus", effort: "high", rationale: "builder on a blast-radius component (\xA72)" };
-  }
-  if (agent && OPUS_DEFAULT_AGENTS.has(agent)) {
-    return { model: "opus", effort: t3 || blast ? "high" : "medium", rationale: `${agent} default (opus)` };
-  }
-  return { model: "sonnet", effort: t3 ? "high" : "medium", rationale: "default (sonnet)" };
 }
 
 // src/core/telemetry.ts

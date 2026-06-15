@@ -14,6 +14,7 @@ import { runNext } from "./commands/next";
 import {
   runBuildPlan,
   runBuildNextWave,
+  runBuildDispatch,
   runBuildClaim,
   runBuildRelease,
   runBuildLeases,
@@ -83,6 +84,7 @@ Usage:
   th verify run                     Run every configured verify command; writes a report; exit 1 on failure
   th build plan [--include-done]    Schedule slices into conflict-free build waves (§16: disjoint parallelize, shared serialize)
   th build next-wave                Live oracle: slices dispatchable in parallel now (deps done, components free)
+  th build dispatch                 Live oracle: full parallel wave + per-slice spawn descriptors in one payload (for single-message batch spawn)
   th build claim|release <SLICE-ID> Take/release a live component lease (collision guard for parallel Builders)
   th build sub-claim <PARENT-SLICE> --components <c1,c2,...>
                                     Open a SUB-lease for a scoped sub-Builder (subset of an in-progress parent's components)
@@ -685,6 +687,9 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           return runBuildPlan(paths, { includeDone: parsed.flags.includeDone });
         case "next-wave":
           return runBuildNextWave(paths);
+        case "dispatch":
+          // Anchor: REQ-PCO-001 — full parallel wave + per-slice spawn descriptors in one payload.
+          return runBuildDispatch(paths);
         case "claim":
           return runBuildClaim(paths, rest[0]);
         case "release":

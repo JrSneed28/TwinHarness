@@ -1,13 +1,16 @@
 ---
 description: Start or resume a TwinHarness Agentic SDLC run — drive an idea through tier-scaled stages to slice-by-slice build.
 argument-hint: <your idea, e.g. "build a CLI todo app">
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node:*), mcp__plugin_twinharness_th__*, Task, Agent
 ---
 
 Start (or resume) a **TwinHarness** orchestration run for: **$ARGUMENTS**
 
 > **Running `th`:** the CLI ships inside this plugin. Wherever instructions say `th <args>`, run
-> `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
+> `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`. The Orchestrator should prefer the typed
+> `mcp__plugin_twinharness_th__*` MCP tools and fall back to
+> `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js"` only for verbs not yet exposed as MCP tools (see
+> `reference/mcp-tools.md`).
 
 Existing run state, if any (captured before this prompt runs — use it to decide **resume vs. fresh
 init**; an error or "not initialized" here means no run exists yet, so start from `th init`):

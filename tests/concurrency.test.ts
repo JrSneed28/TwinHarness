@@ -18,7 +18,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
-import { readState } from "../src/core/state-store";
+import { readState, withStateLock, isLockHeldError } from "../src/core/state-store";
 
 const execFileP = promisify(execFile);
 const CLI = path.resolve(__dirname, "../dist/cli.js");
@@ -90,4 +90,45 @@ describe("REQ-STATE-LOCK-001: concurrent mutations do not lose updates (F10)", (
     const inProgress = state?.slices.filter((s) => s.status === "in-progress").length ?? 0;
     expect(inProgress).toBe(N);
   }, 30_000);
+});
+
+describe("REQ-PCO-000: withStateLock treats Windows EPERM/EACCES as 'held' and retries", () => {
+  // On Windows a concurrent mkdirSync against a contended dir can throw EPERM (or
+  // EACCES) instead of EEXIST. The lock path must recognize all three as
+  // contention (wait / steal-if-stale / retry) rather than rethrow and crash the
+  // caller. The classification is a pure exported predicate so it can be pinned
+  // directly — `fs` module exports are not spy-able under vitest's ESM interop.
+  it("isLockHeldError classifies EEXIST/EPERM/EACCES as contention; everything else rethrows", () => {
+    expect(isLockHeldError("EEXIST")).toBe(true); // POSIX contention
+    expect(isLockHeldError("EPERM")).toBe(true); // Windows contention
+    expect(isLockHeldError("EACCES")).toBe(true); // Windows contention (variant)
+    expect(isLockHeldError("ENOENT")).toBe(false); // genuine error → rethrow
+    expect(isLockHeldError("ENOSPC")).toBe(false); // genuine error → rethrow
+    expect(isLockHeldError(undefined)).toBe(false); // unknown → rethrow
+  });
+
+  it("steals a STALE lock and runs fn (the held → steal → retry loop, no fs mocking)", () => {
+    const tp = makeTempProject();
+    try {
+      runInit(tp.paths, {}); // creates stateDir so withStateLock engages the lock
+      const lockDir = path.join(tp.paths.stateDir, ".state.lock");
+
+      // Simulate a crashed holder: a lock dir whose mtime is older than the stale
+      // threshold (30s). The contention branch must steal it and let fn run.
+      fs.mkdirSync(lockDir, { recursive: true });
+      const old = Date.now() - 60_000;
+      fs.utimesSync(lockDir, new Date(old), new Date(old));
+
+      let ran = false;
+      const out = withStateLock(tp.paths, () => {
+        ran = true;
+        return 42;
+      });
+      expect(ran).toBe(true); // fn ran → the stale lock was stolen and acquired
+      expect(out).toBe(42); // returned fn's value, did not throw
+      expect(fs.existsSync(lockDir)).toBe(false); // released in the finally
+    } finally {
+      tp.cleanup();
+    }
+  });
 });

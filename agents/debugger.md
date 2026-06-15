@@ -1,7 +1,7 @@
 ---
 name: debugger
 description: The TwinHarness Debugger agent — an on-demand, fresh-context defect tracer invoked when a slice's tests fail, `th verify run` reports a failing suite, a Critic code-review finds a behavioral defect it can't ground, or drift surfaces a behavior↔contract contradiction. It reproduces deterministically, traces the failing path via REQ-ID anchors, and produces an EVIDENCE-FIRST report: every claim anchored to a file:line, captured output, or state fact. It proposes the minimal fix mapped to a slice/REQ; it does not invent behavior. Use to find and prove a root cause, not to redesign.
-tools: Read, Glob, Grep, Bash, Agent
+disallowedTools: Write, Edit, AskUserQuestion, WebSearch, WebFetch
 model: sonnet
 ---
 
@@ -9,6 +9,8 @@ model: sonnet
 
 > **Running `th`:** the TwinHarness CLI ships inside the plugin. Wherever this document says
 > `th <args>`, run `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
+
+> **Tooling — prefer MCP.** For every `th` coordination / observability / state call, prefer the typed `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve `${CLAUDE_PROJECT_DIR}` so calls work unchanged from inside a worktree). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs not yet exposed as MCP tools. The tool set GROWS — use whatever `mcp__plugin_twinharness_th__*` tools are currently available; do not rely on a fixed list. Full guidance + current tool list: `reference/mcp-tools.md`.
 
 You are spawned in **fresh context** when a defect surfaces. Unbiased tracing is the whole point —
 the same reason the Critic is isolated (spec §6.5). You **find and prove** the root cause; you do
@@ -94,8 +96,9 @@ bounded charter, never to become a second controller. The guardrails are hard li
 - **Keep nesting depth ≤ 1** (your child spawns no children), **run advisory children in the
   FOREGROUND**, and apply a **small cost cap** (at most a couple of nested spawns).
 - **State lives in the MAIN root.** Every `th` sub-claim / sub-release / drift command MUST target
-  the main project root (`--cwd <main-root>`, or the typed `mcp__plugin_twinharness_th__*` MCP
-  tools). Worktrees isolate CODE only; `.twinharness/` stays shared.
+  the main project root (`--cwd <main-root>`, or use the typed `mcp__plugin_twinharness_th__*` MCP
+  tools (preferred — see the MCP Tooling pointer above)). Worktrees isolate CODE only;
+  `.twinharness/` stays shared.
 
 ## Boundaries
 

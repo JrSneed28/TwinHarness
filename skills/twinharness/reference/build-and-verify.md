@@ -123,6 +123,13 @@ placed in separate waves and serialized to prevent merge conflicts and drift rac
 - **Across waves:** wait for all slices in wave N to pass the code-review Critic loop before
   spawning wave N+1. Shared components are the serialization boundary.
 
+> **Emit a wave's Builder spawns in ONE message (critical for real concurrency).** "Concurrently"
+> is mechanical, not aspirational: the Orchestrator MUST emit **all** of a wave's Builder spawn
+> calls in a **single message / single turn**, so they actually run in parallel. Spawning them
+> across separate turns serializes the wave. To get the full parallel set plus a ready-to-spawn
+> per-slice descriptor in one payload, run `th build dispatch` and emit every returned spawn
+> descriptor together in that one message.
+
 Update slice statuses as work progresses:
 
 ```
@@ -153,11 +160,12 @@ slice are never visible to another. The protocol has five parts:
    hold its own private lease ledger and the cross-process lock would protect **nothing** — two
    Builders could "claim" the same component and never see the conflict. So worktrees isolate
    **CODE only**: every `th` state / lease / drift command issued from inside a worktree MUST target
-   the **main project root** — either pass `--cwd <main-root>`, or use the typed
-   `mcp__plugin_twinharness_th__*` MCP tools (they resolve `${CLAUDE_PROJECT_DIR}` to the stable
-   project root regardless of which worktree the caller is in). **One shared coordination plane;
-   isolated code trees.** Restate this in every Builder / sub-Builder delegation prompt — it is the
-   single most important sentence of the parallel-build contract.
+   the **main project root** — either pass `--cwd <main-root>`, or (preferred) use the typed MCP
+   tools, which resolve `${CLAUDE_PROJECT_DIR}` to the stable project root regardless of which
+   worktree the caller is in. See `reference/mcp-tools.md` for the MCP-first routing rule.
+   **One shared coordination plane; isolated code trees.** Restate this in every Builder /
+   sub-Builder delegation prompt — it is the single most important sentence of the parallel-build
+   contract.
 
 3. **On Critic PASS, merge each worktree branch back in WAVE ORDER.** When a slice's `code-review`
    Critic passes, merge its worktree branch back into the main branch before releasing it. Do this

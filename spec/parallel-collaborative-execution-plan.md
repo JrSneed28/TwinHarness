@@ -1,10 +1,13 @@
 # TwinHarness — Parallel & Collaborative Orchestration: Execution Plan
 
-> **Status:** Draft execution plan (plan only — no source/build performed yet).
+> **Status:** **Phase 0 DONE** (lock hardening REQ-PCO-000, spawn-batching oracle
+> REQ-PCO-001, MCP reachability REQ-PCO-002, MCP Tooling Guideline REQ-PCO-003) —
+> implemented, `npm run verify` green (912 tests passing; MCP tool count unchanged
+> at 23). Phases 1–7 remain planned.
 > **Companion to:** `spec/parallel-collaborative-orchestration.md` (the design/*what*).
 > This document is the *how, in what order, in which files, with what tests*.
-> **Executor:** this Claude Code session executes the phases below directly.
-> **Re-sync note:** rebase onto `main` after the in-flight fix session lands, then execute.
+> **Executor:** this Claude Code session executes the phases directly.
+> **Re-sync note:** re-synced onto `main`.
 
 ---
 
