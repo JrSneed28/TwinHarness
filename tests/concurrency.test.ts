@@ -132,7 +132,14 @@ describe("REQ-PCO-000: withStateLock treats Windows EPERM/EACCES as 'held' and r
     }
   });
 
-  it("rethrows EPERM/EACCES when the lock directory does not exist (genuine permission error)", () => {
+  // This case forces a genuine permission error by chmod-ing the state dir
+  // read-only so `mkdirSync(.state.lock)` is denied. That denial is only
+  // enforceable on POSIX as a non-root user: Windows ignores directory mode bits
+  // for child creation (mkdir succeeds under 0o444), and root bypasses the check
+  // entirely — in both cases mkdir would succeed and the rethrow path can't be
+  // induced. Skip there rather than assert a condition the environment won't
+  // produce; the rethrow logic stays covered on non-root Linux/macOS (incl. CI).
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("rethrows EPERM/EACCES when the lock directory does not exist (genuine permission error)", () => {
     // If mkdirSync throws EPERM/EACCES but the lockDir doesn't exist, it's a
     // real permission problem (read-only dir, ACL, antivirus) — not contention.
     // The lock must rethrow so the caller sees the real root cause instead of
