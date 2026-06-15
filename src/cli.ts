@@ -49,7 +49,14 @@ import {
   runDelegateCapsule,
   runDelegateCheck,
 } from "./commands/delegate";
-import { runRepoMap, runRepoRelevant, runRepoImpact } from "./commands/repo";
+import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck } from "./commands/repo";
+import {
+  runDecisionAdd,
+  runDecisionDetect,
+  runDecisionList,
+  runDecisionApprove,
+  runDecisionCheck,
+} from "./commands/decision";
 
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
@@ -116,11 +123,19 @@ Usage:
   th delegate check --capsule <path>  Validate a returned capsule has every required section (presence only)
   th repo map [--write|--no-write] [--format <summary|json|md>]
                                     Scan the repo; write .twinharness/repo-map.json + docs/00-repo-map.md (writes by default; --no-write = dry/preview)
+  th repo check                     Report whether .twinharness/repo-map.json is fresh vs the working tree (exit 0 fresh / 4 stale / 5 no-map / 1 parse-fail)
   th repo relevant (--slice <ID> | --req <REQ-ID> | --file <path> | --query <kw>)
                    [--maxResults <n>] [--format <slice|req|file|json>]
                                     Precision context: read-first/related/tests/risks for a selector (reads persisted map)
   th repo impact (--file <path> | --component <name|path>) [--format <file|json>]
                                     Pre-edit blast-radius: impacted components, tests, features, risk flags (reads persisted map; no state read)
+  th decision detect                Surface advisory decision candidates from ADRs/drift-log/scope/blast-radius flags (read-only; exit 0)
+  th decision add --title <t> --rationale <r> [--links a,b] [--proposer <n>]
+                                    Record a proposed decision (mints DECISION-NNN; never auto-approves)
+  th decision approve <DECISION-ID> [--reject | --supersede <id>] [--as <actor>]
+                                    HUMAN-ONLY: interactive-TTY-gated transition (proposed→approved/rejected; approved→superseded). Never an MCP tool.
+  th decision check                 Fail (exit 6) when an unapproved decision gates the current stage; else exit 0
+  th decision list                  List the decision set (ids/titles/statuses/links/audit), sorted (exit 0)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
   th version                        Print the CLI version
@@ -175,7 +190,14 @@ Global flags:
                     (repo relevant) Text rendering: slice | req | file | json
   --query <kw>      (repo relevant) Keyword/phrase selector (exact one of --slice/--req/--file/--query required)
   --maxResults <n>  (repo relevant) Cap on combined emitted items (default 20; ≤0 = default)
-  --component <n>   (repo impact) Component name or path selector (exact one of --file/--component required)`;
+  --component <n>   (repo impact) Component name or path selector (exact one of --file/--component required)
+  --title <t>       (decision add) Decision title (required)
+  --rationale <r>   (decision add) Decision rationale (required)
+  --links <a,b>     (decision add) Comma-separated REQ-IDs / ADR-ids / stage ids the decision concerns
+  --proposer <n>    (decision add) Proposer attribution (default: orchestrator)
+  --reject          (decision approve) Append a rejected event instead of approved (mutually exclusive with --supersede)
+  --supersede <id>  (decision approve) Mark this (approved) decision superseded by <id> (mutually exclusive with --reject)
+  --as <actor>      (decision approve) Approver attribution (attribution only — NOT a barrier; default TH_APPROVAL_ACTOR or "human")`;
 
 export interface ParsedArgs {
   positionals: string[];
@@ -237,6 +259,13 @@ export interface ParsedArgs {
     maxResults?: number;
     file?: string;
     component?: string;
+    title?: string;
+    rationale?: string;
+    links?: string;
+    proposer?: string;
+    reject: boolean;
+    supersede?: string;
+    as?: string;
   };
 }
 
@@ -261,6 +290,7 @@ const BOOLEAN_FLAGS: Record<string, FlagField> = {
   "--noisy": "noisy",
   "--write": "write",
   "--no-write": "noWrite",
+  "--reject": "reject",
 };
 
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
@@ -297,6 +327,12 @@ const STRING_FLAGS: Record<string, FlagField> = {
   "--query": "query",
   "--file": "file",
   "--component": "component",
+  "--title": "title",
+  "--rationale": "rationale",
+  "--links": "links",
+  "--proposer": "proposer",
+  "--supersede": "supersede",
+  "--as": "as",
 };
 
 /** Flags that consume a numeric value. */
@@ -333,6 +369,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     noisy: false,
     write: false,
     noWrite: false,
+    reject: false,
   };
   const positionals: string[] = [];
   const unknownFlags: string[] = [];
@@ -515,8 +552,49 @@ function dispatch(parsed: ParsedArgs): CommandResult {
             component: parsed.flags.component,
             format: parsed.flags.format,
           });
+        case "check":
+          // Anchor: REQ-201 — th repo check subcommand dispatch.
+          // Anchor: REQ-202 — stale detection (added/removed/modified).
+          // Anchor: REQ-203 — exit 0 fresh / 4 stale / 5 no-map / 1 parse-fail.
+          // Anchor: REQ-204 — { fresh, added[], removed[], modified[] } report.
+          // Anchor: REQ-205 — deterministic strategy; never executes content.
+          return runRepoCheck(paths, {});
         default:
           return failure({ human: `unknown 'repo' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    case "decision":
+      switch (sub) {
+        case "detect":
+          // Anchor: REQ-405 — read-only candidate surfacing; exit 0 always.
+          return runDecisionDetect(paths, {});
+        case "add":
+          // Anchor: REQ-402 — record a proposed decision; mint id; never auto-approve.
+          return runDecisionAdd(paths, {
+            title: parsed.flags.title,
+            rationale: parsed.flags.rationale,
+            links: (parsed.flags.links ?? "")
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            proposer: parsed.flags.proposer,
+          });
+        case "approve":
+          // Anchor: REQ-403 — HUMAN-ONLY TTY-gated transition (never an MCP tool).
+          // Anchor: REQ-407 — state-machine graph enforced.
+          // Anchor: REQ-412 — non-self-approval barrier is mechanical (TTY).
+          return runDecisionApprove(paths, rest[0], {
+            reject: parsed.flags.reject,
+            supersede: parsed.flags.supersede,
+            as: parsed.flags.as,
+          });
+        case "check":
+          // Anchor: REQ-404 — exit 6 when an unapproved decision gates the stage.
+          return runDecisionCheck(paths, {});
+        case "list":
+          // Anchor: REQ-406 — sorted decision read model; exit 0 always.
+          return runDecisionList(paths, {});
+        default:
+          return failure({ human: `unknown 'decision' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
     case "stage":
       switch (sub) {

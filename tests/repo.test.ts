@@ -90,7 +90,7 @@ describe("REQ-RU-001: dispatch() attachment point — `repo` group now wired (SL
 // Pinning the exact count + names makes any future change to the surface deliberate.
 // ---------------------------------------------------------------------------
 
-describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 16 tools registered (SLICE-4 added 4 repo-map tools; delegate layer added 3)", () => {
+describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 23 tools registered (SLICE-1 added th_build_sub_claim/sub_release; SLICE-4 added 4 repo-map tools; delegate layer added 3; SLICE-6 added th_repo_check + 4 th_decision_* tools)", () => {
   // Anchor: REQ-NFR-002
   const EXPECTED_TOOL_NAMES = [
     "th_state_get",
@@ -109,13 +109,20 @@ describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 16 tools registered (SLICE
     "th_repo_relevant",
     "th_repo_impact",
     "th_context_pack",
+    "th_build_sub_claim",
+    "th_build_sub_release",
+    "th_repo_check",
+    "th_decision_detect",
+    "th_decision_add",
+    "th_decision_check",
+    "th_decision_list",
   ] as const;
 
-  it("REQ-NFR-002 — TOOL_DEFS.length === 16 (SLICE-4 added th_repo_map/relevant/impact/context_pack; delegate layer added th_delegate_plan/pack/check)", () => {
-    expect(TOOL_DEFS.length).toBe(16);
+  it("REQ-NFR-002 — TOOL_DEFS.length === 23 (SLICE-1 added th_build_sub_claim/sub_release; SLICE-4 added th_repo_map/relevant/impact/context_pack; delegate layer added th_delegate_plan/pack/check; SLICE-6 added th_repo_check + th_decision_detect/add/check/list)", () => {
+    expect(TOOL_DEFS.length).toBe(23);
   });
 
-  it("REQ-NFR-002 — TOOL_DEFS contains exactly the 16 expected tool names", () => {
+  it("REQ-NFR-002 — TOOL_DEFS contains exactly the 23 expected tool names", () => {
     const names = TOOL_DEFS.map((t) => t.name);
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
   });

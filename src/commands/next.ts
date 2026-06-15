@@ -9,6 +9,7 @@ import { computeBreakdown } from "../core/coverage";
 import { readVerifyConfig, readVerifyReport } from "../core/verify";
 import { occupiedComponents } from "../core/leases";
 import { computeWave, validateDeps, hasDepIssues } from "../core/wave";
+import { gatingObligations, reduceDecisions, readDecisionEvents } from "../core/decisions";
 
 /**
  * `th next` — the next-action ORACLE (audit F7 — the playbook can fall out of the
@@ -30,6 +31,7 @@ export type NextKind =
   | "resolve-blocking-drift"
   | "escalate-revise"
   | "classify-tier"
+  | "resolve-decision-obligation"
   | "re-register-artifact"
   | "produce-artifact"
   | "register-artifact"
@@ -155,6 +157,29 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
       },
       explain,
     );
+  }
+
+  // 4b. Decision-governance obligation: an unapproved gating decision blocks the stage
+  //     (REQ-501..504). Slots after classify-tier (run-integrity already cleared above)
+  //     and before produce-artifact (stage work). Uses the single gatingObligations
+  //     predicate (RULE-007 / ARCH-RISK-005 — no second implementation). Tolerant
+  //     reader: a corrupt decisions.jsonl skips bad lines and falls through cleanly.
+  {
+    const obligations = gatingObligations(reduceDecisions(readDecisionEvents(paths)), s);
+    if (obligations.length > 0) {
+      const first = obligations[0]!;
+      const title = reduceDecisions(readDecisionEvents(paths)).find((d) => d.id === first.decisionId)?.title ?? "";
+      const titlePart = title ? ` (title: "${title}")` : "";
+      return emit(
+        {
+          kind: "resolve-decision-obligation",
+          action: `Approve ${first.decisionId}${titlePart} — it blocks stage '${first.blockedStage}' from proceeding.`,
+          why: `Decision ${first.decisionId} is linked to stage '${first.blockedStage}' and is not yet approved; no stage work can proceed while a gating decision is unmet (RULE-007).`,
+          data: { decisionId: first.decisionId, blockedStage: first.blockedStage },
+        },
+        explain,
+      );
+    }
   }
 
   // 5. Stage-specific obligations for the current stage.

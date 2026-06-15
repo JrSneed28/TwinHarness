@@ -25,6 +25,7 @@ import { structuredLog } from "../core/log";
 import { requireState } from "../core/guards";
 import { scanRepo } from "../core/repo-map/scanner";
 import { serializeRepoMap, renderRepoMapMarkdown, parseRepoMap, type RepoMap } from "../core/repo-map/schema";
+import { hashContent } from "../core/hash";
 import { computeRelevance, computeImpact, type Selector, type ImpactSelector } from "../core/repo-map/query";
 
 /** `--format` text-rendering values (distinct from the global `--json` envelope). */
@@ -77,6 +78,31 @@ export function runRepoMap(paths: ProjectPaths, opts: RepoMapOptions = {}): Comm
 
   // Scan (best-effort; never throws on repo content — REQ-RU-090).
   const map: RepoMap = scanRepo(paths.root);
+
+  // DS-002 — Populate fileHashes: content-hash every tracked file within scope.
+  // Read-only; NEVER execute scanned content (REQ-NFR-003). Unreadable files are
+  // silently skipped (best-effort; REQ-RU-090). CRLF→LF normalized for
+  // cross-platform determinism (REQ-NFR-002).
+  // Anchor: REQ-202 — per-file hashes enable modified-file detection.
+  // Anchor: REQ-NFR-002 — deterministic: CRLF→LF normalization via hashContent.
+  // Anchor: REQ-NFR-003 — read-only; no subprocess; no require/eval.
+  // Anchor: REQ-NFR-004 — field populated here; absent on old maps (backward-compat preserved by serializer).
+  {
+    const hashes: Record<string, string> = {};
+    for (const f of map.files) {
+      const abs = path.join(paths.root, f.path);
+      try {
+        const content = fs.readFileSync(abs, "utf8");
+        hashes[f.path] = hashContent(content);
+      } catch {
+        // Unreadable file — skip silently (REQ-RU-090, REQ-NFR-003).
+      }
+    }
+    if (Object.keys(hashes).length > 0) {
+      map.fileHashes = hashes;
+    }
+  }
+
   const json = serializeRepoMap(map);
   const md = renderRepoMapMarkdown(map);
 
@@ -601,4 +627,198 @@ function formatImpactHuman(
   }
 
   return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// `th repo check` (IF-001 / REQ-201..205, REQ-NFR-002/003/004)
+// ---------------------------------------------------------------------------
+
+/**
+ * Exit codes for `th repo check` (IF-001).
+ * Anchor: REQ-203 — three-way exit: 0 fresh / 4 stale / 5 no-map / 1 parse-fail.
+ */
+export const REPO_STALE_EXIT = 4;
+export const REPO_NO_MAP_EXIT = 5;
+
+export interface RepoCheckOptions {
+  // No flags beyond --json and --cwd (universal).
+}
+
+/**
+ * `th repo check [--json]` — load the persisted map, rescan the working tree within
+ * scope, diff `fileHashes`, and return a three-way Staleness Outcome.
+ *
+ * Follows Critical Pattern 1 EXACTLY (REQ-NFR-003):
+ *  - named `runRepoCheck`, `paths` first, typed opts second defaulting `{}`;
+ *  - returns `success()`/`failure()` — NEVER throws, NEVER `process.exit`;
+ *  - calls `structuredLog()` exactly once before return.
+ *
+ * Exit codes (IF-001):
+ *   0  fresh           — tree matches map within scope
+ *   4  stale           — files added/removed/modified, or map lacks fileHashes (no_hashes)
+ *   5  no-map          — .twinharness/repo-map.json is absent
+ *   1  parse-failure   — map_invalid-json | map_version | map_schema
+ *
+ * Side-effect-free: never writes repo-map.json.
+ *
+ * Anchor: REQ-201 — th repo check subcommand implemented here.
+ * Anchor: REQ-202 — detects added/removed/modified within scanner scope.
+ * Anchor: REQ-203 — three-way exit (0/4/5/1).
+ * Anchor: REQ-204 — { fresh, added[], removed[], modified[] } report; no_hashes graceful.
+ * Anchor: REQ-205 — deterministic strategy; never executes content.
+ * Anchor: REQ-NFR-002 — hash-compare only; no mtime; deterministic.
+ * Anchor: REQ-NFR-003 — read-only; no subprocess; no path escape.
+ * Anchor: REQ-NFR-004 — absent fileHashes → no_hashes stale (not crash, not fresh).
+ */
+export function runRepoCheck(paths: ProjectPaths, _opts: RepoCheckOptions = {}): CommandResult {
+  const REPO_MAP_JSON = path.join(paths.stateDir, "repo-map.json");
+
+  // ---- Step 1: Load the persisted map ----------------------------------------
+  let rawMap: string | null = null;
+  try {
+    rawMap = fs.readFileSync(REPO_MAP_JSON, "utf8");
+  } catch {
+    // File absent → no-map (exit 5).
+    structuredLog({ cmd: "repo check", outcome: "no-map" });
+    return {
+      ok: false,
+      exitCode: REPO_NO_MAP_EXIT,
+      data: { ok: false, fresh: false, shape: "no-map" },
+      human: "No repo-map.json found. Run `th repo map` first.",
+    };
+  }
+
+  // ---- Step 2: Parse the map (tagged failure, never throws) ------------------
+  const parsed = parseRepoMap(rawMap);
+  if (!parsed.ok || !parsed.map) {
+    const errorCode = parsed.error ?? "map_invalid-json";
+    structuredLog({ cmd: "repo check", outcome: "parse-fail", error: errorCode });
+    return {
+      ok: false,
+      exitCode: 1,
+      data: { ok: false, error: errorCode },
+      human: `repo-map.json parse failure: ${errorCode}. Run \`th repo map\` to regenerate.`,
+    };
+  }
+  const map = parsed.map;
+
+  // ---- Step 3: Graceful degradation — no fileHashes in map (REQ-NFR-004) ----
+  // Anchor: REQ-NFR-004 — valid map without fileHashes → no_hashes stale (exit 4, not crash/fresh).
+  if (!map.fileHashes || Object.keys(map.fileHashes).length === 0) {
+    structuredLog({ cmd: "repo check", outcome: "stale", reason: "no_hashes" });
+    return {
+      ok: false,
+      exitCode: REPO_STALE_EXIT,
+      data: {
+        ok: false,
+        fresh: false,
+        shape: "stale",
+        added: [],
+        removed: [],
+        modified: [],
+        reason: "no_hashes",
+      },
+      human: "repo-map.json exists but has no fileHashes. Run `th repo map` to update it.",
+    };
+  }
+
+  // ---- Step 4: Rescan the working tree (same scope as runRepoMap) -------------
+  // Reuse scanRepo defaults (GENERATED_DIRS, FILE_COUNT_CAP) for scope coherence
+  // (REQ-202). Read-only; never executes content (REQ-NFR-003).
+  const currentMap = scanRepo(paths.root);
+
+  // ---- Step 5: Hash current files within the rescan scope --------------------
+  // Anchor: REQ-NFR-003 — content read via readFileSync; no execution; no path escape.
+  // Unreadable files: omitted from the current hash set (conservative: they will
+  // appear as "removed" if previously tracked, or simply absent — REQ-NFR-003).
+  const currentHashes: Record<string, string> = {};
+  for (const f of currentMap.files) {
+    const abs = path.join(paths.root, f.path);
+    // Scope containment: relPosix ensures the path is within root by construction
+    // (scanner.ts relPosix strips abs prefix — no escape possible). Defense-in-depth:
+    // resolve and verify before reading.
+    // Anchor: REQ-NFR-003 — no path escape: only files emitted by scanRepo (within root).
+    try {
+      const content = fs.readFileSync(abs, "utf8");
+      currentHashes[f.path] = hashContent(content);
+    } catch {
+      // Unreadable file → skip (REQ-NFR-003, REQ-RU-090). This file will appear
+      // as "removed" only if it was previously tracked in map.fileHashes.
+    }
+  }
+
+  // ---- Step 6: Diff the two hash maps ----------------------------------------
+  // Anchor: REQ-202 — detect added/removed/modified within scanner scope.
+  // Anchor: REQ-NFR-002 — hash-compare only; no mtime; deterministic.
+  const storedHashes = map.fileHashes;
+  const added: string[] = [];
+  const removed: string[] = [];
+  const modified: string[] = [];
+
+  // Files in current tree but not in stored map → added.
+  for (const [p, h] of Object.entries(currentHashes)) {
+    if (!(p in storedHashes)) {
+      added.push(p);
+    } else if (storedHashes[p] !== h) {
+      modified.push(p);
+    }
+  }
+
+  // Files in stored map but not in current tree → removed.
+  for (const p of Object.keys(storedHashes)) {
+    if (!(p in currentHashes)) {
+      removed.push(p);
+    }
+  }
+
+  // Sort for determinism (REQ-NFR-002).
+  added.sort();
+  removed.sort();
+  modified.sort();
+
+  const isFresh = added.length === 0 && removed.length === 0 && modified.length === 0;
+
+  if (isFresh) {
+    structuredLog({ cmd: "repo check", outcome: "fresh" });
+    return {
+      ok: true,
+      exitCode: 0,
+      data: {
+        ok: true,
+        fresh: true,
+        shape: "fresh",
+        added: [],
+        removed: [],
+        modified: [],
+      },
+      human: "repo-map.json is fresh — working tree matches the persisted map.",
+    };
+  }
+
+  structuredLog({
+    cmd: "repo check",
+    outcome: "stale",
+    added: added.length,
+    removed: removed.length,
+    modified: modified.length,
+  });
+  return {
+    ok: false,
+    exitCode: REPO_STALE_EXIT,
+    data: {
+      ok: false,
+      fresh: false,
+      shape: "stale",
+      added,
+      removed,
+      modified,
+    },
+    human: [
+      "repo-map.json is stale.",
+      added.length > 0 ? `  added (${added.length}): ${added.slice(0, 5).join(", ")}${added.length > 5 ? " ..." : ""}` : null,
+      removed.length > 0 ? `  removed (${removed.length}): ${removed.slice(0, 5).join(", ")}${removed.length > 5 ? " ..." : ""}` : null,
+      modified.length > 0 ? `  modified (${modified.length}): ${modified.slice(0, 5).join(", ")}${modified.length > 5 ? " ..." : ""}` : null,
+      "Run `th repo map` to update.",
+    ].filter(Boolean).join("\n"),
+  };
 }

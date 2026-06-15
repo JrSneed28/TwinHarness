@@ -1,13 +1,49 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.VETO_EXIT_CODE = void 0;
 exports.runTierClassify = runTierClassify;
 exports.runTierVetoCheck = runTierVetoCheck;
+const fs = __importStar(require("node:fs"));
+const path = __importStar(require("node:path"));
 const paths_1 = require("../core/paths");
 const output_1 = require("../core/output");
 const brief_1 = require("../core/brief");
 const log_1 = require("../core/log");
 const guards_1 = require("../core/guards");
+const state_store_1 = require("../core/state-store");
 /**
  * `th tier` — the Tier-0 classifier (spec §5).
  *
@@ -24,6 +60,45 @@ const guards_1 = require("../core/guards");
  */
 /** Exit code for a blast-radius veto (distinct from the generic failure 1). */
 exports.VETO_EXIT_CODE = 3;
+/**
+ * Brownfield prerequisite check (REQ-301..305, IF-007).
+ *
+ * Returns `{ ok: true, missing: [] }` immediately for any non-brownfield run
+ * (including absent/unreadable state.json). Only when `project_mode ===
+ * "brownfield"` does it check for the two required artifacts.
+ *
+ * Short-circuit guarantee (REQ-304, REQ-305): greenfield and uninitialized
+ * projects are byte-identical to pre-epic behavior — this helper changes nothing
+ * for them (no side-effects, no output change, no exit-code change).
+ */
+function brownfieldPrerequisite(paths) {
+    // Anchor: REQ-305
+    // Read state; tolerate absent or unreadable state.json (falls through as greenfield).
+    const stateResult = (0, state_store_1.readState)(paths);
+    if (!stateResult.state || stateResult.state.project_mode !== "brownfield") {
+        // REQ-304: short-circuit — greenfield / uninitialized path, nothing changes.
+        return { ok: true, missing: [] };
+    }
+    // Brownfield run: check both prerequisite artifacts.
+    // Anchor: REQ-301
+    const repoMapPath = path.join(paths.stateDir, "repo-map.json");
+    const codebaseAnalysisPath = path.join(paths.docsDir, "00-existing-codebase-analysis.md");
+    const missing = [];
+    if (!fs.existsSync(repoMapPath)) {
+        // Canonical relative path as per contract IF-007.
+        const rel = path.relative(paths.root, repoMapPath).replace(/\\/g, "/");
+        missing.push(rel);
+    }
+    if (!fs.existsSync(codebaseAnalysisPath)) {
+        const rel = path.relative(paths.root, codebaseAnalysisPath).replace(/\\/g, "/");
+        missing.push(rel);
+    }
+    if (missing.length > 0) {
+        // Anchor: REQ-302
+        return { ok: false, missing };
+    }
+    return { ok: true, missing: [] };
+}
 function briefLoadFailure(briefPath, issues) {
     return (0, output_1.failure)({
         human: `Could not load brief "${briefPath}":\n${(0, guards_1.formatIssues)(issues)}`,
@@ -75,6 +150,12 @@ function runTierClassify(paths, briefPath) {
     const human = tier0_eligible
         ? "Advisory: T0 — all five Tier-0 conditions hold and no blast-radius flag is present."
         : `Advisory: ≥T1 — Tier 0 not eligible:\n${reasons.map((r) => `  - ${r}`).join("\n")}`;
+    // Anchor: REQ-303 — brownfield advisory (exit 0, surfaced in data only).
+    const prereq = brownfieldPrerequisite(paths);
+    const extraData = {};
+    if (!prereq.ok) {
+        extraData.brownfield_prerequisite_missing = prereq.missing;
+    }
     return (0, output_1.success)({
         data: {
             tier0_eligible,
@@ -82,6 +163,7 @@ function runTierClassify(paths, briefPath) {
             blast_radius_flags: loaded.brief.blast_radius_flags,
             advisory,
             reasons,
+            ...extraData,
         },
         human,
     });
@@ -94,6 +176,16 @@ function runTierClassify(paths, briefPath) {
 function runTierVetoCheck(paths, briefPath) {
     if (!briefPath)
         return (0, output_1.failure)({ human: "usage: th tier veto-check <brief.json>" });
+    // Anchor: REQ-301, REQ-302 — brownfield hard refusal BEFORE brief-load logic.
+    const prereq = brownfieldPrerequisite(paths);
+    if (!prereq.ok) {
+        (0, log_1.structuredLog)({ cmd: "tier veto-check", error: "brownfield_prerequisite_missing", missing: prereq.missing });
+        return (0, output_1.failure)({
+            exitCode: exports.VETO_EXIT_CODE,
+            data: { error: "brownfield_prerequisite_missing", missing: prereq.missing },
+            human: `BLOCKED: brownfield prerequisite artifact(s) missing — run \`th repo map\` and provide docs/00-existing-codebase-analysis.md first:\n${prereq.missing.map((m) => `  - ${m}`).join("\n")}`,
+        });
+    }
     // Resolve the brief path against the project root (--cwd), like `th artifact register`.
     const briefFile = (0, paths_1.resolveWithinRoot)(paths.root, briefPath);
     if (briefFile === null) {

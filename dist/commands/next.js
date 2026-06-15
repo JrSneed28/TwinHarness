@@ -44,6 +44,7 @@ const coverage_1 = require("../core/coverage");
 const verify_1 = require("../core/verify");
 const leases_1 = require("../core/leases");
 const wave_1 = require("../core/wave");
+const decisions_1 = require("../core/decisions");
 function runNext(paths, opts = {}) {
     const explain = opts.explain === true;
     const r = (0, state_store_1.readState)(paths);
@@ -111,6 +112,25 @@ function runNext(paths, opts = {}) {
             why: "The tier determines which stages are even engaged, so nothing downstream can be sequenced until it is set — classification gates every design stage.",
             data: { current_stage: s.current_stage },
         }, explain);
+    }
+    // 4b. Decision-governance obligation: an unapproved gating decision blocks the stage
+    //     (REQ-501..504). Slots after classify-tier (run-integrity already cleared above)
+    //     and before produce-artifact (stage work). Uses the single gatingObligations
+    //     predicate (RULE-007 / ARCH-RISK-005 — no second implementation). Tolerant
+    //     reader: a corrupt decisions.jsonl skips bad lines and falls through cleanly.
+    {
+        const obligations = (0, decisions_1.gatingObligations)((0, decisions_1.reduceDecisions)((0, decisions_1.readDecisionEvents)(paths)), s);
+        if (obligations.length > 0) {
+            const first = obligations[0];
+            const title = (0, decisions_1.reduceDecisions)((0, decisions_1.readDecisionEvents)(paths)).find((d) => d.id === first.decisionId)?.title ?? "";
+            const titlePart = title ? ` (title: "${title}")` : "";
+            return emit({
+                kind: "resolve-decision-obligation",
+                action: `Approve ${first.decisionId}${titlePart} — it blocks stage '${first.blockedStage}' from proceeding.`,
+                why: `Decision ${first.decisionId} is linked to stage '${first.blockedStage}' and is not yet approved; no stage work can proceed while a gating decision is unmet (RULE-007).`,
+                data: { decisionId: first.decisionId, blockedStage: first.blockedStage },
+            }, explain);
+        }
     }
     // 5. Stage-specific obligations for the current stage.
     const current = s.current_stage;
