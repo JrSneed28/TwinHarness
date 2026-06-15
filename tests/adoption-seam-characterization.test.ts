@@ -37,9 +37,9 @@ describe("SLICE-0 characterization: MCP tool registry baseline (Seam B)", () => 
    *
    * Anchor: REQ-105
    */
-  it("REQ-105: test_REQ105_tool_count_incremental_path_16_to_23 — TOOL_DEFS.length is exactly 18 at SLICE-1 (th_build_sub_claim + th_build_sub_release added)", () => {
-    // The incremental path is 16→18→19→23. SLICE-1 advances the baseline to 18.
-    expect(TOOL_DEFS.length).toBe(18);
+  it("REQ-105: test_REQ105_tool_count_incremental_path_16_to_23 — TOOL_DEFS.length is exactly 23 at SLICE-6 (th_repo_check + th_decision_detect/add/check/list added; final count)", () => {
+    // The incremental path is 16→18→19→23. SLICE-6 advances the baseline to 23 (final count).
+    expect(TOOL_DEFS.length).toBe(23);
   });
 
   /**
@@ -95,17 +95,15 @@ describe("SLICE-0 characterization: th_decision_approve absent from TOOL_DEFS (S
    *
    * Anchor: REQ-408
    */
-  it("REQ-408: test_REQ408_mcp_has_no_decision_approve_tool_count_23 — th_decision_approve absent from TOOL_DEFS; count invariant holds at 16", () => {
+  it("REQ-408: test_REQ408_mcp_has_no_decision_approve_tool_count_23 — th_decision_approve absent from TOOL_DEFS; count invariant holds at 23 (SLICE-6 final)", () => {
     const names = TOOL_DEFS.map((t) => t.name);
 
     // The approve tool must NEVER appear — this invariant is non-negotiable (RULE-011, INV-005).
     expect(names).not.toContain("th_decision_approve");
 
-    // At SLICE-0 the baseline count was 16. SLICE-1 advances this to 18
-    // (th_build_sub_claim + th_build_sub_release). Later slices advance to 23.
-    // When SLICE-6 lands, this assertion will be updated to 23 in the SLICE-6
-    // test file (tests/mcp-parity.test.ts). For now we pin the current count.
-    expect(TOOL_DEFS.length).toBe(18);
+    // SLICE-6 lands the final count of 23 (th_repo_check + th_decision_detect/add/check/list
+    // appended; th_decision_approve permanently absent).
+    expect(TOOL_DEFS.length).toBe(23);
   });
 });
 

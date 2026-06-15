@@ -3230,8 +3230,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path17) {
-      let input = path17;
+    function removeDotSegments(path18) {
+      let input = path18;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3483,8 +3483,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path17, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path17 && path17 !== "/" ? path17 : void 0;
+        const [path18, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path18 && path18 !== "/" ? path18 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs19, exportName) {
+    function addFormats(ajv, list, fs20, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs19[f]);
+        ajv.addFormat(f, fs20[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -7141,10 +7141,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path17) {
-  if (!path17)
+function getElementAtPath(obj, path18) {
+  if (!path18)
     return obj;
-  return path17.reduce((acc, key) => acc?.[key], obj);
+  return path18.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7553,11 +7553,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path17, issues) {
+function prefixIssues(path18, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path17);
+    iss.path.unshift(path18);
     return iss;
   });
 }
@@ -7704,16 +7704,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path17 = []) => {
+  const processError = (error3, path18 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path17, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path18, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path18, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path18, ...issue2.path]);
       } else {
-        const fullpath = [...path17, ...issue2.path];
+        const fullpath = [...path18, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -16818,6 +16818,35 @@ var GENESIS_PREV_HASH = "0".repeat(64);
 function decisionsPath(paths) {
   return path12.join(paths.stateDir, "decisions.jsonl");
 }
+var CANONICAL_FIELD_ORDER = [
+  "id",
+  "event",
+  "title",
+  "rationale",
+  "links",
+  "supersededBy",
+  "proposer",
+  "proposedAt",
+  "approver",
+  "approvedAt",
+  "prevHash"
+];
+function canonicalText(event) {
+  const ordered = {};
+  for (const key of CANONICAL_FIELD_ORDER) {
+    const val = event[key];
+    if (val === void 0) continue;
+    if (key === "links") {
+      ordered[key] = [...val].sort();
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeRecordHash(event) {
+  return hashContent(canonicalText(event));
+}
 var HEX64 = /^[0-9a-f]{64}$/;
 var ID_RE = /^DECISION-\d{3,}$/;
 var EVENT_TYPES = /* @__PURE__ */ new Set(["proposed", "approved", "rejected", "superseded"]);
@@ -16850,6 +16879,27 @@ function numericSuffix(id) {
   const m = /^DECISION-(\d+)$/.exec(id);
   if (!m) return null;
   return Number(m[1]);
+}
+function formatDecisionId(n) {
+  return `DECISION-${String(n).padStart(3, "0")}`;
+}
+function mintNextId(events) {
+  let max = 0;
+  for (const e of events) {
+    const n = numericSuffix(e.id);
+    if (n !== null && n > max) max = n;
+  }
+  return formatDecisionId(max + 1);
+}
+function appendDecisionEvent(paths, event) {
+  fs13.mkdirSync(paths.stateDir, { recursive: true });
+  const existing = readDecisionEvents(paths);
+  const prevHash = existing.length > 0 ? existing[existing.length - 1].recordHash : GENESIS_PREV_HASH;
+  const withPrev = { ...event, prevHash };
+  const recordHash = computeRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs13.appendFileSync(decisionsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
 }
 function reduceDecisions(events) {
   const byId = /* @__PURE__ */ new Map();
@@ -18631,6 +18681,124 @@ REQ anchors in scope: ${result.reqAnchors.join(", ")}`);
   }
   return lines.join("\n");
 }
+var REPO_STALE_EXIT = 4;
+var REPO_NO_MAP_EXIT = 5;
+function runRepoCheck(paths, _opts = {}) {
+  const REPO_MAP_JSON = path15.join(paths.stateDir, "repo-map.json");
+  let rawMap = null;
+  try {
+    rawMap = fs16.readFileSync(REPO_MAP_JSON, "utf8");
+  } catch {
+    structuredLog({ cmd: "repo check", outcome: "no-map" });
+    return {
+      ok: false,
+      exitCode: REPO_NO_MAP_EXIT,
+      data: { ok: false, fresh: false, shape: "no-map" },
+      human: "No repo-map.json found. Run `th repo map` first."
+    };
+  }
+  const parsed = parseRepoMap(rawMap);
+  if (!parsed.ok || !parsed.map) {
+    const errorCode = parsed.error ?? "map_invalid-json";
+    structuredLog({ cmd: "repo check", outcome: "parse-fail", error: errorCode });
+    return {
+      ok: false,
+      exitCode: 1,
+      data: { ok: false, error: errorCode },
+      human: `repo-map.json parse failure: ${errorCode}. Run \`th repo map\` to regenerate.`
+    };
+  }
+  const map = parsed.map;
+  if (!map.fileHashes || Object.keys(map.fileHashes).length === 0) {
+    structuredLog({ cmd: "repo check", outcome: "stale", reason: "no_hashes" });
+    return {
+      ok: false,
+      exitCode: REPO_STALE_EXIT,
+      data: {
+        ok: false,
+        fresh: false,
+        shape: "stale",
+        added: [],
+        removed: [],
+        modified: [],
+        reason: "no_hashes"
+      },
+      human: "repo-map.json exists but has no fileHashes. Run `th repo map` to update it."
+    };
+  }
+  const currentMap = scanRepo(paths.root);
+  const currentHashes = {};
+  for (const f of currentMap.files) {
+    const abs = path15.join(paths.root, f.path);
+    try {
+      const content = fs16.readFileSync(abs, "utf8");
+      currentHashes[f.path] = hashContent(content);
+    } catch {
+    }
+  }
+  const storedHashes = map.fileHashes;
+  const added = [];
+  const removed = [];
+  const modified = [];
+  for (const [p, h] of Object.entries(currentHashes)) {
+    if (!(p in storedHashes)) {
+      added.push(p);
+    } else if (storedHashes[p] !== h) {
+      modified.push(p);
+    }
+  }
+  for (const p of Object.keys(storedHashes)) {
+    if (!(p in currentHashes)) {
+      removed.push(p);
+    }
+  }
+  added.sort();
+  removed.sort();
+  modified.sort();
+  const isFresh = added.length === 0 && removed.length === 0 && modified.length === 0;
+  if (isFresh) {
+    structuredLog({ cmd: "repo check", outcome: "fresh" });
+    return {
+      ok: true,
+      exitCode: 0,
+      data: {
+        ok: true,
+        fresh: true,
+        shape: "fresh",
+        added: [],
+        removed: [],
+        modified: []
+      },
+      human: "repo-map.json is fresh \u2014 working tree matches the persisted map."
+    };
+  }
+  structuredLog({
+    cmd: "repo check",
+    outcome: "stale",
+    added: added.length,
+    removed: removed.length,
+    modified: modified.length
+  });
+  return {
+    ok: false,
+    exitCode: REPO_STALE_EXIT,
+    data: {
+      ok: false,
+      fresh: false,
+      shape: "stale",
+      added,
+      removed,
+      modified
+    },
+    human: [
+      "repo-map.json is stale.",
+      added.length > 0 ? `  added (${added.length}): ${added.slice(0, 5).join(", ")}${added.length > 5 ? " ..." : ""}` : null,
+      removed.length > 0 ? `  removed (${removed.length}): ${removed.slice(0, 5).join(", ")}${removed.length > 5 ? " ..." : ""}` : null,
+      modified.length > 0 ? `  modified (${modified.length}): ${modified.slice(0, 5).join(", ")}${modified.length > 5 ? " ..." : ""}` : null,
+      "Run `th repo map` to update."
+    ].filter(Boolean).join("\n")
+  };
+}
 
 // src/commands/context.ts
 var TOKENS_PER_CHAR = 1 / 4;
@@ -18972,6 +19140,166 @@ ${v.missing.map((m) => `  - ${m}`).join("\n")}`
   });
 }
 
+// src/commands/decision.ts
+var fs19 = __toESM(require("node:fs"));
+var path17 = __toESM(require("node:path"));
+var DECISION_GATE_EXIT = 6;
+function runDecisionAdd(paths, opts = {}) {
+  const title = opts.title?.trim();
+  const rationale = opts.rationale?.trim();
+  if (!title) {
+    structuredLog({ cmd: "decision add", error: "missing_field", field: "title" });
+    return failure({
+      human: "Missing required --title.",
+      data: { error: "missing_field", field: "title" }
+    });
+  }
+  if (!rationale) {
+    structuredLog({ cmd: "decision add", error: "missing_field", field: "rationale" });
+    return failure({
+      human: "Missing required --rationale.",
+      data: { error: "missing_field", field: "rationale" }
+    });
+  }
+  const links = opts.links ?? [];
+  const proposer = opts.proposer?.trim() || "orchestrator";
+  const now = opts.now ?? (() => /* @__PURE__ */ new Date());
+  const sealed = withStateLock(paths, () => {
+    const id = mintNextId(readDecisionEvents(paths));
+    return appendDecisionEvent(paths, {
+      id,
+      event: "proposed",
+      title,
+      rationale,
+      links,
+      proposer,
+      proposedAt: now().toISOString()
+    });
+  });
+  structuredLog({ cmd: "decision add", id: sealed.id, status: "proposed", links: links.length });
+  return success({
+    data: { id: sealed.id, status: "proposed", links },
+    human: `Recorded ${sealed.id} (proposed).`
+  });
+}
+function firstHeading(body) {
+  for (const line of body.split(/\r?\n/)) {
+    const m = /^#\s+(.+?)\s*$/.exec(line);
+    if (m) return m[1];
+  }
+  return void 0;
+}
+function runDecisionDetect(paths, _opts = {}) {
+  const candidates = [];
+  const adrDir = path17.join(paths.docsDir, "05-adrs");
+  try {
+    const entries = fs19.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
+    for (const f of entries) {
+      const rel = path17.posix.join("docs/05-adrs", f);
+      let title = f;
+      try {
+        const heading = firstHeading(fs19.readFileSync(path17.join(adrDir, f), "utf8"));
+        if (heading) title = heading;
+      } catch {
+      }
+      candidates.push({ title, source: "adr", sourceRef: rel });
+    }
+  } catch {
+  }
+  try {
+    const driftBody = fs19.readFileSync(paths.driftLog, "utf8");
+    const seen = /* @__PURE__ */ new Set();
+    for (const line of driftBody.split(/\r?\n/)) {
+      const m = /^##\s+(DRIFT-\d+)\b(.*)$/.exec(line);
+      if (!m) continue;
+      const id = m[1];
+      if (/—\s*resolved/i.test(m[2] ?? "")) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      candidates.push({
+        title: `Drift entry ${id}: ${m[2]?.replace(/^\s*[—-]\s*/, "").trim() || "scope-affecting change"}`,
+        source: "drift-log",
+        sourceRef: id,
+        rationale: "Drift entry signals a change that may constitute a significant run choice."
+      });
+    }
+  } catch {
+  }
+  try {
+    const scopeBody = fs19.readFileSync(path17.join(paths.docsDir, "02-scope.md"), "utf8");
+    if (/(^##\s+Changes\b)|(^\s*(ADDED|CHANGED):)/m.test(scopeBody)) {
+      candidates.push({
+        title: "Scope signal: a post-requirements scope change is recorded",
+        source: "scope-change",
+        sourceRef: "docs/02-scope.md",
+        rationale: "Scope document contains change markers indicating a scope addition/change."
+      });
+    }
+  } catch {
+  }
+  const stateResult = readState(paths);
+  const flags = stateResult.state?.blast_radius_flags ?? [];
+  flags.forEach((flag, i) => {
+    candidates.push({
+      title: `Blast-radius flag: ${flag}`,
+      source: "blast-radius-flag",
+      sourceRef: `state.json:blast_radius_flags[${i}]`,
+      rationale: "A blast-radius flag indicates a high-impact choice warranting a formal decision.",
+      suggestedLinks: ["stage:architecture"]
+    });
+  });
+  structuredLog({ cmd: "decision detect", candidates: candidates.length });
+  return success({
+    data: { candidates },
+    human: candidates.length === 0 ? "No decision candidates detected." : `Detected ${candidates.length} decision candidate(s).`
+  });
+}
+function listShape(d) {
+  const out = {
+    id: d.id,
+    title: d.title,
+    rationale: d.rationale,
+    status: d.status,
+    links: d.links
+  };
+  if (d.proposer !== void 0) out.proposer = d.proposer;
+  if (d.proposedAt !== void 0) out.proposedAt = d.proposedAt;
+  if (d.status !== "proposed") {
+    if (d.approver !== void 0) out.approver = d.approver;
+    if (d.approvedAt !== void 0) out.approvedAt = d.approvedAt;
+  }
+  if (d.status === "superseded" && d.supersededBy !== void 0) out.supersededBy = d.supersededBy;
+  return out;
+}
+function runDecisionList(paths, _opts = {}) {
+  const reduced = sortDecisions(reduceDecisions(readDecisionEvents(paths)));
+  const decisions = reduced.map(listShape);
+  structuredLog({ cmd: "decision list", decisions: decisions.length });
+  return success({
+    data: { decisions },
+    human: decisions.length === 0 ? "No decisions recorded." : reduced.map((d) => `${d.id}  [${d.status}]  ${d.title}`).join("\n")
+  });
+}
+function runDecisionCheck(paths, _opts = {}) {
+  const decisions = reduceDecisions(readDecisionEvents(paths));
+  const state = readState(paths).state;
+  const gating = gatingObligations(decisions, state);
+  if (gating.length > 0) {
+    structuredLog({ cmd: "decision check", gating: gating.length });
+    return {
+      ok: false,
+      exitCode: DECISION_GATE_EXIT,
+      data: { ok: false, gating },
+      human: [
+        "Unapproved decisions gate the current stage:",
+        ...gating.map((g) => `  ${g.decisionId} blocks stage '${g.blockedStage}'`)
+      ].join("\n")
+    };
+  }
+  structuredLog({ cmd: "decision check", gating: 0 });
+  return success({ data: { gating: [] }, human: "No unapproved gating decisions." });
+}
+
 // src/mcp-server.ts
 function resolvePathsForCall() {
   return resolveProjectPaths(process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
@@ -19300,6 +19628,76 @@ var TOOL_DEFS = [
       additionalProperties: false
     },
     run: (paths, args) => runBuildSubRelease(paths, optString(args, "subId"))
+  },
+  // Anchor: REQ-206
+  {
+    name: "th_repo_check",
+    description: "Check whether the persisted repo-map.json is stale (files added/removed/modified since the last `th repo map` run). Exit 0 = fresh; exit 4 = stale; exit 5 = no map; exit 1 = parse failure. Read-only; same behavior as `th repo check`.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false
+    },
+    run: (paths, _args) => runRepoCheck(paths)
+  },
+  // Anchor: REQ-408
+  {
+    name: "th_decision_detect",
+    description: "Surface advisory DecisionCandidate[] from four deterministic on-disk sources (ADRs, drift-log, scope-change signals, state.json blast-radius flags). Read-only; exit 0 always; never writes any state. Same behavior as `th decision detect`.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false
+    },
+    run: (paths, _args) => runDecisionDetect(paths)
+  },
+  // Anchor: REQ-408
+  {
+    name: "th_decision_add",
+    description: "Record one `proposed` decision: mint the next id, set the proposer/proposedAt audit trail. `title` and `rationale` are required. `links` is a comma-separated string (split/trim/drop-empties). Never auto-approves. Same behavior as `th decision add`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: stringProp("Decision title (required)."),
+        rationale: stringProp("Decision rationale (required)."),
+        links: stringProp("Comma-separated list of links to related artifacts (optional)."),
+        proposer: stringProp("Attribution for the proposing agent (default: orchestrator).")
+      },
+      required: ["title", "rationale"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runDecisionAdd(paths, {
+      title: optString(args, "title"),
+      rationale: optString(args, "rationale"),
+      links: optString(args, "links")?.split(",").map((s) => s.trim()).filter(Boolean),
+      proposer: optString(args, "proposer")
+    })
+  },
+  // Anchor: REQ-408
+  {
+    name: "th_decision_check",
+    description: "Fail (exit 6) when any unapproved decision gates the current stage; pass (exit 0) when all gating decisions are approved or none exist. Uses the single gatingObligations predicate (RULE-007). Same behavior as `th decision check`.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false
+    },
+    run: (paths, _args) => runDecisionCheck(paths)
+  },
+  // Anchor: REQ-408
+  {
+    name: "th_decision_list",
+    description: "Return the reduced decision set, sorted by numeric id suffix. Exit 0 always. Audit fields appear only when applicable to the status. Same behavior as `th decision list`.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false
+    },
+    run: (paths, _args) => runDecisionList(paths)
   }
 ];
 function listTools() {

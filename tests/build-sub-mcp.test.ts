@@ -135,8 +135,8 @@ describe("SLICE-1 — MCP sub-claim / sub-release wrappers", () => {
   it(
     "REQ-105: test_REQ105_tool_count_incremental_path_16_to_23 — TOOL_DEFS.length follows the 16→18→19→23 path; toToolResult round-trips for new tools",
     () => {
-      // SLICE-1 advances the count from 16 to 18 by appending th_build_sub_claim and th_build_sub_release.
-      expect(TOOL_DEFS.length).toBe(18);
+      // SLICE-6 advances the count to 23 (th_repo_check + th_decision_detect/add/check/list).
+      expect(TOOL_DEFS.length).toBe(23);
 
       // Both new tools must be present.
       const names = TOOL_DEFS.map((t) => t.name);

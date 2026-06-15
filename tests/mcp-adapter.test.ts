@@ -276,8 +276,8 @@ describe("SLICE-4 / TASK-010 — MCP adapter: repo-map tool wiring (REQ-RU-044..
 // SLICE-4 / TASK-011 — REQ-RU-094 + REQ-RU-040 (MCP half)
 // ===========================================================================
 
-describe("SLICE-4 / TASK-011 — MCP tool-count 18 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
-  const expected18 = [
+describe("SLICE-4 / TASK-011 — MCP tool-count 23 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
+  const expected23 = [
     "th_state_get",
     "th_state_set",
     "th_drift_add",
@@ -296,11 +296,16 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 18 + schema/no-exec battery (REQ
     "th_context_pack",
     "th_build_sub_claim",
     "th_build_sub_release",
+    "th_repo_check",
+    "th_decision_detect",
+    "th_decision_add",
+    "th_decision_check",
+    "th_decision_list",
   ];
 
-  // ---- REQ-RU-094: tool count is 18 ----
-  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_18 — TOOL_DEFS exposes exactly 18 tools in order", () => {
-    expect(TOOL_DEFS.map((t) => t.name)).toEqual(expected18);
+  // ---- REQ-RU-094: tool count is 23 ----
+  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_23 — TOOL_DEFS exposes exactly 23 tools in order", () => {
+    expect(TOOL_DEFS.map((t) => t.name)).toEqual(expected23);
   });
 
   // ---- REQ-RU-094: wrong-typed arg is coerced to undefined (optNumber/optString guard) ----
