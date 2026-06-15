@@ -1,9 +1,10 @@
 # TwinHarness — Parallel & Collaborative Orchestration: Execution Plan
 
-> **Status:** **Phase 0 DONE** (lock hardening REQ-PCO-000, spawn-batching oracle
-> REQ-PCO-001, MCP reachability REQ-PCO-002, MCP Tooling Guideline REQ-PCO-003) —
-> implemented, `npm run verify` green (912 tests passing; MCP tool count unchanged
-> at 23). Phases 1–7 remain planned.
+> **Status:** **Phases 0–2 DONE.** P0: lock hardening REQ-PCO-000, spawn-batching
+> oracle REQ-PCO-001, MCP reachability REQ-PCO-002, MCP Tooling Guideline
+> REQ-PCO-003. P1: documentation fan-out REQ-PCO-010. P2: Merge-Coordinator
+> REQ-PCO-020 + per-slice triad (Test-Author) REQ-PCO-021. All green (938 tests
+> passing; MCP tool count unchanged at 23; agent count now 12). Phases 3–7 planned.
 > **Companion to:** `spec/parallel-collaborative-orchestration.md` (the design/*what*).
 > This document is the *how, in what order, in which files, with what tests*.
 > **Executor:** this Claude Code session executes the phases directly.

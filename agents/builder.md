@@ -71,6 +71,28 @@ After all tasks in the slice pass:
      Do NOT self-certify the slice as done — the Critic loop gates completion.
 ```
 
+## Per-slice triad — Builder + Test-Author + Verifier (Pattern C)
+
+You do not build a slice alone. Inside the slice worktree you work **concurrently** with two
+triad partners:
+
+- **Test-Author (`agents/test-author.md`)** — extends the REQ-ID-anchored test suite for the
+  slice's tasks **while you write implementation**, so the contract is pinned by anchored tests as
+  the code lands (not bolted on afterward).
+- **Verifier** — runs the slice's suite and its end-to-end acceptance tests, and routes the
+  evidence back.
+
+All three share the **same slice worktree**, and the **blackboard (`delegations/` dir)** is the
+fast feedback channel between you: the Test-Author drops failing-test and coverage-gap notes there,
+the Verifier drops run evidence there, and you read them and fix the **production code** —
+**without a main-context round-trip**. You still write tests with your own implementation; the
+Test-Author's anchored tests run alongside, not instead. Tests are the contract (§11): when a test
+fails you fix the code, never weaken the test.
+
+The triad converges the slice inside its worktree; it does **not** self-certify it. The
+**code-review Critic still gates the slice** (`agents/critic.md` in `code-review` mode) before it is
+merged back. Route the completed slice to the Orchestrator for that pass as always.
+
 ## Bidirectional drift loop (§10) — the key behavior
 
 This is not optional. Every discovery made while building **must** be classified and handled

@@ -38,6 +38,21 @@ The Builder:
 5. After all tasks in a slice pass, runs the slice's **end-to-end acceptance tests**. The slice
    is complete only when those pass.
 
+**Per-slice triad (Pattern C, REQ-PCO-021).** Within each slice's worktree the Builder does not run
+alone — it runs as a **triad** with the new **Test-Author agent (`agents/test-author.md`)** and a
+**Verifier**:
+
+- The **Test-Author** extends the REQ-anchored test suite **concurrently** with the Builder (same
+  anchor rules as step 2), rather than the Builder writing every test itself serially.
+- The **Verifier** runs checks **continuously** as code and tests land, surfacing failures as they
+  appear instead of only at the end.
+- The three exchange feedback over the **blackboard** — the existing `delegations/` dir — so a
+  Verifier failure or a Test-Author gap reaches the Builder **without a main-context round-trip**.
+  This keeps the tight build/test/verify loop inside the slice's worktree.
+
+The code-review **Critic still gates the slice** (the loop below). The triad accelerates production
+inside the slice; it does not replace the fresh-context Critic gate.
+
 ### Critic code-review loop (after each slice)
 
 Route the completed slice to the **Critic agent (`agents/critic.md`) in `code-review` mode**,
@@ -146,7 +161,15 @@ Parallel Builders — and any **scoped sub-Builder** one of them spawns under a 
 (see the "Spawning sub-agents (Phase 5)" section of `agents/builder.md` / `agents/debugger.md`) —
 run in **isolated git worktrees** (`isolation: worktree` in `agents/builder.md`). A worktree gives
 each concurrent slice its own branched-off copy of the **code tree**, so half-written files in one
-slice are never visible to another. The protocol has five parts:
+slice are never visible to another. The protocol has five parts.
+
+**Single merge-back controller (REQ-PCO-020).** The **Merge-Coordinator agent
+(`agents/merge-coordinator.md`)** is the SINGLE top-level controller that performs wave-order
+merge-back. All branch merges flow through it — no Builder and no sub-Builder merges its own branch.
+This centralizes the **single-deterministic-writer invariant**: exactly one actor ever writes the
+main branch, so merges are serialized and ordered rather than racing. Its mechanics are spelled out
+in parts 3 and 4 below — on a clean merge it runs `th build release <SLICE-ID>`; on a conflict
+between plan-disjoint slices it opens BLOCKING drift instead of hand-resolving.
 
 1. **Parallel Builders run in isolated worktrees.** Each Builder (and each scoped sub-Builder)
    operates on its own `isolation: worktree` checkout branched off the default branch; an
@@ -167,26 +190,28 @@ slice are never visible to another. The protocol has five parts:
    sub-Builder delegation prompt — it is the single most important sentence of the parallel-build
    contract.
 
-3. **On Critic PASS, merge each worktree branch back in WAVE ORDER.** When a slice's `code-review`
-   Critic passes, merge its worktree branch back into the main branch before releasing it. Do this
-   **wave by wave**: the `th build plan` schedule already serializes any slices that share a
-   component into separate waves, so **within a wave the branches are component-disjoint and merge
-   cleanly** by construction. (A `th` CLI cannot perform git merges — the merge is an Orchestrator
-   action; its mechanical hook is `th build release` on a clean merge, and `th drift add` on a
-   dirty one, below.)
+3. **On Critic PASS, the Merge-Coordinator merges each worktree branch back in WAVE ORDER.** When a
+   slice's `code-review` Critic passes, the **Merge-Coordinator agent** merges its worktree branch
+   back into the main branch before releasing it. It does this **wave by wave**: the `th build plan`
+   schedule already serializes any slices that share a component into separate waves, so **within a
+   wave the branches are component-disjoint and merge cleanly** by construction. (A `th` CLI cannot
+   perform git merges — the merge is a Merge-Coordinator action; its mechanical hook is
+   `th build release` on a clean merge, and `th drift add` on a dirty one, below.)
 
 4. **A NON-CLEAN merge is the mechanical signal of accidental shared-state coupling.** If two
    slices the plan believed disjoint produce a merge **conflict**, that conflict is the evidence of
    a coupling the static `th build plan` could not see (e.g. two slices that both edit a file the
-   plan never attributed to either component). Do NOT hand-resolve it silently — open it as
-   **BLOCKING** drift so the stop-gate refuses completion until a human decides:
+   plan never attributed to either component). The Merge-Coordinator does NOT hand-resolve it
+   silently — it opens it as **BLOCKING** drift so the stop-gate refuses completion until a human
+   decides:
    ```
    th drift add --layer requirement \
      --ref "<SLICE-A> + <SLICE-B>" \
      --discovery "merge conflict between plan-disjoint slices — accidental shared-state coupling" \
      --action "build paused for human resolution"
    ```
-   A **clean** merge → `th build release <SLICE-ID>` and continue to the next slice / wave.
+   A **clean** merge → the Merge-Coordinator runs `th build release <SLICE-ID>` and continues to
+   the next slice / wave.
 
 5. **Relationship to leases (acknowledged, useful redundancy).** The lease stays the scheduler's
    **live oracle** — `th build claim` / `th build next-wave` consult it, and it prevents the
@@ -232,6 +257,14 @@ set:
 `docs/02-scope.md`, `docs/07-contracts.md` (if exists), and `docs/09-implementation-plan.md`.
 The doc-writer reads the full `docs/07-contracts.md` for `api-reference` mode (contracts are
 source of truth for the API reference).
+
+**Concurrent doc fan-out (T2/T3) — zero-conflict (REQ-PCO-010).** `readme` runs first and on its
+own. After `readme` completes, the remaining doc modes — `user-guide`, `api-reference`,
+`developer-guide`, `changelog` — write **DISJOINT output files** (one file per mode, no shared
+edits), so they are a **zero-conflict fan-out** and MUST be dispatched **CONCURRENTLY**: emit all
+their Doc-Writer spawns in **ONE message / single turn** (spawning across separate turns serializes
+them and defeats the parallelism). Each fanned-out mode is then gated **independently by its own
+Critic in `documentation` mode** — one producer→Critic loop per mode, not a shared gate.
 
 **Critic loop (documentation mode).** After each mode, route to the **Critic agent in
 `documentation` mode**, fresh context:

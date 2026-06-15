@@ -202,6 +202,14 @@ The Orchestrator selects the mode set for the tier and delegates each mode as a 
 doc-writer invocation. Modes may run sequentially in the same session or as separate delegations
 — the Orchestrator decides.
 
+**Concurrent T2/T3 modes (disjoint outputs).** The `user-guide`, `api-reference`,
+`developer-guide`, and `changelog` modes each write a **disjoint output file** (see Output targets
+below) — no two touch the same path — so they are **dispatched CONCURRENTLY**, after `readme`
+completes. `readme` runs first (it is the T1 baseline and the entry point the others reference);
+once it is done, the remaining tier-appropriate modes run in parallel since they cannot collide.
+Each concurrent mode is gated **independently** by the Critic in `documentation` mode (fresh
+context per mode) — one mode failing its Critic loop does not block the others' independent gates.
+
 ## Output targets
 
 - `README.md` — project root (readme mode)

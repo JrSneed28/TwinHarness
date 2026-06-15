@@ -1,13 +1,14 @@
 # Proposal: Parallel & Collaborative Orchestration for TwinHarness
 
-> **Status:** Plan + **Phase 0 implemented**. This document is the agreed plan for
+> **Status:** Plan + **Phases 0–2 implemented**. This document is the agreed plan for
 > introducing genuine parallelism and multi-agent collaboration into TwinHarness
-> while preserving its core guarantees. Re-synced to `main`. **Phase 0 (lock
-> hardening + spawn-batching oracle + MCP reachability + the MCP Tooling Guideline)
-> is now implemented and green** (see the execution plan); Phases 1–7 remain planned.
+> while preserving its core guarantees. Re-synced to `main`. **Phases 0–2 are now
+> implemented and green** (P0: lock hardening + spawn-batching oracle + MCP
+> reachability + MCP Tooling Guideline; P1: documentation fan-out; P2:
+> Merge-Coordinator + per-slice triad — see the execution plan); Phases 3–7 remain planned.
 >
-> **Scope of this PR:** the plan documents PLUS the Phase 0 implementation (the §8
-> MCP-utilization fix + Slices 0a–0d). Later phases land in follow-up work.
+> **Scope of this PR:** the plan documents PLUS the Phase 0–2 implementation (the §8
+> MCP-utilization fix + Slices 0a–0d, 1, 2, 3). Later phases land in follow-up work.
 
 ---
 
