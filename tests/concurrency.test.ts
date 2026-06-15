@@ -18,7 +18,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
-import { readState } from "../src/core/state-store";
+import { readState, withStateLock, isLockHeldError } from "../src/core/state-store";
 
 const execFileP = promisify(execFile);
 const CLI = path.resolve(__dirname, "../dist/cli.js");
@@ -90,4 +90,75 @@ describe("REQ-STATE-LOCK-001: concurrent mutations do not lose updates (F10)", (
     const inProgress = state?.slices.filter((s) => s.status === "in-progress").length ?? 0;
     expect(inProgress).toBe(N);
   }, 30_000);
+});
+
+describe("REQ-PCO-000: withStateLock treats Windows EPERM/EACCES as 'held' and retries", () => {
+  // On Windows a concurrent mkdirSync against a contended dir can throw EPERM (or
+  // EACCES) instead of EEXIST. The lock path must recognize all three as
+  // contention (wait / steal-if-stale / retry) rather than rethrow and crash the
+  // caller. The classification is a pure exported predicate so it can be pinned
+  // directly — `fs` module exports are not spy-able under vitest's ESM interop.
+  it("isLockHeldError classifies EEXIST/EPERM/EACCES as contention; everything else rethrows", () => {
+    expect(isLockHeldError("EEXIST")).toBe(true); // POSIX contention
+    expect(isLockHeldError("EPERM")).toBe(true); // Windows contention
+    expect(isLockHeldError("EACCES")).toBe(true); // Windows contention (variant)
+    expect(isLockHeldError("ENOENT")).toBe(false); // genuine error → rethrow
+    expect(isLockHeldError("ENOSPC")).toBe(false); // genuine error → rethrow
+    expect(isLockHeldError(undefined)).toBe(false); // unknown → rethrow
+  });
+
+  it("steals a STALE lock and runs fn (the held → steal → retry loop, no fs mocking)", () => {
+    const tp = makeTempProject();
+    try {
+      runInit(tp.paths, {}); // creates stateDir so withStateLock engages the lock
+      const lockDir = path.join(tp.paths.stateDir, ".state.lock");
+
+      // Simulate a crashed holder: a lock dir whose mtime is older than the stale
+      // threshold (30s). The contention branch must steal it and let fn run.
+      fs.mkdirSync(lockDir, { recursive: true });
+      const old = Date.now() - 60_000;
+      fs.utimesSync(lockDir, new Date(old), new Date(old));
+
+      let ran = false;
+      const out = withStateLock(tp.paths, () => {
+        ran = true;
+        return 42;
+      });
+      expect(ran).toBe(true); // fn ran → the stale lock was stolen and acquired
+      expect(out).toBe(42); // returned fn's value, did not throw
+      expect(fs.existsSync(lockDir)).toBe(false); // released in the finally
+    } finally {
+      tp.cleanup();
+    }
+  });
+
+  // This case forces a genuine permission error by chmod-ing the state dir
+  // read-only so `mkdirSync(.state.lock)` is denied. That denial is only
+  // enforceable on POSIX as a non-root user: Windows ignores directory mode bits
+  // for child creation (mkdir succeeds under 0o444), and root bypasses the check
+  // entirely — in both cases mkdir would succeed and the rethrow path can't be
+  // induced. Skip there rather than assert a condition the environment won't
+  // produce; the rethrow logic stays covered on non-root Linux/macOS (incl. CI).
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("rethrows EPERM/EACCES when the lock directory does not exist (genuine permission error)", () => {
+    // If mkdirSync throws EPERM/EACCES but the lockDir doesn't exist, it's a
+    // real permission problem (read-only dir, ACL, antivirus) — not contention.
+    // The lock must rethrow so the caller sees the real root cause instead of
+    // spinning until "lock timeout".
+    const tp = makeTempProject();
+    try {
+      runInit(tp.paths, {}); // creates stateDir
+
+      // Make stateDir read-only so mkdirSync(.state.lock) throws a permission
+      // error while the lock directory does not yet exist.
+      fs.chmodSync(tp.paths.stateDir, 0o444);
+      try {
+        expect(() => withStateLock(tp.paths, () => 1)).toThrow();
+      } finally {
+        // Restore perms so cleanup can delete the temp dir.
+        fs.chmodSync(tp.paths.stateDir, 0o755);
+      }
+    } finally {
+      tp.cleanup();
+    }
+  });
 });

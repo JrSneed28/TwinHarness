@@ -15,10 +15,17 @@ The single governing axis (spec §2) resolves every judgment call:
 > touching security, money, data integrity, or migrations — gets **human gates** and strict, sticky
 > treatment. **Everything else flows, self-maintains, auto-generates, or can be bypassed.**
 
-## Running the `th` CLI
+## Running `th` — MCP tools first, CLI as fallback
 
-The `th` CLI ships inside this plugin (zero runtime dependencies, Node ≥ 18). Wherever this
-playbook — or any TwinHarness agent or command — says `th <args>`, run:
+TwinHarness exposes its coordination / observability / state handlers as **typed MCP tools**
+named `mcp__plugin_twinharness_th__*`. **Prefer those tools** for every such operation — they
+return structured results and resolve the project root automatically (worktree-safe), so they are
+the **primary** path. See `${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference/mcp-tools.md` for the
+routing rule, the why, and a non-exhaustive snapshot of the current tools.
+
+**Fallback — the `th` CLI.** The CLI ships inside this plugin (zero runtime dependencies, Node ≥
+18) and covers verbs not exposed as MCP tools. Wherever this playbook — or any TwinHarness agent or
+command — says `th <args>` and no matching MCP tool exists, run:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>
@@ -38,6 +45,10 @@ CLI — never hand-edit `state.json`, never eyeball traceability, never "remembe
 | Scaffold a project | `th init` |
 | Read/patch/validate state | `th state get\|set\|status\|verify` |
 | Emit a stop-gate decision | `th hook stop-gate` |
+
+The state, drift, build-lease, route, decision, repo, context, and delegate verbs below have typed
+`mcp__plugin_twinharness_th__*` equivalents — invoke them via those MCP tools per
+`reference/mcp-tools.md`; use the CLI form only for verbs without an MCP tool.
 
 > Also available (all implemented): `th artifact register|list` (accepts a directory, e.g. `docs/05-adrs/`),
 > `th anchors scan`, `th trace render`, `th coverage check|report`, `th verify add|list|clear|run`,

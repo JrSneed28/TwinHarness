@@ -43,6 +43,32 @@ instead of starting clean. Three adaptations apply across the stages below:
 
 ---
 
+## Standing services — Librarian (Phase 6, REQ-PCO-060)
+
+The **Librarian agent (`agents/librarian.md`)** is a **long-lived repo-understanding service**, not
+a per-stage agent. The Orchestrator stands it up once and keeps it alive across stages; it is the
+single owner of the **repo-map + artifact-summary index**.
+
+- **What it owns.** The Librarian maintains the repo map and the index of artifact summaries, built
+  and refreshed via `th repo map`, `th repo relevant`, `th repo impact`, and `th context pack`
+  (**prefer the typed `mcp__plugin_twinharness_th__*` MCP tools** for these calls — they return
+  structured results and resolve `${CLAUDE_PROJECT_DIR}` from any worktree; see
+  `reference/mcp-tools.md`). It does not edit artifacts; it indexes and summarizes them.
+- **What it answers.** Any agent (Orchestrator, Spec, Builder, Critic, Debugger, Researcher) can ask
+  the Librarian **locate** queries ("where does component X live / which files touch REQ-NNN") and
+  **summary** queries ("give me the design context for SLICE-3"). It replies with **compact
+  capsules** — a few anchored lines plus file/§ pointers — rather than the full artifacts.
+- **Why it exists.** The capsule answer is the mechanism that keeps the **main context from
+  reloading big artifacts**: instead of pulling a whole design doc or source tree into context, an
+  agent asks the Librarian and gets back just the relevant, anchored slice. This complements the
+  §9 Summaries-handoff rule — Summaries are the static handoff currency; the Librarian is the live
+  query service over the repo and the index.
+
+The Librarian is read-only with respect to artifacts and code; it never gates a stage and never
+substitutes for a Critic or a human gate.
+
+---
+
 ## Stage 4 — Scope (T1, T2, T3)
 
 Delegate to the **Spec agent in `scope` mode** with the `templates/02-scope.md` skeleton. The
@@ -99,6 +125,38 @@ mode**, fresh context, same producer→critic mechanic:
 - Critic **FAIL** → run `th revise bump domain-model`, route grounded defects back to the Spec
   agent, re-run. Repeat until PASS or escalation.
 
+**Debate mode (Phase 4, REQ-PCO-043 — optional augmentation, Pattern B).** For Domain Model the
+Orchestrator may run the stage as a **debate** instead of a single draft, when the design space has
+genuine competing shapes worth surfacing:
+
+1. **Competing producers in fresh contexts.** Spawn 2–3 **Spec agents in `domain-model` mode**, each
+   in a **fresh, isolated context** (`agents/spec.md` debate-mode addendum). Each produces a
+   *competing* model for the same stage; fresh context is the mechanism that surfaces real
+   alternatives instead of one anchored line of thinking.
+2. **Each output is a blackboard fragment** (not the stage artifact). Initialize once with
+   `th collab init --stage domain-model`; each producer writes its position with
+   `th collab fragment --stage domain-model --round <round> --name <name> --text <...>`. Fragments
+   land under `.twinharness/collab/domain-model/<round>/`. `th collab merge --stage domain-model
+   --round <round>` mechanically rejects any round containing a fragment with no REQ-ID anchor (§11
+   enforced at the fragment boundary).
+3. **Reconciler adjudicates.** Spawn the **Reconciler agent (`agents/reconciler.md`)**: it reads the
+   competing fragments (`th collab list --stage domain-model --round <round>`) and merges them into
+   one artifact, recording every contested decision in the **debate ledger** —
+   `th debate add --topic <...>` per fork, `th debate list` to review, `th debate resolve <DEBATE-NNN>
+   --resolution <...>` as each is settled.
+4. **Critic gate on the merge.** Route the merged artifact to the **Critic agent in `debate-reconcile`
+   mode**, fresh context — it certifies the merge is coherent against the competing inputs and the
+   resolved ledger entries (no resolved fork silently dropped or contradicted; every concept still
+   REQ-ID-anchored). This runs *in addition to* the normal `domain-model` critic checks.
+5. **Human sees only the distilled forks.** Genuine, product-meaningful divergences the Reconciler
+   cannot settle on coherence grounds escalate to the human — who sees only the **distilled 1–2
+   forks**, not the full debate. **Recorded reconciliations seed ADR drafts** downstream (Stage 5,
+   T3). When the divergence is a real domain-model fork, it streams as usual once resolved (§8,
+   §14.3 — no standing human gate for domain model otherwise).
+
+When **not** run in debate mode, Domain Model produces a single draft exactly as above; debate mode
+is an Orchestrator-selected augmentation, not the default.
+
 **No human gate (§8, §14.3).** The domain model streams. The user may interrupt at any point but
 is not required to click approve. Once the Critic passes, register the artifact and advance state:
 
@@ -137,6 +195,51 @@ mode**, fresh context:
 - Critic **PASS** → proceed to artifact registration.
 - Critic **FAIL** → run `th revise bump architecture`, route grounded defects back to the Spec
   agent, re-run. Repeat until PASS or escalation.
+
+**Debate mode (Phase 4, REQ-PCO-043 — optional augmentation, Pattern B).** Architecture is the other
+stage that may run as a **debate** rather than a single draft — it is the highest-leverage stage for
+surfacing genuinely competing structures (e.g. monolith vs. service split, sync vs. async backbone)
+before the irreversible-decision gates:
+
+1. **Competing producers in fresh contexts.** Spawn 2–3 **Spec agents in `architecture` mode**, each
+   in a **fresh, isolated context** (`agents/spec.md` debate-mode addendum). Each produces a
+   *competing* architecture for the same stage; independent fresh-context designs surface real
+   structural alternatives rather than one anchored design.
+2. **Each output is a blackboard fragment** (not the stage artifact). `th collab init --stage
+   architecture` once, then each producer writes
+   `th collab fragment --stage architecture --round <round> --name <name> --text <...>`. Fragments
+   land under `.twinharness/collab/architecture/<round>/`; `th collab merge --stage architecture
+   --round <round>` rejects any round with an unanchored fragment (§11 at the fragment boundary).
+3. **Reconciler adjudicates.** The **Reconciler agent (`agents/reconciler.md`)** reads the competing
+   fragments (`th collab list --stage architecture --round <round>`) and merges them into one
+   artifact, recording each contested decision in the **debate ledger** — `th debate add --topic
+   <...>` per fork, `th debate list`, `th debate resolve <DEBATE-NNN> --resolution <...>`.
+4. **Critic gate on the merge.** Route the merged artifact to the **Critic agent in `debate-reconcile`
+   mode**, fresh context, in addition to the normal `architecture` critic checks: it certifies the
+   merge is coherent against the competing inputs and the resolved ledger entries, with every
+   component still REQ-ID-anchored and no resolved fork silently dropped or contradicted.
+5. **Human sees only the distilled forks.** A real, product-meaningful structural divergence the
+   Reconciler cannot settle on coherence grounds escalates to the **irreversible-decision human gate**
+   above — but the human sees only the **distilled 1–2 forks**, not the full debate. **Recorded
+   reconciliations seed ADR drafts** (Stage 5, T3): each resolved ledger entry maps to a candidate
+   ADR for the decision it settled.
+
+When **not** run in debate mode, Architecture produces a single draft exactly as above; debate mode
+is an Orchestrator-selected augmentation, not the default.
+
+**Standing red-team (Phase 5, REQ-PCO-050).** From the moment the Architecture/Technical-Design/
+Contracts stages open, the Orchestrator runs the **Red-Team agent (`agents/red-team.md`)**
+CONCURRENTLY with these downstream design stages — it is not a serial gate that waits for a draft
+to finish. The Red-Team agent reads the in-flight design fragments and posts **grounded,
+component-anchored attacks** to the blackboard as fragments (`th collab fragment`): each attack
+names a specific component, boundary, or data flow and an abuse/break it enables — never a generic
+checklist item (same anti-boilerplate bar as §15.S). The design agents on these stages must
+**answer each posted attack** (mitigation anchored to a component + REQ-ID) or **convert it** into
+a `th drift add` entry or a `th debate add` ledger fork when it exposes a real design fork. This is
+a continuous adversary running alongside design, not a one-shot review. **The human gate on the
+security model is unchanged and is never streamed** — the standing red-team feeds the design and the
+security artifact, but it does not move or bypass the blast-radius human gate at Stage S; that gate
+still requires explicit human approval (§8, §15.S).
 
 Once the Critic passes and the human has answered any irreversible-decision gates, register and
 advance state:
@@ -222,6 +325,35 @@ surfaces slice ordering to the human **only** when the sequencing has real produ
 files). **T3** — full detail (per-slice ADR references, detailed component list, full task files
 with contracts and design notes embedded).
 
+**Parallelism-optimizer loop (Phase 3, REQ-PCO-030 — runs BEFORE the slice gate and coverage
+gate).** After the Vertical Slice agent produces the draft plan, run one reconciliation pass that
+widens disjoint-component parallelism, then proceed to the unchanged gates below:
+
+1. Route the draft to the **Critic agent in `parallelism` mode**, fresh context. That Critic
+   consults `th build plan --advise`, which reports the plan's current max-parallelism width and the
+   **conflict pairs** (slices with overlapping component sets or `depends_on` edges that serialize
+   them — computed from `conflictPairs`). It returns concrete re-cut suggestions (split a shared
+   component along its seam, hoist a shared dependency into Slice 0, break a needless `depends_on`
+   edge), routed back to the Vertical Slice agent.
+2. The **Vertical Slice agent reconciles** the plan: re-cuts *incidental* overlaps so more slices
+   land in the same build wave, updating the **Components touched** field and the **Build Order &
+   Dependencies** section. *Essential* shared boundaries are left as-is.
+3. **The hard gates win.** This loop never weakens vertical-slice integrity or REQ coverage — it
+   may not disguise a horizontal layer, drop a slice's user-visible capability, or remove coverage.
+   The `slice` coherence gate and the `th coverage check` hard-gate (both below) run afterward and
+   override any optimization. Zero re-cut suggestions is a valid PASS — an already-wide plan needs
+   no change.
+
+**Soft (interface-only) dependencies for speculative dispatch (Phase 7, Slice 11, REQ-PCO-070).**
+When a slice needs only the *interface* of an upstream slice and not its finished behavior, the
+Vertical Slice agent records that edge as **`depends_on_soft`** in the **Build Order &
+Dependencies** section rather than a hard `depends_on`. A `depends_on_soft` edge lets the build
+stage dispatch the downstream slice **speculatively** against the upstream contract before that
+upstream is `done` (the merge-conflict-as-BLOCKING-drift backstop catches a bad speculation); a true
+behavioral dependency stays `depends_on` and still gates. The mechanics live in
+`reference/build-and-verify.md` (Parallel builds). Use `depends_on_soft` only for genuine
+interface-only edges — over-using it to fake parallelism is caught at merge-back.
+
 **Critic loop (slice mode).** Route the draft to the **Critic agent (`agents/critic.md`) in
 `slice` mode**, fresh context:
 
@@ -301,6 +433,12 @@ The agent specifies internal behavior the architecture left abstract: workflows,
 machines, error handling, concurrency, retries, idempotency. It stops where code is clearer than
 prose. Streams; asks the human only where a behavior choice is product-meaningful.
 
+**Standing red-team applies here too (Phase 5, REQ-PCO-050).** This is one of the downstream design
+stages the **Red-Team agent (`agents/red-team.md`)** runs CONCURRENTLY against (see the standing
+red-team note under Stage 7 — Architecture). Component-anchored attacks it posts to the blackboard
+(`th collab fragment`) against the detailed-design fragments must be answered (anchored mitigation)
+or converted to drift/debate. The human security gate at Stage S is unchanged and never streamed.
+
 **Summaries handoff (§9).** The Spec agent reads Summary blocks of `docs/01-requirements.md`,
 `docs/04-architecture.md`, and any ADRs in `docs/05-adrs/`. Full artifacts fetched only on demand.
 
@@ -334,6 +472,15 @@ the `templates/07-contracts.md` skeleton (§15.7).
 The agent derives contracts from architecture + domain model: each interface's
 inputs/outputs/errors, typed and constrained schemas, event shapes, versioning expectations,
 anchored to REQ-IDs and slices. Streams; surfaces product-affecting choices to the human.
+
+**Standing red-team applies here too (Phase 5, REQ-PCO-050).** Contracts is one of the downstream
+design stages the **Red-Team agent (`agents/red-team.md`)** runs CONCURRENTLY against (see the
+standing red-team note under Stage 7 — Architecture). Component-anchored attacks it posts to the
+blackboard (`th collab fragment`) against in-flight contract fragments — e.g. an interface that
+leaks a trust boundary, an unvalidated input shape, a missing authz check on a typed endpoint —
+must be answered with an anchored mitigation or converted to a drift/debate entry. This runs
+alongside (not instead of) the auth human gate below and the Stage S human security gate, both of
+which are unchanged and never streamed.
 
 **Auth decisions are blast-radius — human gate required (§8, §15.7).** If any auth scheme
 (authentication or authorization model, token structure, permission boundaries) surfaces as a
@@ -376,10 +523,20 @@ REQ-IDs. **Anti-boilerplate rule (§15.S):** every threat must point at a specif
 boundary, or data flow in this system; generic checklist items with no anchor are discarded and
 the Critic will reject them.
 
+**Standing red-team feeds this stage (Phase 5, REQ-PCO-050).** The **Red-Team agent
+(`agents/red-team.md`)** has been running CONCURRENTLY against Architecture/Technical-Design/
+Contracts (see the standing red-team note under Stage 7). The grounded, component-anchored attacks
+it posted to the blackboard (`th collab fragment`) are inputs to this threat model: every
+unanswered attack is either a threat to enumerate here (anchored to its component/boundary, per the
+anti-boilerplate rule above) or a resolved mitigation to record. The standing red-team accelerates
+and grounds the security artifact; it does **not** alter the gate below.
+
 **Human gate on the security model and every auth decision (§8, §15.S — blast-radius).**
 Surface the completed security model to the human via **AskUserQuestion** before proceeding.
 Any auth decision (authentication flows, authorization model, trust boundaries) is blast-radius
-and must have explicit human approval. Do not stream past auth without a gate.
+and must have explicit human approval. Do not stream past auth without a gate. **This human gate is
+unchanged by the standing red-team and is NEVER streamed** — the concurrent adversary informs the
+model, but only a human signs off on the security model and auth decisions (§8).
 
 **Critic loop (security mode).** Route the draft to the **Critic agent in `security` mode**,
 fresh context:
@@ -417,6 +574,17 @@ The agent walks each component and boundary for failure scenarios and defines ex
 (fail-closed/open, retry/backoff, idempotency, compensation), anchoring each to negative tests in
 the test strategy. **Anti-boilerplate rule (§15.F):** each failure mode is tied to a specific
 component or flow; generic "handle errors gracefully" entries are discarded.
+
+**Standing red-team feeds this stage too (Phase 5, REQ-PCO-050).** Failure-Modes is one of the
+downstream design stages the **Red-Team agent (`agents/red-team.md`)** runs CONCURRENTLY against
+(see the standing red-team note under Stage 7 — Architecture). The grounded, component-anchored
+attacks it posts to the blackboard (`th collab fragment`) against the in-flight design — an abuse
+that drives a component to a data-loss state, a missing fail-closed path on a boundary — are inputs
+here: each unanswered attack is either a failure mode to enumerate (anchored to its component/flow,
+per the anti-boilerplate rule above) or a resolved mitigation to record, or it converts to a
+`th drift add` / `th debate add` entry. The concurrent adversary grounds the failure model; it does
+not move the data-loss-tradeoff human gate below, and the security model's human gate (Stage S) is
+unchanged and never streamed.
 
 Streams. Escalates where a failure-handling choice involves a data-loss tradeoff — that is
 blast-radius and requires a human gate (§8).

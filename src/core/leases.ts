@@ -199,3 +199,79 @@ export function occupiedComponents(paths: ProjectPaths, slices: SliceState[]): M
   }
   return occ;
 }
+
+/* ------------------------------------------------------------------ *
+ * Section-level artifact leases (Phase 4 Slice 6, REQ-PCO-041).       *
+ *                                                                      *
+ * Same append-only ledger and the same collision-guard mechanism as   *
+ * component leases — only the lease KEY differs: instead of a slice id *
+ * naming a component set, the key is a SECTION id of the form          *
+ * `<file>#<section>` and the lease records the HOLDER (the claiming     *
+ * agent/task). Two agents may co-edit DIFFERENT sections of the same    *
+ * file, but never the SAME section concurrently. A section lease reuses *
+ * {@link appendLeaseEvent}: the section id goes in the `slice` field    *
+ * (the ledger's lease key) and the holder is stored as the sole entry  *
+ * of `components` (`[holder]`), so a section lease round-trips through  *
+ * the existing JSONL format without any schema change. Section leases   *
+ * are top-level (never carry `parent`), which is how they are told      *
+ * apart from sub-leases that also use `#` in their owner id.            *
+ * ------------------------------------------------------------------ */
+
+/** A section id is `<file>#<section>` with a non-empty file and section. */
+const SECTION_ID = /^[^#\n]+#[^#\n]+$/;
+
+/** Whether `id` has the valid `<file>#<section>` shape (single `#`, both sides non-empty). */
+export function isSectionId(id: string): boolean {
+  return SECTION_ID.test(id);
+}
+
+/** Split a `<file>#<section>` id into its parts; `undefined` if malformed. */
+export function parseSectionId(id: string): { file: string; section: string } | undefined {
+  if (!isSectionId(id)) return undefined;
+  const hash = id.indexOf("#");
+  return { file: id.slice(0, hash), section: id.slice(hash + 1) };
+}
+
+/** An active section lease: the `<file>#<section>` id and the holder that owns it. */
+export interface ActiveSectionLease {
+  /** The `<file>#<section>` lease key. */
+  section: string;
+  /** The agent/task id currently holding the section. */
+  holder: string;
+}
+
+/**
+ * The currently-held SECTION leases, reduced from the SAME event ledger as
+ * component leases. A section lease is an active top-level lease (no `parent`)
+ * whose `slice` key is a valid `<file>#<section>` id; its holder is the first
+ * entry of `components`. Pure: it reads/reduces the ledger and decides nothing.
+ */
+export function activeSectionLeases(paths: ProjectPaths): ActiveSectionLease[] {
+  const out: ActiveSectionLease[] = [];
+  for (const lease of activeLeases(paths)) {
+    if (lease.parent !== undefined) continue; // sub-lease, not a section lease
+    if (!isSectionId(lease.slice)) continue; // not a section id
+    out.push({ section: lease.slice, holder: lease.components[0] ?? "" });
+  }
+  return out;
+}
+
+/**
+ * Whether `section` (`<file>#<section>`) is currently leased. With `holder`,
+ * tests "held by a DIFFERENT holder" — the collision-guard predicate a claim
+ * uses to refuse a concurrent claim on the SAME section (a re-claim by the same
+ * holder is not a collision). Without `holder`, tests "held by anyone".
+ */
+export function isSectionLeased(paths: ProjectPaths, section: string, holder?: string): boolean {
+  for (const lease of activeSectionLeases(paths)) {
+    if (lease.section !== section) continue;
+    if (holder === undefined) return true;
+    if (lease.holder !== holder) return true;
+  }
+  return false;
+}
+
+/** The holder currently leasing `section`, or `undefined` if it is free. */
+export function sectionLeaseHolder(paths: ProjectPaths, section: string): string | undefined {
+  return activeSectionLeases(paths).find((l) => l.section === section)?.holder;
+}

@@ -15529,6 +15529,7 @@ var STATE_FIELD_ORDER = [
   "implementation_allowed",
   "open_questions",
   "drift_open_blocking",
+  "debate_open_blocking",
   "revise_loop_counts",
   "write_gate",
   "project_mode"
@@ -15608,6 +15609,9 @@ function validateState(value) {
       if (s.depends_on !== void 0 && (!Array.isArray(s.depends_on) || s.depends_on.some((d) => typeof d !== "string"))) {
         issues.push({ path: `slices[${i}].depends_on`, message: "must be an array of strings or absent" });
       }
+      if (s.depends_on_soft !== void 0 && (!Array.isArray(s.depends_on_soft) || s.depends_on_soft.some((d) => typeof d !== "string"))) {
+        issues.push({ path: `slices[${i}].depends_on_soft`, message: "must be an array of strings or absent" });
+      }
     });
   }
   if (typeof v.implementation_allowed !== "boolean") {
@@ -15618,6 +15622,9 @@ function validateState(value) {
   }
   if (!isInteger(v.drift_open_blocking) || v.drift_open_blocking < 0) {
     issues.push({ path: "drift_open_blocking", message: "must be a non-negative integer" });
+  }
+  if (v.debate_open_blocking !== void 0 && (!isInteger(v.debate_open_blocking) || v.debate_open_blocking < 0)) {
+    issues.push({ path: "debate_open_blocking", message: "must be a non-negative integer" });
   }
   if (!isPlainObject3(v.revise_loop_counts)) {
     issues.push({ path: "revise_loop_counts", message: "must be an object" });
@@ -15680,6 +15687,9 @@ function writeState(paths, state) {
   fs2.writeFileSync(tmp, serialized, "utf8");
   fs2.renameSync(tmp, paths.stateFile);
 }
+function isLockHeldError(code) {
+  return code === "EEXIST" || code === "EPERM" || code === "EACCES";
+}
 function withStateLock(paths, fn) {
   if (!fs2.existsSync(paths.stateDir)) return fn();
   const lockDir = path2.join(paths.stateDir, ".state.lock");
@@ -15691,14 +15701,16 @@ function withStateLock(paths, fn) {
       fs2.mkdirSync(lockDir);
       break;
     } catch (e) {
-      if (e.code !== "EEXIST") throw e;
+      const code = e.code;
+      if (!isLockHeldError(code)) throw e;
       try {
         const age = Date.now() - fs2.statSync(lockDir).mtimeMs;
         if (age > STALE_MS) {
           fs2.rmSync(lockDir, { recursive: true, force: true });
           continue;
         }
-      } catch {
+      } catch (statErr) {
+        if (code === "EPERM" || code === "EACCES") throw e;
         continue;
       }
       if (Date.now() > deadline) {
@@ -15734,6 +15746,7 @@ var path3 = __toESM(require("node:path"));
 var GATE_LEDGER_KEYS = /* @__PURE__ */ new Set([
   "implementation_allowed",
   "drift_open_blocking",
+  "debate_open_blocking",
   "write_gate",
   "tier",
   "blast_radius_flags"
@@ -15776,7 +15789,8 @@ ${formatIssues(r.issues)}`,
 // src/commands/state.ts
 var UNSAFE_KEY_SEGMENTS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constructor"]);
 var MANAGED_FIELDS = {
-  drift_open_blocking: "Use `th drift add` / `th drift resolve` \u2014 this counter is owned by the drift flow."
+  drift_open_blocking: "Use `th drift add` / `th drift resolve` \u2014 this counter is owned by the drift flow.",
+  debate_open_blocking: "Use `th debate add` / `th debate resolve` \u2014 this counter is owned by the debate flow."
 };
 function isRecord(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -16113,6 +16127,45 @@ function validateDeps(slices) {
   };
   for (const s of slices) if ((color.get(s.id) ?? WHITE) === WHITE) visit(s.id);
   return { dangling, cycles };
+}
+
+// src/core/routing.ts
+var OPUS_DESIGN_MODES = /* @__PURE__ */ new Set(["architecture", "security", "failure-modes", "technical-design"]);
+var OPUS_CRITIC_MODES = /* @__PURE__ */ new Set(["slice", "code-review"]);
+var OPUS_DEFAULT_AGENTS = /* @__PURE__ */ new Set(["orchestrator", "vertical-slice"]);
+function computeRoute(input) {
+  const agent = input.agent;
+  const mode = input.mode;
+  const tier = input.tier ?? null;
+  const blast = (input.blastFlags?.length ?? 0) > 0;
+  const t3 = tier === "T3";
+  if (input.summarization) {
+    return { model: "haiku", effort: "low", rationale: "trivial mechanical summarization (\xA72)" };
+  }
+  if (mode && OPUS_DESIGN_MODES.has(mode) && (t3 || blast) && agent !== "critic") {
+    if (mode === "security" && t3 && blast) {
+      return { model: "opus", effort: "max", rationale: `security design on a T3 blast-radius project (${mode}, \xA72/\xA715.S)` };
+    }
+    return {
+      model: "opus",
+      effort: t3 && blast ? "xhigh" : "high",
+      rationale: `heavy design mode "${mode}" on ${t3 ? "T3" : "a blast-radius project"} (\xA72)`
+    };
+  }
+  if (agent === "critic" && mode && OPUS_CRITIC_MODES.has(mode) && blast) {
+    return {
+      model: "opus",
+      effort: t3 && blast ? "xhigh" : "high",
+      rationale: `critic "${mode}" on a blast-radius project (\xA72)`
+    };
+  }
+  if (agent === "builder" && (input.componentBlast || blast)) {
+    return { model: "opus", effort: "high", rationale: "builder on a blast-radius component (\xA72)" };
+  }
+  if (agent && OPUS_DEFAULT_AGENTS.has(agent)) {
+    return { model: "opus", effort: t3 || blast ? "high" : "medium", rationale: `${agent} default (opus)` };
+  }
+  return { model: "sonnet", effort: t3 ? "high" : "medium", rationale: "default (sonnet)" };
 }
 
 // src/commands/build.ts
@@ -16545,45 +16598,6 @@ function loadBriefFromFile(filePath) {
     return { ok: false, issues: [{ path: "$", message: `invalid JSON: ${e.message}` }] };
   }
   return validateBrief(parsed);
-}
-
-// src/core/routing.ts
-var OPUS_DESIGN_MODES = /* @__PURE__ */ new Set(["architecture", "security", "failure-modes", "technical-design"]);
-var OPUS_CRITIC_MODES = /* @__PURE__ */ new Set(["slice", "code-review"]);
-var OPUS_DEFAULT_AGENTS = /* @__PURE__ */ new Set(["orchestrator", "vertical-slice"]);
-function computeRoute(input) {
-  const agent = input.agent;
-  const mode = input.mode;
-  const tier = input.tier ?? null;
-  const blast = (input.blastFlags?.length ?? 0) > 0;
-  const t3 = tier === "T3";
-  if (input.summarization) {
-    return { model: "haiku", effort: "low", rationale: "trivial mechanical summarization (\xA72)" };
-  }
-  if (mode && OPUS_DESIGN_MODES.has(mode) && (t3 || blast) && agent !== "critic") {
-    if (mode === "security" && t3 && blast) {
-      return { model: "opus", effort: "max", rationale: `security design on a T3 blast-radius project (${mode}, \xA72/\xA715.S)` };
-    }
-    return {
-      model: "opus",
-      effort: t3 && blast ? "xhigh" : "high",
-      rationale: `heavy design mode "${mode}" on ${t3 ? "T3" : "a blast-radius project"} (\xA72)`
-    };
-  }
-  if (agent === "critic" && mode && OPUS_CRITIC_MODES.has(mode) && blast) {
-    return {
-      model: "opus",
-      effort: t3 && blast ? "xhigh" : "high",
-      rationale: `critic "${mode}" on a blast-radius project (\xA72)`
-    };
-  }
-  if (agent === "builder" && (input.componentBlast || blast)) {
-    return { model: "opus", effort: "high", rationale: "builder on a blast-radius component (\xA72)" };
-  }
-  if (agent && OPUS_DEFAULT_AGENTS.has(agent)) {
-    return { model: "opus", effort: t3 || blast ? "high" : "medium", rationale: `${agent} default (opus)` };
-  }
-  return { model: "sonnet", effort: t3 ? "high" : "medium", rationale: "default (sonnet)" };
 }
 
 // src/core/telemetry.ts

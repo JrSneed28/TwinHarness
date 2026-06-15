@@ -38,6 +38,21 @@ The Builder:
 5. After all tasks in a slice pass, runs the slice's **end-to-end acceptance tests**. The slice
    is complete only when those pass.
 
+**Per-slice triad (Pattern C, REQ-PCO-021).** Within each slice's worktree the Builder does not run
+alone — it runs as a **triad** with the new **Test-Author agent (`agents/test-author.md`)** and a
+**Verifier**:
+
+- The **Test-Author** extends the REQ-anchored test suite **concurrently** with the Builder (same
+  anchor rules as step 2), rather than the Builder writing every test itself serially.
+- The **Verifier** runs checks **continuously** as code and tests land, surfacing failures as they
+  appear instead of only at the end.
+- The three exchange feedback over the **blackboard** — the existing `delegations/` dir — so a
+  Verifier failure or a Test-Author gap reaches the Builder **without a main-context round-trip**.
+  This keeps the tight build/test/verify loop inside the slice's worktree.
+
+The code-review **Critic still gates the slice** (the loop below). The triad accelerates production
+inside the slice; it does not replace the fresh-context Critic gate.
+
 ### Critic code-review loop (after each slice)
 
 Route the completed slice to the **Critic agent (`agents/critic.md`) in `code-review` mode**,
@@ -123,6 +138,13 @@ placed in separate waves and serialized to prevent merge conflicts and drift rac
 - **Across waves:** wait for all slices in wave N to pass the code-review Critic loop before
   spawning wave N+1. Shared components are the serialization boundary.
 
+> **Emit a wave's Builder spawns in ONE message (critical for real concurrency).** "Concurrently"
+> is mechanical, not aspirational: the Orchestrator MUST emit **all** of a wave's Builder spawn
+> calls in a **single message / single turn**, so they actually run in parallel. Spawning them
+> across separate turns serializes the wave. To get the full parallel set plus a ready-to-spawn
+> per-slice descriptor in one payload, run `th build dispatch` and emit every returned spawn
+> descriptor together in that one message.
+
 Update slice statuses as work progresses:
 
 ```
@@ -133,13 +155,43 @@ th slice set-status <SLICE-ID> done          # after the Critic code-review PASS
 The wave schedule from `th build plan` is the mechanical input — not a judgment call. Apply it
 exactly as computed.
 
+**Speculative dispatch against an upstream contract (Slice 11, REQ-PCO-070).** A downstream slice
+that needs only the *interface* of an upstream slice — not its finished implementation — may declare
+that relationship as `depends_on_soft` (an interface-only dependency) rather than a hard
+`depends_on`. A slice whose only unmet dependencies are `depends_on_soft` may be dispatched
+**SPECULATIVELY**: the Orchestrator spawns its Builder against the upstream's **published contract**
+(`docs/07-contracts.md` / the upstream task file's contract block) *before* that upstream slice is
+`done`, instead of waiting a full wave. This widens real parallelism when the interface is stable
+even though the implementation is not.
+
+- **Hard `depends_on` still gates.** A true dependency — where the downstream slice needs the
+  upstream's *behavior*, not just its shape — stays `depends_on` and is serialized into a later wave
+  exactly as before. Speculation applies only to `depends_on_soft` edges. Component-set disjointness
+  (the wave rule above) is still required; speculation relaxes the *ordering* wait, not the
+  shared-component serialization.
+- **The merge backstop catches a bad speculation.** If the upstream contract shifts under the
+  speculation (the interface the downstream built against was wrong), the divergence surfaces at
+  merge-back as a **conflict between plan-disjoint slices** — and the Merge-Coordinator's existing
+  "non-clean merge → BLOCKING drift" backstop (see the worktree merge-back protocol below) catches
+  it: it opens `th drift add --layer requirement` for human resolution rather than hand-resolving.
+  Speculation never needs a new failure path — it rides the existing merge-conflict-as-BLOCKING-drift
+  guard.
+
 ### Worktree isolation + merge-back protocol (§21)
 
 Parallel Builders — and any **scoped sub-Builder** one of them spawns under a component sub-lease
 (see the "Spawning sub-agents (Phase 5)" section of `agents/builder.md` / `agents/debugger.md`) —
 run in **isolated git worktrees** (`isolation: worktree` in `agents/builder.md`). A worktree gives
 each concurrent slice its own branched-off copy of the **code tree**, so half-written files in one
-slice are never visible to another. The protocol has five parts:
+slice are never visible to another. The protocol has five parts.
+
+**Single merge-back controller (REQ-PCO-020).** The **Merge-Coordinator agent
+(`agents/merge-coordinator.md`)** is the SINGLE top-level controller that performs wave-order
+merge-back. All branch merges flow through it — no Builder and no sub-Builder merges its own branch.
+This centralizes the **single-deterministic-writer invariant**: exactly one actor ever writes the
+main branch, so merges are serialized and ordered rather than racing. Its mechanics are spelled out
+in parts 3 and 4 below — on a clean merge it runs `th build release <SLICE-ID>`; on a conflict
+between plan-disjoint slices it opens BLOCKING drift instead of hand-resolving.
 
 1. **Parallel Builders run in isolated worktrees.** Each Builder (and each scoped sub-Builder)
    operates on its own `isolation: worktree` checkout branched off the default branch; an
@@ -153,32 +205,35 @@ slice are never visible to another. The protocol has five parts:
    hold its own private lease ledger and the cross-process lock would protect **nothing** — two
    Builders could "claim" the same component and never see the conflict. So worktrees isolate
    **CODE only**: every `th` state / lease / drift command issued from inside a worktree MUST target
-   the **main project root** — either pass `--cwd <main-root>`, or use the typed
-   `mcp__plugin_twinharness_th__*` MCP tools (they resolve `${CLAUDE_PROJECT_DIR}` to the stable
-   project root regardless of which worktree the caller is in). **One shared coordination plane;
-   isolated code trees.** Restate this in every Builder / sub-Builder delegation prompt — it is the
-   single most important sentence of the parallel-build contract.
+   the **main project root** — either pass `--cwd <main-root>`, or (preferred) use the typed MCP
+   tools, which resolve `${CLAUDE_PROJECT_DIR}` to the stable project root regardless of which
+   worktree the caller is in. See `reference/mcp-tools.md` for the MCP-first routing rule.
+   **One shared coordination plane; isolated code trees.** Restate this in every Builder /
+   sub-Builder delegation prompt — it is the single most important sentence of the parallel-build
+   contract.
 
-3. **On Critic PASS, merge each worktree branch back in WAVE ORDER.** When a slice's `code-review`
-   Critic passes, merge its worktree branch back into the main branch before releasing it. Do this
-   **wave by wave**: the `th build plan` schedule already serializes any slices that share a
-   component into separate waves, so **within a wave the branches are component-disjoint and merge
-   cleanly** by construction. (A `th` CLI cannot perform git merges — the merge is an Orchestrator
-   action; its mechanical hook is `th build release` on a clean merge, and `th drift add` on a
-   dirty one, below.)
+3. **On Critic PASS, the Merge-Coordinator merges each worktree branch back in WAVE ORDER.** When a
+   slice's `code-review` Critic passes, the **Merge-Coordinator agent** merges its worktree branch
+   back into the main branch before releasing it. It does this **wave by wave**: the `th build plan`
+   schedule already serializes any slices that share a component into separate waves, so **within a
+   wave the branches are component-disjoint and merge cleanly** by construction. (A `th` CLI cannot
+   perform git merges — the merge is a Merge-Coordinator action; its mechanical hook is
+   `th build release` on a clean merge, and `th drift add` on a dirty one, below.)
 
 4. **A NON-CLEAN merge is the mechanical signal of accidental shared-state coupling.** If two
    slices the plan believed disjoint produce a merge **conflict**, that conflict is the evidence of
    a coupling the static `th build plan` could not see (e.g. two slices that both edit a file the
-   plan never attributed to either component). Do NOT hand-resolve it silently — open it as
-   **BLOCKING** drift so the stop-gate refuses completion until a human decides:
+   plan never attributed to either component). The Merge-Coordinator does NOT hand-resolve it
+   silently — it opens it as **BLOCKING** drift so the stop-gate refuses completion until a human
+   decides:
    ```
    th drift add --layer requirement \
      --ref "<SLICE-A> + <SLICE-B>" \
      --discovery "merge conflict between plan-disjoint slices — accidental shared-state coupling" \
      --action "build paused for human resolution"
    ```
-   A **clean** merge → `th build release <SLICE-ID>` and continue to the next slice / wave.
+   A **clean** merge → the Merge-Coordinator runs `th build release <SLICE-ID>` and continues to
+   the next slice / wave.
 
 5. **Relationship to leases (acknowledged, useful redundancy).** The lease stays the scheduler's
    **live oracle** — `th build claim` / `th build next-wave` consult it, and it prevents the
@@ -224,6 +279,14 @@ set:
 `docs/02-scope.md`, `docs/07-contracts.md` (if exists), and `docs/09-implementation-plan.md`.
 The doc-writer reads the full `docs/07-contracts.md` for `api-reference` mode (contracts are
 source of truth for the API reference).
+
+**Concurrent doc fan-out (T2/T3) — zero-conflict (REQ-PCO-010).** `readme` runs first and on its
+own. After `readme` completes, the remaining doc modes — `user-guide`, `api-reference`,
+`developer-guide`, `changelog` — write **DISJOINT output files** (one file per mode, no shared
+edits), so they are a **zero-conflict fan-out** and MUST be dispatched **CONCURRENTLY**: emit all
+their Doc-Writer spawns in **ONE message / single turn** (spawning across separate turns serializes
+them and defeats the parallelism). Each fanned-out mode is then gated **independently by its own
+Critic in `documentation` mode** — one producer→Critic loop per mode, not a shared gate.
 
 **Critic loop (documentation mode).** After each mode, route to the **Critic agent in
 `documentation` mode**, fresh context:
@@ -366,6 +429,18 @@ th revise status <mode> --json     # check the cap before re-running
 The Critic reviews only whether the downstream artifact is coherent against the *changed portion*
 of the upstream summary — not a full re-review from scratch. This keeps re-verification
 proportionate to the actual change.
+
+**Run the stale set CONCURRENTLY (Slice 12, REQ-PCO-071).** The diff-scoped stale set from
+`th stale` is a set of **independent** downstream artifacts — each is re-checked against the same
+upstream diff with no ordering dependency between them. So re-run the matching Critic for **every
+stale downstream artifact concurrently**: emit all the stale-set Critic spawns in **ONE batched
+message / single turn** (spawning them across turns serializes the cascade and defeats the
+parallelism — same mechanical rule as the parallel-wave Builder spawns above). Each stale Critic
+still runs in its own fresh context and respects its own `th revise status <mode>` cap.
+Independent **Researchers** and **Debuggers** likewise run **in parallel** when they are working on
+independent topics or independent slices (Researchers cross-check findings before feeding design;
+Debuggers are scoped by sub-lease to disjoint components) — see `agents/researcher.md` and
+`agents/debugger.md`.
 
 **Step 4 — Escalate genuine conflicts.**
 

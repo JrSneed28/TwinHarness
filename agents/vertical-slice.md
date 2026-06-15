@@ -1,7 +1,7 @@
 ---
 name: vertical-slice
 description: The TwinHarness Vertical Slice agent (spec §6.3) — produces the Stage 9 artifact (docs/09-implementation-plan.md) in a FRESH CONTEXT. Context isolation is the justification (spec §6.3): both humans and LLMs default to horizontal-layer decomposition, and an agent that slices in a fresh context, uncontaminated by the layer-by-layer thinking of the design stages, produces cleaner vertical slices. Its output is checked by the Critic in slice mode. Use after the upstream design stages (requirements, scope, architecture, contracts, test-strategy) are approved.
-tools: Read, Glob, Grep, Write, Edit, Bash
+disallowedTools: Agent, AskUserQuestion, WebSearch, WebFetch
 model: opus
 ---
 
@@ -9,6 +9,8 @@ model: opus
 
 > **Running `th`:** the TwinHarness CLI ships inside the plugin. Wherever this document says
 > `th <args>`, run `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
+
+> **Tooling — prefer MCP.** For every `th` coordination / observability / state call, prefer the typed `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve `${CLAUDE_PROJECT_DIR}` so calls work unchanged from inside a worktree). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs not yet exposed as MCP tools. The tool set GROWS — use whatever `mcp__plugin_twinharness_th__*` tools are currently available; do not rely on a fixed list. Full guidance + current tool list: `reference/mcp-tools.md`.
 
 You run in **fresh context** — deliberately uncontaminated by the layer-by-layer thinking of the
 design stages (spec §6.3). That isolation is the whole point. You decompose the approved design
@@ -150,17 +152,45 @@ must write the map in a form it can parse.
 
 7. Write docs/09-implementation-plan.md from templates/09-implementation-plan.md.
 
-8. Stream the artifact. Surface slice ordering to the human only when what is demoable first
+8. Optimizer handshake (Phase 3, REQ-PCO-030) — see below. Consume the Critic(parallelism)
+   re-cut suggestions plus th build plan --advise, then reconcile the plan to widen
+   disjoint-component parallelism. This happens BEFORE the slice gate and the coverage gate.
+
+9. Stream the artifact. Surface slice ordering to the human only when what is demoable first
    has a real product consequence (e.g., two valid orderings with different go-to-market
    implications).
 
-9. The Orchestrator routes the artifact to the Critic (slice mode, fresh context) for coherence
-   gating before any building starts.
+10. The Orchestrator routes the artifact to the Critic (slice mode, fresh context) for coherence
+    gating before any building starts.
 
-10. After Critic PASS, the Orchestrator runs:
+11. After Critic PASS, the Orchestrator runs:
     th coverage check
     to mechanically assert full MVP REQ coverage. Building does not begin until this exits zero.
 ```
+
+## Optimizer handshake (Phase 3, REQ-PCO-030)
+
+After you produce the slice plan but **before** the `Critic(slice)` coherence gate and the
+`th coverage check` hard-gate (both unchanged), run one reconciliation pass that widens parallelism:
+
+1. The Orchestrator routes your draft plan to the **Critic in `parallelism` mode** (fresh context).
+   That Critic consults `th build plan --advise` — which reports the plan's current max-parallelism
+   width and the **conflict pairs** (slices with overlapping component sets or `depends_on` edges
+   that serialize them) — and returns concrete re-cut suggestions: split a shared component along its
+   seam, hoist a shared dependency into Slice 0, or break a needless `depends_on` edge.
+2. Read `th build plan --advise` yourself too, so you see the same width and conflict pairs the
+   Critic saw.
+3. For each suggestion, decide whether the overlap it targets is *essential* (a genuine shared
+   boundary — leave it) or *incidental* (an artifact of how you cut the slice — re-cut it). Reconcile
+   the plan: re-cut incidental overlaps so more slices land in the same build wave, and update the
+   **Components touched** field and **Build Order & Dependencies** section accordingly.
+4. **The hard gates win.** Never accept a re-cut that disguises a horizontal layer, drops a slice's
+   user-visible capability, or removes REQ coverage. If widening parallelism would violate vertical
+   integrity, keep the slice as-is and note why. The `Critic(slice)` gate and `th coverage check`
+   run afterward and override any optimization.
+
+This loop is the Vertical-Slice ↔ Critic(parallelism) side of the optimizer; it multiplies every
+future build wave without weakening the integrity or coverage gates.
 
 ## Output artifact structure (spec §15.9)
 

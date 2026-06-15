@@ -67,10 +67,33 @@ export function writeState(paths: ProjectPaths, state: TwinHarnessState): void {
  * ~10s rather than hang forever, and steals a lock older than the stale
  * threshold so a crashed holder can't wedge the project permanently.
  *
+ * Contention is recognized by THREE errno codes, not just `EEXIST`: on POSIX a
+ * `mkdir` onto an existing dir throws `EEXIST`, but on Windows a concurrent
+ * `mkdirSync` against a contended directory can instead throw `EPERM` (and, on
+ * some filesystems / antivirus interception, `EACCES`). All three mean "the lock
+ * is held — wait / steal-if-stale / retry", so treating only `EEXIST` as
+ * contention rethrows the Windows codes and crashes the caller (REQ-PCO-000 /
+ * REQ-STATE-LOCK-001 on windows-latest CI). This is the targeted fix only — the
+ * mkdir mechanism is unchanged (no migration to flock).
+ *
  * When the state directory does not yet exist there is no shared state to race
  * on, so `fn` runs directly without creating anything (preserves the behaviour
  * of commands that return "not initialized").
  */
+/**
+ * Classify a `mkdirSync` failure as "the lock is already held" (→ wait/steal/
+ * retry) versus a genuine error (→ rethrow).
+ *
+ * Anchor: REQ-PCO-000 — POSIX signals contention with `EEXIST`; on Windows an
+ * atomic `mkdir` on a contended directory can instead throw `EPERM` (and
+ * sometimes `EACCES`). Treating only `EEXIST` as contention rethrows the Windows
+ * codes and crashes the caller (REQ-STATE-LOCK-001 on windows-latest CI). Pure +
+ * exported so the classification is unit-tested directly without mocking `fs`.
+ */
+export function isLockHeldError(code: string | undefined): boolean {
+  return code === "EEXIST" || code === "EPERM" || code === "EACCES";
+}
+
 export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
   if (!fs.existsSync(paths.stateDir)) return fn();
 
@@ -81,19 +104,26 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
 
   for (;;) {
     try {
-      fs.mkdirSync(lockDir); // atomic test-and-set: throws EEXIST if held
+      fs.mkdirSync(lockDir); // atomic test-and-set: throws EEXIST (POSIX) / EPERM|EACCES (Windows) if held
       break;
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      const code = (e as NodeJS.ErrnoException).code;
+      if (!isLockHeldError(code)) throw e;
       // Held: steal if stale, else wait until the deadline.
+      // statSync doubles as the existence check and mtime fetch in one call,
+      // avoiding a redundant existsSync + statSync pair. If it throws, the lock
+      // dir is absent or inaccessible: for EPERM/EACCES that means a genuine
+      // permission error (not contention) so we rethrow the original; for EEXIST
+      // the dir just vanished and we retry.
       try {
         const age = Date.now() - fs.statSync(lockDir).mtimeMs;
         if (age > STALE_MS) {
           fs.rmSync(lockDir, { recursive: true, force: true });
           continue;
         }
-      } catch {
-        continue; // lock vanished between mkdir and stat — retry
+      } catch (statErr) {
+        if (code === "EPERM" || code === "EACCES") throw e; // genuine permission error
+        continue; // EEXIST: lock vanished between mkdir and stat — retry
       }
       if (Date.now() > deadline) {
         throw new Error(`state lock timeout: ${lockDir} is held; remove it if no \`th\` process is running.`);

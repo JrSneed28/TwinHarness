@@ -1,7 +1,7 @@
 ---
 name: orchestrator
 description: The TwinHarness controller (spec §6.1). Classifies complexity AND blast radius, picks the tier (including Tier 0 bypass), decides which stages run, routes prior context as summaries, enforces coherence + human gates, owns state.json via the `th` CLI, and handles bidirectional drift. Use to plan/route a TwinHarness run; it owns state but delegates artifact production to Spec/Vertical-Slice/Builder/Critic.
-tools: Read, Glob, Grep, Bash, AskUserQuestion
+disallowedTools: Write, Edit, WebSearch, WebFetch
 model: opus
 ---
 
@@ -9,6 +9,8 @@ model: opus
 
 > **Running `th`:** the TwinHarness CLI ships inside the plugin. Wherever this document says
 > `th <args>`, run `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
+
+> **Tooling — prefer MCP.** For every `th` coordination / observability / state call, prefer the typed `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve `${CLAUDE_PROJECT_DIR}` so calls work unchanged from inside a worktree). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs not yet exposed as MCP tools. The tool set GROWS — use whatever `mcp__plugin_twinharness_th__*` tools are currently available; do not rely on a fixed list. Full guidance + current tool list: `reference/mcp-tools.md`.
 
 You decide *what runs*; the `th` CLI records *what happened*. Keep that boundary absolute.
 
@@ -319,8 +321,8 @@ half-written files. The protocol:
    copy would give each Builder its own lease ledger and the cross-process lock would protect
    nothing. So worktrees isolate **CODE only**: every `th` state/lease/drift command issued from
    inside a worktree MUST target the **main project root** — pass `--cwd <main-root>`, or use the
-   typed `mcp__plugin_twinharness_th__*` MCP tools (they resolve `${CLAUDE_PROJECT_DIR}` to the
-   stable project root). One shared coordination plane; isolated code trees. Restate this in every
+   typed `mcp__plugin_twinharness_th__*` MCP tools (preferred — see the MCP Tooling pointer above;
+   they resolve `${CLAUDE_PROJECT_DIR}` to the stable project root). One shared coordination plane; isolated code trees. Restate this in every
    Builder/sub-Builder delegation prompt.
 2. **Merge back in WAVE ORDER on Critic PASS.** When a slice's code-review Critic passes, merge its
    worktree branch back into the main branch. Do this **wave by wave**: the `th build plan` schedule

@@ -2,7 +2,7 @@
   "name": "twinharness",
   "displayName": "TwinHarness",
   "version": "0.6.2",
-  "description": "Agentic SDLC Orchestrator: drive a vague idea through tier-scaled SDLC stages, producing governing artifacts and slice-by-slice builds. Hybrid design — prompt orchestration (10 specialized agents) plus a deterministic `th` CLI for mechanical enforcement (state, hashing, anchors, traceability, coverage, drift, cascade-staleness).",
+  "description": "Agentic SDLC Orchestrator: drive a vague idea through tier-scaled SDLC stages, producing governing artifacts and slice-by-slice builds. Hybrid design — prompt orchestration (15 specialized agents) plus a deterministic `th` CLI for mechanical enforcement (state, hashing, anchors, traceability, coverage, drift, cascade-staleness).",
   "author": {
     "name": "JrSneed28",
     "url": "https://github.com/JrSneed28"

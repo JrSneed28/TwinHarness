@@ -48,6 +48,16 @@ export interface SliceState {
    * existing slices hash byte-identically.
    */
   depends_on?: string[];
+  /**
+   * INTERFACE-only (soft) dependencies: slice IDs whose CONTRACT this slice
+   * builds against but which need not be `done` first. Such a slice may be
+   * dispatched SPECULATIVELY once its HARD `depends_on` are done, because the
+   * merge-conflict-as-BLOCKING-drift backstop catches a bad speculation
+   * (Phase 7 Slice 11, REQ-PCO-070). Optional: absent ⇒ no soft deps. Same
+   * shape as `depends_on`; omitted from serialization when absent so existing
+   * slices hash byte-identically.
+   */
+  depends_on_soft?: string[];
 }
 
 /**
@@ -78,6 +88,13 @@ export interface TwinHarnessState {
   implementation_allowed: boolean;
   open_questions: string[];
   drift_open_blocking: number;
+  /**
+   * Count of OPEN blocking debates (Pattern B reconciliation owed) — mirrors
+   * drift_open_blocking for the debate ledger and feeds the stop-gate (REQ-PCO-042).
+   * Optional + omitted from serialization when absent so existing state files hash
+   * identically; absent ⇒ 0. Owned by `th debate add` / `th debate resolve`.
+   */
+  debate_open_blocking?: number;
   revise_loop_counts: Record<string, number>;
   /**
    * Controls the PreToolUse write-gate behaviour (design doc §State schema change).
@@ -116,6 +133,7 @@ export const STATE_FIELD_ORDER: (keyof TwinHarnessState)[] = [
   "implementation_allowed",
   "open_questions",
   "drift_open_blocking",
+  "debate_open_blocking",
   "revise_loop_counts",
   "write_gate",
   "project_mode",
@@ -228,6 +246,10 @@ export function validateState(value: unknown): ValidationResult {
       if (s.depends_on !== undefined && (!Array.isArray(s.depends_on) || s.depends_on.some((d: unknown) => typeof d !== "string"))) {
         issues.push({ path: `slices[${i}].depends_on`, message: "must be an array of strings or absent" });
       }
+      // Optional soft (interface-only) deps (REQ-PCO-070); same shape as depends_on, validated only when present.
+      if (s.depends_on_soft !== undefined && (!Array.isArray(s.depends_on_soft) || s.depends_on_soft.some((d: unknown) => typeof d !== "string"))) {
+        issues.push({ path: `slices[${i}].depends_on_soft`, message: "must be an array of strings or absent" });
+      }
     });
   }
 
@@ -241,6 +263,11 @@ export function validateState(value: unknown): ValidationResult {
 
   if (!isInteger(v.drift_open_blocking) || (v.drift_open_blocking as number) < 0) {
     issues.push({ path: "drift_open_blocking", message: "must be a non-negative integer" });
+  }
+
+  // Optional (absent ⇒ 0); validated only when present, mirroring drift_open_blocking.
+  if (v.debate_open_blocking !== undefined && (!isInteger(v.debate_open_blocking) || (v.debate_open_blocking as number) < 0)) {
+    issues.push({ path: "debate_open_blocking", message: "must be a non-negative integer" });
   }
 
   if (!isPlainObject(v.revise_loop_counts)) {

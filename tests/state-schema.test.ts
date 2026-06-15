@@ -59,7 +59,7 @@ describe("REQ-STATE-SERIALIZE: deterministic serialization", () => {
     const out = serializeState(initialState());
     expect(out.endsWith("\n")).toBe(true);
     // Only required fields appear (optional write_gate / project_mode are absent from initialState()).
-    const requiredOrder = STATE_FIELD_ORDER.filter((k) => k !== "write_gate" && k !== "project_mode");
+    const requiredOrder = STATE_FIELD_ORDER.filter((k) => k !== "write_gate" && k !== "project_mode" && k !== "debate_open_blocking");
     expect(Object.keys(JSON.parse(out))).toEqual(requiredOrder);
   });
 

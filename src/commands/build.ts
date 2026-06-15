@@ -14,6 +14,7 @@ import {
   type ActiveLease,
 } from "../core/leases";
 import { computeWave, validateDeps, hasDepIssues } from "../core/wave";
+import { computeRoute } from "../core/routing";
 import { structuredLog } from "../core/log";
 import { NOT_INIT, formatIssues } from "../core/guards";
 
@@ -29,6 +30,13 @@ import { NOT_INIT, formatIssues } from "../core/guards";
 export interface BuildPlanOptions {
   /** Include slices with status `done` (default: only schedule unfinished slices). */
   includeDone?: boolean;
+  /**
+   * Anchor: REQ-PCO-030 — emit the parallelism-optimizer advisory: the current
+   * max wave width and the conflict pairs whose shared components serialize the
+   * plan, so the Vertical-Slice agent can re-cut to widen build waves. Advisory
+   * only — it never changes the schedule.
+   */
+  advise?: boolean;
 }
 
 /**
@@ -68,15 +76,26 @@ export function runBuildPlan(paths: ProjectPaths, opts: BuildPlanOptions = {}): 
   const conflictLines = conflicts.length
     ? ["Serialized conflicts (shared components):", ...conflicts.map((c) => `  ${c.a} × ${c.b} (shared: ${c.shared.join(", ")})`)]
     : ["Serialized conflicts (shared components): (none)"];
+  const adviseLines = opts.advise
+    ? [
+        "",
+        `ADVISORY (parallelism optimizer, REQ-PCO-030): current max wave width = ${parallelism} ` +
+          `across ${waves.length} wave${waves.length === 1 ? "" : "s"}; ` +
+          `${conflicts.length} conflict pair${conflicts.length === 1 ? "" : "s"} serialize the plan. ` +
+          `To widen build waves, re-cut slices to MINIMIZE shared components and depends_on edges ` +
+          `(the coverage hard-gate and vertical-slice integrity stay unchanged).`,
+      ]
+    : [];
   const human = [
     ...waveLines,
     "",
     ...conflictLines,
     "",
     "Within a wave Builders may run concurrently (§16); across waves they serialize.",
+    ...adviseLines,
   ].join("\n");
 
-  return success({ data: { waves, conflicts, parallelism }, human });
+  return success({ data: { waves, conflicts, parallelism, advise: opts.advise === true }, human });
 }
 
 /* ------------------------------------------------------------------ *
@@ -121,6 +140,98 @@ export function runBuildNextWave(paths: ProjectPaths): CommandResult {
   lines.push("", "Set each dispatched slice in-progress and `th build claim <ID>` before spawning its Builder.");
 
   return success({ data: { wave, held, stalled, deps }, human: lines.join("\n") });
+}
+
+/** A per-slice spawn descriptor: what a single wave Builder needs to be launched. */
+export interface DispatchDescriptor {
+  sliceId: string;
+  /** Components the Builder will touch (its lease set). */
+  components: string[];
+  /** Recommended spawn model (reuses the §2 routing table; Orchestrator applies). */
+  model: string;
+  /** Recommended spawn effort. */
+  effort: string;
+}
+
+/**
+ * `th build dispatch` — the single-payload parallel-dispatch oracle (REQ-PCO-001).
+ *
+ * Where `th build next-wave` emits the dispatchable slice IDs, `dispatch` emits
+ * the FULL spawn set in ONE payload so the Orchestrator can launch every wave
+ * Builder in a single message (a single-message batch spawn) instead of round-
+ * tripping per slice. It is a thin wrapper over the same live-wave computation
+ * (`readState` → `occupiedComponents` → `computeWave`/`validateDeps`, identical to
+ * {@link runBuildNextWave}) — it never recomputes or duplicates the wave logic;
+ * it only enriches each dispatchable slice with a `{ model, effort }` spawn
+ * recommendation from the §2 routing table ({@link computeRoute}).
+ *
+ * `data` = `{ wave: DispatchDescriptor[], held: [...with reasons...], warnings:
+ * [...] }`. `warnings` carries the dependency-graph problems (cycles / dangling
+ * refs) and a STALL note so a deadlock surfaces in the same payload rather than as
+ * a silently empty wave. Per-slice routing uses the project-level blast-radius
+ * flags as the Builder's `componentBlast` signal (the only blast signal readily
+ * available at slice granularity — slice components are plain names, not flags),
+ * so a blast-radius project escalates its Builders; a `note` records that scope.
+ */
+export function runBuildDispatch(paths: ProjectPaths): CommandResult {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({ human: `state.json is invalid:\n${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+  }
+
+  const slices = r.state.slices;
+  const anyInProgress = slices.some((s) => s.status === "in-progress");
+  const occupied = occupiedComponents(paths, slices);
+  // Anchor: REQ-PCO-001 — reuse the next-wave computation; do NOT duplicate it.
+  const { wave, held, stalled } = computeWave(slices, occupied, anyInProgress);
+  const deps = validateDeps(slices);
+
+  // Project-level blast flags drive Builder escalation (slice components are plain
+  // names, not blast flags, so this is the readily-available component-blast signal).
+  const componentBlast = r.state.blast_radius_flags.length > 0;
+  const byId = new Map(slices.map((s) => [s.id, s]));
+  const dispatch: DispatchDescriptor[] = wave.map((id) => {
+    const slice = byId.get(id)!;
+    const route = computeRoute({
+      agent: "builder",
+      mode: "slice",
+      tier: r.state!.tier,
+      blastFlags: r.state!.blast_radius_flags,
+      componentBlast,
+    });
+    return { sliceId: id, components: slice.components, model: route.model, effort: route.effort };
+  });
+
+  const warnings: string[] = [];
+  for (const c of deps.cycles) warnings.push(`DEPENDENCY CYCLE: ${c.join(" → ")} → ${c[0]} (unsatisfiable — break the cycle in the plan)`);
+  for (const d of deps.dangling) warnings.push(`DANGLING DEPENDENCY: ${d.slice} depends on unknown slice(s): ${d.missing.join(", ")}`);
+  if (stalled) warnings.push("STALLED: pending slices exist but none can dispatch and none are in progress — resolve the dependency/component deadlock.");
+
+  structuredLog({ cmd: "build dispatch", dispatch: dispatch.length, held: held.length, stalled, depIssues: hasDepIssues(deps) });
+
+  const lines: string[] = [
+    dispatch.length
+      ? "Dispatch now (spawn all in ONE message):"
+      : "Dispatch now: (none ready)",
+    ...dispatch.map((d) => `  ${d.sliceId} → ${d.model}/${d.effort} [${d.components.join(", ") || "(no components)"}]`),
+    ...(held.length
+      ? ["Held:", ...held.map((h) => `  ${h.id} — ${h.reason}: ${h.detail.join(", ")}`)]
+      : ["Held: (none)"]),
+    ...warnings,
+    "",
+    "Set each dispatched slice in-progress and `th build claim <ID>` before spawning its Builder.",
+  ];
+
+  return success({
+    data: {
+      wave: dispatch,
+      held,
+      warnings,
+      note: "per-slice model/effort routes Builders via the §2 table; componentBlast reflects project-level blast_radius_flags",
+    },
+    human: lines.join("\n"),
+  });
 }
 
 function leaseUsage(action: string): CommandResult {

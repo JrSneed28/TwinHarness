@@ -14,7 +14,7 @@ const ROOT = path.resolve(__dirname, "..");
 const load = (p: string): Record<string, unknown> =>
   JSON.parse(fs.readFileSync(path.join(ROOT, p), "utf8")) as Record<string, unknown>;
 
-const OPTIONAL_STATE_FIELDS = ["schema_version", "write_gate", "project_mode"];
+const OPTIONAL_STATE_FIELDS = ["schema_version", "write_gate", "project_mode", "debate_open_blocking"];
 
 describe("REQ-SCHEMA-001: state.schema.json matches the validator", () => {
   it("properties cover exactly STATE_FIELD_ORDER", () => {

@@ -44,6 +44,9 @@ const state_1 = require("./commands/state");
 const revise_1 = require("./commands/revise");
 const tier_1 = require("./commands/tier");
 const artifact_1 = require("./commands/artifact");
+const artifact_lease_1 = require("./commands/artifact-lease");
+const collab_1 = require("./commands/collab");
+const debate_1 = require("./commands/debate");
 const coverage_1 = require("./commands/coverage");
 const verify_1 = require("./commands/verify");
 const next_1 = require("./commands/next");
@@ -90,8 +93,9 @@ Usage:
   th verify list                    Show configured verify commands
   th verify clear                   Remove all configured verify commands
   th verify run                     Run every configured verify command; writes a report; exit 1 on failure
-  th build plan [--include-done]    Schedule slices into conflict-free build waves (§16: disjoint parallelize, shared serialize)
+  th build plan [--include-done] [--advise]  Schedule slices into conflict-free build waves (§16); --advise emits the parallelism-optimizer advisory (max wave width + serializing conflict pairs)
   th build next-wave                Live oracle: slices dispatchable in parallel now (deps done, components free)
+  th build dispatch                 Live oracle: full parallel wave + per-slice spawn descriptors in one payload (for single-message batch spawn)
   th build claim|release <SLICE-ID> Take/release a live component lease (collision guard for parallel Builders)
   th build sub-claim <PARENT-SLICE> --components <c1,c2,...>
                                     Open a SUB-lease for a scoped sub-Builder (subset of an in-progress parent's components)
@@ -110,6 +114,16 @@ Usage:
   th drift add --layer <derived|requirement> [--ref ...] [--discovery ...] [--action ...] [--escalation ...] [--source ...]
                                     Append a §10 drift entry
   th drift list                     List drift entries + open blocking count
+  th artifact claim <file#section> --holder <id>  Take a section-level artifact lease (REQ-PCO-041; collision guard for intra-artifact fan-out)
+  th artifact release <file#section> --holder <id>  Release a section-level artifact lease
+  th artifact leases                List active section-level artifact leases
+  th collab init --stage <s>        Initialize a blackboard stage dir (REQ-PCO-040)
+  th collab fragment --stage <s> --round <r> --name <n> --text <t>  Drop a fragment file on the blackboard
+  th collab list --stage <s> [--round <r>]  List blackboard fragments
+  th collab merge --stage <s> --round <r>   Concatenate fragments (REQ-anchor-validated) for the Reconciler
+  th debate add --topic <t> [--positions ...] [--links a,b] [--source ...]  Open a BLOCKING debate (REQ-PCO-042)
+  th debate list                    List debate-ledger entries + open blocking count
+  th debate resolve --id <DEBATE-ID> --resolution <r>  Resolve a debate (clears the blocking obligation)
   th drift resolve <DRIFT-NNN>      Append a resolution note; decrement blocking counter only for requirement-layer entries
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
   th hook pretool-gate              Emit a Claude Code PreToolUse write-gate decision
@@ -227,6 +241,7 @@ const BOOLEAN_FLAGS = {
     "--write": "write",
     "--no-write": "noWrite",
     "--reject": "reject",
+    "--advise": "advise",
 };
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
 const STRING_FLAGS = {
@@ -268,6 +283,16 @@ const STRING_FLAGS = {
     "--proposer": "proposer",
     "--supersede": "supersede",
     "--as": "as",
+    "--stage": "stage",
+    "--round": "round",
+    "--name": "name",
+    "--text": "text",
+    "--section": "section",
+    "--holder": "holder",
+    "--topic": "topic",
+    "--positions": "positions",
+    "--id": "id",
+    "--resolution": "resolution",
 };
 /** Flags that consume a numeric value. */
 const NUMBER_FLAGS = {
@@ -303,6 +328,7 @@ function parseArgs(argv) {
         write: false,
         noWrite: false,
         reject: false,
+        advise: false,
     };
     const positionals = [];
     const unknownFlags = [];
@@ -583,6 +609,13 @@ function dispatch(parsed) {
                     return (0, artifact_1.runArtifactRegister)(paths, rest[0], parsed.flags.version);
                 case "list":
                     return (0, artifact_1.runArtifactList)(paths);
+                // Anchor: REQ-PCO-041 — section-level artifact leases (file#section).
+                case "claim":
+                    return (0, artifact_lease_1.runArtifactClaim)(paths, { section: rest[0] ?? parsed.flags.section, holder: parsed.flags.holder });
+                case "release":
+                    return (0, artifact_lease_1.runArtifactRelease)(paths, { section: rest[0] ?? parsed.flags.section, holder: parsed.flags.holder });
+                case "leases":
+                    return (0, artifact_lease_1.runArtifactLeases)(paths);
                 default:
                     return (0, output_1.failure)({ human: `unknown 'artifact' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
@@ -622,9 +655,12 @@ function dispatch(parsed) {
         case "build":
             switch (sub) {
                 case "plan":
-                    return (0, build_1.runBuildPlan)(paths, { includeDone: parsed.flags.includeDone });
+                    return (0, build_1.runBuildPlan)(paths, { includeDone: parsed.flags.includeDone, advise: parsed.flags.advise });
                 case "next-wave":
                     return (0, build_1.runBuildNextWave)(paths);
+                case "dispatch":
+                    // Anchor: REQ-PCO-001 — full parallel wave + per-slice spawn descriptors in one payload.
+                    return (0, build_1.runBuildDispatch)(paths);
                 case "claim":
                     return (0, build_1.runBuildClaim)(paths, rest[0]);
                 case "release":
@@ -642,6 +678,42 @@ function dispatch(parsed) {
                     return (0, build_1.runBuildLeases)(paths);
                 default:
                     return (0, output_1.failure)({ human: `unknown 'build' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        // Anchor: REQ-PCO-040 — blackboard collab substrate (fragments + reconcile-merge).
+        case "collab":
+            switch (sub) {
+                case "init":
+                    return (0, collab_1.runCollabInit)(paths, { stage: parsed.flags.stage });
+                case "fragment":
+                    return (0, collab_1.runCollabFragment)(paths, {
+                        stage: parsed.flags.stage,
+                        round: parsed.flags.round,
+                        name: parsed.flags.name,
+                        text: parsed.flags.text,
+                    });
+                case "list":
+                    return (0, collab_1.runCollabList)(paths, { stage: parsed.flags.stage, round: parsed.flags.round });
+                case "merge":
+                    return (0, collab_1.runCollabMerge)(paths, { stage: parsed.flags.stage, round: parsed.flags.round });
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'collab' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        // Anchor: REQ-PCO-042 — append-only debate ledger (mirrors the drift ledger).
+        case "debate":
+            switch (sub) {
+                case "add":
+                    return (0, debate_1.runDebateAdd)(paths, {
+                        topic: parsed.flags.topic ?? rest[0],
+                        positions: parsed.flags.positions,
+                        links: parsed.flags.links,
+                        source: parsed.flags.source,
+                    });
+                case "list":
+                    return (0, debate_1.runDebateList)(paths);
+                case "resolve":
+                    return (0, debate_1.runDebateResolve)(paths, { id: parsed.flags.id ?? rest[0], resolution: parsed.flags.resolution });
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'debate' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
         case "debug":
             switch (sub) {

@@ -22,6 +22,7 @@ import type { ProjectPaths } from "./paths";
 export const GATE_LEDGER_KEYS = new Set<string>([
   "implementation_allowed",
   "drift_open_blocking",
+  "debate_open_blocking",
   "write_gate",
   "tier",
   "blast_radius_flags",

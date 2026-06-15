@@ -83,6 +83,15 @@ function evaluateStopGate(paths) {
             reasons: [`${n} open BLOCKING drift escalation${n === 1 ? "" : "s"} (§10) must be resolved before completing.`],
         };
     }
+    // Anchor: REQ-PCO-042 — an open debate is a blocking reconciliation obligation,
+    // exactly like a requirement-layer drift. Absent counter ⇒ 0.
+    if ((r.state.debate_open_blocking ?? 0) > 0) {
+        const n = r.state.debate_open_blocking ?? 0;
+        return {
+            block: true,
+            reasons: [`${n} open BLOCKING debate${n === 1 ? "" : "s"} must be reconciled (\`th debate resolve\`) before completing.`],
+        };
+    }
     if (r.state.current_stage === "final-verification") {
         const incomplete = r.state.slices.filter((s) => s.status !== "done" && s.status !== "blocked");
         if (incomplete.length > 0) {

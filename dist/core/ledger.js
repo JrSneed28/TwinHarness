@@ -58,6 +58,7 @@ const path = __importStar(require("node:path"));
 exports.GATE_LEDGER_KEYS = new Set([
     "implementation_allowed",
     "drift_open_blocking",
+    "debate_open_blocking",
     "write_gate",
     "tier",
     "blast_radius_flags",

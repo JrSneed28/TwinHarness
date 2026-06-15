@@ -48,6 +48,7 @@ exports.STATE_FIELD_ORDER = [
     "implementation_allowed",
     "open_questions",
     "drift_open_blocking",
+    "debate_open_blocking",
     "revise_loop_counts",
     "write_gate",
     "project_mode",
@@ -151,6 +152,10 @@ function validateState(value) {
             if (s.depends_on !== undefined && (!Array.isArray(s.depends_on) || s.depends_on.some((d) => typeof d !== "string"))) {
                 issues.push({ path: `slices[${i}].depends_on`, message: "must be an array of strings or absent" });
             }
+            // Optional soft (interface-only) deps (REQ-PCO-070); same shape as depends_on, validated only when present.
+            if (s.depends_on_soft !== undefined && (!Array.isArray(s.depends_on_soft) || s.depends_on_soft.some((d) => typeof d !== "string"))) {
+                issues.push({ path: `slices[${i}].depends_on_soft`, message: "must be an array of strings or absent" });
+            }
         });
     }
     if (typeof v.implementation_allowed !== "boolean") {
@@ -161,6 +166,10 @@ function validateState(value) {
     }
     if (!isInteger(v.drift_open_blocking) || v.drift_open_blocking < 0) {
         issues.push({ path: "drift_open_blocking", message: "must be a non-negative integer" });
+    }
+    // Optional (absent ⇒ 0); validated only when present, mirroring drift_open_blocking.
+    if (v.debate_open_blocking !== undefined && (!isInteger(v.debate_open_blocking) || v.debate_open_blocking < 0)) {
+        issues.push({ path: "debate_open_blocking", message: "must be a non-negative integer" });
     }
     if (!isPlainObject(v.revise_loop_counts)) {
         issues.push({ path: "revise_loop_counts", message: "must be an object" });

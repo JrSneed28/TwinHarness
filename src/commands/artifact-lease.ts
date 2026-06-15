@@ -1,0 +1,134 @@
+/**
+ * Section-level artifact leases (Phase 4 Slice 6, REQ-PCO-041).
+ *
+ * `th artifact claim|release|leases` — the section-grained sibling of the
+ * component leases in `commands/build.ts`. Where a component lease serializes
+ * whole slices over a shared component, a SECTION lease serializes co-editors
+ * over a single `<file>#<section>` region of one artifact. The point: two agents
+ * may edit DIFFERENT sections of the SAME file concurrently, but never the SAME
+ * section at once.
+ *
+ * It is the SAME mechanism as `runBuildClaim`/`runBuildRelease` — the same
+ * append-only lease ledger (via `appendLeaseEvent`), the same collision guard
+ * (a claim refuses an overlapping active lease held by a different holder), and
+ * the same serialization under `withStateLock` so two concurrent claims can't
+ * both win the same section — only keyed by a `<file>#<section>` section id and a
+ * holder id instead of a slice id and its component set. These handlers are pure
+ * `CommandResult` producers; cli.ts wires the `th artifact ...` subcommands and
+ * prints / sets the exit code.
+ */
+
+import type { ProjectPaths } from "../core/paths";
+import { type CommandResult, success, failure } from "../core/output";
+import { readState, withStateLock } from "../core/state-store";
+import { NOT_INIT, formatIssues } from "../core/guards";
+import {
+  appendLeaseEvent,
+  activeSectionLeases,
+  isSectionLeased,
+  isSectionId,
+  sectionLeaseHolder,
+} from "../core/leases";
+import { structuredLog } from "../core/log";
+
+export interface ArtifactLeaseOptions {
+  /** The section id of the form `<file>#<section>`. */
+  section?: string;
+  /** The claiming/releasing agent or task id. */
+  holder?: string;
+}
+
+const CLAIM_USAGE = "usage: th artifact claim <file>#<section> --holder <id>";
+const RELEASE_USAGE = "usage: th artifact release <file>#<section> --holder <id>";
+
+/** Validate the `{section, holder}` pair common to claim/release. */
+function validate(opts: ArtifactLeaseOptions, usage: string):
+  | { ok: true; section: string; holder: string }
+  | { ok: false; result: CommandResult } {
+  const section = opts.section;
+  const holder = opts.holder;
+  if (!section || !holder) {
+    return { ok: false, result: failure({ human: usage, data: { error: "missing_args" } }) };
+  }
+  if (!isSectionId(section)) {
+    return {
+      ok: false,
+      result: failure({
+        human: `Invalid section id: "${section}". Expected <file>#<section> (a non-empty file and section separated by a single '#'). ${usage}`,
+        data: { error: "invalid_section_id", section },
+      }),
+    };
+  }
+  return { ok: true, section, holder };
+}
+
+/**
+ * `th artifact claim <file>#<section> --holder <id>` — take a section lease.
+ * The collision guard: refuses (ok:false, exit 1) if that EXACT section is
+ * already actively leased to a DIFFERENT holder, mirroring `runBuildClaim`'s
+ * component-conflict refusal. A re-claim by the SAME holder is idempotent-safe
+ * (re-records the lease, never a conflict). Serialized under `withStateLock` so
+ * two concurrent claims can't both win the same section.
+ */
+export function runArtifactClaim(paths: ProjectPaths, opts: ArtifactLeaseOptions = {}): CommandResult {
+  const v = validate(opts, CLAIM_USAGE);
+  if (!v.ok) return v.result;
+  const { section, holder } = v;
+
+  return withStateLock(paths, () => {
+    const r = readState(paths);
+    if (!r.exists) return NOT_INIT;
+    if (!r.state) return failure({ human: `state.json is invalid:\n${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+
+    // Collision guard: refuse if the SAME section is held by a DIFFERENT holder.
+    if (isSectionLeased(paths, section, holder)) {
+      const owner = sectionLeaseHolder(paths, section);
+      return failure({
+        human: `Cannot claim ${section}: already leased to ${owner}. Co-edit a different section, or wait for it to be released (REQ-PCO-041).`,
+        data: { error: "section_lease_conflict", section, holder: owner },
+      });
+    }
+
+    // Reuse the component-lease ledger: section id is the lease key (`slice`),
+    // the holder is stored as the sole `components` entry.
+    appendLeaseEvent(paths, { event: "claim", slice: section, components: [holder] });
+    structuredLog({ cmd: "artifact claim", section, holder });
+    return success({ data: { section, holder }, human: `claimed ${section} for ${holder}` });
+  });
+}
+
+/**
+ * `th artifact release <file>#<section> --holder <id>` — release a section
+ * lease. Records a `release` event in the shared ledger (mirrors
+ * `runBuildRelease`); after it, the section is free for another holder.
+ */
+export function runArtifactRelease(paths: ProjectPaths, opts: ArtifactLeaseOptions = {}): CommandResult {
+  const v = validate(opts, RELEASE_USAGE);
+  if (!v.ok) return v.result;
+  const { section, holder } = v;
+
+  return withStateLock(paths, () => {
+    const r = readState(paths);
+    if (!r.exists) return NOT_INIT;
+    if (!r.state) return failure({ human: `state.json is invalid:\n${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+
+    appendLeaseEvent(paths, { event: "release", slice: section, components: [holder] });
+    structuredLog({ cmd: "artifact release", section, holder });
+    return success({ data: { section, holder }, human: `released ${section}.` });
+  });
+}
+
+/**
+ * `th artifact leases` — list the active section leases and their holders.
+ */
+export function runArtifactLeases(paths: ProjectPaths): CommandResult {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) return failure({ human: `state.json is invalid:\n${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+
+  const leases = activeSectionLeases(paths);
+  const human = leases.length
+    ? leases.map((l) => `${l.section} → ${l.holder}`).join("\n")
+    : "(no active section leases)";
+  return success({ data: { leases }, human });
+}
