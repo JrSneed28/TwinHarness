@@ -24,6 +24,7 @@ exports.runArtifactRelease = runArtifactRelease;
 exports.runArtifactLeases = runArtifactLeases;
 const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
+const guards_1 = require("../core/guards");
 const leases_1 = require("../core/leases");
 const log_1 = require("../core/log");
 const CLAIM_USAGE = "usage: th artifact claim <file>#<section> --holder <id>";
@@ -60,6 +61,11 @@ function runArtifactClaim(paths, opts = {}) {
         return v.result;
     const { section, holder } = v;
     return (0, state_store_1.withStateLock)(paths, () => {
+        const r = (0, state_store_1.readState)(paths);
+        if (!r.exists)
+            return guards_1.NOT_INIT;
+        if (!r.state)
+            return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
         // Collision guard: refuse if the SAME section is held by a DIFFERENT holder.
         if ((0, leases_1.isSectionLeased)(paths, section, holder)) {
             const owner = (0, leases_1.sectionLeaseHolder)(paths, section);
@@ -86,6 +92,11 @@ function runArtifactRelease(paths, opts = {}) {
         return v.result;
     const { section, holder } = v;
     return (0, state_store_1.withStateLock)(paths, () => {
+        const r = (0, state_store_1.readState)(paths);
+        if (!r.exists)
+            return guards_1.NOT_INIT;
+        if (!r.state)
+            return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
         (0, leases_1.appendLeaseEvent)(paths, { event: "release", slice: section, components: [holder] });
         (0, log_1.structuredLog)({ cmd: "artifact release", section, holder });
         return (0, output_1.success)({ data: { section, holder }, human: `released ${section}.` });
@@ -95,6 +106,11 @@ function runArtifactRelease(paths, opts = {}) {
  * `th artifact leases` — list the active section leases and their holders.
  */
 function runArtifactLeases(paths) {
+    const r = (0, state_store_1.readState)(paths);
+    if (!r.exists)
+        return guards_1.NOT_INIT;
+    if (!r.state)
+        return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
     const leases = (0, leases_1.activeSectionLeases)(paths);
     const human = leases.length
         ? leases.map((l) => `${l.section} → ${l.holder}`).join("\n")

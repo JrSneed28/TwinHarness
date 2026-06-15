@@ -87,3 +87,30 @@ describe("REQ-PCO-040: merge is idempotent — two runs yield identical output",
     expect(second.data?.merged).toBe(first.data?.merged);
   });
 });
+
+describe("REQ-PCO-040: path traversal is rejected in stage/round/name segments", () => {
+  it("rejects an absolute stage", () => {
+    tp = makeTempProject();
+    expect(() => runCollabFragment(tp.paths, { stage: "/tmp", round: "r1", name: "a.md", text: "REQ-001" })).toThrow();
+  });
+
+  it("rejects a '..' stage", () => {
+    tp = makeTempProject();
+    expect(() => runCollabFragment(tp.paths, { stage: "..", round: "r1", name: "a.md", text: "REQ-001" })).toThrow();
+  });
+
+  it("rejects a stage containing a path separator", () => {
+    tp = makeTempProject();
+    expect(() => runCollabFragment(tp.paths, { stage: "foo/bar", round: "r1", name: "a.md", text: "REQ-001" })).toThrow();
+  });
+
+  it("rejects a '..' round", () => {
+    tp = makeTempProject();
+    expect(() => runCollabFragment(tp.paths, { stage: "design", round: "..", name: "a.md", text: "REQ-001" })).toThrow();
+  });
+
+  it("rejects a name containing a path separator", () => {
+    tp = makeTempProject();
+    expect(() => runCollabFragment(tp.paths, { stage: "design", round: "r1", name: "sub/a.md", text: "REQ-001" })).toThrow();
+  });
+});

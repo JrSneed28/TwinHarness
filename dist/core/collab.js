@@ -57,11 +57,28 @@ const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const anchors_1 = require("./anchors");
 /**
+ * Validate that `segment` is a safe single path component: rejects absolute
+ * paths, `..`, and any value containing a path separator (`/` or `\`).  Throws
+ * a descriptive `Error` on invalid input so callers get a clear message rather
+ * than a silent path traversal.
+ */
+function validatePathSegment(segment, label) {
+    if (path.isAbsolute(segment)) {
+        throw new Error(`collab: ${label} must not be an absolute path: "${segment}"`);
+    }
+    if (segment === ".." || segment.includes("/") || segment.includes("\\")) {
+        throw new Error(`collab: ${label} must be a single path component with no separators or "..": "${segment}"`);
+    }
+}
+/**
  * Build the absolute collab directory for a stage (and optional round) under
  * `paths.stateDir`. Path construction only — never creates anything (dirs are
  * created on write).
  */
 function collabDir(paths, stage, round) {
+    validatePathSegment(stage, "stage");
+    if (round !== undefined)
+        validatePathSegment(round, "round");
     const base = path.join(paths.stateDir, "collab", stage);
     return round === undefined ? base : path.join(base, round);
 }
@@ -70,6 +87,7 @@ function collabDir(paths, stage, round) {
  * creating the round directory tree on demand. Returns the absolute path written.
  */
 function writeFragment(paths, input) {
+    validatePathSegment(input.name, "name");
     const dir = collabDir(paths, input.stage, input.round);
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, input.name);
