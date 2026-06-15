@@ -133,12 +133,13 @@ describe("SLICE-1 — MCP sub-claim / sub-release wrappers", () => {
   );
 
   it(
-    "REQ-105: test_REQ105_tool_count_incremental_path_16_to_23 — TOOL_DEFS.length follows the 16→18→19→23 path; toToolResult round-trips for new tools",
+    "REQ-105: test_REQ105_tool_count_incremental_path_16_to_35 — TOOL_DEFS.length is 35 after the coordination-primitive layer; toToolResult round-trips for the sub-lease tools",
     () => {
-      // SLICE-6 advances the count to 23 (th_repo_check + th_decision_detect/add/check/list).
-      expect(TOOL_DEFS.length).toBe(23);
+      // The coordination-primitive layer advances the count to 35 (th_build_dispatch/plan
+      // inserted into the build group + th_artifact_*/collab_*/debate_* appended).
+      expect(TOOL_DEFS.length).toBe(35);
 
-      // Both new tools must be present.
+      // Both sub-lease tools must be present.
       const names = TOOL_DEFS.map((t) => t.name);
       expect(names).toContain("th_build_sub_claim");
       expect(names).toContain("th_build_sub_release");
@@ -146,9 +147,10 @@ describe("SLICE-1 — MCP sub-claim / sub-release wrappers", () => {
       // The forbidden tool must remain absent.
       expect(names).not.toContain("th_decision_approve");
 
-      // New tools are appended at the end (positions 16 and 17).
-      expect(names[16]).toBe("th_build_sub_claim");
-      expect(names[17]).toBe("th_build_sub_release");
+      // th_build_dispatch + th_build_plan were inserted after th_build_release, shifting
+      // the sub-lease tools from positions 16/17 to 18/19.
+      expect(names[18]).toBe("th_build_sub_claim");
+      expect(names[19]).toBe("th_build_sub_release");
     },
   );
 });

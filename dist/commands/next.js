@@ -45,6 +45,7 @@ const verify_1 = require("../core/verify");
 const leases_1 = require("../core/leases");
 const wave_1 = require("../core/wave");
 const decisions_1 = require("../core/decisions");
+const repo_1 = require("./repo");
 function runNext(paths, opts = {}) {
     const explain = opts.explain === true;
     const r = (0, state_store_1.readState)(paths);
@@ -112,6 +113,24 @@ function runNext(paths, opts = {}) {
             why: "The tier determines which stages are even engaged, so nothing downstream can be sequenced until it is set — classification gates every design stage.",
             data: { current_stage: s.current_stage },
         }, explain);
+    }
+    // 4a. Brownfield repo-map freshness — a hard gate mirroring `th tier veto-check`.
+    //     Only fires for a brownfield run BEFORE implementation is unlocked: once
+    //     building begins, Builders writing code naturally make the map stale, so
+    //     freshness is the invariant only while the map still grounds tiering and
+    //     planning decisions. Reuses the single `th repo check` freshness oracle
+    //     (`runRepoCheck`) — no duplicate hashing.
+    if (s.project_mode === "brownfield" && !s.implementation_allowed) {
+        const check = (0, repo_1.runRepoCheck)(paths);
+        if (check.exitCode !== 0) {
+            const absent = check.exitCode === repo_1.REPO_NO_MAP_EXIT;
+            return emit({
+                kind: "refresh-repo-map",
+                action: `Brownfield repo-map is ${absent ? "absent" : "stale"} — run \`th repo map\` to ${absent ? "generate" : "refresh"} it before tiering or planning proceeds.`,
+                why: "In a brownfield run the repo-map grounds every tiering and planning decision; a map that is absent or has drifted from the working tree would let those decisions run on an outdated understanding, so refreshing it outranks stage work.",
+                data: { shape: check.data?.shape ?? "stale" },
+            }, explain);
+        }
     }
     // 4b. Decision-governance obligation: an unapproved gating decision blocks the stage
     //     (REQ-501..504). Slots after classify-tier (run-integrity already cleared above)
@@ -243,8 +262,8 @@ function runNext(paths, opts = {}) {
         if (plan.wave.length > 0) {
             return emit({
                 kind: "dispatch-wave",
-                action: `Dispatch the next parallel build wave: ${plan.wave.join(", ")} — set each \`in-progress\` and \`th build claim <ID>\` before spawning its Builder (\`th build next-wave\`).`,
-                why: "A conflict-free wave of slices is ready (deps done, components free), so dispatching it is the highest-value next step — it is the build making forward progress.",
+                action: `Dispatch the next parallel build wave: ${plan.wave.join(", ")} — run \`th build dispatch\` for the full spawn set (per-slice model/effort in one payload), then set each \`in-progress\` and \`th build claim <ID>\` before spawning its Builder.`,
+                why: "A conflict-free wave of slices is ready (deps done, components free), so dispatching it is the highest-value next step — it is the build making forward progress. `th build dispatch` emits every wave Builder's spawn descriptor in one payload (it does not mutate state, so each slice still needs in-progress + a component claim before spawning).",
                 data: { wave: plan.wave, pending: prog.pending, inProgress: prog.inProgress },
             }, explain);
         }

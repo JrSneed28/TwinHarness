@@ -34,17 +34,35 @@ function runCollabInit(paths, opts) {
 function runCollabFragment(paths, opts) {
     if (!opts.stage || !opts.round || !opts.name) {
         return (0, output_1.failure)({
-            human: "usage: th collab fragment --stage <stage> --round <round> --name <name> [--text <text>]",
+            human: "usage: th collab fragment --stage <stage> --round <round> --name <name> [--text <text>] [--force]",
             data: { error: "missing_args" },
         });
     }
-    const file = (0, collab_1.writeFragment)(paths, {
-        stage: opts.stage,
-        round: opts.round,
-        name: opts.name,
-        content: opts.text ?? "",
-    });
-    (0, log_1.structuredLog)({ cmd: "collab fragment", stage: opts.stage, round: opts.round, name: opts.name });
+    // writeFragment throws a FragmentExistsError on a collision (existing fragment,
+    // no --force) — convert ONLY that to a structured failure. Path-validation errors
+    // (absolute / ".." / separator segments) are a distinct, security-relevant failure
+    // mode and must keep propagating as throws (preserved behavior), so they are
+    // re-thrown rather than mislabeled as a collision.
+    let file;
+    try {
+        file = (0, collab_1.writeFragment)(paths, {
+            stage: opts.stage,
+            round: opts.round,
+            name: opts.name,
+            content: opts.text ?? "",
+            force: opts.force ?? false,
+        });
+    }
+    catch (e) {
+        if (!(e instanceof collab_1.FragmentExistsError))
+            throw e;
+        (0, log_1.structuredLog)({ cmd: "collab fragment", stage: opts.stage, round: opts.round, name: opts.name, error: "fragment_exists" });
+        return (0, output_1.failure)({
+            human: e.message,
+            data: { error: "fragment_exists", stage: opts.stage, round: opts.round, name: opts.name },
+        });
+    }
+    (0, log_1.structuredLog)({ cmd: "collab fragment", stage: opts.stage, round: opts.round, name: opts.name, force: opts.force === true });
     return (0, output_1.success)({
         data: { stage: opts.stage, round: opts.round, name: opts.name, path: file },
         human: `fragment written: ${file}`,

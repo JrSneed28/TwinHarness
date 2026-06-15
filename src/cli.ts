@@ -110,7 +110,7 @@ Usage:
   th artifact release <file#section> --holder <id>  Release a section-level artifact lease
   th artifact leases                List active section-level artifact leases
   th collab init --stage <s>        Initialize a blackboard stage dir (REQ-PCO-040)
-  th collab fragment --stage <s> --round <r> --name <n> --text <t>  Drop a fragment file on the blackboard
+  th collab fragment --stage <s> --round <r> --name <n> --text <t> [--force]  Drop a fragment file on the blackboard (refuses to overwrite without --force)
   th collab list --stage <s> [--round <r>]  List blackboard fragments
   th collab merge --stage <s> --round <r>   Concatenate fragments (REQ-anchor-validated) for the Reconciler
   th debate add --topic <t> [--positions ...] [--links a,b] [--source ...]  Open a BLOCKING debate (REQ-PCO-042)
@@ -197,7 +197,7 @@ Global flags:
   --task <s>        (delegate) Free-text task label (echoed; not parsed)
   --agent <a>       (route, delegate pack) The agent being spawned / delegated to
   --capsule <path>  (delegate check) Capsule file to validate
-  --force           (init) Reset existing state.json
+  --force           (init) Reset existing state.json; (collab fragment) overwrite an existing fragment
   --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)
   --write           (repo map) Write the artifacts (default; bare \`th repo map\` writes)
   --no-write        (repo map) Dry/preview: build in memory, write nothing (alias of --dry-run)
@@ -762,6 +762,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
             round: parsed.flags.round,
             name: parsed.flags.name,
             text: parsed.flags.text,
+            force: parsed.flags.force,
           });
         case "list":
           return runCollabList(paths, { stage: parsed.flags.stage, round: parsed.flags.round });

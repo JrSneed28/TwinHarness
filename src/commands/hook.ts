@@ -3,6 +3,7 @@ import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { readState } from "../core/state-store";
 import { readVerifyConfig, readVerifyReport } from "../core/verify";
+import { gatingObligations, reduceDecisions, readDecisionEvents } from "../core/decisions";
 
 /**
  * Stop-gate decision (plan pre-mortem #2 mitigation): the mechanical gate that
@@ -20,6 +21,9 @@ export interface StopGateDecision {
  * - No state.json  → no TwinHarness run active in this project → allow.
  * - Invalid state  → block (the orchestrator must repair state first).
  * - Open BLOCKING drift (§10) → block.
+ * - Open BLOCKING debate → block.
+ * - Unapproved decision gating the current stage (RULE-007) → block (mirrors
+ *   `th next`, which already refuses to advance past such a decision).
  * - At `final-verification` stage: block when any slice is not yet done or
  *   blocked (i.e. status is "pending" or "in-progress"). This catches the
  *   most intuitive false-"done" — a run that claims completion while slices
@@ -62,6 +66,23 @@ export function evaluateStopGate(paths: ProjectPaths): StopGateDecision {
     return {
       block: true,
       reasons: [`${n} open BLOCKING debate${n === 1 ? "" : "s"} must be reconciled (\`th debate resolve\`) before completing.`],
+    };
+  }
+  // RULE-007 — an unapproved decision linked to the current stage gates progress.
+  // `th next` already refuses to advance past it; completion must be blocked too
+  // (mirroring drift/debate). Reuses the SINGLE gating predicate so the stop-gate
+  // and `th next` cannot disagree. Tolerant: missing ledger / no current_stage ⇒
+  // no obligations ⇒ no block (Tier-0 and non-decision runs are unaffected).
+  const obligations = gatingObligations(reduceDecisions(readDecisionEvents(paths)), r.state);
+  if (obligations.length > 0) {
+    const ids = obligations.map((o) => o.decisionId).join(", ");
+    const n = obligations.length;
+    return {
+      block: true,
+      reasons: [
+        `${n} unapproved decision${n === 1 ? "" : "s"} gate the current stage ` +
+          `(${ids}); approve or reject via \`th decision approve\` (see \`th decision check\`) before completing.`,
+      ],
     };
   }
   if (r.state.current_stage === "final-verification") {

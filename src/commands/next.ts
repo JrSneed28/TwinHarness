@@ -10,6 +10,7 @@ import { readVerifyConfig, readVerifyReport } from "../core/verify";
 import { occupiedComponents } from "../core/leases";
 import { computeWave, validateDeps, hasDepIssues } from "../core/wave";
 import { gatingObligations, reduceDecisions, readDecisionEvents } from "../core/decisions";
+import { runRepoCheck, REPO_NO_MAP_EXIT } from "./repo";
 
 /**
  * `th next` — the next-action ORACLE (audit F7 — the playbook can fall out of the
@@ -31,6 +32,7 @@ export type NextKind =
   | "resolve-blocking-drift"
   | "escalate-revise"
   | "classify-tier"
+  | "refresh-repo-map"
   | "resolve-decision-obligation"
   | "re-register-artifact"
   | "produce-artifact"
@@ -157,6 +159,28 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
       },
       explain,
     );
+  }
+
+  // 4a. Brownfield repo-map freshness — a hard gate mirroring `th tier veto-check`.
+  //     Only fires for a brownfield run BEFORE implementation is unlocked: once
+  //     building begins, Builders writing code naturally make the map stale, so
+  //     freshness is the invariant only while the map still grounds tiering and
+  //     planning decisions. Reuses the single `th repo check` freshness oracle
+  //     (`runRepoCheck`) — no duplicate hashing.
+  if (s.project_mode === "brownfield" && !s.implementation_allowed) {
+    const check = runRepoCheck(paths);
+    if (check.exitCode !== 0) {
+      const absent = check.exitCode === REPO_NO_MAP_EXIT;
+      return emit(
+        {
+          kind: "refresh-repo-map",
+          action: `Brownfield repo-map is ${absent ? "absent" : "stale"} — run \`th repo map\` to ${absent ? "generate" : "refresh"} it before tiering or planning proceeds.`,
+          why: "In a brownfield run the repo-map grounds every tiering and planning decision; a map that is absent or has drifted from the working tree would let those decisions run on an outdated understanding, so refreshing it outranks stage work.",
+          data: { shape: (check.data as { shape?: string } | undefined)?.shape ?? "stale" },
+        },
+        explain,
+      );
+    }
   }
 
   // 4b. Decision-governance obligation: an unapproved gating decision blocks the stage
@@ -323,8 +347,8 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
       return emit(
         {
           kind: "dispatch-wave",
-          action: `Dispatch the next parallel build wave: ${plan.wave.join(", ")} — set each \`in-progress\` and \`th build claim <ID>\` before spawning its Builder (\`th build next-wave\`).`,
-          why: "A conflict-free wave of slices is ready (deps done, components free), so dispatching it is the highest-value next step — it is the build making forward progress.",
+          action: `Dispatch the next parallel build wave: ${plan.wave.join(", ")} — run \`th build dispatch\` for the full spawn set (per-slice model/effort in one payload), then set each \`in-progress\` and \`th build claim <ID>\` before spawning its Builder.`,
+          why: "A conflict-free wave of slices is ready (deps done, components free), so dispatching it is the highest-value next step — it is the build making forward progress. `th build dispatch` emits every wave Builder's spawn descriptor in one payload (it does not mutate state, so each slice still needs in-progress + a component claim before spawning).",
           data: { wave: plan.wave, pending: prog.pending, inProgress: prog.inProgress },
         },
         explain,

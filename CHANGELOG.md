@@ -9,6 +9,42 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer + self-epic governance), not yet cut as a versioned release. **874 tests, 848 passing** (26 pre-existing failures unrelated to this epic; was 460 at 0.6.2).
 
+### Added (coordination-primitive hardening, 2026-06-15)
+
+- **Decision obligations block completion (RULE-007).** The Stop-gate (`evaluateStopGate`,
+  `src/commands/hook.ts`) now refuses completion while an unapproved decision gates the current
+  stage, mirroring the existing open-drift and open-debate blocks. It reuses the single
+  `gatingObligations(reduceDecisions(readDecisionEvents()))` predicate that `th next` already
+  uses, so the stop-gate and the next-action oracle can never disagree. Tolerant of a missing
+  ledger / absent `current_stage`; Tier-0 and non-decision runs are unaffected.
+
+- **MCP coordination-primitive tools.** Twelve new MCP tools wrap existing CLI handlers verbatim:
+  `th_build_dispatch`, `th_build_plan`, `th_artifact_claim`/`th_artifact_release`/`th_artifact_leases`,
+  `th_collab_init`/`th_collab_fragment`/`th_collab_list`/`th_collab_merge`, and
+  `th_debate_add`/`th_debate_list`/`th_debate_resolve`. MCP tool count: 23 → 35. The adapter stays
+  a thin pass-through (no command logic added); `th_decision_approve` remains permanently absent
+  (decision approval is a human gate, never an MCP tool).
+
+- **Brownfield repo-map FRESHNESS gate (not just existence).** `brownfieldPrerequisite`
+  (`src/commands/tier.ts`) now delegates to the `th repo check` freshness oracle (`runRepoCheck`)
+  instead of a bare `existsSync`. A STALE repo-map (drifted from the working tree) now hard-vetoes
+  `th tier veto-check` (exit 3, `brownfield_repo_map_stale`) exactly as a MISSING one does, and is
+  surfaced as a `brownfield_prerequisite_stale` advisory by `th tier classify`. `th next` emits a
+  new `refresh-repo-map` obligation when a brownfield run has a stale/absent map — guarded to
+  pre-implementation only (`!implementation_allowed`) so an in-flight build, whose own writes
+  naturally stale the map, never deadlocks.
+
+- **Collision-safe `th collab fragment`.** `writeFragment` (`src/core/collab.ts`) now refuses to
+  overwrite an existing fragment unless `--force` is passed, throwing a distinct `FragmentExistsError`
+  that the command layer converts to a `fragment_exists` failure. Path-traversal validation errors
+  keep propagating as throws (unchanged security behavior). Exposed via the `force` flag on the CLI
+  and the `th_collab_fragment` MCP tool.
+
+- **`th next` prefers `th build dispatch`.** The `dispatch-wave` obligation now recommends the
+  single-payload `th build dispatch` (per-slice model/effort in one spawn set) as the primary
+  command, while keeping the still-required per-slice `in-progress` + `th build claim` steps
+  (dispatch is read-only and does not mutate state).
+
 ### Added (self-epic — governance, stale-detection & MCP parity, 2026-06-15)
 
 - **MCP sub-lease parity (REQ-101..105).** `th_build_sub_claim` and `th_build_sub_release` are

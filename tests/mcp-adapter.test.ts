@@ -71,6 +71,9 @@ describe("REQ-MCP-MAP-002: toToolResult maps ok:false → isError:true", () => {
 });
 
 describe("REQ-MCP-TOOLS-001: the exposed tool set is the intended minimal subset", () => {
+  // The first 9 registered tools, in order. th_build_dispatch and th_build_plan
+  // were inserted into the build group (after th_build_release), shifting th_route
+  // et al. down — this legacy prefix pin tracks that order.
   const expected = [
     "th_state_get",
     "th_state_set",
@@ -78,12 +81,12 @@ describe("REQ-MCP-TOOLS-001: the exposed tool set is the intended minimal subset
     "th_build_next_wave",
     "th_build_claim",
     "th_build_release",
+    "th_build_dispatch",
+    "th_build_plan",
     "th_route",
-    "th_coverage_check",
-    "th_next",
   ];
 
-  it("TOOL_DEFS exposes exactly the 9 intended tools (pre-SLICE-4 legacy pin — superseded by REQ-RU-094 below)", () => {
+  it("TOOL_DEFS exposes the intended core tools in order (pre-SLICE-4 legacy prefix pin — superseded by the full registry pin below)", () => {
     expect(TOOL_DEFS.map((t) => t.name).slice(0, 9)).toEqual(expected);
   });
 
@@ -276,14 +279,20 @@ describe("SLICE-4 / TASK-010 — MCP adapter: repo-map tool wiring (REQ-RU-044..
 // SLICE-4 / TASK-011 — REQ-RU-094 + REQ-RU-040 (MCP half)
 // ===========================================================================
 
-describe("SLICE-4 / TASK-011 — MCP tool-count 23 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
-  const expected23 = [
+describe("SLICE-4 / TASK-011 — MCP tool-count 35 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
+  // Full registry, in registration order. The original 23-tool battery (REQ-RU-094)
+  // is extended by the 12 coordination tools added after it: th_build_dispatch and
+  // th_build_plan slot into the build group (after th_build_release), and the
+  // artifact-lease / collab / debate trios append at the tail.
+  const expectedAll = [
     "th_state_get",
     "th_state_set",
     "th_drift_add",
     "th_build_next_wave",
     "th_build_claim",
     "th_build_release",
+    "th_build_dispatch",
+    "th_build_plan",
     "th_route",
     "th_coverage_check",
     "th_next",
@@ -301,11 +310,21 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 23 + schema/no-exec battery (REQ
     "th_decision_add",
     "th_decision_check",
     "th_decision_list",
+    "th_artifact_claim",
+    "th_artifact_release",
+    "th_artifact_leases",
+    "th_collab_init",
+    "th_collab_fragment",
+    "th_collab_list",
+    "th_collab_merge",
+    "th_debate_add",
+    "th_debate_list",
+    "th_debate_resolve",
   ];
 
-  // ---- REQ-RU-094: tool count is 23 ----
-  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_23 — TOOL_DEFS exposes exactly 23 tools in order", () => {
-    expect(TOOL_DEFS.map((t) => t.name)).toEqual(expected23);
+  // ---- REQ-RU-094: full registry, in order (originally 23; now 35 with the coordination tools) ----
+  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_35 — TOOL_DEFS exposes exactly 35 tools in order", () => {
+    expect(TOOL_DEFS.map((t) => t.name)).toEqual(expectedAll);
   });
 
   // ---- REQ-RU-094: wrong-typed arg is coerced to undefined (optNumber/optString guard) ----
@@ -518,6 +537,108 @@ describe("SLICE-5 / TASK-012+013 — REQ-RU-063: repo MCP tools are structurally
       const res = fn();
       expect(typeof res.ok).toBe("boolean");
     }
+  });
+});
+
+// ===========================================================================
+// Coordination tools — round-trip the 12 new MCP tools through def.run(paths,
+// args) exactly as the existing delegate/decision batteries do: find the ToolDef
+// by name in TOOL_DEFS, call its run closure against a temp project, assert the
+// CommandResult delegates to the real handler. Covers build-dispatch/plan,
+// debate add/list/resolve, collab fragment/list, and the artifact section leases.
+// ===========================================================================
+
+describe("MCP coordination tools delegate to their handlers (locked, real state)", () => {
+  function defFor(name: string) {
+    const d = TOOL_DEFS.find((t) => t.name === name);
+    if (!d) throw new Error(`missing tool ${name}`);
+    return d;
+  }
+
+  it("th_build_dispatch on an initialized project returns the live wave payload (ok)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const res = defFor("th_build_dispatch").run(tp.paths, {});
+    expect(res.ok).toBe(true);
+    // Structured payload from runBuildDispatch: a wave array (empty on a fresh init).
+    expect(Array.isArray((res.data as Record<string, unknown>).wave)).toBe(true);
+  });
+
+  it("th_build_plan schedules conflict-free waves on an initialized project (ok)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const res = defFor("th_build_plan").run(tp.paths, { advise: true });
+    expect(res.ok).toBe(true);
+    expect(res.data).toBeDefined();
+  });
+
+  it("th_debate_add increments open_blocking, th_debate_list reflects it, th_debate_resolve clears it", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    const added = defFor("th_debate_add").run(tp.paths, {
+      topic: "queue vs. stream",
+      positions: "A: queue; B: stream",
+      links: "REQ-001",
+    });
+    expect(added.ok).toBe(true);
+    expect(added.data?.status).toBe("open");
+    expect(added.data?.debate_open_blocking).toBe(1);
+    const id = added.data?.id as string;
+    expect(id).toMatch(/^DEBATE-/);
+
+    // The open debate appears in the list with the live open_blocking count.
+    const listed = defFor("th_debate_list").run(tp.paths, {});
+    expect(listed.ok).toBe(true);
+    expect((listed.data as Record<string, unknown>).open_blocking).toBe(1);
+    const entries = (listed.data as Record<string, { id: string }[]>).entries;
+    expect(entries.some((e) => e.id === id)).toBe(true);
+
+    // Resolving the debate decrements the blocking counter back to 0.
+    const resolved = defFor("th_debate_resolve").run(tp.paths, { id, resolution: "chose stream" });
+    expect(resolved.ok).toBe(true);
+    expect(resolved.data?.status).toBe("resolved");
+    expect(resolved.data?.debate_open_blocking).toBe(0);
+  });
+
+  it("th_collab_fragment writes an anchored fragment, th_collab_list returns it", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    const frag = defFor("th_collab_fragment").run(tp.paths, {
+      stage: "architecture",
+      round: "r1",
+      name: "builder-a.md",
+      // The fragment carries a REQ-ID anchor so it would survive a merge (§17).
+      text: "## REQ-001\nProposal: bound the queue depth.\n",
+    });
+    expect(frag.ok).toBe(true);
+    expect(frag.data?.name).toBe("builder-a.md");
+
+    const listed = defFor("th_collab_list").run(tp.paths, { stage: "architecture" });
+    expect(listed.ok).toBe(true);
+    const fragments = (listed.data as Record<string, { name: string }[]>).fragments;
+    expect(fragments.some((f) => f.name === "builder-a.md")).toBe(true);
+  });
+
+  it("th_artifact_leases is empty (ok) on a fresh project; claim then leases lists the lease", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    // Empty list on a fresh project.
+    const empty = defFor("th_artifact_leases").run(tp.paths, {});
+    expect(empty.ok).toBe(true);
+    expect((empty.data as Record<string, unknown[]>).leases).toEqual([]);
+
+    // Claim a section, then the active-leases list reflects it.
+    const section = "docs/04-architecture.md#data-model";
+    const claim = defFor("th_artifact_claim").run(tp.paths, { section, holder: "builder-a" });
+    expect(claim.ok).toBe(true);
+
+    const after = defFor("th_artifact_leases").run(tp.paths, {});
+    expect(after.ok).toBe(true);
+    const leases = (after.data as Record<string, { section: string; holder: string }[]>).leases;
+    expect(leases.some((l) => l.section === section && l.holder === "builder-a")).toBe(true);
   });
 });
 
