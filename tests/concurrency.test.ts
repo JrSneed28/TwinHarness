@@ -131,4 +131,27 @@ describe("REQ-PCO-000: withStateLock treats Windows EPERM/EACCES as 'held' and r
       tp.cleanup();
     }
   });
+
+  it("rethrows EPERM/EACCES when the lock directory does not exist (genuine permission error)", () => {
+    // If mkdirSync throws EPERM/EACCES but the lockDir doesn't exist, it's a
+    // real permission problem (read-only dir, ACL, antivirus) — not contention.
+    // The lock must rethrow so the caller sees the real root cause instead of
+    // spinning until "lock timeout".
+    const tp = makeTempProject();
+    try {
+      runInit(tp.paths, {}); // creates stateDir
+
+      // Make stateDir read-only so mkdirSync(.state.lock) throws a permission
+      // error while the lock directory does not yet exist.
+      fs.chmodSync(tp.paths.stateDir, 0o444);
+      try {
+        expect(() => withStateLock(tp.paths, () => 1)).toThrow();
+      } finally {
+        // Restore perms so cleanup can delete the temp dir.
+        fs.chmodSync(tp.paths.stateDir, 0o755);
+      }
+    } finally {
+      tp.cleanup();
+    }
+  });
 });

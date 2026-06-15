@@ -120,3 +120,26 @@ describe("REQ-PCO-041: section id validation", () => {
     expect(runArtifactRelease(tp.paths, { section: "docs/spec.md#intro" }).ok).toBe(false);
   });
 });
+
+describe("REQ-PCO-041: commands return NOT_INIT on an uninitialized project", () => {
+  it("claim returns not_initialized when state.json is absent", () => {
+    tp = makeTempProject();
+    const res = runArtifactClaim(tp.paths, { section: "docs/spec.md#intro", holder: "agent-A" });
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("not_initialized");
+  });
+
+  it("release returns not_initialized when state.json is absent", () => {
+    tp = makeTempProject();
+    const res = runArtifactRelease(tp.paths, { section: "docs/spec.md#intro", holder: "agent-A" });
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("not_initialized");
+  });
+
+  it("leases returns not_initialized when state.json is absent", () => {
+    tp = makeTempProject();
+    const res = runArtifactLeases(tp.paths);
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("not_initialized");
+  });
+});

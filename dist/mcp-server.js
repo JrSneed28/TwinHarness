@@ -15701,7 +15701,9 @@ function withStateLock(paths, fn) {
       fs2.mkdirSync(lockDir);
       break;
     } catch (e) {
-      if (!isLockHeldError(e.code)) throw e;
+      const code = e.code;
+      if (!isLockHeldError(code)) throw e;
+      if ((code === "EPERM" || code === "EACCES") && !fs2.existsSync(lockDir)) throw e;
       try {
         const age = Date.now() - fs2.statSync(lockDir).mtimeMs;
         if (age > STALE_MS) {

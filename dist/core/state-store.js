@@ -128,7 +128,14 @@ function withStateLock(paths, fn) {
             break;
         }
         catch (e) {
-            if (!isLockHeldError(e.code))
+            const code = e.code;
+            if (!isLockHeldError(code))
+                throw e;
+            // EPERM/EACCES can also signal a genuine permission problem (read-only
+            // directory, ACL restriction, antivirus interception) rather than lock
+            // contention. Only treat them as contention when the lock directory
+            // actually exists; otherwise rethrow so the caller sees the real cause.
+            if ((code === "EPERM" || code === "EACCES") && !fs.existsSync(lockDir))
                 throw e;
             // Held: steal if stale, else wait until the deadline.
             try {
