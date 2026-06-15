@@ -10,6 +10,7 @@ import {
   listTools,
   resolvePathsForCall,
 } from "../src/mcp-server";
+import { capsuleTemplate } from "../src/core/delegation";
 
 /**
  * Phase 4 — MCP adapter tests.
@@ -79,9 +80,12 @@ describe("REQ-MCP-TOOLS-001: the exposed tool set is the intended minimal subset
     "th_route",
     "th_coverage_check",
     "th_next",
+    "th_delegate_plan",
+    "th_delegate_pack",
+    "th_delegate_check",
   ];
 
-  it("TOOL_DEFS exposes exactly the 9 intended tools", () => {
+  it("TOOL_DEFS exposes exactly the 12 intended tools", () => {
     expect(TOOL_DEFS.map((t) => t.name)).toEqual(expected);
   });
 
@@ -175,6 +179,48 @@ describe("REQ-MCP-DELEGATE-001: tool handlers delegate to the real run* handlers
     expect(res.ok).toBe(true);
     expect(res.data?.model).toBe("opus");
     expect(typeof res.data?.effort).toBe("string");
+  });
+});
+
+describe("REQ-MCP-DELEGATE-002: the delegate tools delegate to their handlers", () => {
+  function defFor(name: string) {
+    const d = TOOL_DEFS.find((t) => t.name === name);
+    if (!d) throw new Error(`missing tool ${name}`);
+    return d;
+  }
+
+  it("th_delegate_plan computes a recommendation (delegate on debug intent)", () => {
+    const res = defFor("th_delegate_plan").run(resolvePathsForCall(), { intent: "debug" });
+    expect(res.ok).toBe(true);
+    expect(res.data?.recommendation).toBe("delegate");
+    expect(res.data?.suggestedAgent).toBe("debugger");
+  });
+
+  it("th_delegate_plan coerces a numeric-string files arg (delegate over threshold)", () => {
+    const res = defFor("th_delegate_plan").run(resolvePathsForCall(), { files: "5" });
+    expect(res.ok).toBe(true);
+    expect(res.data?.recommendation).toBe("delegate");
+  });
+
+  it("th_delegate_check validates inline capsule text (ok and missing)", () => {
+    const good = defFor("th_delegate_check").run(resolvePathsForCall(), { text: capsuleTemplate() });
+    expect(good.ok).toBe(true);
+    const bad = defFor("th_delegate_check").run(resolvePathsForCall(), { text: "DELEGATION CAPSULE\nAgent: x\n" });
+    expect(bad.ok).toBe(false);
+    expect((bad.data?.missing as string[]).length).toBeGreaterThan(0);
+  });
+
+  it("th_delegate_pack emits the handoff envelope", () => {
+    const res = defFor("th_delegate_pack").run(resolvePathsForCall(), { agent: "spec", intent: "artifact" });
+    expect(res.ok).toBe(true);
+    expect(res.data?.agent).toBe("spec");
+  });
+
+  it("the three delegate tools advertise additionalProperties:false", () => {
+    for (const name of ["th_delegate_plan", "th_delegate_pack", "th_delegate_check"]) {
+      expect(defFor(name).inputSchema.additionalProperties).toBe(false);
+      expect(defFor(name).inputSchema.required).toBeUndefined();
+    }
   });
 });
 

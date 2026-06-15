@@ -7,10 +7,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-Post-0.6.2 infrastructure work (Phases 1–5), not yet cut as a versioned release. **566 tests** (was 460).
+Post-0.6.2 infrastructure work (Phases 1–6), not yet cut as a versioned release. **598 tests** (was 460).
 
 ### Added
 
+- **`th delegate` — Context Preservation / Delegation Layer (Phase 6).** A mechanical delegate-vs-keep-main oracle (`th delegate plan`) from intent/file-count/writes/noisy signals, a bounded child-agent handoff assembler (`th delegate pack`, reusing `th context pack` for a slice), the strict Delegation Capsule skeleton (`th delegate capsule`), and a presence-only capsule validator (`th delegate check`). Exposed as the MCP tools `th_delegate_plan` / `th_delegate_pack` / `th_delegate_check`. Keeps the main Orchestrator context a control-plane resource — heavy reads/edits/debugging/reviews/inspection are delegated to child agents that return a compact capsule, with long-form detail in `.twinharness/delegations/DEL-###/`. Read-only; no `state.json` mutation; CLI stays zero-runtime-dependency.
 - **`th route` — automatic model/effort routing (Phase 2).** A mechanical routing oracle recording the recommended model/effort per stage; surfaced as a Routing line in `th scorecard`.
 - **`th` as a plugin-scoped MCP server (Phase 4).** `dist/mcp-server.js` exposes the CLI's read/compute surface as MCP tools (`th_next`, `th_build_claim`, …); the CLI itself stays zero-runtime-dependency.
 - **Component sub-leases (Phase 5).** `th build sub-claim` / `sub-release` scope a sub-Builder to a subset of an in-progress parent slice's components, nested under the parent's top-level lease and guarded against overlapping siblings.

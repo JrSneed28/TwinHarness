@@ -191,6 +191,7 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 | `th telemetry on\|off\|status` | Opt-in, local-only run telemetry (snapshots; never leaves the machine) |
 | `th manifest export` | Deterministic run snapshot (state + drift + gate ledger) for review or golden CI checks |
 | `th context estimate` / `th context pack` | Approximate prompt-surface token cost · assemble the §9 slice/agent handoff bundle |
+| `th delegate plan\|pack\|capsule\|check` | Context-preservation layer: recommend delegate vs keep-main · assemble a bounded child handoff · emit/validate the return capsule |
 | `th migrate` | Upgrade `state.json` to the current schema version (forward-only) |
 
 All commands accept `--json` for machine-readable output. The full reference is in [USAGE.md](./USAGE.md) Part 3.

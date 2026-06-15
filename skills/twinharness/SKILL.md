@@ -44,7 +44,7 @@ CLI — never hand-edit `state.json`, never eyeball traceability, never "remembe
 > `th drift add|list|resolve`, `th stale --artifact`, `th tier classify`, `th tier veto-check`,
 > `th build plan|next-wave|claim|release|leases`, `th debug pack|log`, `th revise bump|status|reset`,
 > `th slices sync`, `th slice set-status`, `th doctor`, `th next`, `th context estimate|pack`,
-> `th stage current|describe|list`, `th manifest export`, `th version`.
+> `th delegate plan|pack|capsule|check`, `th stage current|describe|list`, `th manifest export`, `th version`.
 >
 > **`th next`** is the mechanical next-action oracle: when unsure what the run owes next (or after a
 > long context window), run it for the single highest-priority obligation. It computes; you still decide.
@@ -216,6 +216,23 @@ Stage 10 (implementation) and Stage 11 (final verification) are described in the
 - **Doc-Writer** (`agents/doc-writer.md`) — tier-scaled documentation generation from contracts and implementation (Stage 10.5).
 - **Codebase-Inspector** (`agents/codebase-inspector.md`) — fresh-context existing-codebase mapper on a brownfield run; emits source-anchored `docs/00-existing-codebase-analysis.md` (on-demand, like the Researcher/Debugger).
 - **Orchestrator** (`agents/orchestrator.md`) — your own playbook for tiering, routing, gates, state.
+
+## Delegating high-context work (`th delegate`)
+
+The main context window is a scarce control-plane resource: you coordinate, child agents consume
+detail. Before doing heavy work directly (broad reads, code edits, debugging, long reviews, repo
+inspection, log/impact analysis), ask whether it will bloat the main context — and if so, delegate:
+
+1. `th delegate plan --intent <read|write|debug|review|artifact|repo-analysis> [--files N] [--writes] [--noisy] [--slice <ID>]`
+   → a `delegate` / `keep-main` recommendation, a suggested agent, and whether a capsule is required (advisory).
+2. `th delegate pack --agent <agent> [--slice <ID>] [--intent <i>]` → a **bounded** child handoff
+   (reuses `th context pack` for a slice). Spawn the agent with it.
+3. Require a **Delegation Capsule** back; validate with `th delegate check --capsule <path>`
+   (`th delegate capsule` prints the blank skeleton). Keep only the capsule in the main context;
+   long-form detail lives in durable files under `.twinharness/delegations/DEL-###/`.
+
+Keep small queries, tiny reads, one-line updates, short commands, approval moments, and `th next`
+checks in the main context — delegation is for the high-context work, not every action.
 
 ## Model & effort routing (mechanical)
 
