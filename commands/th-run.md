@@ -10,17 +10,22 @@ Start (or resume) a **TwinHarness** orchestration run for: **$ARGUMENTS**
 > `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`. The Orchestrator should prefer the typed
 > `mcp__plugin_twinharness_th__*` MCP tools and fall back to
 > `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js"` only for verbs not yet exposed as MCP tools (see
-> `reference/mcp-tools.md`).
+> `reference/mcp-tools.md`). A tool that **returns** an error result (e.g. `not_initialized`) is
+> working — act on it and keep using the MCP tools; do not switch to the CLI just because a call
+> reported "no run yet."
 
-Existing run state, if any (captured before this prompt runs — use it to decide **resume vs. fresh
-init**; an error or "not initialized" here means no run exists yet, so start from `th init`):
+Existing run state, if any (captured before this prompt runs). **"No state.json" / "not initialized"
+here is normal for a new project — it is the signal to START a run, not an error to report to the
+user.** Use it to decide **resume vs. fresh init**:
 
 !`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" state status || true`
 
 Follow the `twinharness` skill (the Orchestrator playbook). In brief:
 
-1. If `.twinharness/state.json` exists, run `th state status` and **resume** from `current_stage`.
-   Otherwise run `th init`.
+1. **No run yet** (`.twinharness/state.json` absent / the snapshot says "not initialized") → run
+   `th init` **yourself** (`th init --brownfield` when building into an existing repo) and drive the
+   entire flow below. **Never stop to tell the user to initialize — just do it.** If a run already
+   exists, run `th state status` and **resume** from `current_stage`.
 2. Classify the tier and blast radius (spec §5). Record it with `th state set` — never hand-edit state.
 3. Run the engaged stages for the tier, delegating each artifact to the **Spec agent** (by mode),
    verifying coherence with the **Critic**, and surfacing only the §8 human gates via AskUserQuestion.

@@ -22,6 +22,31 @@ e.g. scaffolding (`th init`/`th migrate`), the hook gates
 `th artifact register`, `th tier classify`/`veto-check`, `th revise *`,
 `th stale`, `th doctor`, etc. When a verb exists as both, the MCP tool wins.
 
+## A returned error result is NOT a broken tool (critical)
+
+When an MCP tool **returns** a structured error — `not_initialized` (no
+`state.json` yet), `map_missing` (no repo-map built yet), `slice_not_found`,
+etc. — **the tool worked.** It reported a *fact about the project*, exactly as
+the equivalent CLI command would (the CLI prints the same message and exits
+non-zero). The MCP result carries `isError: true` only because the underlying
+command exited non-zero — that is a **domain outcome to act on, not a sign the
+MCP server is broken.** Keep using the MCP tools.
+
+The ONLY two reasons to shell the CLI instead of an MCP tool are:
+
+1. **No MCP tool for the verb** — `init`, `migrate`, the `hook` gates,
+   `anchors scan`, `trace render`, `verify run`, `tier classify`/`veto-check`,
+   `revise *`, `slices sync`, `slice set-status`, `artifact register`, `stale`,
+   `doctor`, `coverage report` (the fallback list above).
+2. **The server is genuinely unreachable** — the `mcp__plugin_twinharness_th__*`
+   tools are not advertised at all, or a call fails at the **transport** level
+   (a connection/protocol error), *not* with a domain `isError` result.
+
+A `not_initialized` from `th_state_get` / `th_next` is neither: stay on the MCP
+tools. (When there is no run yet, the next mechanical step is `th init` — which
+has no MCP tool, so that ONE call is a legitimate CLI use under reason 1; then
+resume the MCP tools.)
+
 ## Why MCP is preferred
 
 - **Typed, structured results instead of parsing stdout.** Each tool returns a

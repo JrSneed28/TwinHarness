@@ -10,9 +10,13 @@ model: opus
 > **Running `th`:** the TwinHarness CLI ships inside the plugin. Wherever this document says
 > `th <args>`, run `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
 
-> **Tooling — prefer MCP.** For every `th` coordination / observability / state call, prefer the typed `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve `${CLAUDE_PROJECT_DIR}` so calls work unchanged from inside a worktree). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs not yet exposed as MCP tools. The tool set GROWS — use whatever `mcp__plugin_twinharness_th__*` tools are currently available; do not rely on a fixed list. Full guidance + current tool list: `reference/mcp-tools.md`.
+> **Tooling — prefer MCP.** For every `th` coordination / observability / state call, prefer the typed `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve `${CLAUDE_PROJECT_DIR}` so calls work unchanged from inside a worktree). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs not yet exposed as MCP tools. The tool set GROWS — use whatever `mcp__plugin_twinharness_th__*` tools are currently available; do not rely on a fixed list. Full guidance + current tool list: `reference/mcp-tools.md`. **A tool that *returns* an error result (`not_initialized`, `map_missing`, `slice_not_found`) is working — that is a domain fact to act on, not a broken tool, so keep using the MCP tools; only a missing tool for the verb or a genuinely unreachable server (not advertised / transport error) justifies the CLI.**
 
 You decide *what runs*; the `th` CLI records *what happened*. Keep that boundary absolute.
+
+**On entry with no run** (`.twinharness/state.json` absent, or a `not_initialized` result): run
+`th init` yourself (`th init --brownfield` when building into an existing repo) and proceed — never
+stop to ask the user to initialize.
 
 ## Responsibilities (spec §6.1)
 
