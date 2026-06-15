@@ -17159,6 +17159,7 @@ function emptyRepoMap(repoRoot) {
     files: [],
     req_anchors: [],
     blast_radius_signals: []
+    // fileHashes intentionally absent — omit-when-absent (REQ-NFR-004)
   };
 }
 function toPosix(p) {
@@ -17260,7 +17261,16 @@ function serializeRepoMap(map) {
         trigger_patterns: sortStrings(s.trigger_patterns)
       })),
       (s) => s.flag
-    )
+    ),
+    // DS-002: emit fileHashes ONLY when present and non-empty (omit-when-absent —
+    // REQ-NFR-004). Keys are sorted for byte-stable output (REQ-NFR-002).
+    // Anchor: REQ-NFR-002 — deterministic: sorted keys, CRLF-normalized values (via hashContent).
+    // Anchor: REQ-NFR-004 — backward-compat: absent field → no key emitted → pre-epic byte identity.
+    ...map.fileHashes && Object.keys(map.fileHashes).length > 0 ? {
+      fileHashes: Object.fromEntries(
+        Object.entries(map.fileHashes).map(([k, v]) => [toPosix(k), v]).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+      )
+    } : {}
   };
   return JSON.stringify(ordered, null, 2) + "\n";
 }
@@ -17313,7 +17323,9 @@ function parseRepoMap(raw) {
     ownership_hints: p.ownership_hints,
     files: p.files,
     req_anchors: p.req_anchors,
-    blast_radius_signals: p.blast_radius_signals
+    blast_radius_signals: p.blast_radius_signals,
+    // DS-002: carry fileHashes when present (validated above).
+    ...p.fileHashes !== void 0 && p.fileHashes !== null ? { fileHashes: p.fileHashes } : {}
   };
   return { ok: true, map };
 }
@@ -17339,6 +17351,13 @@ function validateRepoMapShape(v) {
   if (!Array.isArray(v.req_anchors) || !v.req_anchors.every((r) => isPlainObject5(r) && typeof r.req_id === "string" && reqIdRe.test(r.req_id) && isStringArray(r.locations))) return false;
   const flags = BLAST_RADIUS_FLAGS;
   if (!Array.isArray(v.blast_radius_signals) || !v.blast_radius_signals.every((s) => isPlainObject5(s) && typeof s.flag === "string" && flags.includes(s.flag) && isStringArray(s.matching_paths) && isStringArray(s.trigger_patterns))) return false;
+  if (v.fileHashes !== void 0 && v.fileHashes !== null) {
+    if (!isPlainObject5(v.fileHashes)) return false;
+    const hexRe = /^[0-9a-f]{64}$/;
+    for (const val of Object.values(v.fileHashes)) {
+      if (typeof val !== "string" || !hexRe.test(val)) return false;
+    }
+  }
   return true;
 }
 function renderRepoMapMarkdown(map) {
@@ -18166,6 +18185,20 @@ function runRepoMap(paths, opts = {}) {
     });
   }
   const map = scanRepo(paths.root);
+  {
+    const hashes = {};
+    for (const f of map.files) {
+      const abs = path14.join(paths.root, f.path);
+      try {
+        const content = fs15.readFileSync(abs, "utf8");
+        hashes[f.path] = hashContent(content);
+      } catch {
+      }
+    }
+    if (Object.keys(hashes).length > 0) {
+      map.fileHashes = hashes;
+    }
+  }
   const json = serializeRepoMap(map);
   const md = renderRepoMapMarkdown(map);
   const counts = {

@@ -131,6 +131,7 @@ Usage:
   th delegate check --capsule <path>  Validate a returned capsule has every required section (presence only)
   th repo map [--write|--no-write] [--format <summary|json|md>]
                                     Scan the repo; write .twinharness/repo-map.json + docs/00-repo-map.md (writes by default; --no-write = dry/preview)
+  th repo check                     Report whether .twinharness/repo-map.json is fresh vs the working tree (exit 0 fresh / 4 stale / 5 no-map / 1 parse-fail)
   th repo relevant (--slice <ID> | --req <REQ-ID> | --file <path> | --query <kw>)
                    [--maxResults <n>] [--format <slice|req|file|json>]
                                     Precision context: read-first/related/tests/risks for a selector (reads persisted map)
@@ -467,6 +468,13 @@ function dispatch(parsed) {
                         component: parsed.flags.component,
                         format: parsed.flags.format,
                     });
+                case "check":
+                    // Anchor: REQ-201 — th repo check subcommand dispatch.
+                    // Anchor: REQ-202 — stale detection (added/removed/modified).
+                    // Anchor: REQ-203 — exit 0 fresh / 4 stale / 5 no-map / 1 parse-fail.
+                    // Anchor: REQ-204 — { fresh, added[], removed[], modified[] } report.
+                    // Anchor: REQ-205 — deterministic strategy; never executes content.
+                    return (0, repo_1.runRepoCheck)(paths, {});
                 default:
                     return (0, output_1.failure)({ human: `unknown 'repo' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
