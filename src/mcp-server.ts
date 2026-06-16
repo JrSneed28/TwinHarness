@@ -53,6 +53,7 @@ import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } 
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
 import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from "./commands/collab";
 import { runDebateAdd, runDebateList, runDebateResolve } from "./commands/debate";
+import { GATE_OWNED } from "./core/state-fields";
 
 /* ------------------------------------------------------------------ *
  * Project-paths resolution                                            *
@@ -180,11 +181,11 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_state_set",
     description:
-      "Patch a single dotted key in state.json. `value` is JSON-parsed when possible, else stored as a string. Refuses unknown top-level fields, unsafe key segments, managed fields, and any write that would make state invalid.",
+      "Patch a single dotted key in state.json. `value` is JSON-parsed when possible, else stored as a string. Refuses gate-owned fields (implementation_allowed, tier, current_stage, write_gate) over MCP — those are changed only through the human-driven CLI flow, never an agent tool — plus unknown top-level fields, unsafe key segments, the managed drift/debate counters, and any write that would make state invalid.",
     inputSchema: {
       type: "object",
       properties: {
-        key: stringProp("Dotted key to set (first segment must be a known state field)."),
+        key: stringProp("Dotted key to set (first segment must be a known, non-gate-owned state field)."),
         value: stringProp("Value to set; parsed as JSON when valid, otherwise stored as a raw string."),
       },
       required: ["key", "value"],
@@ -197,6 +198,19 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       const rawValue = typeof args.value === "string" ? args.value : undefined;
       if (key === undefined || rawValue === undefined) {
         return { ok: false, exitCode: 1, human: "th_state_set requires both `key` and `value` (strings)." };
+      }
+      // H-2: the MCP raw setter must NOT move a gate-security field. The CLI keeps
+      // these settable (the documented human unlock/advance path), but an agent
+      // over MCP must never flip implementation_allowed / tier / current_stage /
+      // write_gate. Defense-in-depth: refuse here before the handler.
+      const firstSegment = key.split(".")[0] ?? "";
+      if (GATE_OWNED.has(firstSegment)) {
+        return {
+          ok: false,
+          exitCode: 1,
+          human: `Refusing to set gate-owned field "${firstSegment}" over MCP. Gate fields (${[...GATE_OWNED].sort().join(", ")}) are changed only through the human-driven CLI flow, never an agent tool.`,
+          data: { error: "gate_owned_field", field: firstSegment },
+        };
       }
       return runStateSet(paths, key, rawValue);
     },
@@ -758,6 +772,64 @@ const SERVER_NAME = "twinharness-th";
 /** Version advertised to clients; kept in sync with the plugin/package version. */
 const SERVER_VERSION = "0.6.2";
 
+/* ------------------------------------------------------------------ *
+ * Runtime argument validation (H-1)                                   *
+ * ------------------------------------------------------------------ */
+
+/** Does `v` satisfy the declared JSON-Schema scalar type? `number` also accepts a
+ *  finite numeric string, mirroring the CLI's own coercion (optNumber). */
+function valueMatchesType(v: unknown, type: JsonSchemaProp["type"]): boolean {
+  if (type === "string") return typeof v === "string";
+  if (type === "boolean") return typeof v === "boolean";
+  if (typeof v === "number") return Number.isFinite(v);
+  return typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v));
+}
+
+/**
+ * Validate a tool call's `arguments` against the tool's CLOSED, typed
+ * `inputSchema` BEFORE dispatch (H-1). The advertised `additionalProperties:false`
+ * schemas were previously decorative — the handler called `def.run` with raw
+ * arguments, so extra/wrong-typed properties were silently accepted. A hand-rolled
+ * validator (the schemas are tiny: type/enum/required/additionalProperties) keeps
+ * the MCP bundle dependency-free (no ajv codegen). Exported so it is unit-testable
+ * without driving the SDK handler.
+ */
+export function validateToolArgs(name: string, args: unknown): { ok: true } | { ok: false; errors: string } {
+  const def = TOOL_DEFS.find((t) => t.name === name);
+  if (!def) return { ok: false, errors: `unknown tool: ${name}` };
+  if (typeof args !== "object" || args === null || Array.isArray(args)) {
+    return { ok: false, errors: "arguments must be a JSON object" };
+  }
+  const a = args as Record<string, unknown>;
+  const schema = def.inputSchema;
+  const errors: string[] = [];
+
+  // additionalProperties:false — reject any property not in the schema.
+  for (const key of Object.keys(a)) {
+    if (!Object.prototype.hasOwnProperty.call(schema.properties, key)) {
+      errors.push(`unknown property: ${key}`);
+    }
+  }
+  // required — every required property must be present (and not undefined).
+  for (const req of schema.required ?? []) {
+    if (a[req] === undefined) errors.push(`missing required property: ${req}`);
+  }
+  // typed + enum — validate each PRESENT property against its schema.
+  for (const [key, prop] of Object.entries(schema.properties)) {
+    const v = a[key];
+    if (v === undefined) continue; // optional & absent
+    if (!valueMatchesType(v, prop.type)) {
+      errors.push(`property "${key}" must be ${prop.type}`);
+      continue;
+    }
+    if (prop.enum && !prop.enum.includes(String(v))) {
+      errors.push(`property "${key}" must be one of: ${prop.enum.join(", ")}`);
+    }
+  }
+
+  return errors.length === 0 ? { ok: true } : { ok: false, errors: errors.join("; ") };
+}
+
 /**
  * Build the MCP {@link Server} with the tools/list + tools/call handlers wired
  * to {@link TOOL_DEFS}. Pulled out of `main` so it is independently testable and
@@ -780,6 +852,16 @@ export function buildServer(): Server {
       };
     }
     const args: ToolArgs = (request.params.arguments as ToolArgs | undefined) ?? {};
+    // Enforce the closed, typed inputSchema BEFORE dispatch (H-1): extra,
+    // wrong-typed, or missing-required arguments are rejected as a tool error
+    // instead of being silently passed to the handler.
+    const valid = validateToolArgs(def.name, args);
+    if (!valid.ok) {
+      return {
+        content: [{ type: "text", text: `Invalid arguments for ${def.name}: ${valid.errors}` }],
+        isError: true,
+      };
+    }
     // Handlers are pure and self-contained; an unexpected throw is mapped to a
     // tool error rather than crashing the server process.
     try {

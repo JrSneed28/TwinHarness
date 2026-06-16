@@ -53,6 +53,18 @@ The **gate-mutation audit ledger** (`.twinharness/gate-ledger.jsonl`) records
 every gate-relevant state change, making such overrides reviewable after the
 fact. This is the primary accountability mechanism — not prevention.
 
+**CLI vs MCP asymmetry for gate fields.** The gate-owned fields
+(`implementation_allowed`, `tier`, `current_stage`, `write_gate`) remain settable
+through the **human-driven CLI** `th state set` (the documented unlock/advance
+path; validated and audit-ledgered). The **MCP `th_state_set` tool refuses them**:
+an agent acting over the MCP surface cannot flip a gate field, and the MCP server
+additionally validates every tool call against the tool's closed, typed schema
+(extra / wrong-typed / missing-required arguments are rejected before dispatch).
+`th decision approve` is likewise CLI-/human-only and is never exposed over MCP.
+The managed drift/debate counters are refused on both surfaces (they are owned by
+`th drift`/`th debate`). `current_stage` is enum-normalized on the CLI set path,
+so a non-pipeline stage value cannot be stored.
+
 ### `th verify run` executes configured commands
 
 `th verify run` is the **only** `th` command that executes project commands. It

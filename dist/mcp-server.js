@@ -6897,7 +6897,8 @@ __export(mcp_server_exports, {
   buildServer: () => buildServer,
   listTools: () => listTools,
   resolvePathsForCall: () => resolvePathsForCall,
-  toToolResult: () => toToolResult
+  toToolResult: () => toToolResult,
+  validateToolArgs: () => validateToolArgs
 });
 module.exports = __toCommonJS(mcp_server_exports);
 
@@ -20256,11 +20257,11 @@ var TOOL_DEFS = [
   },
   {
     name: "th_state_set",
-    description: "Patch a single dotted key in state.json. `value` is JSON-parsed when possible, else stored as a string. Refuses unknown top-level fields, unsafe key segments, managed fields, and any write that would make state invalid.",
+    description: "Patch a single dotted key in state.json. `value` is JSON-parsed when possible, else stored as a string. Refuses gate-owned fields (implementation_allowed, tier, current_stage, write_gate) over MCP \u2014 those are changed only through the human-driven CLI flow, never an agent tool \u2014 plus unknown top-level fields, unsafe key segments, the managed drift/debate counters, and any write that would make state invalid.",
     inputSchema: {
       type: "object",
       properties: {
-        key: stringProp("Dotted key to set (first segment must be a known state field)."),
+        key: stringProp("Dotted key to set (first segment must be a known, non-gate-owned state field)."),
         value: stringProp("Value to set; parsed as JSON when valid, otherwise stored as a raw string.")
       },
       required: ["key", "value"],
@@ -20271,6 +20272,15 @@ var TOOL_DEFS = [
       const rawValue = typeof args.value === "string" ? args.value : void 0;
       if (key === void 0 || rawValue === void 0) {
         return { ok: false, exitCode: 1, human: "th_state_set requires both `key` and `value` (strings)." };
+      }
+      const firstSegment = key.split(".")[0] ?? "";
+      if (GATE_OWNED.has(firstSegment)) {
+        return {
+          ok: false,
+          exitCode: 1,
+          human: `Refusing to set gate-owned field "${firstSegment}" over MCP. Gate fields (${[...GATE_OWNED].sort().join(", ")}) are changed only through the human-driven CLI flow, never an agent tool.`,
+          data: { error: "gate_owned_field", field: firstSegment }
+        };
       }
       return runStateSet(paths, key, rawValue);
     }
@@ -20782,6 +20792,42 @@ function listTools() {
 }
 var SERVER_NAME = "twinharness-th";
 var SERVER_VERSION = "0.6.2";
+function valueMatchesType(v, type) {
+  if (type === "string") return typeof v === "string";
+  if (type === "boolean") return typeof v === "boolean";
+  if (typeof v === "number") return Number.isFinite(v);
+  return typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v));
+}
+function validateToolArgs(name, args) {
+  const def = TOOL_DEFS.find((t) => t.name === name);
+  if (!def) return { ok: false, errors: `unknown tool: ${name}` };
+  if (typeof args !== "object" || args === null || Array.isArray(args)) {
+    return { ok: false, errors: "arguments must be a JSON object" };
+  }
+  const a = args;
+  const schema = def.inputSchema;
+  const errors = [];
+  for (const key of Object.keys(a)) {
+    if (!Object.prototype.hasOwnProperty.call(schema.properties, key)) {
+      errors.push(`unknown property: ${key}`);
+    }
+  }
+  for (const req of schema.required ?? []) {
+    if (a[req] === void 0) errors.push(`missing required property: ${req}`);
+  }
+  for (const [key, prop] of Object.entries(schema.properties)) {
+    const v = a[key];
+    if (v === void 0) continue;
+    if (!valueMatchesType(v, prop.type)) {
+      errors.push(`property "${key}" must be ${prop.type}`);
+      continue;
+    }
+    if (prop.enum && !prop.enum.includes(String(v))) {
+      errors.push(`property "${key}" must be one of: ${prop.enum.join(", ")}`);
+    }
+  }
+  return errors.length === 0 ? { ok: true } : { ok: false, errors: errors.join("; ") };
+}
 function buildServer() {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -20797,6 +20843,13 @@ function buildServer() {
       };
     }
     const args = request.params.arguments ?? {};
+    const valid = validateToolArgs(def.name, args);
+    if (!valid.ok) {
+      return {
+        content: [{ type: "text", text: `Invalid arguments for ${def.name}: ${valid.errors}` }],
+        isError: true
+      };
+    }
     try {
       const paths = resolvePathsForCall();
       return toToolResult(def.run(paths, args));
@@ -20825,5 +20878,6 @@ if (require.main === module) {
   buildServer,
   listTools,
   resolvePathsForCall,
-  toToolResult
+  toToolResult,
+  validateToolArgs
 });
