@@ -8,6 +8,8 @@ import {
   runCollabMerge,
 } from "../src/commands/collab";
 import { type Fragment, writeFragment } from "../src/core/collab";
+import { PathContainmentError } from "../src/core/paths";
+import { failure, renderResult } from "../src/core/output";
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
@@ -112,6 +114,50 @@ describe("REQ-PCO-040: path traversal is rejected in stage/round/name segments",
   it("rejects a name containing a path separator", () => {
     tp = makeTempProject();
     expect(() => runCollabFragment(tp.paths, { stage: "design", round: "r1", name: "sub/a.md", text: "REQ-001" })).toThrow();
+  });
+});
+
+describe("ARCH-003: a path-escape attempt throws a TYPED PathContainmentError the CLI boundary maps to a structured --json failure (no raw stack)", () => {
+  it("`th collab fragment --name \"../x\"` throws PathContainmentError with a stable code (not a raw Error)", () => {
+    tp = makeTempProject();
+    let caught: unknown;
+    try {
+      runCollabFragment(tp.paths, { stage: "design", round: "r1", name: "../x", text: "REQ-001" });
+    } catch (e) {
+      caught = e;
+    }
+    // Before ARCH-003 this was a raw `Error` whose stack escaped the CLI boundary;
+    // now it is the typed, code-bearing error the boundary recognizes.
+    expect(caught).toBeInstanceOf(PathContainmentError);
+    expect((caught as PathContainmentError).code).toBe("path_containment");
+    expect((caught as PathContainmentError).segment).toBe("../x");
+  });
+
+  it("the CLI boundary mapping turns that throw into a STRUCTURED failure envelope (typed code, sane exit, no stack)", () => {
+    tp = makeTempProject();
+    // Reproduce the cli.ts top-level boundary mapping exactly: catch the throw and
+    // map a PathContainmentError to a structured `failure(...)`. The proof is that
+    // the result is a well-formed --json envelope keyed by the typed error code —
+    // never a raw Node stack — with a non-zero, client-reject exit code (2).
+    let result: ReturnType<typeof failure> | undefined;
+    try {
+      runCollabFragment(tp.paths, { stage: "design", round: "r1", name: "../x", text: "REQ-001" });
+    } catch (e) {
+      if (e instanceof PathContainmentError) {
+        result = failure({ human: e.message, data: { error: e.code, segment: e.segment }, exitCode: 2 });
+      } else {
+        throw e;
+      }
+    }
+    expect(result).toBeDefined();
+    expect(result!.ok).toBe(false);
+    expect(result!.exitCode).toBe(2);
+    expect(result!.data?.error).toBe("path_containment");
+    // The --json rendering is the structured envelope, with no stack-trace text.
+    const json = JSON.parse(renderResult(result!, true)) as { ok: boolean; error?: string };
+    expect(json.ok).toBe(false);
+    expect(json.error).toBe("path_containment");
+    expect(JSON.stringify(json)).not.toMatch(/\bat\s+\w+.*\(/); // no "    at fn (file:line)" stack frame
   });
 });
 

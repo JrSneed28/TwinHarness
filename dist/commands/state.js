@@ -187,5 +187,15 @@ function runStateVerify(paths) {
         return (0, output_1.failure)({ human: "No state.json found.", data: { valid: false, error: "not_initialized" } });
     if (!r.state)
         return (0, output_1.failure)({ human: `state.json INVALID:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { valid: false, issues: r.issues } });
+    // A valid file may still carry non-fatal warnings (ARCH-007) — e.g. an unknown
+    // top-level key. Surface them WITHOUT failing: the file is still valid (exit 0),
+    // the operator just sees the advisory so a typo/forward-compat field is visible.
+    const warnings = r.warnings ?? [];
+    if (warnings.length > 0) {
+        return (0, output_1.success)({
+            data: { valid: true, warnings },
+            human: `state.json is valid (with ${warnings.length} warning(s)):\n${(0, guards_1.formatIssues)(warnings)}`,
+        });
+    }
     return (0, output_1.success)({ data: { valid: true }, human: "state.json is valid." });
 }

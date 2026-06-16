@@ -72,9 +72,11 @@ function readState(paths) {
     }
     const result = (0, state_schema_1.validateState)(parsed);
     if (!result.ok) {
-        return { exists: true, raw, issues: result.issues };
+        return { exists: true, raw, issues: result.issues, warnings: result.warnings };
     }
-    return { exists: true, raw, state: result.state };
+    // A valid file may still carry non-fatal warnings (e.g. an unknown top-level
+    // key); thread them through so callers like `th state verify` can surface them.
+    return { exists: true, raw, state: result.state, warnings: result.warnings };
 }
 /**
  * Write state.json atomically (write temp, then rename over the target).

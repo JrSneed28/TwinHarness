@@ -15471,6 +15471,16 @@ var path21 = __toESM(require("node:path"));
 // src/core/paths.ts
 var fs = __toESM(require("node:fs"));
 var path = __toESM(require("node:path"));
+var PathContainmentError = class extends Error {
+  constructor(message, segment) {
+    super(message);
+    this.segment = segment;
+    this.name = "PathContainmentError";
+  }
+  segment;
+  /** Stable machine token surfaced in the `--json` failure envelope. */
+  code = "path_containment";
+};
 function resolveWithinRoot(root, p) {
   const absRoot = path.resolve(root);
   const abs = path.isAbsolute(p) ? p : path.resolve(absRoot, p);
@@ -15645,12 +15655,19 @@ function isPlainObject3(v) {
 function isInteger(v) {
   return typeof v === "number" && Number.isInteger(v);
 }
+var KNOWN_TOP_LEVEL_KEYS = new Set(STATE_FIELD_ORDER);
 function validateState(value) {
   const issues = [];
   if (!isPlainObject3(value)) {
     return { ok: false, issues: [{ path: "$", message: "state must be a JSON object" }] };
   }
   const v = value;
+  const warnings = [];
+  for (const key of Object.keys(v).sort()) {
+    if (!KNOWN_TOP_LEVEL_KEYS.has(key)) {
+      warnings.push({ path: key, message: `unknown top-level key (not in the state schema)` });
+    }
+  }
   if (v.schema_version !== void 0 && (!isInteger(v.schema_version) || v.schema_version < 1)) {
     issues.push({ path: "schema_version", message: "must be a positive integer or absent" });
   }
@@ -15753,8 +15770,9 @@ function validateState(value) {
   if (v.tier === "T0" && Array.isArray(v.blast_radius_flags) && v.blast_radius_flags.length > 0) {
     issues.push({ path: "tier", message: "Tier 0 is vetoed when blast-radius flags are present (\xA75)" });
   }
-  if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, issues: [], state: value };
+  const warn = warnings.length > 0 ? { warnings } : {};
+  if (issues.length > 0) return { ok: false, issues, ...warn };
+  return { ok: true, issues: [], ...warn, state: value };
 }
 function serializeState(state) {
   const ordered = {};
@@ -15788,9 +15806,9 @@ function readState(paths) {
   }
   const result = validateState(parsed);
   if (!result.ok) {
-    return { exists: true, raw, issues: result.issues };
+    return { exists: true, raw, issues: result.issues, warnings: result.warnings };
   }
-  return { exists: true, raw, state: result.state };
+  return { exists: true, raw, state: result.state, warnings: result.warnings };
 }
 function writeState(paths, state) {
   atomicWriteFile(paths.stateFile, serializeState(state));
@@ -17107,8 +17125,14 @@ function readVerifyConfig(paths) {
 function readVerifyReport(paths) {
   const file = verifyReportPath(paths);
   if (!fs10.existsSync(file)) return null;
+  let raw;
   try {
-    const parsed = JSON.parse(fs10.readFileSync(file, "utf8"));
+    raw = readFileWithRetry(file);
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && typeof parsed.ok === "boolean") {
       return parsed;
     }
@@ -18578,6 +18602,98 @@ function computeImpact(map, selector) {
   };
 }
 
+// src/core/repo-map/freshness-codes.ts
+var REPO_STALE_EXIT = 4;
+var REPO_NO_MAP_EXIT = 5;
+
+// src/core/repo-map/freshness.ts
+function computeFreshness(input) {
+  switch (input.kind) {
+    case "no-map":
+      return {
+        ok: false,
+        exitCode: REPO_NO_MAP_EXIT,
+        data: { ok: false, fresh: false, shape: "no-map" },
+        human: "No repo-map.json found. Run `th repo map` first.",
+        log: { cmd: "repo check", outcome: "no-map" }
+      };
+    case "parse-fail":
+      return {
+        ok: false,
+        exitCode: 1,
+        data: { ok: false, error: input.error },
+        human: `repo-map.json parse failure: ${input.error}. Run \`th repo map\` to regenerate.`,
+        log: { cmd: "repo check", outcome: "parse-fail", error: input.error }
+      };
+    case "no-hashes":
+      return {
+        ok: false,
+        exitCode: REPO_STALE_EXIT,
+        data: {
+          ok: false,
+          fresh: false,
+          shape: "stale",
+          added: [],
+          removed: [],
+          modified: [],
+          reason: "no_hashes"
+        },
+        human: "repo-map.json exists but has no fileHashes. Run `th repo map` to update it.",
+        log: { cmd: "repo check", outcome: "stale", reason: "no_hashes" }
+      };
+    case "diff": {
+      const added = [...input.added].sort();
+      const removed = [...input.removed].sort();
+      const modified = [...input.modified].sort();
+      const fresh = added.length === 0 && removed.length === 0 && modified.length === 0;
+      if (fresh) {
+        return {
+          ok: true,
+          exitCode: 0,
+          data: { ok: true, fresh: true, shape: "fresh", added: [], removed: [], modified: [] },
+          human: "repo-map.json is fresh \u2014 working tree matches the persisted map.",
+          log: { cmd: "repo check", outcome: "fresh" }
+        };
+      }
+      return {
+        ok: false,
+        exitCode: REPO_STALE_EXIT,
+        data: { ok: false, fresh: false, shape: "stale", added, removed, modified },
+        human: [
+          "repo-map.json is stale.",
+          added.length > 0 ? `  added (${added.length}): ${added.slice(0, 5).join(", ")}${added.length > 5 ? " ..." : ""}` : null,
+          removed.length > 0 ? `  removed (${removed.length}): ${removed.slice(0, 5).join(", ")}${removed.length > 5 ? " ..." : ""}` : null,
+          modified.length > 0 ? `  modified (${modified.length}): ${modified.slice(0, 5).join(", ")}${modified.length > 5 ? " ..." : ""}` : null,
+          "Run `th repo map` to update."
+        ].filter(Boolean).join("\n"),
+        log: {
+          cmd: "repo check",
+          outcome: "stale",
+          added: added.length,
+          removed: removed.length,
+          modified: modified.length
+        }
+      };
+    }
+  }
+}
+function diffHashes(stored, current) {
+  const added = [];
+  const removed = [];
+  const modified = [];
+  for (const [p, h] of Object.entries(current)) {
+    if (!(p in stored)) added.push(p);
+    else if (stored[p] !== h) modified.push(p);
+  }
+  for (const p of Object.keys(stored)) {
+    if (!(p in current)) removed.push(p);
+  }
+  added.sort();
+  removed.sort();
+  modified.sort();
+  return { added, removed, modified };
+}
+
 // src/commands/repo.ts
 var FORMATS = ["summary", "json", "md"];
 var REPO_MAP_JSON_REL = ".twinharness/repo-map.json";
@@ -18932,50 +19048,26 @@ REQ anchors in scope: ${result.reqAnchors.join(", ")}`);
   }
   return lines.join("\n");
 }
-var REPO_STALE_EXIT = 4;
-var REPO_NO_MAP_EXIT = 5;
 function runRepoCheck(paths, _opts = {}) {
   const REPO_MAP_JSON = path15.join(paths.stateDir, "repo-map.json");
+  const emit2 = (outcome) => {
+    structuredLog(outcome.log);
+    return { ok: outcome.ok, exitCode: outcome.exitCode, data: outcome.data, human: outcome.human };
+  };
   let rawMap = null;
   try {
     rawMap = fs16.readFileSync(REPO_MAP_JSON, "utf8");
   } catch {
-    structuredLog({ cmd: "repo check", outcome: "no-map" });
-    return {
-      ok: false,
-      exitCode: REPO_NO_MAP_EXIT,
-      data: { ok: false, fresh: false, shape: "no-map" },
-      human: "No repo-map.json found. Run `th repo map` first."
-    };
+    return emit2(computeFreshness({ kind: "no-map" }));
   }
   const parsed = parseRepoMap(rawMap);
   if (!parsed.ok || !parsed.map) {
     const errorCode = parsed.error ?? "map_invalid-json";
-    structuredLog({ cmd: "repo check", outcome: "parse-fail", error: errorCode });
-    return {
-      ok: false,
-      exitCode: 1,
-      data: { ok: false, error: errorCode },
-      human: `repo-map.json parse failure: ${errorCode}. Run \`th repo map\` to regenerate.`
-    };
+    return emit2(computeFreshness({ kind: "parse-fail", error: errorCode }));
   }
   const map = parsed.map;
   if (!map.fileHashes || Object.keys(map.fileHashes).length === 0) {
-    structuredLog({ cmd: "repo check", outcome: "stale", reason: "no_hashes" });
-    return {
-      ok: false,
-      exitCode: REPO_STALE_EXIT,
-      data: {
-        ok: false,
-        fresh: false,
-        shape: "stale",
-        added: [],
-        removed: [],
-        modified: [],
-        reason: "no_hashes"
-      },
-      human: "repo-map.json exists but has no fileHashes. Run `th repo map` to update it."
-    };
+    return emit2(computeFreshness({ kind: "no-hashes" }));
   }
   const currentMap = scanRepo(paths.root);
   const currentHashes = {};
@@ -18987,68 +19079,8 @@ function runRepoCheck(paths, _opts = {}) {
     } catch {
     }
   }
-  const storedHashes = map.fileHashes;
-  const added = [];
-  const removed = [];
-  const modified = [];
-  for (const [p, h] of Object.entries(currentHashes)) {
-    if (!(p in storedHashes)) {
-      added.push(p);
-    } else if (storedHashes[p] !== h) {
-      modified.push(p);
-    }
-  }
-  for (const p of Object.keys(storedHashes)) {
-    if (!(p in currentHashes)) {
-      removed.push(p);
-    }
-  }
-  added.sort();
-  removed.sort();
-  modified.sort();
-  const isFresh = added.length === 0 && removed.length === 0 && modified.length === 0;
-  if (isFresh) {
-    structuredLog({ cmd: "repo check", outcome: "fresh" });
-    return {
-      ok: true,
-      exitCode: 0,
-      data: {
-        ok: true,
-        fresh: true,
-        shape: "fresh",
-        added: [],
-        removed: [],
-        modified: []
-      },
-      human: "repo-map.json is fresh \u2014 working tree matches the persisted map."
-    };
-  }
-  structuredLog({
-    cmd: "repo check",
-    outcome: "stale",
-    added: added.length,
-    removed: removed.length,
-    modified: modified.length
-  });
-  return {
-    ok: false,
-    exitCode: REPO_STALE_EXIT,
-    data: {
-      ok: false,
-      fresh: false,
-      shape: "stale",
-      added,
-      removed,
-      modified
-    },
-    human: [
-      "repo-map.json is stale.",
-      added.length > 0 ? `  added (${added.length}): ${added.slice(0, 5).join(", ")}${added.length > 5 ? " ..." : ""}` : null,
-      removed.length > 0 ? `  removed (${removed.length}): ${removed.slice(0, 5).join(", ")}${removed.length > 5 ? " ..." : ""}` : null,
-      modified.length > 0 ? `  modified (${modified.length}): ${modified.slice(0, 5).join(", ")}${modified.length > 5 ? " ..." : ""}` : null,
-      "Run `th repo map` to update."
-    ].filter(Boolean).join("\n")
-  };
+  const { added, removed, modified } = diffHashes(map.fileHashes, currentHashes);
+  return emit2(computeFreshness({ kind: "diff", added, removed, modified }));
 }
 
 // src/commands/next.ts
@@ -20003,10 +20035,13 @@ var fs21 = __toESM(require("node:fs"));
 var path19 = __toESM(require("node:path"));
 function validatePathSegment(segment, label) {
   if (path19.isAbsolute(segment)) {
-    throw new Error(`collab: ${label} must not be an absolute path: "${segment}"`);
+    throw new PathContainmentError(`collab: ${label} must not be an absolute path: "${segment}"`, segment);
   }
   if (segment === ".." || segment.includes("/") || segment.includes("\\")) {
-    throw new Error(`collab: ${label} must be a single path component with no separators or "..": "${segment}"`);
+    throw new PathContainmentError(
+      `collab: ${label} must be a single path component with no separators or "..": "${segment}"`,
+      segment
+    );
   }
 }
 var FragmentExistsError = class extends Error {
@@ -20400,7 +20435,7 @@ function toToolResult(result) {
     content: [{ type: "text", text }],
     isError: !result.ok
   };
-  if (result.data !== void 0) out.structuredContent = result.data;
+  out.structuredContent = { ...result.data ?? {}, exitCode: result.exitCode };
   return out;
 }
 function optString(args, key) {

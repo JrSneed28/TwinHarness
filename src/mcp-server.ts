@@ -96,8 +96,11 @@ export interface ToolInputSchema {
  *
  *  - `result.human` (or a JSON-stringified `result.data`, or a terse OK/FAILED)
  *    becomes the single text content block — the human-readable rendering.
- *  - `result.data` (when present) is attached as `structuredContent` so a caller
- *    can consume the machine payload without re-parsing text.
+ *  - `result.data` (when present) plus the numeric `exitCode` are attached as
+ *    `structuredContent` so a caller can consume the machine payload — including
+ *    the exact CLI exit code — without re-parsing text (ARCH-005). The CLI exit
+ *    code carries information `isError` (a coarse ok/not-ok boolean) loses: e.g.
+ *    `th repo check`'s 0-fresh / 4-stale / 5-no-map / 1-parse-fail taxonomy.
  *  - `isError` is the inverse of `result.ok`: a failing command surfaces as a
  *    tool error rather than a silent success.
  *
@@ -117,7 +120,10 @@ export function toToolResult(result: CommandResult): CallToolResult {
     content: [{ type: "text", text }],
     isError: !result.ok,
   };
-  if (result.data !== undefined) out.structuredContent = result.data;
+  // Surface the machine payload + the numeric exit code as structuredContent.
+  // Additive: `exitCode` is always present so callers get the full CLI exit-code
+  // taxonomy (not just isError); `result.data` fields are merged in when present.
+  out.structuredContent = { ...(result.data ?? {}), exitCode: result.exitCode };
   return out;
 }
 

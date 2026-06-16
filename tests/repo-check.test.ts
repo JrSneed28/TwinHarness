@@ -18,6 +18,7 @@ import { runRepoCheck, REPO_STALE_EXIT, REPO_NO_MAP_EXIT } from "../src/commands
 import { serializeRepoMap, parseRepoMap, emptyRepoMap, type RepoMap } from "../src/core/repo-map/schema";
 import { hashContent } from "../src/core/hash";
 import { TOOL_DEFS } from "../src/mcp-server";
+import { computeFreshness, diffHashes } from "../src/core/repo-map/freshness";
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
@@ -390,4 +391,64 @@ describe("SLICE-2 — th repo check stale detection", () => {
     expect(rtWithHashes.map?.fileHashes?.["src/foo.ts"]).toBe("a".repeat(64));
   });
 
+});
+
+// ---------------------------------------------------------------------------
+// ARCH-002 — the freshness/staleness taxonomy is extracted into a PURE,
+// reusable, side-effect-free module (src/core/repo-map/freshness.ts) that
+// runRepoCheck delegates to. These tests pin the pure module directly so the
+// exit-code taxonomy + data shape can be reused/tested without disk I/O.
+// ---------------------------------------------------------------------------
+describe("ARCH-002 — pure freshness taxonomy (computeFreshness / diffHashes)", () => {
+  it("no-map → exit 5, shape no-map", () => {
+    const o = computeFreshness({ kind: "no-map" });
+    expect(o.exitCode).toBe(REPO_NO_MAP_EXIT);
+    expect(o.ok).toBe(false);
+    expect(o.data.shape).toBe("no-map");
+    expect(o.human).toContain("No repo-map.json found");
+  });
+
+  it("parse-fail → exit 1, carries the tagged error code", () => {
+    const o = computeFreshness({ kind: "parse-fail", error: "map_version" });
+    expect(o.exitCode).toBe(1);
+    expect(o.ok).toBe(false);
+    expect(o.data.error).toBe("map_version");
+  });
+
+  it("no-hashes → exit 4, stale shape with reason no_hashes and empty buckets", () => {
+    const o = computeFreshness({ kind: "no-hashes" });
+    expect(o.exitCode).toBe(REPO_STALE_EXIT);
+    expect(o.data).toMatchObject({ shape: "stale", reason: "no_hashes", added: [], removed: [], modified: [] });
+  });
+
+  it("diff with no changes → exit 0, fresh shape", () => {
+    const o = computeFreshness({ kind: "diff", added: [], removed: [], modified: [] });
+    expect(o.exitCode).toBe(0);
+    expect(o.ok).toBe(true);
+    expect(o.data).toMatchObject({ fresh: true, shape: "fresh", added: [], removed: [], modified: [] });
+  });
+
+  it("diff with changes → exit 4, stale shape with SORTED buckets", () => {
+    const o = computeFreshness({ kind: "diff", added: ["b", "a"], removed: ["z"], modified: [] });
+    expect(o.exitCode).toBe(REPO_STALE_EXIT);
+    expect(o.data).toMatchObject({ fresh: false, shape: "stale", added: ["a", "b"], removed: ["z"], modified: [] });
+    expect(o.human).toContain("repo-map.json is stale.");
+  });
+
+  it("diffHashes classifies added / removed / modified deterministically", () => {
+    const stored = { keep: "h1", change: "h2", gone: "h3" };
+    const current = { keep: "h1", change: "h2-NEW", born: "h4" };
+    expect(diffHashes(stored, current)).toEqual({ added: ["born"], removed: ["gone"], modified: ["change"] });
+  });
+
+  it("runRepoCheck delegates to the pure module: stale map → exit 4 (no behavior change)", () => {
+    // End-to-end parity proof: the command still produces the pure module's taxonomy.
+    tp = makeTempProject();
+    fs.writeFileSync(path.join(tp.root, "alpha.txt"), "v1", "utf8");
+    runRepoMap(tp.paths, { write: true });
+    fs.writeFileSync(path.join(tp.root, "alpha.txt"), "v2-changed", "utf8");
+    const res = runRepoCheck(tp.paths, {});
+    expect(res.exitCode).toBe(REPO_STALE_EXIT);
+    expect((res.data as Record<string, unknown>).shape).toBe("stale");
+  });
 });

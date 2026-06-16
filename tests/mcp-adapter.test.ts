@@ -29,12 +29,13 @@ let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
 
 describe("REQ-MCP-MAP-001: toToolResult maps ok:true → non-error result with the data", () => {
-  it("ok result with data → isError false, text from human, data as structuredContent", () => {
+  it("ok result with data → isError false, text from human, data + exitCode as structuredContent", () => {
     const r: CommandResult = success({ data: { tier: "T1", count: 3 }, human: "all good" });
     const mapped = toToolResult(r);
     expect(mapped.isError).toBe(false);
     expect(mapped.content).toEqual([{ type: "text", text: "all good" }]);
-    expect(mapped.structuredContent).toEqual({ tier: "T1", count: 3 });
+    // ARCH-005: data fields are merged with the numeric exitCode.
+    expect(mapped.structuredContent).toEqual({ tier: "T1", count: 3, exitCode: 0 });
   });
 
   it("ok result without human → text falls back to JSON-stringified data", () => {
@@ -43,30 +44,54 @@ describe("REQ-MCP-MAP-001: toToolResult maps ok:true → non-error result with t
     expect(mapped.isError).toBe(false);
     expect(mapped.content[0]).toMatchObject({ type: "text" });
     expect((mapped.content[0] as { text: string }).text).toContain("42");
-    expect(mapped.structuredContent).toEqual({ value: 42 });
+    expect(mapped.structuredContent).toEqual({ value: 42, exitCode: 0 });
   });
 
-  it("ok result with neither human nor data → text 'OK', no structuredContent", () => {
+  it("ok result with neither human nor data → text 'OK', structuredContent carries exitCode", () => {
     const mapped = toToolResult({ ok: true, exitCode: 0 });
     expect(mapped.isError).toBe(false);
     expect(mapped.content).toEqual([{ type: "text", text: "OK" }]);
-    expect(mapped.structuredContent).toBeUndefined();
+    // ARCH-005: exitCode is always surfaced, even with no data payload.
+    expect(mapped.structuredContent).toEqual({ exitCode: 0 });
+  });
+});
+
+describe("ARCH-005: toToolResult carries the numeric exitCode in structuredContent", () => {
+  it("preserves a non-zero exit code (e.g. repo check stale=4) alongside the data", () => {
+    // Mirrors `th repo check` on a stale map: ok:false, exitCode:4, shape data.
+    const r: CommandResult = { ok: false, exitCode: 4, data: { ok: false, shape: "stale" } };
+    const mapped = toToolResult(r);
+    expect(mapped.isError).toBe(true);
+    expect((mapped.structuredContent as Record<string, unknown>).exitCode).toBe(4);
+    // The data payload is still present, untouched.
+    expect((mapped.structuredContent as Record<string, unknown>).shape).toBe("stale");
+  });
+
+  it("a real run* handler's exit code reaches structuredContent (th_repo_check no-map → 5)", () => {
+    tp = makeTempProject();
+    const def = TOOL_DEFS.find((t) => t.name === "th_repo_check")!;
+    const mapped = toToolResult(def.run(tp.paths, {}));
+    // No repo-map.json → REPO_NO_MAP_EXIT (5); isError stays true (ok:false).
+    expect(mapped.isError).toBe(true);
+    expect((mapped.structuredContent as Record<string, unknown>).exitCode).toBe(5);
   });
 });
 
 describe("REQ-MCP-MAP-002: toToolResult maps ok:false → isError:true", () => {
-  it("failure result → isError true, human as text, data still attached", () => {
+  it("failure result → isError true, human as text, data + exitCode still attached", () => {
     const r: CommandResult = failure({ human: "it broke", data: { error: "boom" } });
     const mapped = toToolResult(r);
     expect(mapped.isError).toBe(true);
     expect(mapped.content).toEqual([{ type: "text", text: "it broke" }]);
-    expect(mapped.structuredContent).toEqual({ error: "boom" });
+    // ARCH-005: data + the default failure exit code (1).
+    expect(mapped.structuredContent).toEqual({ error: "boom", exitCode: 1 });
   });
 
   it("failure with neither human nor data → text 'FAILED'", () => {
     const mapped = toToolResult({ ok: false, exitCode: 1 });
     expect(mapped.isError).toBe(true);
     expect(mapped.content).toEqual([{ type: "text", text: "FAILED" }]);
+    expect(mapped.structuredContent).toEqual({ exitCode: 1 });
   });
 });
 

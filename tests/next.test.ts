@@ -16,6 +16,7 @@ import { runReviseBump } from "../src/commands/revise";
 import { runArtifactRegister } from "../src/commands/artifact";
 import { runSlicesSync } from "../src/commands/slices";
 import { runVerifyAdd, runVerifyRun } from "../src/commands/verify";
+import { readVerifyReport, writeVerifyReport } from "../src/core/verify";
 import { runNext } from "../src/commands/next";
 import { runRepoMap } from "../src/commands/repo";
 
@@ -252,6 +253,47 @@ describe("REQ-NEXT-011: final-verification mirrors the stop-gate verify-suite ch
     runVerifyAdd(tp.paths, "true");
     runVerifyRun(tp.paths); // green (`true` exits 0)
     expect(runNext(tp.paths).data?.kind).not.toBe("run-verify");
+  });
+
+  // FLAKE FIX (REQ-NEXT-011): a freshly-written verify report must NEVER read as
+  // absent and re-trigger a spurious `run-verify`. The root cause was a
+  // non-atomic report write + a read whose catch-all swallowed a transient
+  // contention error as "absent" — under full-suite load a present report
+  // intermittently looked missing. The report is now written atomically and read
+  // with a bounded retry. This determinism check writes the report and reads the
+  // obligation many times in a tight loop; before the fix this surfaced
+  // `run-verify` intermittently, now it is always stable.
+  it("REQ-NEXT-011 (flake fix): a green report is deterministically NOT judged un-run across many reads", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runStateSet(tp.paths, "tier", "T1");
+    writeFile(tp, "docs/09-implementation-plan.md", "### SLICE-1\nComponents touched: api\n");
+    runSlicesSync(tp.paths, { planFile: "docs/09-implementation-plan.md" });
+    runStateSet(tp.paths, "slices", JSON.stringify([{ id: "SLICE-1", status: "done", components: ["api"] }]));
+    runStateSet(tp.paths, "current_stage", "final-verification");
+    runVerifyAdd(tp.paths, "true");
+    runVerifyRun(tp.paths); // green report on disk
+
+    for (let i = 0; i < 50; i++) {
+      const kind = runNext(tp.paths).data?.kind;
+      // The settled green run owes a human sign-off, never a re-run of verify.
+      expect(kind).not.toBe("run-verify");
+    }
+  });
+});
+
+describe("ARCH-005 flake substrate: verify report write/read is atomic + retrying (REQ-NEXT-011)", () => {
+  it("writeVerifyReport then readVerifyReport round-trips and never reads a present report as null", () => {
+    tp = makeTempProject();
+    const report = { ok: true, ranAt: new Date().toISOString(), results: [] };
+    // Repeated atomic write + retrying read must always return the present report,
+    // never null (the failure mode that re-triggered run-verify).
+    for (let i = 0; i < 100; i++) {
+      writeVerifyReport(tp.paths, report);
+      const got = readVerifyReport(tp.paths);
+      expect(got).not.toBeNull();
+      expect(got!.ok).toBe(true);
+    }
   });
 });
 

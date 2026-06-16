@@ -808,6 +808,7 @@ comparing against archived golden fixtures.
 |---|---|
 | 0 | Success |
 | 1 | General failure (invalid state, unknown command, missing args, `unknown_field` on `state set`, `drift_not_found` / `already_resolved` on `drift resolve`, lease collision on `th build claim`) |
+| 2 | Path containment violation — a path-escape attempt (a `..`/absolute/separator-bearing segment where a single in-root component is required, e.g. `th collab fragment --name "../x"`); returns a structured `path_containment` failure instead of a raw stack |
 | 3 | Blast-radius veto (`th tier veto-check` blocked; also `brownfield_prerequisite_missing` when repo map or codebase analysis is absent) |
 | 4 | Repo map stale (`th repo check` — files added/removed/modified since last `th repo map`) |
 | 5 | Repo map absent (`th repo check` — `.twinharness/repo-map.json` not found; run `th repo map` first) |

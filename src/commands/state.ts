@@ -185,5 +185,15 @@ export function runStateVerify(paths: ProjectPaths): CommandResult {
   const r = readState(paths);
   if (!r.exists) return failure({ human: "No state.json found.", data: { valid: false, error: "not_initialized" } });
   if (!r.state) return failure({ human: `state.json INVALID:\n${formatIssues(r.issues)}`, data: { valid: false, issues: r.issues } });
+  // A valid file may still carry non-fatal warnings (ARCH-007) — e.g. an unknown
+  // top-level key. Surface them WITHOUT failing: the file is still valid (exit 0),
+  // the operator just sees the advisory so a typo/forward-compat field is visible.
+  const warnings = r.warnings ?? [];
+  if (warnings.length > 0) {
+    return success({
+      data: { valid: true, warnings },
+      human: `state.json is valid (with ${warnings.length} warning(s)):\n${formatIssues(warnings)}`,
+    });
+  }
   return success({ data: { valid: true }, human: "state.json is valid." });
 }

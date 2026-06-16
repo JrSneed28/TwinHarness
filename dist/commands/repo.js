@@ -66,6 +66,10 @@ const schema_1 = require("../core/repo-map/schema");
 const hash_1 = require("../core/hash");
 const atomic_io_1 = require("../core/atomic-io");
 const query_1 = require("../core/repo-map/query");
+const freshness_1 = require("../core/repo-map/freshness");
+const freshness_codes_1 = require("../core/repo-map/freshness-codes");
+Object.defineProperty(exports, "REPO_STALE_EXIT", { enumerable: true, get: function () { return freshness_codes_1.REPO_STALE_EXIT; } });
+Object.defineProperty(exports, "REPO_NO_MAP_EXIT", { enumerable: true, get: function () { return freshness_codes_1.REPO_NO_MAP_EXIT; } });
 /** `--format` text-rendering values (distinct from the global `--json` envelope). */
 const FORMATS = ["summary", "json", "md"];
 /** Relative artifact paths (POSIX) reported in `data.artifacts`. */
@@ -568,15 +572,6 @@ function formatImpactHuman(result, format) {
     }
     return lines.join("\n");
 }
-// ---------------------------------------------------------------------------
-// `th repo check` (IF-001 / REQ-201..205, REQ-NFR-002/003/004)
-// ---------------------------------------------------------------------------
-/**
- * Exit codes for `th repo check` (IF-001).
- * Anchor: REQ-203 — three-way exit: 0 fresh / 4 stale / 5 no-map / 1 parse-fail.
- */
-exports.REPO_STALE_EXIT = 4;
-exports.REPO_NO_MAP_EXIT = 5;
 /**
  * `th repo check [--json]` — load the persisted map, rescan the working tree within
  * scope, diff `fileHashes`, and return a three-way Staleness Outcome.
@@ -605,6 +600,15 @@ exports.REPO_NO_MAP_EXIT = 5;
  */
 function runRepoCheck(paths, _opts = {}) {
     const REPO_MAP_JSON = path.join(paths.stateDir, "repo-map.json");
+    // This handler is now PURE I/O + delegation (ARCH-002): it reads the map, scans
+    // and hashes the working tree, then hands the loaded inputs to the pure
+    // `computeFreshness` taxonomy. The exit code, `--json` data shape, human text,
+    // and structuredLog record are all owned by the pure module — byte-identical to
+    // the previous in-command logic.
+    const emit = (outcome) => {
+        (0, log_1.structuredLog)(outcome.log);
+        return { ok: outcome.ok, exitCode: outcome.exitCode, data: outcome.data, human: outcome.human };
+    };
     // ---- Step 1: Load the persisted map ----------------------------------------
     let rawMap = null;
     try {
@@ -612,45 +616,19 @@ function runRepoCheck(paths, _opts = {}) {
     }
     catch {
         // File absent → no-map (exit 5).
-        (0, log_1.structuredLog)({ cmd: "repo check", outcome: "no-map" });
-        return {
-            ok: false,
-            exitCode: exports.REPO_NO_MAP_EXIT,
-            data: { ok: false, fresh: false, shape: "no-map" },
-            human: "No repo-map.json found. Run `th repo map` first.",
-        };
+        return emit((0, freshness_1.computeFreshness)({ kind: "no-map" }));
     }
     // ---- Step 2: Parse the map (tagged failure, never throws) ------------------
     const parsed = (0, schema_1.parseRepoMap)(rawMap);
     if (!parsed.ok || !parsed.map) {
         const errorCode = parsed.error ?? "map_invalid-json";
-        (0, log_1.structuredLog)({ cmd: "repo check", outcome: "parse-fail", error: errorCode });
-        return {
-            ok: false,
-            exitCode: 1,
-            data: { ok: false, error: errorCode },
-            human: `repo-map.json parse failure: ${errorCode}. Run \`th repo map\` to regenerate.`,
-        };
+        return emit((0, freshness_1.computeFreshness)({ kind: "parse-fail", error: errorCode }));
     }
     const map = parsed.map;
     // ---- Step 3: Graceful degradation — no fileHashes in map (REQ-NFR-004) ----
     // Anchor: REQ-NFR-004 — valid map without fileHashes → no_hashes stale (exit 4, not crash/fresh).
     if (!map.fileHashes || Object.keys(map.fileHashes).length === 0) {
-        (0, log_1.structuredLog)({ cmd: "repo check", outcome: "stale", reason: "no_hashes" });
-        return {
-            ok: false,
-            exitCode: exports.REPO_STALE_EXIT,
-            data: {
-                ok: false,
-                fresh: false,
-                shape: "stale",
-                added: [],
-                removed: [],
-                modified: [],
-                reason: "no_hashes",
-            },
-            human: "repo-map.json exists but has no fileHashes. Run `th repo map` to update it.",
-        };
+        return emit((0, freshness_1.computeFreshness)({ kind: "no-hashes" }));
     }
     // ---- Step 4: Rescan the working tree (same scope as runRepoMap) -------------
     // Reuse scanRepo defaults (GENERATED_DIRS, FILE_COUNT_CAP) for scope coherence
@@ -676,73 +654,9 @@ function runRepoCheck(paths, _opts = {}) {
             // as "removed" only if it was previously tracked in map.fileHashes.
         }
     }
-    // ---- Step 6: Diff the two hash maps ----------------------------------------
+    // ---- Step 6: Diff the two hash maps, then delegate the taxonomy -------------
     // Anchor: REQ-202 — detect added/removed/modified within scanner scope.
     // Anchor: REQ-NFR-002 — hash-compare only; no mtime; deterministic.
-    const storedHashes = map.fileHashes;
-    const added = [];
-    const removed = [];
-    const modified = [];
-    // Files in current tree but not in stored map → added.
-    for (const [p, h] of Object.entries(currentHashes)) {
-        if (!(p in storedHashes)) {
-            added.push(p);
-        }
-        else if (storedHashes[p] !== h) {
-            modified.push(p);
-        }
-    }
-    // Files in stored map but not in current tree → removed.
-    for (const p of Object.keys(storedHashes)) {
-        if (!(p in currentHashes)) {
-            removed.push(p);
-        }
-    }
-    // Sort for determinism (REQ-NFR-002).
-    added.sort();
-    removed.sort();
-    modified.sort();
-    const isFresh = added.length === 0 && removed.length === 0 && modified.length === 0;
-    if (isFresh) {
-        (0, log_1.structuredLog)({ cmd: "repo check", outcome: "fresh" });
-        return {
-            ok: true,
-            exitCode: 0,
-            data: {
-                ok: true,
-                fresh: true,
-                shape: "fresh",
-                added: [],
-                removed: [],
-                modified: [],
-            },
-            human: "repo-map.json is fresh — working tree matches the persisted map.",
-        };
-    }
-    (0, log_1.structuredLog)({
-        cmd: "repo check",
-        outcome: "stale",
-        added: added.length,
-        removed: removed.length,
-        modified: modified.length,
-    });
-    return {
-        ok: false,
-        exitCode: exports.REPO_STALE_EXIT,
-        data: {
-            ok: false,
-            fresh: false,
-            shape: "stale",
-            added,
-            removed,
-            modified,
-        },
-        human: [
-            "repo-map.json is stale.",
-            added.length > 0 ? `  added (${added.length}): ${added.slice(0, 5).join(", ")}${added.length > 5 ? " ..." : ""}` : null,
-            removed.length > 0 ? `  removed (${removed.length}): ${removed.slice(0, 5).join(", ")}${removed.length > 5 ? " ..." : ""}` : null,
-            modified.length > 0 ? `  modified (${modified.length}): ${modified.slice(0, 5).join(", ")}${modified.length > 5 ? " ..." : ""}` : null,
-            "Run `th repo map` to update.",
-        ].filter(Boolean).join("\n"),
-    };
+    const { added, removed, modified } = (0, freshness_1.diffHashes)(map.fileHashes, currentHashes);
+    return emit((0, freshness_1.computeFreshness)({ kind: "diff", added, removed, modified }));
 }

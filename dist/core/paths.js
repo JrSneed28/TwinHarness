@@ -33,10 +33,36 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.PathContainmentError = void 0;
 exports.resolveWithinRoot = resolveWithinRoot;
 exports.resolveProjectPaths = resolveProjectPaths;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+/**
+ * Thrown when a caller attempts to operate on a path that escapes the project
+ * root (an absolute path, a `..` segment, or a separator-bearing component where
+ * a single component is required). Lives here, beside {@link resolveWithinRoot},
+ * because root-relative containment is the invariant this whole module enforces.
+ *
+ * A DISTINCT, typed error (with a stable `code`) so the single CLI boundary
+ * (cli.ts) can map it to a structured `failure(...)` — and therefore a valid
+ * `--json` envelope plus a sensible exit code — instead of letting a raw Node
+ * stack escape (ARCH-003). The `code` mirrors the convention the state-store
+ * uses for its lock/contention errors so the boundary can switch on it uniformly.
+ */
+class PathContainmentError extends Error {
+    segment;
+    /** Stable machine token surfaced in the `--json` failure envelope. */
+    code = "path_containment";
+    constructor(message, 
+    /** The offending path/segment, echoed into the structured failure data. */
+    segment) {
+        super(message);
+        this.segment = segment;
+        this.name = "PathContainmentError";
+    }
+}
+exports.PathContainmentError = PathContainmentError;
 /**
  * Resolve `p` (absolute, or relative to `root`) to an absolute path, but ONLY
  * if it stays within `root`. Returns null when the path escapes the project

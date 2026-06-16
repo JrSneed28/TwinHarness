@@ -64,8 +64,9 @@ describe("SLICE-0 characterization: MCP tool registry baseline (Seam B)", () => 
     expect(mapped.content).toHaveLength(1);
     expect(mapped.content[0]).toMatchObject({ type: "text", text: "characterization: 16 tools at baseline" });
 
-    // structuredContent carries the data payload for machine consumption
-    expect(mapped.structuredContent).toEqual({ tool: "th_state_get", count: 16, seam: "B" });
+    // structuredContent carries the data payload for machine consumption,
+    // now additively merged with the numeric exit code (ARCH-005).
+    expect(mapped.structuredContent).toEqual({ tool: "th_state_get", count: 16, seam: "B", exitCode: 0 });
   });
 
   /**

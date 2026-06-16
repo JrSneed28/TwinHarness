@@ -76,6 +76,12 @@ function isPlainObject(v) {
 function isInteger(v) {
     return typeof v === "number" && Number.isInteger(v);
 }
+/**
+ * The recognized top-level keys, derived from the canonical field order so the
+ * known-key set can never drift from the schema. Used only to flag UNKNOWN keys
+ * as non-fatal warnings (ARCH-007) — it never rejects a state.
+ */
+const KNOWN_TOP_LEVEL_KEYS = new Set(exports.STATE_FIELD_ORDER);
 /** Validate an arbitrary parsed value against the state schema. */
 function validateState(value) {
     const issues = [];
@@ -83,6 +89,17 @@ function validateState(value) {
         return { ok: false, issues: [{ path: "$", message: "state must be a JSON object" }] };
     }
     const v = value;
+    // ARCH-007 — non-fatal unknown-top-level-key warnings. We do NOT hard-reject
+    // unknown keys: that would break forward-compat state files (a newer field this
+    // binary doesn't know yet) and the serialize round-trip. Instead surface them
+    // as advisories so a typo (e.g. `teir`) or an unexpected field is visible while
+    // the file still validates. Sorted for deterministic output.
+    const warnings = [];
+    for (const key of Object.keys(v).sort()) {
+        if (!KNOWN_TOP_LEVEL_KEYS.has(key)) {
+            warnings.push({ path: key, message: `unknown top-level key (not in the state schema)` });
+        }
+    }
     // Optional schema_version: absent ⇒ legacy v1. When present it must be a
     // positive integer. A version newer than CURRENT is still structurally valid
     // here; `th migrate` is responsible for refusing to downgrade.
@@ -203,9 +220,12 @@ function validateState(value) {
         v.blast_radius_flags.length > 0) {
         issues.push({ path: "tier", message: "Tier 0 is vetoed when blast-radius flags are present (§5)" });
     }
+    // Warnings ride along on BOTH the valid and invalid result (non-fatal — they
+    // never change `ok`). Omitted when empty so existing callers/tests are unaffected.
+    const warn = warnings.length > 0 ? { warnings } : {};
     if (issues.length > 0)
-        return { ok: false, issues };
-    return { ok: true, issues: [], state: value };
+        return { ok: false, issues, ...warn };
+    return { ok: true, issues: [], ...warn, state: value };
 }
 /**
  * Deterministic serialization in canonical field order, trailing newline.

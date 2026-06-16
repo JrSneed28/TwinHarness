@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { resolveProjectPaths } from "./core/paths";
+import { resolveProjectPaths, PathContainmentError } from "./core/paths";
 import { type CommandResult, renderResult, failure, success } from "./core/output";
 import { runInit } from "./commands/init";
 import { runStateGet, runStateSet, runStateStatus, runStateVerify } from "./commands/state";
@@ -957,13 +957,23 @@ function main(): void {
   try {
     result = dispatch(parsed);
   } catch (e) {
-    // Contention on the state store (lock timeout, or a write that lost the
-    // rename race past its retry budget) surfaces as a typed error. Convert it
-    // to a clean structured failure here — at the single CLI boundary — so every
-    // mutating command gets non-zero exit + valid --json instead of a raw stack
-    // crash (C-2 / M-3). Any other error is a real bug and must propagate.
+    // Map KNOWN typed core errors to a clean structured failure here — at the
+    // single CLI boundary — so every command returns a non-zero exit + a valid
+    // --json envelope instead of a raw Node stack crash. Two families flow here:
+    //   • State-store contention (lock timeout, or a write that lost the rename
+    //     race past its retry budget) — C-2 / M-3.
+    //   • Path-containment violations (an absolute / ".." / separator-bearing
+    //     path segment that escapes the project root) — ARCH-003. Before this,
+    //     e.g. `th collab fragment --name "../x"` threw a raw Error whose stack,
+    //     under --json, was unstructured garbage.
+    // All are switched on by their stable `code` so the mapping stays uniform.
+    // A PathContainmentError is a client/security reject (exit 2), distinct from
+    // a transient-contention exit (1, "retry the command"). Any OTHER error is a
+    // real bug and must propagate.
     const code = (e as { code?: string }).code;
-    if (code === "state_lock_timeout" || code === "state_write_contended") {
+    if (e instanceof PathContainmentError) {
+      result = failure({ human: e.message, data: { error: e.code, segment: e.segment }, exitCode: 2 });
+    } else if (code === "state_lock_timeout" || code === "state_write_contended") {
       result = failure({ human: (e as Error).message, data: { error: code } });
     } else {
       throw e;

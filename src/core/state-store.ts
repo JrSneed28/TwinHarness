@@ -31,6 +31,12 @@ export interface ReadStateResult {
   state?: TwinHarnessState;
   /** Present when the file exists but is invalid JSON or fails schema validation. */
   issues?: ValidationIssue[];
+  /**
+   * NON-fatal validation advisories (ARCH-007) — e.g. unknown top-level keys. A
+   * warning never makes `state` absent; a valid-but-warned file still yields a
+   * populated `state`. Absent when there are none.
+   */
+  warnings?: ValidationIssue[];
 }
 
 /** Read + validate state.json. Distinguishes "missing" from "present but invalid". */
@@ -47,9 +53,11 @@ export function readState(paths: ProjectPaths): ReadStateResult {
   }
   const result = validateState(parsed);
   if (!result.ok) {
-    return { exists: true, raw, issues: result.issues };
+    return { exists: true, raw, issues: result.issues, warnings: result.warnings };
   }
-  return { exists: true, raw, state: result.state };
+  // A valid file may still carry non-fatal warnings (e.g. an unknown top-level
+  // key); thread them through so callers like `th state verify` can surface them.
+  return { exists: true, raw, state: result.state, warnings: result.warnings };
 }
 
 /**

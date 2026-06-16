@@ -117,6 +117,15 @@ export interface ValidationIssue {
 export interface ValidationResult {
   ok: boolean;
   issues: ValidationIssue[];
+  /**
+   * NON-fatal advisories (ARCH-007). Unlike `issues` (which make a state invalid
+   * and flip `ok`), a warning never affects `ok`, never appears in `issues`, and
+   * never blocks serialization — the state still round-trips byte-identically.
+   * Currently surfaces unknown top-level keys: a forward-compat or typo signal
+   * the operator should see without rejecting an otherwise-valid file. Absent
+   * (undefined) when there are none, so existing callers and tests are unaffected.
+   */
+  warnings?: ValidationIssue[];
   state?: TwinHarnessState;
 }
 
@@ -165,6 +174,13 @@ function isInteger(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v);
 }
 
+/**
+ * The recognized top-level keys, derived from the canonical field order so the
+ * known-key set can never drift from the schema. Used only to flag UNKNOWN keys
+ * as non-fatal warnings (ARCH-007) — it never rejects a state.
+ */
+const KNOWN_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set(STATE_FIELD_ORDER as string[]);
+
 /** Validate an arbitrary parsed value against the state schema. */
 export function validateState(value: unknown): ValidationResult {
   const issues: ValidationIssue[] = [];
@@ -172,6 +188,18 @@ export function validateState(value: unknown): ValidationResult {
     return { ok: false, issues: [{ path: "$", message: "state must be a JSON object" }] };
   }
   const v = value;
+
+  // ARCH-007 — non-fatal unknown-top-level-key warnings. We do NOT hard-reject
+  // unknown keys: that would break forward-compat state files (a newer field this
+  // binary doesn't know yet) and the serialize round-trip. Instead surface them
+  // as advisories so a typo (e.g. `teir`) or an unexpected field is visible while
+  // the file still validates. Sorted for deterministic output.
+  const warnings: ValidationIssue[] = [];
+  for (const key of Object.keys(v).sort()) {
+    if (!KNOWN_TOP_LEVEL_KEYS.has(key)) {
+      warnings.push({ path: key, message: `unknown top-level key (not in the state schema)` });
+    }
+  }
 
   // Optional schema_version: absent ⇒ legacy v1. When present it must be a
   // positive integer. A version newer than CURRENT is still structurally valid
@@ -307,8 +335,11 @@ export function validateState(value: unknown): ValidationResult {
     issues.push({ path: "tier", message: "Tier 0 is vetoed when blast-radius flags are present (§5)" });
   }
 
-  if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, issues: [], state: value as unknown as TwinHarnessState };
+  // Warnings ride along on BOTH the valid and invalid result (non-fatal — they
+  // never change `ok`). Omitted when empty so existing callers/tests are unaffected.
+  const warn = warnings.length > 0 ? { warnings } : {};
+  if (issues.length > 0) return { ok: false, issues, ...warn };
+  return { ok: true, issues: [], ...warn, state: value as unknown as TwinHarnessState };
 }
 
 /**
