@@ -1,12 +1,27 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "./paths";
+import { atomicWriteFile, readFileWithRetry } from "./atomic-io";
 import {
   type TwinHarnessState,
   type ValidationIssue,
   serializeState,
   validateState,
 } from "./state-schema";
+
+/**
+ * Thrown by {@link withStateLock} when the lock cannot be acquired within the
+ * timeout. Carries a stable `code` so the CLI boundary maps it to
+ * `failure({ error: "state_lock_timeout" })` and `--json` callers get clean
+ * output instead of a raw stack (M-3).
+ */
+export class LockTimeoutError extends Error {
+  readonly code = "state_lock_timeout";
+  constructor(lockDir: string) {
+    super(`state lock timeout: ${lockDir} is held; remove it if no \`th\` process is running.`);
+    this.name = "LockTimeoutError";
+  }
+}
 
 export interface ReadStateResult {
   exists: boolean;
@@ -22,7 +37,7 @@ export function readState(paths: ProjectPaths): ReadStateResult {
   if (!fs.existsSync(paths.stateFile)) {
     return { exists: false };
   }
-  const raw = fs.readFileSync(paths.stateFile, "utf8");
+  const raw = readFileWithRetry(paths.stateFile);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -43,11 +58,11 @@ export function readState(paths: ProjectPaths): ReadStateResult {
  * observed and is *replaced, not duplicated* on resume (spec §18 idempotency).
  */
 export function writeState(paths: ProjectPaths, state: TwinHarnessState): void {
-  fs.mkdirSync(paths.stateDir, { recursive: true });
-  const serialized = serializeState(state);
-  const tmp = path.join(paths.stateDir, `state.json.tmp-${process.pid}`);
-  fs.writeFileSync(tmp, serialized, "utf8");
-  fs.renameSync(tmp, paths.stateFile);
+  // atomicWriteFile retries the rename on transient contention (a concurrent
+  // reader holding the file open → EPERM/EACCES/EBUSY on Windows) and, only if
+  // the budget is exhausted, throws StateWriteContendedError — which the CLI
+  // boundary turns into a clean structured failure (C-2).
+  atomicWriteFile(paths.stateFile, serializeState(state));
 }
 
 /**
@@ -94,17 +109,38 @@ export function isLockHeldError(code: string | undefined): boolean {
   return code === "EEXIST" || code === "EPERM" || code === "EACCES";
 }
 
+/** Read the lock's owner token, or null if absent/unreadable. */
+function readLockOwner(ownerFile: string): string | null {
+  try {
+    return fs.readFileSync(ownerFile, "utf8");
+  } catch {
+    return null;
+  }
+}
+
 export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
   if (!fs.existsSync(paths.stateDir)) return fn();
 
   const lockDir = path.join(paths.stateDir, ".state.lock");
-  const STALE_MS = 30_000;
+  const ownerFile = path.join(lockDir, "owner");
+  // A pid+nonce stamped into the lock on acquire. Used to close the 3-party
+  // stale-lock TOCTOU: a waiter only steals the SAME stale lock it observed.
+  const myToken = `${process.pid}-${Math.random().toString(36).slice(2)}`;
+  // STALE_MS < TIMEOUT_MS so a crashed holder's lock becomes stealable strictly
+  // before a healthy waiter gives up (the original had STALE 30s > TIMEOUT 10s,
+  // which could wedge waiters: they'd time out before the lock ever went stale).
+  const STALE_MS = 5_000;
   const TIMEOUT_MS = 10_000;
   const deadline = Date.now() + TIMEOUT_MS;
 
   for (;;) {
     try {
       fs.mkdirSync(lockDir); // atomic test-and-set: throws EEXIST (POSIX) / EPERM|EACCES (Windows) if held
+      try {
+        fs.writeFileSync(ownerFile, myToken, "utf8");
+      } catch {
+        /* best-effort owner stamp; absence just means a steal can't TOCTOU-verify */
+      }
       break;
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
@@ -116,9 +152,16 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
       // permission error (not contention) so we rethrow the original; for EEXIST
       // the dir just vanished and we retry.
       try {
+        const ownerBefore = readLockOwner(ownerFile);
         const age = Date.now() - fs.statSync(lockDir).mtimeMs;
         if (age > STALE_MS) {
-          fs.rmSync(lockDir, { recursive: true, force: true });
+          // TOCTOU guard: only steal if the owner token is unchanged since we
+          // observed the stale lock. If another waiter already stole and
+          // re-acquired (fresh token, or a fresh mtime), we must NOT clobber its
+          // live lock — fall through and retry/wait instead.
+          if (readLockOwner(ownerFile) === ownerBefore) {
+            fs.rmSync(lockDir, { recursive: true, force: true });
+          }
           continue;
         }
       } catch (statErr) {
@@ -126,7 +169,7 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
         continue; // EEXIST: lock vanished between mkdir and stat — retry
       }
       if (Date.now() > deadline) {
-        throw new Error(`state lock timeout: ${lockDir} is held; remove it if no \`th\` process is running.`);
+        throw new LockTimeoutError(lockDir);
       }
       const spinUntil = Date.now() + 20;
       while (Date.now() < spinUntil) {
