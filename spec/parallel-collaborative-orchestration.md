@@ -322,7 +322,7 @@ traceable core.
 > **Why this is in this plan.** The whole parallelism design above leans on the typed
 > coordination/observability surface (`th build dispatch/claim/release`, leases, `th next`,
 > `th route`, `th delegate *`, the new debate/collab verbs). TwinHarness already ships that
-> surface as an MCP server — **23 tools** (`mcp__plugin_twinharness_th__*`, built into
+> surface as an MCP server — **35 tools** (`mcp__plugin_twinharness_th__*`, built into
 > `dist/mcp-server.js`, registered in `.claude-plugin/plugin.json`). But it is currently
 > utilized **0%**: neither the main context nor any agent ever calls a single MCP tool. Every
 > coordination call shells out to `node dist/cli.js` instead. Making the MCP layer actually
