@@ -64,7 +64,6 @@ exports.verifyChain = verifyChain;
 exports.verifyApprovalSeals = verifyApprovalSeals;
 exports.reduceDecisions = reduceDecisions;
 exports.sortDecisions = sortDecisions;
-exports.findDecision = findDecision;
 exports.canonicalStageLink = canonicalStageLink;
 exports.canonicalizeLink = canonicalizeLink;
 exports.gatingObligations = gatingObligations;
@@ -393,10 +392,6 @@ function reduceDecisions(events) {
 /** Sort decisions by numeric `DECISION-NNN` suffix (deterministic — REQ-NFR-002). */
 function sortDecisions(decisions) {
     return [...decisions].sort((a, b) => (numericSuffix(a.id) ?? 0) - (numericSuffix(b.id) ?? 0));
-}
-/** Look up a single reduced decision by id (convenience for the handlers). */
-function findDecision(events, id) {
-    return reduceDecisions(events).find((d) => d.id === id);
 }
 // ---------------------------------------------------------------------------
 // gatingObligations — THE single governance predicate (RULE-007)

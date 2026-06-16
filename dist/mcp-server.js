@@ -16230,28 +16230,87 @@ ${formatIssues(validation.issues)}`,
 // src/commands/drift.ts
 var fs6 = __toESM(require("node:fs"));
 
+// src/core/md-ledger.ts
+function formatLedgerEntry(entry, config2) {
+  const heading = `## ${entry.id}  (${entry.head}, ${entry.source})  \u2014 ${config2.headingTail(entry)}`;
+  const lines = [heading];
+  for (const field of config2.fields) {
+    lines.push(`${field.label}: ${field.value(entry)}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+function extractHead(paren) {
+  const lastComma = paren.lastIndexOf(",");
+  if (lastComma < 0) return paren.trim();
+  return paren.slice(0, lastComma).trim();
+}
+function parseLedgerEntries(text, headingRe, fieldRe, make, assign) {
+  const entries = [];
+  const lines = text.split(/\r?\n/);
+  let current;
+  for (const line of lines) {
+    const head = headingRe.exec(line);
+    if (head) {
+      if (current) entries.push(current);
+      current = make({ id: head[1], head: extractHead(head[2]), tag: head[3] });
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      if (current) {
+        entries.push(current);
+        current = void 0;
+      }
+      continue;
+    }
+    if (current) {
+      const field = fieldRe.exec(line);
+      if (field) {
+        assign(current, field[1], field[2]);
+      }
+    }
+  }
+  if (current) entries.push(current);
+  return entries;
+}
+function nextLedgerId(text, prefix) {
+  let max = 0;
+  const re = new RegExp(`${prefix}-(\\d+)`, "g");
+  for (const m of text.matchAll(re)) {
+    const n = Number(m[1]);
+    if (n > max) max = n;
+  }
+  return `${prefix}-${String(max + 1).padStart(3, "0")}`;
+}
+
 // src/core/drift-log.ts
 function actionTag(layer) {
   return layer === "requirement" ? "BLOCKING" : "auto-applied";
 }
+var DRIFT_LEDGER = {
+  headingTail: (e) => `${e.layer} layer, ${actionTag(e.layer)}`,
+  fields: [
+    { label: "Discovery ", value: (e) => e.discovery },
+    { label: "Action    ", value: (e) => e.action },
+    { label: "Escalation", value: (e) => e.escalation }
+  ]
+};
 function formatDriftEntry(entry) {
-  const src = entry.source ?? "Builder";
-  const heading = `## ${entry.id}  (${entry.ref}, ${src})  \u2014 ${entry.layer} layer, ${actionTag(entry.layer)}`;
-  return [
-    heading,
-    `Discovery : ${entry.discovery}`,
-    `Action    : ${entry.action}`,
-    `Escalation: ${entry.escalation}`,
-    ""
-  ].join("\n");
+  return formatLedgerEntry(
+    {
+      id: entry.id,
+      head: entry.ref,
+      source: entry.source ?? "Builder",
+      layer: entry.layer,
+      discovery: entry.discovery,
+      action: entry.action,
+      escalation: entry.escalation
+    },
+    DRIFT_LEDGER
+  );
 }
 function nextDriftId(text) {
-  let max = 0;
-  for (const m of text.matchAll(/DRIFT-(\d+)/g)) {
-    const n = Number(m[1]);
-    if (n > max) max = n;
-  }
-  return `DRIFT-${String(max + 1).padStart(3, "0")}`;
+  return nextLedgerId(text, "DRIFT");
 }
 
 // src/commands/drift.ts
@@ -16610,20 +16669,14 @@ function computeRoute(input) {
 
 // src/commands/build.ts
 function runBuildPlan(paths, opts = {}) {
-  const r = readState(paths);
-  if (!r.exists) return NOT_INIT;
-  if (!r.state) {
-    return failure({
-      human: `state.json is invalid:
-${formatIssues(r.issues)}`,
-      data: { error: "invalid_state", issues: r.issues }
-    });
-  }
-  const selected = opts.includeDone ? r.state.slices : r.state.slices.filter((s) => s.status !== "done");
+  const sr = requireState(paths);
+  if (sr.result) return sr.result;
+  const state = sr.state;
+  const selected = opts.includeDone ? state.slices : state.slices.filter((s) => s.status !== "done");
   const waves = scheduleWaves(selected);
   const conflicts = conflictPairs(selected);
   const parallelism = waves.reduce((max, w) => Math.max(max, w.length), 0);
-  const deps = validateDeps(r.state.slices);
+  const deps = validateDeps(state.slices);
   const depIssues = hasDepIssues(deps);
   structuredLog({
     cmd: "build plan",
@@ -16659,13 +16712,10 @@ ${formatIssues(r.issues)}`,
   return success({ data, human });
 }
 function runBuildNextWave(paths) {
-  const r = readState(paths);
-  if (!r.exists) return NOT_INIT;
-  if (!r.state) {
-    return failure({ human: `state.json is invalid:
-${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
-  }
-  const slices = r.state.slices;
+  const sr = requireState(paths);
+  if (sr.result) return sr.result;
+  const state = sr.state;
+  const slices = state.slices;
   const anyInProgress = slices.some((s) => s.status === "in-progress");
   const occupied = occupiedComponents(paths, slices);
   const { wave, held, stalled } = computeWave(slices, occupied, anyInProgress);
@@ -16682,26 +16732,23 @@ ${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } }
   return success({ data: { wave, held, stalled, deps }, human: lines.join("\n") });
 }
 function runBuildDispatch(paths) {
-  const r = readState(paths);
-  if (!r.exists) return NOT_INIT;
-  if (!r.state) {
-    return failure({ human: `state.json is invalid:
-${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
-  }
-  const slices = r.state.slices;
+  const sr = requireState(paths);
+  if (sr.result) return sr.result;
+  const state = sr.state;
+  const slices = state.slices;
   const anyInProgress = slices.some((s) => s.status === "in-progress");
   const occupied = occupiedComponents(paths, slices);
   const { wave, held, stalled } = computeWave(slices, occupied, anyInProgress);
   const deps = validateDeps(slices);
-  const componentBlast = r.state.blast_radius_flags.length > 0;
+  const componentBlast = state.blast_radius_flags.length > 0;
   const byId = new Map(slices.map((s) => [s.id, s]));
   const dispatch = wave.map((id) => {
     const slice = byId.get(id);
     const route = computeRoute({
       agent: "builder",
       mode: "slice",
-      tier: r.state.tier,
-      blastFlags: r.state.blast_radius_flags,
+      tier: state.tier,
+      blastFlags: state.blast_radius_flags,
       componentBlast
     });
     return { sliceId: id, components: slice.components, model: route.model, effort: route.effort };
@@ -16735,13 +16782,12 @@ function leaseUsage(action) {
 function runBuildClaim(paths, sliceId) {
   if (!sliceId) return leaseUsage("claim");
   return withStateLock(paths, () => {
-    const r = readState(paths);
-    if (!r.exists) return NOT_INIT;
-    if (!r.state) return failure({ human: `state.json is invalid:
-${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
-    const slice = r.state.slices.find((s) => s.id === sliceId);
+    const sr = requireState(paths);
+    if (sr.result) return sr.result;
+    const state = sr.state;
+    const slice = state.slices.find((s) => s.id === sliceId);
     if (!slice) {
-      return failure({ human: `Slice not found: ${sliceId}. Known: ${r.state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", sliceId } });
+      return failure({ human: `Slice not found: ${sliceId}. Known: ${state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", sliceId } });
     }
     if (slice.status !== "in-progress") {
       return failure({
@@ -16750,7 +16796,7 @@ ${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } }
       });
     }
     const owners = /* @__PURE__ */ new Map();
-    for (const lease of liveLeases(paths, r.state.slices)) {
+    for (const lease of liveLeases(paths, state.slices)) {
       for (const c of lease.components) if (!owners.has(c)) owners.set(c, lease.slice);
     }
     const conflicts = slice.components.map((c) => ({ component: c, owner: owners.get(c) })).filter((x) => x.owner !== void 0 && x.owner !== sliceId);
@@ -16768,10 +16814,8 @@ ${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } }
 function runBuildRelease(paths, sliceId) {
   if (!sliceId) return leaseUsage("release");
   return withStateLock(paths, () => {
-    const r = readState(paths);
-    if (!r.exists) return NOT_INIT;
-    if (!r.state) return failure({ human: `state.json is invalid:
-${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+    const sr = requireState(paths);
+    if (sr.result) return sr.result;
     const held = activeLeases(paths).find((l) => l.slice === sliceId);
     appendLeaseEvent(paths, { event: "release", slice: sliceId, components: held?.components ?? [] });
     structuredLog({ cmd: "build release", slice: sliceId });
@@ -16784,13 +16828,12 @@ function runBuildSubClaim(paths, parentSlice, components) {
     return failure({ human: "usage: th build sub-claim <PARENT-SLICE> --components <c1,c2,...>", data: { error: "no_components" } });
   }
   return withStateLock(paths, () => {
-    const r = readState(paths);
-    if (!r.exists) return NOT_INIT;
-    if (!r.state) return failure({ human: `state.json is invalid:
-${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
-    const parent = r.state.slices.find((s) => s.id === parentSlice);
+    const sr = requireState(paths);
+    if (sr.result) return sr.result;
+    const state = sr.state;
+    const parent = state.slices.find((s) => s.id === parentSlice);
     if (!parent) {
-      return failure({ human: `Parent slice not found: ${parentSlice}. Known: ${r.state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", parent: parentSlice } });
+      return failure({ human: `Parent slice not found: ${parentSlice}. Known: ${state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", parent: parentSlice } });
     }
     if (parent.status !== "in-progress") {
       return failure({
@@ -16807,7 +16850,7 @@ ${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } }
       });
     }
     const siblings = subLeasesOf(paths, parentSlice);
-    const live = new Set(liveLeases(paths, r.state.slices).map((l) => l.slice));
+    const live = new Set(liveLeases(paths, state.slices).map((l) => l.slice));
     const owners = /* @__PURE__ */ new Map();
     for (const sib of siblings) {
       if (!live.has(sib.slice)) continue;
@@ -16834,10 +16877,8 @@ ${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } }
 function runBuildSubRelease(paths, subId) {
   if (!subId) return failure({ human: "usage: th build sub-release <SUB-ID>" });
   return withStateLock(paths, () => {
-    const r = readState(paths);
-    if (!r.exists) return NOT_INIT;
-    if (!r.state) return failure({ human: `state.json is invalid:
-${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+    const sr = requireState(paths);
+    if (sr.result) return sr.result;
     const held = activeLeases(paths).find((l) => l.slice === subId && l.parent !== void 0);
     if (!held) {
       return failure({
@@ -18640,6 +18681,23 @@ function runRepoMap(paths, opts = {}) {
   return success({ data, human });
 }
 var REPO_MAP_REL = "repo-map.json";
+function loadPersistedMap(paths, cmd) {
+  const mapJsonPath = path15.join(paths.stateDir, REPO_MAP_REL);
+  let rawMap = null;
+  try {
+    rawMap = fs16.readFileSync(mapJsonPath, "utf8");
+  } catch {
+    rawMap = null;
+  }
+  const parsed = parseRepoMap(rawMap);
+  if (!parsed.ok || !parsed.map) {
+    const errorCode = rawMap === null ? "map_missing" : parsed.error ?? "map_missing";
+    const human = errorCode === "map_missing" ? "No repo-map.json found. Run `th repo map` first." : `repo-map.json is invalid: ${errorCode}. Run \`th repo map\` to regenerate.`;
+    structuredLog({ cmd, error: errorCode });
+    return { result: failure({ human, data: { error: errorCode } }) };
+  }
+  return { map: parsed.map };
+}
 function runRepoRelevant(paths, opts = {}) {
   if (opts.file !== void 0) {
     const resolved = resolveWithinRoot(paths.root, opts.file);
@@ -18651,21 +18709,9 @@ function runRepoRelevant(paths, opts = {}) {
       });
     }
   }
-  const mapJsonPath = path15.join(paths.stateDir, REPO_MAP_REL);
-  let rawMap = null;
-  try {
-    rawMap = fs16.readFileSync(mapJsonPath, "utf8");
-  } catch {
-    rawMap = null;
-  }
-  const parsed = parseRepoMap(rawMap);
-  if (!parsed.ok || !parsed.map) {
-    const errorCode = rawMap === null ? "map_missing" : parsed.error ?? "map_missing";
-    const human2 = errorCode === "map_missing" ? "No repo-map.json found. Run `th repo map` first." : `repo-map.json is invalid: ${errorCode}. Run \`th repo map\` to regenerate.`;
-    structuredLog({ cmd: "repo relevant", error: errorCode });
-    return failure({ human: human2, data: { error: errorCode } });
-  }
-  const map = parsed.map;
+  const loaded = loadPersistedMap(paths, "repo relevant");
+  if (loaded.result) return loaded.result;
+  const map = loaded.map;
   const selectors = [];
   if (opts.slice !== void 0) selectors.push({ kind: "slice", value: opts.slice });
   if (opts.req !== void 0) selectors.push({ kind: "req", value: opts.req });
@@ -18796,21 +18842,9 @@ function runRepoImpact(paths, opts = {}) {
       });
     }
   }
-  const mapJsonPath = path15.join(paths.stateDir, REPO_MAP_REL);
-  let rawMap = null;
-  try {
-    rawMap = fs16.readFileSync(mapJsonPath, "utf8");
-  } catch {
-    rawMap = null;
-  }
-  const parsed = parseRepoMap(rawMap);
-  if (!parsed.ok || !parsed.map) {
-    const errorCode = rawMap === null ? "map_missing" : parsed.error ?? "map_missing";
-    const human2 = errorCode === "map_missing" ? "No repo-map.json found. Run `th repo map` first." : `repo-map.json is invalid: ${errorCode}. Run \`th repo map\` to regenerate.`;
-    structuredLog({ cmd: "repo impact", error: errorCode });
-    return failure({ human: human2, data: { error: errorCode } });
-  }
-  const map = parsed.map;
+  const loaded = loadPersistedMap(paths, "repo impact");
+  if (loaded.result) return loaded.result;
+  const map = loaded.map;
   const selectors = [];
   if (opts.file !== void 0) selectors.push({ kind: "file", value: opts.file });
   if (opts.component !== void 0) selectors.push({ kind: "component", value: opts.component });
@@ -19930,10 +19964,8 @@ function runArtifactClaim(paths, opts = {}) {
   if (!v.ok) return v.result;
   const { section, holder } = v;
   return withStateLock(paths, () => {
-    const r = readState(paths);
-    if (!r.exists) return NOT_INIT;
-    if (!r.state) return failure({ human: `state.json is invalid:
-${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+    const sr = requireState(paths);
+    if (sr.result) return sr.result;
     if (isSectionLeased(paths, section, holder)) {
       const owner = sectionLeaseHolder(paths, section);
       return failure({
@@ -19951,20 +19983,16 @@ function runArtifactRelease(paths, opts = {}) {
   if (!v.ok) return v.result;
   const { section, holder } = v;
   return withStateLock(paths, () => {
-    const r = readState(paths);
-    if (!r.exists) return NOT_INIT;
-    if (!r.state) return failure({ human: `state.json is invalid:
-${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+    const sr = requireState(paths);
+    if (sr.result) return sr.result;
     appendLeaseEvent(paths, { event: "release", slice: section, components: [holder] });
     structuredLog({ cmd: "artifact release", section, holder });
     return success({ data: { section, holder }, human: `released ${section}.` });
   });
 }
 function runArtifactLeases(paths) {
-  const r = readState(paths);
-  if (!r.exists) return NOT_INIT;
-  if (!r.state) return failure({ human: `state.json is invalid:
-${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+  const sr = requireState(paths);
+  if (sr.result) return sr.result;
   const leases = activeSectionLeases(paths);
   const human = leases.length ? leases.map((l) => `${l.section} \u2192 ${l.holder}`).join("\n") : "(no active section leases)";
   return success({ data: { leases }, human });
@@ -20146,69 +20174,52 @@ var fs22 = __toESM(require("node:fs"));
 var path20 = __toESM(require("node:path"));
 
 // src/core/debate-log.ts
+var DEBATE_LEDGER = {
+  headingTail: (e) => e.status,
+  fields: [
+    { label: "Positions  ", value: (e) => e.positions ?? "" },
+    { label: "Resolution ", value: (e) => e.resolution ?? "(pending)" },
+    { label: "Links      ", value: (e) => e.links ?? "" }
+  ]
+};
 function formatDebateEntry(entry) {
-  const src = entry.source ?? "Builder";
-  const heading = `## ${entry.id}  (${entry.topic}, ${src})  \u2014 ${entry.status}`;
-  return [
-    heading,
-    `Positions  : ${entry.positions ?? ""}`,
-    `Resolution : ${entry.resolution ?? "(pending)"}`,
-    `Links      : ${entry.links ?? ""}`,
-    ""
-  ].join("\n");
+  return formatLedgerEntry(
+    {
+      id: entry.id,
+      head: entry.topic,
+      source: entry.source ?? "Builder",
+      status: entry.status,
+      positions: entry.positions,
+      resolution: entry.resolution,
+      links: entry.links
+    },
+    DEBATE_LEDGER
+  );
 }
 var HEADING_RE = /^##\s+(DEBATE-\d+)\s*\(([^)]+)\)\s*—\s*(open|resolved)/;
-function extractTopic(paren) {
-  const lastComma = paren.lastIndexOf(",");
-  if (lastComma < 0) return paren.trim();
-  return paren.slice(0, lastComma).trim();
-}
 var FIELD_RE = /^(Positions|Resolution|Links)\s*:\s*(.*)$/;
 function parseDebateEntries(text) {
-  const entries = [];
-  const lines = text.split(/\r?\n/);
-  let current;
-  for (const line of lines) {
-    const head = HEADING_RE.exec(line);
-    if (head) {
-      if (current) entries.push(current);
-      current = {
-        id: head[1],
-        topic: extractTopic(head[2]),
-        status: head[3],
-        positions: "",
-        resolution: "",
-        links: ""
-      };
-      continue;
+  return parseLedgerEntries(
+    text,
+    HEADING_RE,
+    FIELD_RE,
+    (h) => ({
+      id: h.id,
+      topic: h.head,
+      status: h.tag,
+      positions: "",
+      resolution: "",
+      links: ""
+    }),
+    (entry, key, value) => {
+      if (key === "Positions") entry.positions = value;
+      else if (key === "Resolution") entry.resolution = value;
+      else entry.links = value;
     }
-    if (line.startsWith("## ")) {
-      if (current) {
-        entries.push(current);
-        current = void 0;
-      }
-      continue;
-    }
-    if (current) {
-      const field = FIELD_RE.exec(line);
-      if (field) {
-        const value = field[2];
-        if (field[1] === "Positions") current.positions = value;
-        else if (field[1] === "Resolution") current.resolution = value;
-        else current.links = value;
-      }
-    }
-  }
-  if (current) entries.push(current);
-  return entries;
+  );
 }
 function nextDebateId(text) {
-  let max = 0;
-  for (const m of text.matchAll(/DEBATE-(\d+)/g)) {
-    const n = Number(m[1]);
-    if (n > max) max = n;
-  }
-  return `DEBATE-${String(max + 1).padStart(3, "0")}`;
+  return nextLedgerId(text, "DEBATE");
 }
 
 // src/commands/debate.ts

@@ -190,6 +190,42 @@ export function runRepoMap(paths: ProjectPaths, opts: RepoMapOptions = {}): Comm
 /** Persisted repo-map path (relative to stateDir). */
 const REPO_MAP_REL = "repo-map.json";
 
+type LoadPersistedMapResult =
+  | { map: RepoMap; result?: undefined }
+  | { map?: undefined; result: CommandResult };
+
+/**
+ * Load + parse the persisted `<stateDir>/repo-map.json` (CQ-007 dedup — the same
+ * read/parse/error ladder previously inlined in `runRepoRelevant` and
+ * `runRepoImpact`). A missing file maps to `map_missing`; a present-but-invalid
+ * file carries the parser's tagged error code. On failure it logs
+ * `structuredLog({ cmd, error })` and returns the canonical `failure()`; on
+ * success it returns the parsed map. Behavior (error codes, human wording, the
+ * single structured-log line, the `failure()` payload) is identical to the prior
+ * inline code — `cmd` is threaded through so each caller's log keeps its label.
+ */
+function loadPersistedMap(paths: ProjectPaths, cmd: string): LoadPersistedMapResult {
+  const mapJsonPath = path.join(paths.stateDir, REPO_MAP_REL);
+  let rawMap: string | null = null;
+  try {
+    rawMap = fs.readFileSync(mapJsonPath, "utf8");
+  } catch {
+    // Missing file → map_missing.
+    rawMap = null;
+  }
+  const parsed = parseRepoMap(rawMap);
+  if (!parsed.ok || !parsed.map) {
+    const errorCode = rawMap === null ? "map_missing" : (parsed.error ?? "map_missing");
+    const human =
+      errorCode === "map_missing"
+        ? "No repo-map.json found. Run `th repo map` first."
+        : `repo-map.json is invalid: ${errorCode}. Run \`th repo map\` to regenerate.`;
+    structuredLog({ cmd, error: errorCode });
+    return { result: failure({ human, data: { error: errorCode } }) };
+  }
+  return { map: parsed.map };
+}
+
 /** Valid `--format` values for `th repo relevant`. */
 const RELEVANT_FORMATS = ["slice", "req", "file", "json"] as const;
 
@@ -249,25 +285,9 @@ export function runRepoRelevant(paths: ProjectPaths, opts: RepoRelevantOptions =
   }
 
   // ---- Step 2: load + parse persisted map (REQ-RU-025 / REQ-RU-043) ----
-  const mapJsonPath = path.join(paths.stateDir, REPO_MAP_REL);
-  let rawMap: string | null = null;
-  try {
-    rawMap = fs.readFileSync(mapJsonPath, "utf8");
-  } catch {
-    // Missing file → map_missing.
-    rawMap = null;
-  }
-  const parsed = parseRepoMap(rawMap);
-  if (!parsed.ok || !parsed.map) {
-    const errorCode = rawMap === null ? "map_missing" : (parsed.error ?? "map_missing");
-    const human =
-      errorCode === "map_missing"
-        ? "No repo-map.json found. Run `th repo map` first."
-        : `repo-map.json is invalid: ${errorCode}. Run \`th repo map\` to regenerate.`;
-    structuredLog({ cmd: "repo relevant", error: errorCode });
-    return failure({ human, data: { error: errorCode } });
-  }
-  const map = parsed.map;
+  const loaded = loadPersistedMap(paths, "repo relevant");
+  if (loaded.result) return loaded.result;
+  const map = loaded.map;
 
   // ---- Step 3: selector validation — exactly one required (REQ-RU-020) ----
   const selectors: Array<{ kind: "slice" | "req" | "file" | "query"; value: string }> = [];
@@ -486,25 +506,9 @@ export function runRepoImpact(paths: ProjectPaths, opts: RepoImpactOptions = {})
   }
 
   // ---- Step 2: load + parse persisted map (REQ-RU-034) ----
-  const mapJsonPath = path.join(paths.stateDir, REPO_MAP_REL);
-  let rawMap: string | null = null;
-  try {
-    rawMap = fs.readFileSync(mapJsonPath, "utf8");
-  } catch {
-    // Missing file → map_missing.
-    rawMap = null;
-  }
-  const parsed = parseRepoMap(rawMap);
-  if (!parsed.ok || !parsed.map) {
-    const errorCode = rawMap === null ? "map_missing" : (parsed.error ?? "map_missing");
-    const human =
-      errorCode === "map_missing"
-        ? "No repo-map.json found. Run `th repo map` first."
-        : `repo-map.json is invalid: ${errorCode}. Run \`th repo map\` to regenerate.`;
-    structuredLog({ cmd: "repo impact", error: errorCode });
-    return failure({ human, data: { error: errorCode } });
-  }
-  const map = parsed.map;
+  const loaded = loadPersistedMap(paths, "repo impact");
+  if (loaded.result) return loaded.result;
+  const map = loaded.map;
 
   // ---- Step 3: selector validation — exactly one required (REQ-RU-030) ----
   const selectors: Array<{ kind: "file" | "component"; value: string }> = [];

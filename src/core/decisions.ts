@@ -411,11 +411,6 @@ export function sortDecisions(decisions: Decision[]): Decision[] {
   return [...decisions].sort((a, b) => (numericSuffix(a.id) ?? 0) - (numericSuffix(b.id) ?? 0));
 }
 
-/** Look up a single reduced decision by id (convenience for the handlers). */
-export function findDecision(events: DecisionEvent[], id: string): Decision | undefined {
-  return reduceDecisions(events).find((d) => d.id === id);
-}
-
 // ---------------------------------------------------------------------------
 // gatingObligations — THE single governance predicate (RULE-007)
 // ---------------------------------------------------------------------------
