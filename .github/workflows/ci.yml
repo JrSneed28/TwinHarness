@@ -33,12 +33,14 @@ jobs:
       - name: Build
         run: npm run build
 
-      # dist/ is the committed, shipped artifact; assert the build matches it.
-      # Linux only — it is the canonical build OS, and cross-OS line-ending
-      # normalization would make a byte-exact diff flaky elsewhere.
+      # dist/ is the committed, shipped artifact; assert the build matches it on
+      # EVERY OS (incl. windows-latest), so a CRLF-tainted dist can't slip through
+      # a non-Linux runner. `.gitattributes` pins dist/** to no EOL conversion, and
+      # --ignore-cr-at-eol keeps the barrier robust to any residual line-ending
+      # quirk while still catching real content drift (the F-3/F-4 Windows-specific
+      # tests already run as part of `npm test` on the windows-latest matrix entry).
       - name: Assert dist/ is in sync with build
-        if: matrix.os == 'ubuntu-latest'
-        run: git diff --exit-code dist/
+        run: git diff --ignore-cr-at-eol --exit-code dist/
 
       - name: Test
         run: npm test
