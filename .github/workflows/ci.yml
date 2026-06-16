@@ -12,6 +12,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+    # TEST-002 anti-regression: force pwsh on all runners (including windows-latest)
+    # so the verify/coverage-report tests are exercised under PowerShell, not bash.
+    # This ensures de-POSIX-ified code cannot silently regress on a bare-Windows
+    # runner that has no Git Bash on PATH.
+    defaults:
+      run:
+        shell: pwsh
 
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +49,15 @@ jobs:
       # AND any CRLF-tainted dist that would break cross-platform reproducibility.
       - name: Assert dist/ is in sync with build
         run: git diff --exit-code dist/
+
+      # Smoke-test the shipped CLI binary (package.json bin: { "th": "dist/cli.js" }).
+      # Using `node dist/cli.js` rather than the `th` symlink so this works on all
+      # OSes without relying on a global npm install or PATH-resolved symlinks.
+      # `version` is a subcommand that exits 0 and prints the package version, so it
+      # also exercises the P2-1 version single-source end-to-end. (`--help`/`--version`
+      # are NOT valid flags here — the CLI is subcommand-based and exits 1 on them.)
+      - name: Smoke test th CLI
+        run: node dist/cli.js version
 
       - name: Test
         run: npm test
