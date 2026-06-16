@@ -27,11 +27,9 @@ let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
 
 describe("REQ-STATE-LOCK-001: concurrent mutations do not lose updates (F10)", () => {
-  it("N parallel `drift add` processes each increment the blocking count with a unique id", async () => {
-    // Guard: this test needs the compiled CLI. CI builds before testing.
-    if (!fs.existsSync(CLI)) {
-      throw new Error(`dist/cli.js missing — run \`npm run build\` before the concurrency test (${CLI}).`);
-    }
+  // TEST-008/009: skipIf dist is absent so the suite degrades gracefully instead
+  // of throwing. CI always builds first; local runs without a build simply skip.
+  it.skipIf(!fs.existsSync(CLI))("N parallel `drift add` processes each increment the blocking count with a unique id", async () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
 
@@ -62,10 +60,8 @@ describe("REQ-STATE-LOCK-001: concurrent mutations do not lose updates (F10)", (
     expect(ids.size).toBe(N);
   }, 30_000);
 
-  it("concurrent `slice set-status` updates all land (no lost slice writes)", async () => {
-    if (!fs.existsSync(CLI)) {
-      throw new Error(`dist/cli.js missing — run \`npm run build\` before the concurrency test.`);
-    }
+  // TEST-008/009: skipIf dist is absent so the suite degrades gracefully.
+  it.skipIf(!fs.existsSync(CLI))("concurrent `slice set-status` updates all land (no lost slice writes)", async () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
     // Seed N pending slices.

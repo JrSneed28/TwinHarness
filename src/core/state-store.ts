@@ -120,6 +120,16 @@ function readLockOwner(ownerFile: string): string | null {
   }
 }
 
+/**
+ * Age (ms) after which an unrefreshed `.state.lock` is considered stale and
+ * may be stolen by a waiting caller. Exported so tests can use `STALE_MS + N`
+ * rather than hardcoding the magic literal (TEST-006).
+ *
+ * Keep STALE_MS < TIMEOUT_MS (25 s) so a crashed holder is always reclaimable
+ * before a healthy waiter times out.
+ */
+export const STALE_MS = 15_000;
+
 export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
   if (!fs.existsSync(paths.stateDir)) return fn();
 
@@ -128,17 +138,9 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
   // A pid+nonce stamped into the lock on acquire. Used to close the 3-party
   // stale-lock TOCTOU: a waiter only steals the SAME stale lock it observed.
   const myToken = `${process.pid}-${Math.random().toString(36).slice(2)}`;
-  // STALE_MS < TIMEOUT_MS so a crashed holder's lock becomes stealable strictly
-  // before a healthy waiter gives up (the original had STALE 30s > TIMEOUT 10s,
-  // which could wedge waiters: they'd time out before the lock ever went stale).
-  // STALE_MS must ALSO comfortably exceed the longest legitimate critical section:
-  // a live holder never refreshes its lock mtime/owner while inside fn(), so a
-  // too-small threshold lets a waiter steal a LIVE-but-slow holder's lock and run
-  // fn() concurrently — the exact lost-update this lock exists to prevent. 5s was
-  // too tight (a GC/scheduler pause or a contended atomic-write retry budget can
-  // approach it); 15s clears any sub-second JSON read-modify-write with wide margin
-  // while a crashed holder is still reclaimed well before the 25s waiter timeout.
-  const STALE_MS = 15_000;
+  // STALE_MS is the module-level exported constant (15 s). See its declaration
+  // above for the full rationale. Referenced here by name so tests can import
+  // it and use STALE_MS + N instead of hardcoding the magic literal (TEST-006).
   const TIMEOUT_MS = 25_000;
   const deadline = Date.now() + TIMEOUT_MS;
 

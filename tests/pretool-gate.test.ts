@@ -593,6 +593,114 @@ describe("REQ-WGATE-007: legacy .agentic-sdlc project — identical behaviour", 
 });
 
 // ---------------------------------------------------------------------------
+// BYPASS-KNOWN regression suite (TEST-007)
+//
+// Each case documents a deliberate fail-open in the write-gate decision ladder
+// (spec/write-gate-design.md §Decision ladder). The label "BYPASS-KNOWN-*"
+// makes it easy to grep for all intentional bypasses and catch a future
+// half-parse regression that accidentally promotes one into a hard block.
+//
+// Contract: isAllow(out) must remain true for every case below. A test
+// failure here means a previously-documented safe bypass now fires the gate,
+// which is a regression.
+// ---------------------------------------------------------------------------
+
+describe("BYPASS-KNOWN: documented fail-open cases must stay isAllow===true", () => {
+  // BYPASS-KNOWN-A: no state.json → gate has no opinion; non-TH projects unaffected.
+  it("BYPASS-KNOWN-A: no state.json → allow", () => {
+    tp = makeTempProject();
+    // No init, no state file written.
+    const out = runHookPretoolGate(tp.paths, inputFor("src/index.ts"));
+    expect(isAllow(out)).toBe(true);
+    expect(out.exitCode).toBe(0);
+  });
+
+  // BYPASS-KNOWN-B: TH_DISABLE_WRITE_GATE=1 is the documented emergency escape hatch.
+  it("BYPASS-KNOWN-B: TH_DISABLE_WRITE_GATE=1 → allow (escape hatch, checked before reading state)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths);
+    const out = runHookPretoolGate(tp.paths, inputFor("src/index.ts"), {
+      TH_DISABLE_WRITE_GATE: "1",
+    });
+    expect(isAllow(out)).toBe(true);
+  });
+
+  // BYPASS-KNOWN-C: write_gate=off is the operator-declared "gate inactive" mode.
+  it("BYPASS-KNOWN-C: write_gate=off → allow (operator declared gate inactive)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { write_gate: "off" });
+    const out = runHookPretoolGate(tp.paths, inputFor("src/index.ts"));
+    expect(isAllow(out)).toBe(true);
+  });
+
+  // BYPASS-KNOWN-D: no file_path in tool_input → gate cannot determine a target; fail-open.
+  it("BYPASS-KNOWN-D: no tool_input.file_path → allow (gate cannot determine target)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths);
+    const out = runHookPretoolGate(tp.paths, { tool_name: "Write", tool_input: {} });
+    expect(isAllow(out)).toBe(true);
+  });
+
+  // BYPASS-KNOWN-E: no input at all → gate has nothing to evaluate; fail-open.
+  it("BYPASS-KNOWN-E: no input at all → allow (nothing to evaluate)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths);
+    const out = runHookPretoolGate(tp.paths, undefined);
+    expect(isAllow(out)).toBe(true);
+  });
+
+  // BYPASS-KNOWN-F: target outside project root → not TH's concern; fail-open.
+  it("BYPASS-KNOWN-F: absolute path outside project root → allow (not our concern)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths);
+    const externalPath = path.resolve(tp.root, "..", "other-project", "src", "foo.ts");
+    const out = runHookPretoolGate(tp.paths, inputFor(externalPath, tp.root));
+    expect(isAllow(out)).toBe(true);
+  });
+
+  // BYPASS-KNOWN-G: doc/state allowlist paths are always allowed in all phases.
+  it("BYPASS-KNOWN-G: docs/ path in Phase A → allow (doc/state allowlist)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths);
+    const out = runHookPretoolGate(tp.paths, inputFor("docs/01-requirements.md", tp.root));
+    expect(isAllow(out)).toBe(true);
+  });
+
+  // BYPASS-KNOWN-H: Bash with no write redirection in Phase A → fail-open (no offending target).
+  it("BYPASS-KNOWN-H: Phase A Bash with no write redirection → allow (fail-open, no target found)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { current_stage: "stage-05" });
+    const out = runHookPretoolGate(tp.paths, {
+      tool_name: "Bash",
+      tool_input: { command: "npm test && ls -la" },
+      cwd: tp.root,
+    });
+    expect(isAllow(out)).toBe(true);
+  });
+
+  // BYPASS-KNOWN-I: Phase B with implementation_allowed + slice in-progress → allow.
+  it("BYPASS-KNOWN-I: Phase B write into an in-progress slice's component → allow", () => {
+    tp = makeTempProject();
+    fs.mkdirSync(path.join(tp.root, "src", "engine"), { recursive: true });
+    writePostImplState(tp.paths, {
+      slices: [{ id: "SLICE-1", status: "in-progress", components: ["src/engine"] }],
+    });
+    const out = runHookPretoolGate(tp.paths, inputFor("src/engine/index.ts", tp.root));
+    expect(isAllow(out)).toBe(true);
+  });
+
+  // BYPASS-KNOWN-J: Phase B with implementation_allowed + path owned by no slice → allow.
+  it("BYPASS-KNOWN-J: Phase B write to an unowned path → allow (no slice claims this path)", () => {
+    tp = makeTempProject();
+    writePostImplState(tp.paths, {
+      slices: [{ id: "SLICE-1", status: "pending", components: ["src/engine"] }],
+    });
+    const out = runHookPretoolGate(tp.paths, inputFor("src/utils/helper.ts", tp.root));
+    expect(isAllow(out)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // REQ-WGATE-009: extractBashWriteTargets operand heuristic (security regression)
 // ---------------------------------------------------------------------------
 

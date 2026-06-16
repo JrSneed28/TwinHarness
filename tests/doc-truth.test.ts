@@ -227,6 +227,11 @@ describe("DOC-TRUTH: docs match mechanical reality", () => {
   // verify/coverage-report no longer use POSIX-only commands, so the old
   // "6 Windows-only platform skips in verify/coverage-report" claim is false
   // and must never reappear in shipped docs.
+  //
+  // Note: build-artifact guards (skipIf(!existsSync(CLI))) are a separate
+  // category from platform-conditional skips; this test counts only the latter
+  // (patterns referencing process.platform or process.getuid) so that adding
+  // build-guard skips (TEST-008/009) doesn't alter the platform-skip count.
   // -------------------------------------------------------------------------
   it("docs describe the single platform-conditional skip, not the stale '6 Windows skips'", () => {
     const skipDeclCount = fs
@@ -234,7 +239,9 @@ describe("DOC-TRUTH: docs match mechanical reality", () => {
       .filter((f) => f.endsWith(".test.ts"))
       .reduce((n, f) => {
         const src = fs.readFileSync(path.join(ROOT, "tests", f), "utf8");
-        const m = src.match(/\.(?:skip|skipIf)\s*\(/g);
+        // Count only platform-conditional skips (process.platform / process.getuid),
+        // not build-artifact guards (skipIf(!existsSync(...))).
+        const m = src.match(/\.skipIf\s*\([^)]*process\.(?:platform|getuid)/g);
         return n + (m ? m.length : 0);
       }, 0);
     expect(skipDeclCount, "expected exactly one platform-conditional skip declaration in tests/").toBe(1);

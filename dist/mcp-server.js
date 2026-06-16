@@ -15805,12 +15805,12 @@ function readLockOwner(ownerFile) {
     return null;
   }
 }
+var STALE_MS = 15e3;
 function withStateLock(paths, fn) {
   if (!fs3.existsSync(paths.stateDir)) return fn();
   const lockDir = path3.join(paths.stateDir, ".state.lock");
   const ownerFile = path3.join(lockDir, "owner");
   const myToken = `${process.pid}-${Math.random().toString(36).slice(2)}`;
-  const STALE_MS = 15e3;
   const TIMEOUT_MS = 25e3;
   const deadline = Date.now() + TIMEOUT_MS;
   for (; ; ) {
