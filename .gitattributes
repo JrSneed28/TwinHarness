@@ -1,5 +1,13 @@
-# dist/ is committed on purpose and CI runs `git diff --exit-code dist/`. With
-# core.autocrlf=true this barrier flaps on Windows (LF in repo vs CRLF in the
-# working tree) even when content is unchanged. Pin dist to no EOL conversion so
-# the dist-sync barrier is reliable across platforms and worktrees. (Realignment §2.0)
+# Normalize every text file to LF in the working tree on every platform. The build
+# bakes multi-line template literals from src/ straight into dist/, so if src/ is
+# checked out as CRLF (core.autocrlf=true on Windows) tsc emits CRLF *inside* those
+# literals and the committed dist/ stops being byte-reproducible across OSes. Forcing
+# eol=lf makes `npm run build` byte-identical on Windows, Linux, and macOS.
+* text=auto eol=lf
+
+# dist/ is the committed, shipped artifact and CI runs a strict `git diff
+# --exit-code dist/`. Pin it to raw bytes (no EOL conversion) so the barrier is an
+# honest byte-for-byte reproducibility check. With src/ forced to LF above, the build
+# now emits LF dist/ on every OS, so the committed LF bytes match everywhere.
+# (Realignment §2.0)
 dist/** -text
