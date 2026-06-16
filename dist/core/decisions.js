@@ -54,21 +54,28 @@ exports.GENESIS_PREV_HASH = void 0;
 exports.decisionsPath = decisionsPath;
 exports.canonicalText = canonicalText;
 exports.computeRecordHash = computeRecordHash;
+exports.computeKeyedHash = computeKeyedHash;
 exports.readDecisionEvents = readDecisionEvents;
 exports.formatDecisionId = formatDecisionId;
 exports.mintNextId = mintNextId;
 exports.appendDecisionEvent = appendDecisionEvent;
 exports.verifyChain = verifyChain;
+exports.verifyApprovalSeals = verifyApprovalSeals;
 exports.reduceDecisions = reduceDecisions;
 exports.sortDecisions = sortDecisions;
 exports.findDecision = findDecision;
 exports.canonicalStageLink = canonicalStageLink;
+exports.canonicalizeLink = canonicalizeLink;
 exports.gatingObligations = gatingObligations;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+const node_crypto_1 = require("node:crypto");
 const hash_1 = require("./hash");
+const stages_1 = require("./stages");
 /** `prevHash` of the very first event line — 64 hex zeros (DS-001). */
 exports.GENESIS_PREV_HASH = "0".repeat(64);
+/** Lifecycle transitions that carry an optional keyed seal (the human-gate events). */
+const APPROVAL_TRANSITIONS = new Set(["approved", "rejected", "superseded"]);
 /** `<stateDir>/decisions.jsonl` — the decision ledger's location. */
 function decisionsPath(paths) {
     return path.join(paths.stateDir, "decisions.jsonl");
@@ -121,6 +128,15 @@ function canonicalText(event) {
 function computeRecordHash(event) {
     return (0, hash_1.hashContent)(canonicalText(event));
 }
+/**
+ * Keyed seal (C-3b) for an event = HMAC-SHA256(key, canonicalText). Byte-stable
+ * given the key — no nonce — so a sealed ledger stays deterministic (REQ-NFR-001).
+ * Computed over the SAME canonical text as `recordHash` (keyedHash itself is not in
+ * the canonical field order, so the keyless chain is unaffected by its presence).
+ */
+function computeKeyedHash(event, key) {
+    return (0, node_crypto_1.createHmac)("sha256", key).update(canonicalText(event)).digest("hex");
+}
 // ---------------------------------------------------------------------------
 // Tolerant reader (mirrors readLeaseEvents) — never throws
 // ---------------------------------------------------------------------------
@@ -141,6 +157,8 @@ function isValidEvent(parsed) {
     if (typeof e.recordHash !== "string" || !HEX64.test(e.recordHash))
         return false;
     if (e.links !== undefined && !Array.isArray(e.links))
+        return false;
+    if (e.keyedHash !== undefined && typeof e.keyedHash !== "string")
         return false;
     return true;
 }
@@ -212,13 +230,20 @@ function mintNextId(events) {
  * The serialized line stores every field INCLUDING `recordHash`; the hash itself
  * is over the canonical text WITHOUT `recordHash`. Returns the sealed event.
  */
-function appendDecisionEvent(paths, event) {
+function appendDecisionEvent(paths, event, key) {
     fs.mkdirSync(paths.stateDir, { recursive: true });
     const existing = readDecisionEvents(paths);
     const prevHash = existing.length > 0 ? existing[existing.length - 1].recordHash : exports.GENESIS_PREV_HASH;
     const withPrev = { ...event, prevHash };
     const recordHash = computeRecordHash(withPrev);
     const sealed = { ...withPrev, recordHash };
+    // Keyed seal (C-3b): only on an approval transition, and only when a key was
+    // EXPLICITLY supplied (TH_DECISION_KEY) — never auto-generated. keyedHash is not
+    // part of the canonical text, so the keyless chain (recordHash/prevHash) is
+    // byte-identical whether or not a seal is present.
+    if (key && APPROVAL_TRANSITIONS.has(event.event)) {
+        sealed.keyedHash = computeKeyedHash(withPrev, key);
+    }
     fs.appendFileSync(decisionsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
     return sealed;
 }
@@ -247,6 +272,36 @@ function verifyChain(events) {
         expectedPrev = e.recordHash;
     }
     return { ok: true };
+}
+/**
+ * Verify the optional keyed seals (C-3b) — run ONLY when a key is explicitly
+ * supplied. For each approval-transition event that CARRIES a `keyedHash`,
+ * recompute the HMAC and flag a mismatch. This catches a competently re-sealed
+ * chain (which `verifyChain` cannot): an attacker who re-hashes the keyless chain
+ * cannot reproduce a keyed seal without the key, so a left-behind seal stops
+ * matching the tampered content.
+ *
+ * Warn-only by contract: the caller surfaces mismatches as a warning, NOT a
+ * fail-closed `chain_broken`, because a per-environment key difference must never
+ * turn a legitimately-committed ledger red. Residual limitation (documented): an
+ * attacker who STRIPS the keyedHash entirely is not detected here — only the
+ * keyless chain continuity (which still breaks on a naive edit) and an explicit
+ * out-of-band key policy cover that.
+ */
+function verifyApprovalSeals(events, key) {
+    const mismatches = [];
+    for (let i = 0; i < events.length; i++) {
+        const e = events[i];
+        if (!APPROVAL_TRANSITIONS.has(e.event))
+            continue;
+        if (e.keyedHash === undefined)
+            continue; // unsealed (created without a key) — not a mismatch
+        const { recordHash: _rh, keyedHash, ...rest } = e;
+        if (computeKeyedHash(rest, key) !== keyedHash) {
+            mismatches.push({ index: i, id: e.id });
+        }
+    }
+    return { ok: mismatches.length === 0, mismatches };
 }
 // ---------------------------------------------------------------------------
 // reduceDecisions (TD §latest-event-wins) — event log → read model
@@ -306,9 +361,22 @@ function findDecision(events, id) {
 // ---------------------------------------------------------------------------
 // gatingObligations — THE single governance predicate (RULE-007)
 // ---------------------------------------------------------------------------
-/** The canonical identifier of a stage within a decision's `links` array. */
+/** The canonical identifier of a stage within a decision's `links` array. The
+ * stage component is canonicalized (F-6 item 2c) so a near-miss spelling in
+ * either the recorded link or `current_stage` cannot make a gating decision
+ * silently stop gating. */
 function canonicalStageLink(stage) {
-    return `stage:${stage}`;
+    return `stage:${(0, stages_1.canonicalizeStage)(stage)}`;
+}
+/**
+ * Normalize a single link: a `stage:<x>` link has its stage component
+ * canonicalized; any other link (REQ-/ADR- traceability) is returned unchanged.
+ * Applied both when a link is recorded (`th decision add`) and when comparing in
+ * `gatingObligations`, so the two sides always agree.
+ */
+function canonicalizeLink(link) {
+    const prefix = "stage:";
+    return link.startsWith(prefix) ? canonicalStageLink(link.slice(prefix.length)) : link;
 }
 /**
  * The single gating predicate (RULE-007 — only implementation; both
@@ -327,12 +395,14 @@ function gatingObligations(decisions, state) {
     const stage = state?.current_stage;
     if (!stage)
         return [];
-    const wanted = canonicalStageLink(stage);
+    const wanted = canonicalStageLink(stage); // canonicalizes current_stage
     const obligations = [];
     for (const d of sortDecisions(decisions)) {
         if (d.status === "approved")
             continue;
-        if (d.links.includes(wanted)) {
+        // Canonicalize each link's stage component too, so a near-miss spelling on
+        // either side still matches (F-6 item 2c).
+        if (d.links.some((l) => canonicalizeLink(l) === wanted)) {
             obligations.push({ decisionId: d.id, blockedStage: stage });
         }
     }

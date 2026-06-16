@@ -17158,7 +17158,9 @@ function reviseEscalations(state, cap = DEFAULT_REVISE_CAP) {
 // src/core/decisions.ts
 var fs14 = __toESM(require("node:fs"));
 var path13 = __toESM(require("node:path"));
+var import_node_crypto2 = require("node:crypto");
 var GENESIS_PREV_HASH = "0".repeat(64);
+var APPROVAL_TRANSITIONS = /* @__PURE__ */ new Set(["approved", "rejected", "superseded"]);
 function decisionsPath(paths) {
   return path13.join(paths.stateDir, "decisions.jsonl");
 }
@@ -17191,6 +17193,9 @@ function canonicalText(event) {
 function computeRecordHash(event) {
   return hashContent(canonicalText(event));
 }
+function computeKeyedHash(event, key) {
+  return (0, import_node_crypto2.createHmac)("sha256", key).update(canonicalText(event)).digest("hex");
+}
 var HEX64 = /^[0-9a-f]{64}$/;
 var ID_RE = /^DECISION-\d{3,}$/;
 var EVENT_TYPES = /* @__PURE__ */ new Set(["proposed", "approved", "rejected", "superseded"]);
@@ -17202,6 +17207,7 @@ function isValidEvent(parsed) {
   if (typeof e.prevHash !== "string" || !HEX64.test(e.prevHash)) return false;
   if (typeof e.recordHash !== "string" || !HEX64.test(e.recordHash)) return false;
   if (e.links !== void 0 && !Array.isArray(e.links)) return false;
+  if (e.keyedHash !== void 0 && typeof e.keyedHash !== "string") return false;
   return true;
 }
 function readDecisionEvents(paths) {
@@ -17235,15 +17241,47 @@ function mintNextId(events) {
   }
   return formatDecisionId(max + 1);
 }
-function appendDecisionEvent(paths, event) {
+function appendDecisionEvent(paths, event, key) {
   fs14.mkdirSync(paths.stateDir, { recursive: true });
   const existing = readDecisionEvents(paths);
   const prevHash = existing.length > 0 ? existing[existing.length - 1].recordHash : GENESIS_PREV_HASH;
   const withPrev = { ...event, prevHash };
   const recordHash = computeRecordHash(withPrev);
   const sealed = { ...withPrev, recordHash };
+  if (key && APPROVAL_TRANSITIONS.has(event.event)) {
+    sealed.keyedHash = computeKeyedHash(withPrev, key);
+  }
   fs14.appendFileSync(decisionsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   return sealed;
+}
+function verifyChain(events) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    const { recordHash, ...rest } = e;
+    const recomputed = computeRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (e.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = e.recordHash;
+  }
+  return { ok: true };
+}
+function verifyApprovalSeals(events, key) {
+  const mismatches = [];
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    if (!APPROVAL_TRANSITIONS.has(e.event)) continue;
+    if (e.keyedHash === void 0) continue;
+    const { recordHash: _rh, keyedHash, ...rest } = e;
+    if (computeKeyedHash(rest, key) !== keyedHash) {
+      mismatches.push({ index: i, id: e.id });
+    }
+  }
+  return { ok: mismatches.length === 0, mismatches };
 }
 function reduceDecisions(events) {
   const byId = /* @__PURE__ */ new Map();
@@ -17275,7 +17313,11 @@ function sortDecisions(decisions) {
   return [...decisions].sort((a, b) => (numericSuffix(a.id) ?? 0) - (numericSuffix(b.id) ?? 0));
 }
 function canonicalStageLink(stage) {
-  return `stage:${stage}`;
+  return `stage:${canonicalizeStage(stage)}`;
+}
+function canonicalizeLink(link) {
+  const prefix = "stage:";
+  return link.startsWith(prefix) ? canonicalStageLink(link.slice(prefix.length)) : link;
 }
 function gatingObligations(decisions, state) {
   const stage = state?.current_stage;
@@ -17284,7 +17326,7 @@ function gatingObligations(decisions, state) {
   const obligations = [];
   for (const d of sortDecisions(decisions)) {
     if (d.status === "approved") continue;
-    if (d.links.includes(wanted)) {
+    if (d.links.some((l) => canonicalizeLink(l) === wanted)) {
       obligations.push({ decisionId: d.id, blockedStage: stage });
     }
   }
@@ -19502,6 +19544,14 @@ ${v.missing.map((m) => `  - ${m}`).join("\n")}`
 // src/commands/decision.ts
 var fs20 = __toESM(require("node:fs"));
 var path18 = __toESM(require("node:path"));
+
+// src/core/decision-key.ts
+function resolveDecisionKey() {
+  const key = process.env.TH_DECISION_KEY;
+  return key && key.length > 0 ? key : null;
+}
+
+// src/commands/decision.ts
 var DECISION_GATE_EXIT = 6;
 function runDecisionAdd(paths, opts = {}) {
   const title = opts.title?.trim();
@@ -19520,7 +19570,7 @@ function runDecisionAdd(paths, opts = {}) {
       data: { error: "missing_field", field: "rationale" }
     });
   }
-  const links = opts.links ?? [];
+  const links = (opts.links ?? []).map(canonicalizeLink);
   const proposer = opts.proposer?.trim() || "orchestrator";
   const now = opts.now ?? (() => /* @__PURE__ */ new Date());
   const sealed = withStateLock(paths, () => {
@@ -19631,24 +19681,46 @@ function listShape(d) {
   return out;
 }
 function runDecisionList(paths, _opts = {}) {
-  const reduced = sortDecisions(reduceDecisions(readDecisionEvents(paths)));
+  const events = readDecisionEvents(paths);
+  const chain = verifyChain(events);
+  if (!chain.ok) {
+    structuredLog({ cmd: "decision list", error: "chain_broken", brokenAt: chain.brokenAt });
+    return failure({
+      human: `decisions.jsonl hash chain is broken at index ${chain.brokenAt} (${chain.reason}); refusing to list a tampered ledger as clean. Inspect \`.twinharness/decisions.jsonl\`.`,
+      data: { error: "chain_broken", brokenAt: chain.brokenAt, reason: chain.reason }
+    });
+  }
+  const reduced = sortDecisions(reduceDecisions(events));
   const decisions = reduced.map(listShape);
+  const seal = sealWarningData(events);
   structuredLog({ cmd: "decision list", decisions: decisions.length });
   return success({
-    data: { decisions },
+    data: { decisions, ...seal },
     human: decisions.length === 0 ? "No decisions recorded." : reduced.map((d) => `${d.id}  [${d.status}]  ${d.title}`).join("\n")
   });
 }
 function runDecisionCheck(paths, _opts = {}) {
-  const decisions = reduceDecisions(readDecisionEvents(paths));
+  const events = readDecisionEvents(paths);
+  const chain = verifyChain(events);
+  if (!chain.ok) {
+    structuredLog({ cmd: "decision check", error: "chain_broken", brokenAt: chain.brokenAt });
+    return {
+      ok: false,
+      exitCode: DECISION_GATE_EXIT,
+      data: { error: "chain_broken", brokenAt: chain.brokenAt, reason: chain.reason },
+      human: `decisions.jsonl hash chain is broken at index ${chain.brokenAt} (${chain.reason}); the decision ledger has been edited/reordered. Refusing to report it as clean.`
+    };
+  }
+  const decisions = reduceDecisions(events);
   const state = readState(paths).state;
   const gating = gatingObligations(decisions, state);
+  const seal = sealWarningData(events);
   if (gating.length > 0) {
     structuredLog({ cmd: "decision check", gating: gating.length });
     return {
       ok: false,
       exitCode: DECISION_GATE_EXIT,
-      data: { ok: false, gating },
+      data: { ok: false, error: "unapproved_gating", gating, ...seal },
       human: [
         "Unapproved decisions gate the current stage:",
         ...gating.map((g) => `  ${g.decisionId} blocks stage '${g.blockedStage}'`)
@@ -19656,7 +19728,13 @@ function runDecisionCheck(paths, _opts = {}) {
     };
   }
   structuredLog({ cmd: "decision check", gating: 0 });
-  return success({ data: { gating: [] }, human: "No unapproved gating decisions." });
+  return success({ data: { gating: [], ...seal }, human: "No unapproved gating decisions." });
+}
+function sealWarningData(events) {
+  const key = resolveDecisionKey();
+  if (!key) return {};
+  const res = verifyApprovalSeals(events, key);
+  return res.ok ? {} : { sealWarning: { mismatches: res.mismatches } };
 }
 
 // src/commands/artifact-lease.ts
