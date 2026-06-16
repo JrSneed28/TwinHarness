@@ -44,7 +44,7 @@ describe("REQ-PCO-030: parallelism-optimizer prompt wiring", () => {
   });
 
   it("REQ-PCO-030: pipeline-stages.md documents the Stage 9 parallelism-optimizer loop", () => {
-    const pipeline = read("skills/twinharness/reference/pipeline-stages.md");
+    const pipeline = read("skills/twinharness/reference/pipeline-stages-part3.md");
     expect(pipeline).toContain("REQ-PCO-030");
     expect(pipeline.toLowerCase()).toContain("parallelism");
     expect(pipeline).toContain("th build plan --advise");

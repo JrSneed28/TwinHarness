@@ -49,7 +49,7 @@ describe("REQ-PCO-060: librarian prompt wiring", () => {
   });
 
   it("REQ-PCO-060: pipeline-stages.md documents the Librarian standing service", () => {
-    const pipeline = read("skills/twinharness/reference/pipeline-stages.md");
+    const pipeline = read("skills/twinharness/reference/pipeline-stages-part1.md");
     expect(pipeline.toLowerCase()).toContain("librarian");
     expect(pipeline).toContain("REQ-PCO-060");
   });

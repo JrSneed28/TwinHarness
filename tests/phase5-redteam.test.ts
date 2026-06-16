@@ -54,7 +54,7 @@ describe("REQ-PCO-050: red-team prompt wiring", () => {
   });
 
   it("REQ-PCO-050: pipeline-stages.md wires the red-team (concurrent + blackboard)", () => {
-    const pipeline = read("skills/twinharness/reference/pipeline-stages.md");
+    const pipeline = read("skills/twinharness/reference/pipeline-stages-part2.md");
     const lower = pipeline.toLowerCase();
     expect(lower).toContain("red-team");
     expect(lower).toMatch(/concurrent|parallel|alongside|continuous/);

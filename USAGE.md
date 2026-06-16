@@ -354,10 +354,12 @@ unwritable. Attempts to set an unknown top-level key exit with `unknown_field`. 
 | `summaries_index` | string | Index doc for summary handoffs |
 | `slices` | {id, status, components}[] | Slice ledger; `status` ∈ pending/in-progress/done/blocked; `components` drives wave scheduling |
 | `implementation_allowed` | boolean | Set true only after the slice plan + tier prerequisites clear |
-| `write_gate` | `"ask"` \| `"deny"` \| `"off"` \| absent | PreToolUse write-gate semantics; absent = `ask`; use `th state set write_gate <value>` to configure |
 | `open_questions` | string[] | Unresolved questions blocking advancement |
 | `drift_open_blocking` | number | Open requirement-layer escalations; stop-gate blocks while > 0. **Managed field** — `state set` refuses writes; use `th drift add` / `th drift resolve` to modify. |
+| `debate_open_blocking` | number \| absent | Open blocking debate-reconciliation obligations (Pattern B, REQ-PCO-042); stop-gate blocks while > 0. **Managed field** — owned by `th debate add` / `th debate resolve`; absent when zero (omitted so existing files hash identically). |
 | `revise_loop_counts` | {mode: count} | Critic-loop round counters per mode |
+| `write_gate` | `"ask"` \| `"deny"` \| `"off"` \| `"strict"` \| absent | PreToolUse write-gate semantics; absent = `ask`. `strict` adds Phase-B Bash-mediated-write enforcement on top of `deny`. Set with `th state set write_gate <value>`. |
+| `project_mode` | `"greenfield"` \| `"brownfield"` \| absent | Whether the run adopts an existing codebase; absent = greenfield. Stamped by `th init --brownfield`; omitted from serialization when absent so existing files hash identically. |
 
 ### Tiering
 
@@ -805,8 +807,12 @@ comparing against archived golden fixtures.
 | Code | Meaning |
 |---|---|
 | 0 | Success |
-| 1 | General failure (invalid state, unknown command, missing args, `unknown_field` on `state set`, `drift_not_found` / `already_resolved` on `drift resolve`) |
-| 3 | Blast-radius veto (`th tier veto-check` blocked) |
+| 1 | General failure (invalid state, unknown command, missing args, `unknown_field` on `state set`, `drift_not_found` / `already_resolved` on `drift resolve`, lease collision on `th build claim`) |
+| 3 | Blast-radius veto (`th tier veto-check` blocked; also `brownfield_prerequisite_missing` when repo map or codebase analysis is absent) |
+| 4 | Repo map stale (`th repo check` — files added/removed/modified since last `th repo map`) |
+| 5 | Repo map absent (`th repo check` — `.twinharness/repo-map.json` not found; run `th repo map` first) |
+| 6 | Unapproved decision gates the current stage (`th decision check` — use `th decision approve` via interactive TTY to unblock) |
+| 7 | Dependency graph unsatisfiable (`th build plan` — `depends_on` graph has a cycle or dangling reference; fix and re-sync) |
 
 ### The hooks
 
@@ -839,6 +845,21 @@ The hook fires on two matchers:
   of scope as a guarantee.
 
 See Part 2 — "The write-gate" for full semantics.
+
+#### Hook wiring (`hooks/hooks.json`)
+
+All three hooks are wired via `hooks/hooks.json` in the plugin root. The wiring maps Claude Code
+hook events to `th` CLI invocations:
+
+| Hook event | Command | Fires on |
+|---|---|---|
+| `Stop` | `th hook stop-gate` | Every turn end — blocks Claude from claiming done while state is invalid, blocking drift is open, or (at `final-verification`) slices are unfinished or suite is red |
+| `PreToolUse` | `th hook pretool-gate` | `Write`, `Edit`, `NotebookEdit`, `Bash` — the write-gate; enforces phase-gating and component-boundary rules |
+| `SubagentStop` | `th hook subagent-stop` | Sub-agent turn ends — state-validity guard analogous to the Stop-gate for spawned child agents |
+
+The hooks are installed automatically with the plugin; `hooks/hooks.json` is the authoritative
+wiring file. All three commands always exit 0 — decisions are carried in the JSON payload on
+stdout, not in the process exit code.
 
 ### Repo-understanding layer (`th repo`)
 

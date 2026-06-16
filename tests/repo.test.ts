@@ -2424,7 +2424,10 @@ describe("SLICE-5 / TASK-013 — docs truthfulness: documented surface ⊆ dispa
     }
 
     // Known implemented subcommands in dispatch table (src/cli.ts case "repo":).
-    const implementedSubcommands = ["map", "relevant", "impact"];
+    // `check` (runRepoCheck, cli.ts case "repo"→"check") was added after this list
+    // was first written; USAGE.md now documents it (exit codes 4/5), so it must be
+    // listed here for the subset guard to reflect the real dispatch table.
+    const implementedSubcommands = ["map", "relevant", "impact", "check"];
 
     for (const mentioned of repoCommandMentions) {
       expect(implementedSubcommands).toContain(mentioned);

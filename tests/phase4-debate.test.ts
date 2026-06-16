@@ -64,7 +64,7 @@ describe("REQ-PCO-043: debate/reconcile prompt wiring", () => {
   });
 
   it("REQ-PCO-043: pipeline-stages.md wires the debate flow (reconciler + th debate)", () => {
-    const pipeline = read("skills/twinharness/reference/pipeline-stages.md");
+    const pipeline = read("skills/twinharness/reference/pipeline-stages-part2.md");
     expect(pipeline.toLowerCase()).toContain("reconciler");
     expect(pipeline).toContain("th debate");
     expect(pipeline).toContain("REQ-PCO-043");

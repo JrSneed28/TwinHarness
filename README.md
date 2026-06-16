@@ -202,6 +202,13 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 | `th repo check` | Stale-detection: compare `.twinharness/repo-map.json` against the current working tree; exit 0 = fresh, 4 = stale, 5 = no map |
 | `th decision detect\|add\|approve\|check\|list` | Decision governance: surface candidates, record decisions, human-approve via TTY gate, enforce unapproved-decision blocks, list all decisions |
 | `th tier veto-check\|classify` (brownfield) | Now refuses (exit 3, `brownfield_prerequisite_missing`) on a brownfield run missing the repo map or codebase analysis |
+| `th collab init\|fragment\|list\|merge` | Parallel-author blackboard: per-stage scratch space so concurrent producers drop fragments without overwriting each other |
+| `th debate add\|list\|resolve` | Blocking reconciliation ledger: records contested design forks; open debate blocks completion until resolved |
+| `th artifact claim\|release\|leases` | Section-level artifact leases: collision guard for intra-artifact fan-out (multiple agents editing different sections) |
+| `th build sub-claim\|sub-release` | Component sub-leases: carve a bounded subset of a parent slice's components for a scoped sub-Builder |
+| `th build dispatch` | Batch wave dispatch: emits the full parallel wave plus per-slice spawn descriptors in one payload |
+| `th hook subagent-stop` | SubagentStop-hook decision: state-validity guard for sub-agent turns (analogous to the Stop-gate) |
+| `th version` | Print the CLI version from `package.json` |
 
 All commands accept `--json` for machine-readable output. The full reference is in [USAGE.md](./USAGE.md) Part 3.
 
