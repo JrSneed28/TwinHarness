@@ -6,7 +6,7 @@ import { structuredLog } from "../core/log";
 import { appendLedger, GATE_LEDGER_KEYS } from "../core/ledger";
 import { NOT_INIT, formatIssues } from "../core/guards";
 import { fieldPolicy } from "../core/state-fields";
-import { canonicalizeStage, isKnownStage, STAGE_PIPELINE } from "../core/stages";
+import { canonicalizeStage, STAGE_PIPELINE } from "../core/stages";
 
 /** Key segments that must never be written through a dotted path (proto-pollution guard, S3). */
 const UNSAFE_KEY_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
@@ -127,7 +127,9 @@ function runStateSetLocked(paths: ProjectPaths, key: string, rawValue: string): 
   // schema). Scoped to the exact `current_stage` key only.
   if (key === "current_stage") {
     const canonical = canonicalizeStage(String(value));
-    if (!isKnownStage(canonical)) {
+    // `canonical` is already canonical, so membership-test directly rather than
+    // calling isKnownStage (which would canonicalize a second time).
+    if (!STAGE_PIPELINE.some((s) => s.stage === canonical)) {
       return failure({
         human:
           `Refusing to set current_stage to "${String(value)}": not a known pipeline stage. ` +

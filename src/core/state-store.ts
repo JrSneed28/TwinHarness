@@ -129,8 +129,15 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
   // STALE_MS < TIMEOUT_MS so a crashed holder's lock becomes stealable strictly
   // before a healthy waiter gives up (the original had STALE 30s > TIMEOUT 10s,
   // which could wedge waiters: they'd time out before the lock ever went stale).
-  const STALE_MS = 5_000;
-  const TIMEOUT_MS = 10_000;
+  // STALE_MS must ALSO comfortably exceed the longest legitimate critical section:
+  // a live holder never refreshes its lock mtime/owner while inside fn(), so a
+  // too-small threshold lets a waiter steal a LIVE-but-slow holder's lock and run
+  // fn() concurrently — the exact lost-update this lock exists to prevent. 5s was
+  // too tight (a GC/scheduler pause or a contended atomic-write retry budget can
+  // approach it); 15s clears any sub-second JSON read-modify-write with wide margin
+  // while a crashed holder is still reclaimed well before the 25s waiter timeout.
+  const STALE_MS = 15_000;
+  const TIMEOUT_MS = 25_000;
   const deadline = Date.now() + TIMEOUT_MS;
 
   for (;;) {

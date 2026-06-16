@@ -203,7 +203,9 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       // these settable (the documented human unlock/advance path), but an agent
       // over MCP must never flip implementation_allowed / tier / current_stage /
       // write_gate. Defense-in-depth: refuse here before the handler.
-      const firstSegment = key.split(".")[0] ?? "";
+      // Trim the segment so a whitespace-padded key (" tier", "tier ") still hits
+      // the gate refusal instead of slipping through to a generic unknown-field error.
+      const firstSegment = (key.split(".")[0] ?? "").trim();
       if (GATE_OWNED.has(firstSegment)) {
         return {
           ok: false,

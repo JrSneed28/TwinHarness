@@ -129,7 +129,9 @@ function runStateSetLocked(paths, key, rawValue) {
     // schema). Scoped to the exact `current_stage` key only.
     if (key === "current_stage") {
         const canonical = (0, stages_1.canonicalizeStage)(String(value));
-        if (!(0, stages_1.isKnownStage)(canonical)) {
+        // `canonical` is already canonical, so membership-test directly rather than
+        // calling isKnownStage (which would canonicalize a second time).
+        if (!stages_1.STAGE_PIPELINE.some((s) => s.stage === canonical)) {
             return (0, output_1.failure)({
                 human: `Refusing to set current_stage to "${String(value)}": not a known pipeline stage. ` +
                     `Valid stages: ${stages_1.STAGE_PIPELINE.map((s) => s.stage).join(", ")}.`,

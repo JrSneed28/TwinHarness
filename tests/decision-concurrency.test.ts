@@ -217,7 +217,7 @@ describe("SLICE-4 — decisions.jsonl concurrency + durability", () => {
     expect(verifyChain(events)).toEqual({ ok: true });
 
     // The SIGKILLed holder left an orphaned `.state.lock`. A real recovery steals
-    // it once it crosses the stale threshold (STALE_MS in withStateLock, now 5s) —
+    // it once it crosses the stale threshold (STALE_MS in withStateLock, now 15s) —
     // so the lock is NOT permanently wedged. Age the orphan into the past to
     // model that elapsed time, then prove a subsequent add succeeds (steals it).
     const orphanLock = path.join(tp.paths.stateDir, ".state.lock");

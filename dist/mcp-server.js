@@ -15470,7 +15470,7 @@ function resolveWithinRoot(root, p) {
   const abs = path.isAbsolute(p) ? p : path.resolve(absRoot, p);
   const rel = path.relative(absRoot, abs);
   if (rel !== "" && (rel.startsWith("..") || path.isAbsolute(rel))) return null;
-  const realRoot = realpathSafe(absRoot);
+  const realRoot = realpathExistingPrefix(absRoot);
   const realAbs = realpathExistingPrefix(abs);
   const realRel = path.relative(realRoot, realAbs);
   if (realRel === "") return abs;
@@ -15550,7 +15550,7 @@ var path2 = __toESM(require("node:path"));
 function isTransientIoError(code) {
   return code === "EPERM" || code === "EACCES" || code === "EBUSY";
 }
-var MAX_RENAME_ATTEMPTS = 12;
+var MAX_IO_ATTEMPTS = 12;
 var StateWriteContendedError = class extends Error {
   code = "state_write_contended";
   constructor(absPath, attempts) {
@@ -15576,7 +15576,7 @@ function atomicWriteFile(absPath, content, rename = fs2.renameSync) {
     } catch (e) {
       const code = e.code;
       const transient = isTransientIoError(code);
-      if (!transient || attempt >= MAX_RENAME_ATTEMPTS) {
+      if (!transient || attempt >= MAX_IO_ATTEMPTS) {
         try {
           fs2.rmSync(tmp, { force: true });
         } catch {
@@ -15589,13 +15589,14 @@ function atomicWriteFile(absPath, content, rename = fs2.renameSync) {
   }
 }
 function readFileWithRetry(absPath, read = (p) => fs2.readFileSync(p, "utf8")) {
-  try {
-    return read(absPath);
-  } catch (e) {
-    const code = e.code;
-    if (!isTransientIoError(code)) throw e;
-    busyWait(10);
-    return read(absPath);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return read(absPath);
+    } catch (e) {
+      const code = e.code;
+      if (!isTransientIoError(code) || attempt >= MAX_IO_ATTEMPTS) throw e;
+      busyWait(Math.min(4 * attempt, 40));
+    }
   }
 }
 
@@ -15799,8 +15800,8 @@ function withStateLock(paths, fn) {
   const lockDir = path3.join(paths.stateDir, ".state.lock");
   const ownerFile = path3.join(lockDir, "owner");
   const myToken = `${process.pid}-${Math.random().toString(36).slice(2)}`;
-  const STALE_MS = 5e3;
-  const TIMEOUT_MS = 1e4;
+  const STALE_MS = 15e3;
+  const TIMEOUT_MS = 25e3;
   const deadline = Date.now() + TIMEOUT_MS;
   for (; ; ) {
     try {
@@ -15976,10 +15977,6 @@ function canonicalizeStage(raw) {
 function isFinalVerification(stage) {
   return canonicalizeStage(stage) === "final-verification";
 }
-function isKnownStage(stage) {
-  const canonical = canonicalizeStage(stage);
-  return STAGE_PIPELINE.some((s) => s.stage === canonical);
-}
 function stageContract(stage) {
   const key = stage.toLowerCase();
   return STAGE_PIPELINE.find((s) => s.stage === key);
@@ -16085,7 +16082,7 @@ ${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } }
   let value = parseValue(rawValue);
   if (key === "current_stage") {
     const canonical = canonicalizeStage(String(value));
-    if (!isKnownStage(canonical)) {
+    if (!STAGE_PIPELINE.some((s) => s.stage === canonical)) {
       return failure({
         human: `Refusing to set current_stage to "${String(value)}": not a known pipeline stage. Valid stages: ${STAGE_PIPELINE.map((s) => s.stage).join(", ")}.`,
         data: { error: "unknown_stage", value: String(value), validStages: STAGE_PIPELINE.map((s) => s.stage) }
@@ -20269,7 +20266,7 @@ var TOOL_DEFS = [
       if (key === void 0 || rawValue === void 0) {
         return { ok: false, exitCode: 1, human: "th_state_set requires both `key` and `value` (strings)." };
       }
-      const firstSegment = key.split(".")[0] ?? "";
+      const firstSegment = (key.split(".")[0] ?? "").trim();
       if (GATE_OWNED.has(firstSegment)) {
         return {
           ok: false,

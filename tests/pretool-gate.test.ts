@@ -19,7 +19,11 @@ import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
-import { runHookPretoolGate, type PreToolHookInput } from "../src/commands/hook";
+import {
+  runHookPretoolGate,
+  extractBashWriteTargets,
+  type PreToolHookInput,
+} from "../src/commands/hook";
 import { writeState } from "../src/core/state-store";
 import { initialState, serializeState } from "../src/core/state-schema";
 import { resolveProjectPaths } from "../src/core/paths";
@@ -585,5 +589,23 @@ describe("REQ-WGATE-007: legacy .agentic-sdlc project — identical behaviour", 
     const legacyPaths = resolveProjectPaths(tp.root);
     const out = runHookPretoolGate(legacyPaths, inputFor("docs/spec.md", tp.root));
     expect(isAllow(out)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// REQ-WGATE-009: extractBashWriteTargets operand heuristic (security regression)
+// ---------------------------------------------------------------------------
+
+describe("extractBashWriteTargets: touch flags every operand, dest-last cmds flag only the last", () => {
+  it("touch treats every non-flag arg as a write target", () => {
+    expect(extractBashWriteTargets("touch src/a.ts src/b.ts")).toEqual(
+      expect.arrayContaining(["src/a.ts", "src/b.ts"]),
+    );
+  });
+
+  it("cp flags only the destination (last arg), not the source", () => {
+    const targets = extractBashWriteTargets("cp a.ts dst.ts");
+    expect(targets).toEqual(expect.arrayContaining(["dst.ts"]));
+    expect(targets).not.toContain("a.ts");
   });
 });

@@ -26,10 +26,11 @@ function isTransientIoError(code: string | undefined): boolean {
   return code === "EPERM" || code === "EACCES" || code === "EBUSY";
 }
 
-/** Bounded retry budget for the rename. ~12 tries with an escalating short
- * busy-wait keeps the total well under ~1s while comfortably outlasting a
- * reader's microsecond-scale open window. */
-const MAX_RENAME_ATTEMPTS = 12;
+/** Bounded retry budget for a contended rename OR read. ~12 tries with an
+ * escalating short busy-wait keeps the total well under ~1s while comfortably
+ * outlasting a colliding open/rename window. Shared by writer and reader so the
+ * read side is no weaker than the write side. */
+const MAX_IO_ATTEMPTS = 12;
 
 /**
  * Thrown by {@link atomicWriteFile} when the rename could not complete within the
@@ -81,7 +82,7 @@ export function atomicWriteFile(
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       const transient = isTransientIoError(code);
-      if (!transient || attempt >= MAX_RENAME_ATTEMPTS) {
+      if (!transient || attempt >= MAX_IO_ATTEMPTS) {
         // Give up: clean the temp file, then surface the right error shape.
         try {
           fs.rmSync(tmp, { force: true });
@@ -97,21 +98,26 @@ export function atomicWriteFile(
 }
 
 /**
- * Read a UTF-8 file, retrying ONCE on a transient contention error (a reader that
- * collided with a concurrent atomic rename). A genuine error (ENOENT, …) is not
- * retried and propagates immediately. `read` is injectable for testing; production
- * callers omit it.
+ * Read a UTF-8 file, retrying a transient contention error (a reader that collided
+ * with a concurrent atomic rename) with the SAME bounded, escalating budget as the
+ * writer — so the read side is no weaker than the write side. A genuine error
+ * (ENOENT, …) is not retried and propagates immediately. A single retry is not
+ * enough under sustained contention: a second consecutive transient failure would
+ * otherwise throw a raw EPERM/EACCES/EBUSY that escapes the CLI boundary (which
+ * only maps the typed lock/write-contention codes) and crashes with a raw stack.
+ * `read` is injectable for testing; production callers omit it.
  */
 export function readFileWithRetry(
   absPath: string,
   read: (p: string) => string = (p) => fs.readFileSync(p, "utf8"),
 ): string {
-  try {
-    return read(absPath);
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
-    if (!isTransientIoError(code)) throw e;
-    busyWait(10);
-    return read(absPath);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return read(absPath);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (!isTransientIoError(code) || attempt >= MAX_IO_ATTEMPTS) throw e;
+      busyWait(Math.min(4 * attempt, 40));
+    }
   }
 }

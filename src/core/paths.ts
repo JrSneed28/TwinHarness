@@ -45,7 +45,14 @@ export function resolveWithinRoot(root: string, p: string): string | null {
   //    containment after resolving REAL paths: realpath the root and the longest
   //    existing prefix of `abs` (tolerating a not-yet-created tail), symmetrically
   //    so a symlinked tmpdir (e.g. macOS /var -> /private/var) never false-rejects.
-  const realRoot = realpathSafe(absRoot);
+  // Resolve BOTH sides through `realpathExistingPrefix` so the symmetry holds even
+  // when the root itself does not exist yet (a fresh `th init`, or a test tmpdir):
+  // `realpathSafe` falls back to the LITERAL path on ENOENT, so realpath-ing the
+  // root directly would leave it unresolved (e.g. `/var/...`) while `abs` resolves
+  // its existing ancestor through a symlink (e.g. `/private/var/...`) — that
+  // asymmetry false-rejects valid in-root paths on macOS/CI. `realpathExistingPrefix`
+  // resolves each one's longest existing prefix identically.
+  const realRoot = realpathExistingPrefix(absRoot);
   const realAbs = realpathExistingPrefix(abs);
   const realRel = path.relative(realRoot, realAbs);
   if (realRel === "") return abs; // resolves to the root itself

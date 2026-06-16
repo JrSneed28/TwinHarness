@@ -287,8 +287,10 @@ export interface PreToolHookInput {
  *   - `tee` (optionally `-a`) followed by a path token.
  *   - `dd ... of=PATH`.
  *   - `sed -i` in-place: last bareword token of the command.
- *   - cp/mv/install/touch/rsync: the last non-flag bareword of the segment is the
+ *   - cp/mv/install/rsync: the last non-flag bareword of the segment is the
  *     destination (per shell segment, split on `;`/`&`/`|`).
+ *   - touch: EVERY non-flag bareword is a target (touch creates/updates all its
+ *     operands, not just the last), so all of them are added.
  */
 export function extractBashWriteTargets(command: string): string[] {
   const seen = new Set<string>();
@@ -323,19 +325,30 @@ export function extractBashWriteTargets(command: string): string[] {
     if (lastToken && lastToken[1]) add(lastToken[1]);
   }
 
-  // Copy/move family (cp/mv/install/touch/rsync): the LAST non-flag argument of
-  // each shell segment is the write destination. Split on shell separators so a
-  // chained command (`build && cp x dst.ts`) is handled per segment.
-  const COPY_CMDS = new Set(["cp", "mv", "install", "touch", "rsync"]);
+  // Copy/move family, per shell segment (split on `;`/`&`/`|` so a chained
+  // command like `build && cp x dst.ts` is handled segment-by-segment):
+  //   - cp/mv/install/rsync: only the LAST non-flag argument is the write
+  //     destination (the earlier operands are read sources).
+  //   - touch: EVERY non-flag argument is a write target (it creates/updates all
+  //     operands), so adding only the last would miss `touch a b` → leaves `a`
+  //     unchecked and lets the gate pass a protected write.
+  const DEST_LAST_CMDS = new Set(["cp", "mv", "install", "rsync"]);
   for (const segment of command.split(/[;&|]+/)) {
     const tokens = segment.trim().split(/\s+/).filter(Boolean);
     const head = tokens[0];
-    if (!head || !COPY_CMDS.has(head)) continue;
-    for (let i = tokens.length - 1; i >= 1; i--) {
-      const tok = tokens[i];
-      if (tok && !tok.startsWith("-")) {
-        add(tok);
-        break;
+    if (!head) continue;
+    if (head === "touch") {
+      for (let i = 1; i < tokens.length; i++) {
+        const tok = tokens[i];
+        if (tok && !tok.startsWith("-")) add(tok);
+      }
+    } else if (DEST_LAST_CMDS.has(head)) {
+      for (let i = tokens.length - 1; i >= 1; i--) {
+        const tok = tokens[i];
+        if (tok && !tok.startsWith("-")) {
+          add(tok);
+          break;
+        }
       }
     }
   }

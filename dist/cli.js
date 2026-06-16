@@ -158,7 +158,7 @@ Usage:
   th decision approve <DECISION-ID> [--reject | --supersede <id>] [--as <actor>]
                                     HUMAN-ONLY: interactive-TTY-gated transition (proposed→approved/rejected; approved→superseded). Never an MCP tool.
   th decision check                 Fail (exit 6) when an unapproved decision gates the current stage; else exit 0
-  th decision list                  List the decision set (ids/titles/statuses/links/audit), sorted (exit 0)
+  th decision list                  List the decision set (ids/titles/statuses/links/audit), sorted (exit 0; non-zero if the hash chain is broken)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
   th version                        Print the CLI version
