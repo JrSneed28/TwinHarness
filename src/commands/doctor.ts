@@ -4,7 +4,7 @@ import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState } from "../core/state-store";
 import { CURRENT_SCHEMA_VERSION } from "../core/state-schema";
-import { readLedger } from "../core/ledger";
+import { readLedger, verifyLedgerChain } from "../core/ledger";
 import { artifactIntegrity, sliceProgress, reviseEscalations } from "../core/health";
 import { computeBreakdown } from "../core/coverage";
 import { readVerifyReport } from "../core/verify";
@@ -42,7 +42,15 @@ function nodeMajor(): number {
   return m ? Number(m[1]) : 0;
 }
 
-export function runDoctor(paths: ProjectPaths): CommandResult {
+/**
+ * @param opts.strict When true, a gate-ledger chain break is escalated from a
+ *   WARNING to a hard FAIL (non-zero exit). Default (false) keeps it a warning —
+ *   the ledger is a best-effort review aid, so a broken chain informs rather than
+ *   fails the run. Mirrors `runAnchorsScan`'s `strict` opt-in (the `--strict`
+ *   flag); wiring `--strict` through `th doctor` at the CLI layer is left to the
+ *   cli.ts owner — this function honors the signal today.
+ */
+export function runDoctor(paths: ProjectPaths, opts: { strict?: boolean } = {}): CommandResult {
   const checks: Check[] = [];
 
   // --- Environment ---
@@ -126,8 +134,25 @@ export function runDoctor(paths: ProjectPaths): CommandResult {
       });
     }
 
-    const ledgerCount = readLedger(paths).length;
+    const ledgerEntries = readLedger(paths);
+    const ledgerCount = ledgerEntries.length;
     checks.push({ name: "audit ledger", status: "ok", detail: `${ledgerCount} gate-mutation entr${ledgerCount === 1 ? "y" : "ies"}` });
+
+    // Tamper-evidence (GOV-2): verify the gate-ledger's hash chain. A break means
+    // a sealed entry was edited/backdated, deleted, or reordered. WARNING by
+    // default (the ledger is a best-effort review aid), escalated to FAIL under
+    // strict. Legacy (pre-migration, unsealed) lines are NOT a tamper signal —
+    // `verifyLedgerChain` verifies only the sealed run.
+    const chain = verifyLedgerChain(ledgerEntries);
+    if (chain.ok) {
+      checks.push({ name: "ledger chain", status: "ok", detail: ledgerCount > 0 ? "intact (no tampering detected)" : "no entries to verify" });
+    } else {
+      checks.push({
+        name: "ledger chain",
+        status: opts.strict ? "fail" : "warn",
+        detail: `BROKEN at entry ${chain.brokenAt} (${chain.reason}) — a sealed entry was edited, deleted, or reordered${opts.strict ? "" : " (run \`th doctor --strict\` to fail on this)"}`,
+      });
+    }
 
     // --- Run health (read-only; warnings only) ---
 

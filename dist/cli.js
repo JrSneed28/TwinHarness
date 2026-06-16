@@ -424,7 +424,7 @@ function dispatch(parsed) {
         case "migrate":
             return (0, migrate_1.runMigrate)(paths);
         case "doctor":
-            return (0, doctor_1.runDoctor)(paths);
+            return (0, doctor_1.runDoctor)(paths, { strict: parsed.flags.strict });
         case "next":
             return (0, next_1.runNext)(paths, { explain: parsed.flags.explain });
         case "preview":

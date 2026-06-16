@@ -15863,8 +15863,78 @@ function structuredLog(event) {
 }
 
 // src/core/ledger.ts
+var fs5 = __toESM(require("node:fs"));
+var path5 = __toESM(require("node:path"));
+
+// src/core/hash.ts
+var import_node_crypto = require("node:crypto");
 var fs4 = __toESM(require("node:fs"));
 var path4 = __toESM(require("node:path"));
+function hashContent(content) {
+  const normalized = content.replace(/\r\n/g, "\n");
+  return (0, import_node_crypto.createHash)("sha256").update(normalized, "utf8").digest("hex");
+}
+var HASH_SKIP_DIRS = /* @__PURE__ */ new Set([".git", "node_modules", "dist"]);
+var MAX_HASH_FILES = 5e3;
+var MAX_HASH_TOTAL_BYTES = 50 * 1024 * 1024;
+var MAX_HASH_FILE_BYTES = 10 * 1024 * 1024;
+var DEFAULT_HASH_LIMITS = {
+  maxFiles: MAX_HASH_FILES,
+  maxTotalBytes: MAX_HASH_TOTAL_BYTES,
+  maxFileBytes: MAX_HASH_FILE_BYTES
+};
+var HashLimitError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "HashLimitError";
+  }
+};
+function hashDir(absDir, limits = DEFAULT_HASH_LIMITS) {
+  const entries = [];
+  let fileCount = 0;
+  let totalBytes = 0;
+  const walk = (abs) => {
+    for (const e of fs4.readdirSync(abs, { withFileTypes: true })) {
+      if (e.isDirectory()) {
+        if (HASH_SKIP_DIRS.has(e.name)) continue;
+        walk(path4.join(abs, e.name));
+      } else if (e.isFile()) {
+        const p = path4.join(abs, e.name);
+        if (++fileCount > limits.maxFiles) {
+          throw new HashLimitError(
+            `directory has more than ${limits.maxFiles} files \u2014 too large to hash as one artifact; register a narrower path`
+          );
+        }
+        const rel = path4.relative(absDir, p).split(path4.sep).join("/");
+        const size = fs4.statSync(p).size;
+        if (size > limits.maxFileBytes) {
+          throw new HashLimitError(
+            `file "${rel}" exceeds ${limits.maxFileBytes} bytes \u2014 artifacts are governed documents, not binaries; register a narrower path`
+          );
+        }
+        totalBytes += size;
+        if (totalBytes > limits.maxTotalBytes) {
+          throw new HashLimitError(
+            `directory exceeds ${limits.maxTotalBytes} bytes total \u2014 too large to hash as one artifact; register a narrower path`
+          );
+        }
+        entries.push(`${rel}\0${hashContent(fs4.readFileSync(p, "utf8"))}`);
+      }
+    }
+  };
+  walk(absDir);
+  entries.sort();
+  return hashContent(entries.join("\n"));
+}
+function hashPathContent(abs) {
+  return fs4.statSync(abs).isDirectory() ? hashDir(abs) : hashContent(fs4.readFileSync(abs, "utf8"));
+}
+function shortHashPath(abs) {
+  return hashPathContent(abs).slice(0, 12);
+}
+
+// src/core/ledger.ts
+var GENESIS_PREV_HASH = "0".repeat(64);
 var GATE_LEDGER_KEYS = /* @__PURE__ */ new Set([
   "implementation_allowed",
   "drift_open_blocking",
@@ -15874,13 +15944,48 @@ var GATE_LEDGER_KEYS = /* @__PURE__ */ new Set([
   "blast_radius_flags"
 ]);
 function ledgerPath(paths) {
-  return path4.join(paths.stateDir, "gate-ledger.jsonl");
+  return path5.join(paths.stateDir, "gate-ledger.jsonl");
+}
+function ledgerCanonicalText(entry) {
+  const ordered = {};
+  for (const key of Object.keys(entry).sort()) {
+    if (key === "recordHash") continue;
+    const val = entry[key];
+    if (val === void 0) continue;
+    ordered[key] = val;
+  }
+  return JSON.stringify(ordered);
+}
+function computeLedgerRecordHash(entry) {
+  return hashContent(ledgerCanonicalText(entry));
+}
+var HEX64 = /^[0-9a-f]{64}$/;
+function readLastLedgerRecordHash(paths) {
+  const file = ledgerPath(paths);
+  if (!fs5.existsSync(file)) return GENESIS_PREV_HASH;
+  const lines = fs5.readFileSync(file, "utf8").split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed === "object" && parsed !== null) {
+        const rh = parsed.recordHash;
+        if (typeof rh === "string" && HEX64.test(rh)) return rh;
+      }
+    } catch {
+    }
+  }
+  return GENESIS_PREV_HASH;
 }
 function appendLedger(paths, entry) {
   try {
-    fs4.mkdirSync(paths.stateDir, { recursive: true });
-    const line = JSON.stringify({ ts: (/* @__PURE__ */ new Date()).toISOString(), ...entry }) + "\n";
-    fs4.appendFileSync(ledgerPath(paths), line, "utf8");
+    fs5.mkdirSync(paths.stateDir, { recursive: true });
+    const prevHash = readLastLedgerRecordHash(paths);
+    const withPrev = { ts: (/* @__PURE__ */ new Date()).toISOString(), ...entry, prevHash };
+    const recordHash = computeLedgerRecordHash(withPrev);
+    const sealed = { ...withPrev, recordHash };
+    fs5.appendFileSync(ledgerPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   } catch {
   }
 }
@@ -16123,7 +16228,7 @@ ${formatIssues(validation.issues)}`,
 }
 
 // src/commands/drift.ts
-var fs5 = __toESM(require("node:fs"));
+var fs6 = __toESM(require("node:fs"));
 
 // src/core/drift-log.ts
 function actionTag(layer) {
@@ -16166,16 +16271,16 @@ Escalation: ...
 \`\`\`
 `;
 function readDriftLog(paths) {
-  if (!fs5.existsSync(paths.driftLog)) {
-    fs5.writeFileSync(paths.driftLog, DRIFT_LOG_HEADER, "utf8");
+  if (!fs6.existsSync(paths.driftLog)) {
+    fs6.writeFileSync(paths.driftLog, DRIFT_LOG_HEADER, "utf8");
     return DRIFT_LOG_HEADER;
   }
-  return fs5.readFileSync(paths.driftLog, "utf8");
+  return fs6.readFileSync(paths.driftLog, "utf8");
 }
 function appendDriftLog(paths, block) {
   const current = readDriftLog(paths);
   const sep7 = current.endsWith("\n") ? "" : "\n";
-  fs5.writeFileSync(paths.driftLog, `${current}${sep7}${block}`, "utf8");
+  fs6.writeFileSync(paths.driftLog, `${current}${sep7}${block}`, "utf8");
 }
 function runDriftAdd(paths, opts) {
   return withStateLock(paths, () => runDriftAddLocked(paths, opts));
@@ -16291,10 +16396,10 @@ function conflictPairs(slices) {
 }
 
 // src/core/leases.ts
-var fs6 = __toESM(require("node:fs"));
-var path5 = __toESM(require("node:path"));
+var fs7 = __toESM(require("node:fs"));
+var path6 = __toESM(require("node:path"));
 function leasesPath(paths) {
-  return path5.join(paths.stateDir, "build-leases.jsonl");
+  return path6.join(paths.stateDir, "build-leases.jsonl");
 }
 var LEASE_FIELD_ORDER = [
   "ts",
@@ -16314,9 +16419,9 @@ function serializeLeaseEvent(event) {
 }
 function readLeaseEvents(paths) {
   const file = leasesPath(paths);
-  if (!fs6.existsSync(file)) return [];
+  if (!fs7.existsSync(file)) return [];
   const out = [];
-  for (const line of fs6.readFileSync(file, "utf8").split(/\r?\n/)) {
+  for (const line of fs7.readFileSync(file, "utf8").split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
@@ -16333,9 +16438,9 @@ function readLeaseEvents(paths) {
   return out;
 }
 function appendLeaseEvent(paths, event, now = () => /* @__PURE__ */ new Date()) {
-  fs6.mkdirSync(paths.stateDir, { recursive: true });
+  fs7.mkdirSync(paths.stateDir, { recursive: true });
   const line = serializeLeaseEvent({ ts: now().toISOString(), ...event }) + "\n";
-  fs6.appendFileSync(leasesPath(paths), line, "utf8");
+  fs7.appendFileSync(leasesPath(paths), line, "utf8");
 }
 function activeLeases(paths) {
   const byOwner = /* @__PURE__ */ new Map();
@@ -16754,11 +16859,11 @@ function readLeaseEventsForParent(paths, parentSlice) {
 }
 
 // src/commands/coverage.ts
-var path9 = __toESM(require("node:path"));
+var path10 = __toESM(require("node:path"));
 
 // src/core/anchors.ts
-var fs7 = __toESM(require("node:fs"));
-var path6 = __toESM(require("node:path"));
+var fs8 = __toESM(require("node:fs"));
+var path7 = __toESM(require("node:path"));
 var REQ_ID_PATTERN = "REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*";
 function extractReqIds(text) {
   const re = new RegExp(REQ_ID_PATTERN, "g");
@@ -16789,12 +16894,12 @@ function scanDirForReqIdsCapped(dir, optsOrPredicate) {
   const skipDirs = opts.skipDirs ?? SCAN_SKIP_DIRS;
   const out = /* @__PURE__ */ new Map();
   const result = { anchors: out, bytesRead: 0, filesRead: 0, capHit: null };
-  if (!fs7.existsSync(dir) || !fs7.statSync(dir).isDirectory()) return result;
+  if (!fs8.existsSync(dir) || !fs8.statSync(dir).isDirectory()) return result;
   const walk = (abs) => {
     if (result.capHit) return;
     let entries;
     try {
-      entries = fs7.readdirSync(abs, { withFileTypes: true });
+      entries = fs8.readdirSync(abs, { withFileTypes: true });
     } catch {
       return;
     }
@@ -16802,13 +16907,13 @@ function scanDirForReqIdsCapped(dir, optsOrPredicate) {
       if (result.capHit) return;
       if (entry.isDirectory()) {
         if (skipDirs.has(entry.name)) continue;
-        walk(path6.join(abs, entry.name));
+        walk(path7.join(abs, entry.name));
       } else if (entry.isFile()) {
         if (extPredicate && !extPredicate(entry.name)) continue;
-        const filePath = path6.join(abs, entry.name);
+        const filePath = path7.join(abs, entry.name);
         let size;
         try {
-          size = fs7.statSync(filePath).size;
+          size = fs8.statSync(filePath).size;
         } catch {
           continue;
         }
@@ -16823,13 +16928,13 @@ function scanDirForReqIdsCapped(dir, optsOrPredicate) {
         }
         let content;
         try {
-          content = fs7.readFileSync(filePath, "utf8");
+          content = fs8.readFileSync(filePath, "utf8");
         } catch {
           continue;
         }
         result.bytesRead += size;
         result.filesRead++;
-        const rel = path6.relative(dir, filePath).split(path6.sep).join("/");
+        const rel = path7.relative(dir, filePath).split(path7.sep).join("/");
         for (const id of extractReqIds(content)) {
           const files = out.get(id);
           if (files) {
@@ -16846,11 +16951,11 @@ function scanDirForReqIdsCapped(dir, optsOrPredicate) {
 }
 
 // src/core/coverage.ts
-var fs8 = __toESM(require("node:fs"));
-var path7 = __toESM(require("node:path"));
+var fs9 = __toESM(require("node:fs"));
+var path8 = __toESM(require("node:path"));
 function readFileOrUndefined(abs) {
-  if (!fs8.existsSync(abs) || !fs8.statSync(abs).isFile()) return void 0;
-  return fs8.readFileSync(abs, "utf8");
+  if (!fs9.existsSync(abs) || !fs9.statSync(abs).isFile()) return void 0;
+  return fs9.readFileSync(abs, "utf8");
 }
 function extractMvpScopeReqIds(scopeContent) {
   const lines = scopeContent.split(/\r?\n/);
@@ -16905,14 +17010,14 @@ function resolveReqSet(reqsContent, scopeContent) {
   return { allReqIds, reqSet: allReqIds, filterDescription: "MVP filter: none \u2014 checking all REQ-IDs" };
 }
 function computeBreakdown(root, opts = {}) {
-  const reqsAbs = path7.resolve(root, opts.reqsFile ?? "docs/01-requirements.md");
-  const planAbs = path7.resolve(root, opts.planFile ?? "docs/09-implementation-plan.md");
-  const testsAbs = path7.resolve(root, opts.testsDir ?? "tests");
-  const scopeAbs = path7.resolve(root, opts.scopeFile ?? "docs/02-scope.md");
-  const codeAbs = path7.resolve(root, opts.codeDir ?? "src");
+  const reqsAbs = path8.resolve(root, opts.reqsFile ?? "docs/01-requirements.md");
+  const planAbs = path8.resolve(root, opts.planFile ?? "docs/09-implementation-plan.md");
+  const testsAbs = path8.resolve(root, opts.testsDir ?? "tests");
+  const scopeAbs = path8.resolve(root, opts.scopeFile ?? "docs/02-scope.md");
+  const codeAbs = path8.resolve(root, opts.codeDir ?? "src");
   const reqsContent = readFileOrUndefined(reqsAbs);
   if (reqsContent === void 0) {
-    return { error: "reqs_file_not_found", reqsFile: path7.relative(root, reqsAbs).split(path7.sep).join("/") };
+    return { error: "reqs_file_not_found", reqsFile: path8.relative(root, reqsAbs).split(path8.sep).join("/") };
   }
   const { reqSet, filterDescription } = resolveReqSet(reqsContent, readFileOrUndefined(scopeAbs));
   const planContent = readFileOrUndefined(planAbs);
@@ -16936,20 +17041,20 @@ function computeBreakdown(root, opts = {}) {
 }
 
 // src/core/verify.ts
-var fs9 = __toESM(require("node:fs"));
-var path8 = __toESM(require("node:path"));
+var fs10 = __toESM(require("node:fs"));
+var path9 = __toESM(require("node:path"));
 var DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60 * 1e3;
 function verifyConfigPath(paths) {
-  return path8.join(paths.stateDir, "verify.json");
+  return path9.join(paths.stateDir, "verify.json");
 }
 function verifyReportPath(paths) {
-  return path8.join(paths.stateDir, "verify-report.json");
+  return path9.join(paths.stateDir, "verify-report.json");
 }
 function readVerifyConfig(paths) {
   const file = verifyConfigPath(paths);
-  if (!fs9.existsSync(file)) return { commands: [] };
+  if (!fs10.existsSync(file)) return { commands: [] };
   try {
-    const parsed = JSON.parse(fs9.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs10.readFileSync(file, "utf8"));
     if (parsed && typeof parsed === "object" && Array.isArray(parsed.commands)) {
       const commands = parsed.commands.filter((c) => typeof c === "string");
       return { commands };
@@ -16960,9 +17065,9 @@ function readVerifyConfig(paths) {
 }
 function readVerifyReport(paths) {
   const file = verifyReportPath(paths);
-  if (!fs9.existsSync(file)) return null;
+  if (!fs10.existsSync(file)) return null;
   try {
-    const parsed = JSON.parse(fs9.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs10.readFileSync(file, "utf8"));
     if (parsed && typeof parsed === "object" && typeof parsed.ok === "boolean") {
       return parsed;
     }
@@ -16990,13 +17095,13 @@ function rejectEscapingPath(paths, opts) {
 function runCoverageCheck(paths, opts = {}) {
   const escaped = rejectEscapingPath(paths, opts);
   if (escaped) return escaped;
-  const reqsAbs = path9.resolve(paths.root, opts.reqsFile ?? "docs/01-requirements.md");
-  const planAbs = path9.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
-  const testsAbs = path9.resolve(paths.root, opts.testsDir ?? "tests");
-  const scopeAbs = path9.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
+  const reqsAbs = path10.resolve(paths.root, opts.reqsFile ?? "docs/01-requirements.md");
+  const planAbs = path10.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  const testsAbs = path10.resolve(paths.root, opts.testsDir ?? "tests");
+  const scopeAbs = path10.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
   const reqsContent = readFileOrUndefined(reqsAbs);
   if (reqsContent === void 0) {
-    const rel = path9.relative(paths.root, reqsAbs).split(path9.sep).join("/");
+    const rel = path10.relative(paths.root, reqsAbs).split(path10.sep).join("/");
     return failure({
       human: `Requirements file not found: ${rel}. Run \`th init\` and author requirements first.`,
       data: { error: "reqs_file_not_found", reqsFile: rel }
@@ -17038,7 +17143,7 @@ ${filterDescription}`
 }
 
 // src/core/brief.ts
-var fs10 = __toESM(require("node:fs"));
+var fs11 = __toESM(require("node:fs"));
 function isPlainObject4(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -17074,12 +17179,12 @@ function validateBrief(value) {
   return { ok: true, issues: [], brief: value };
 }
 function loadBriefFromFile(filePath) {
-  if (!fs10.existsSync(filePath)) {
+  if (!fs11.existsSync(filePath)) {
     return { ok: false, issues: [{ path: "$", message: `brief file not found: ${filePath}` }] };
   }
   let raw;
   try {
-    raw = fs10.readFileSync(filePath, "utf8");
+    raw = fs11.readFileSync(filePath, "utf8");
   } catch (e) {
     return { ok: false, issues: [{ path: "$", message: `could not read brief: ${e.message}` }] };
   }
@@ -17093,19 +17198,19 @@ function loadBriefFromFile(filePath) {
 }
 
 // src/core/telemetry.ts
-var fs11 = __toESM(require("node:fs"));
-var path10 = __toESM(require("node:path"));
+var fs12 = __toESM(require("node:fs"));
+var path11 = __toESM(require("node:path"));
 function telemetryConfigPath(paths) {
-  return path10.join(paths.stateDir, "telemetry.json");
+  return path11.join(paths.stateDir, "telemetry.json");
 }
 function telemetryLogPath(paths) {
-  return path10.join(paths.stateDir, "telemetry.jsonl");
+  return path11.join(paths.stateDir, "telemetry.jsonl");
 }
 function readTelemetryConfig(paths) {
   const file = telemetryConfigPath(paths);
-  if (!fs11.existsSync(file)) return { enabled: false };
+  if (!fs12.existsSync(file)) return { enabled: false };
   try {
-    const parsed = JSON.parse(fs11.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs12.readFileSync(file, "utf8"));
     if (parsed && typeof parsed === "object" && typeof parsed.enabled === "boolean") {
       return { enabled: parsed.enabled };
     }
@@ -17116,8 +17221,8 @@ function readTelemetryConfig(paths) {
 function appendTelemetry(paths, record2) {
   if (!readTelemetryConfig(paths).enabled) return;
   try {
-    fs11.mkdirSync(paths.stateDir, { recursive: true });
-    fs11.appendFileSync(telemetryLogPath(paths), JSON.stringify(record2) + "\n", "utf8");
+    fs12.mkdirSync(paths.stateDir, { recursive: true });
+    fs12.appendFileSync(telemetryLogPath(paths), JSON.stringify(record2) + "\n", "utf8");
   } catch {
   }
 }
@@ -17182,75 +17287,6 @@ var path16 = __toESM(require("node:path"));
 // src/core/health.ts
 var fs13 = __toESM(require("node:fs"));
 var path12 = __toESM(require("node:path"));
-
-// src/core/hash.ts
-var import_node_crypto = require("node:crypto");
-var fs12 = __toESM(require("node:fs"));
-var path11 = __toESM(require("node:path"));
-function hashContent(content) {
-  const normalized = content.replace(/\r\n/g, "\n");
-  return (0, import_node_crypto.createHash)("sha256").update(normalized, "utf8").digest("hex");
-}
-var HASH_SKIP_DIRS = /* @__PURE__ */ new Set([".git", "node_modules", "dist"]);
-var MAX_HASH_FILES = 5e3;
-var MAX_HASH_TOTAL_BYTES = 50 * 1024 * 1024;
-var MAX_HASH_FILE_BYTES = 10 * 1024 * 1024;
-var DEFAULT_HASH_LIMITS = {
-  maxFiles: MAX_HASH_FILES,
-  maxTotalBytes: MAX_HASH_TOTAL_BYTES,
-  maxFileBytes: MAX_HASH_FILE_BYTES
-};
-var HashLimitError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "HashLimitError";
-  }
-};
-function hashDir(absDir, limits = DEFAULT_HASH_LIMITS) {
-  const entries = [];
-  let fileCount = 0;
-  let totalBytes = 0;
-  const walk = (abs) => {
-    for (const e of fs12.readdirSync(abs, { withFileTypes: true })) {
-      if (e.isDirectory()) {
-        if (HASH_SKIP_DIRS.has(e.name)) continue;
-        walk(path11.join(abs, e.name));
-      } else if (e.isFile()) {
-        const p = path11.join(abs, e.name);
-        if (++fileCount > limits.maxFiles) {
-          throw new HashLimitError(
-            `directory has more than ${limits.maxFiles} files \u2014 too large to hash as one artifact; register a narrower path`
-          );
-        }
-        const rel = path11.relative(absDir, p).split(path11.sep).join("/");
-        const size = fs12.statSync(p).size;
-        if (size > limits.maxFileBytes) {
-          throw new HashLimitError(
-            `file "${rel}" exceeds ${limits.maxFileBytes} bytes \u2014 artifacts are governed documents, not binaries; register a narrower path`
-          );
-        }
-        totalBytes += size;
-        if (totalBytes > limits.maxTotalBytes) {
-          throw new HashLimitError(
-            `directory exceeds ${limits.maxTotalBytes} bytes total \u2014 too large to hash as one artifact; register a narrower path`
-          );
-        }
-        entries.push(`${rel}\0${hashContent(fs12.readFileSync(p, "utf8"))}`);
-      }
-    }
-  };
-  walk(absDir);
-  entries.sort();
-  return hashContent(entries.join("\n"));
-}
-function hashPathContent(abs) {
-  return fs12.statSync(abs).isDirectory() ? hashDir(abs) : hashContent(fs12.readFileSync(abs, "utf8"));
-}
-function shortHashPath(abs) {
-  return hashPathContent(abs).slice(0, 12);
-}
-
-// src/core/health.ts
 var DEFAULT_REVISE_CAP = 3;
 function artifactIntegrity(paths, state) {
   return state.approved_artifacts.map((a) => {
@@ -17286,7 +17322,7 @@ function reviseEscalations(state, cap = DEFAULT_REVISE_CAP) {
 var fs14 = __toESM(require("node:fs"));
 var path13 = __toESM(require("node:path"));
 var import_node_crypto2 = require("node:crypto");
-var GENESIS_PREV_HASH = "0".repeat(64);
+var GENESIS_PREV_HASH2 = "0".repeat(64);
 var APPROVAL_TRANSITIONS = /* @__PURE__ */ new Set(["approved", "rejected", "superseded"]);
 function decisionsPath(paths) {
   return path13.join(paths.stateDir, "decisions.jsonl");
@@ -17323,7 +17359,7 @@ function computeRecordHash(event) {
 function computeKeyedHash(event, key) {
   return (0, import_node_crypto2.createHmac)("sha256", key).update(canonicalText(event)).digest("hex");
 }
-var HEX64 = /^[0-9a-f]{64}$/;
+var HEX642 = /^[0-9a-f]{64}$/;
 var ID_RE = /^DECISION-\d{3,}$/;
 var EVENT_TYPES = /* @__PURE__ */ new Set(["proposed", "approved", "rejected", "superseded"]);
 function isValidEvent(parsed) {
@@ -17331,8 +17367,8 @@ function isValidEvent(parsed) {
   const e = parsed;
   if (typeof e.id !== "string" || !ID_RE.test(e.id)) return false;
   if (typeof e.event !== "string" || !EVENT_TYPES.has(e.event)) return false;
-  if (typeof e.prevHash !== "string" || !HEX64.test(e.prevHash)) return false;
-  if (typeof e.recordHash !== "string" || !HEX64.test(e.recordHash)) return false;
+  if (typeof e.prevHash !== "string" || !HEX642.test(e.prevHash)) return false;
+  if (typeof e.recordHash !== "string" || !HEX642.test(e.recordHash)) return false;
   if (e.links !== void 0 && !Array.isArray(e.links)) return false;
   if (e.keyedHash !== void 0 && typeof e.keyedHash !== "string") return false;
   return true;
@@ -17354,7 +17390,7 @@ function readDecisionEvents(paths) {
 }
 function readLastDecisionRecordHash(paths) {
   const file = decisionsPath(paths);
-  if (!fs14.existsSync(file)) return GENESIS_PREV_HASH;
+  if (!fs14.existsSync(file)) return GENESIS_PREV_HASH2;
   const lines = fs14.readFileSync(file, "utf8").split(/\r?\n/);
   for (let i = lines.length - 1; i >= 0; i--) {
     const trimmed = lines[i].trim();
@@ -17365,7 +17401,7 @@ function readLastDecisionRecordHash(paths) {
     } catch {
     }
   }
-  return GENESIS_PREV_HASH;
+  return GENESIS_PREV_HASH2;
 }
 function numericSuffix(id) {
   const m = /^DECISION-(\d+)$/.exec(id);
@@ -17396,7 +17432,7 @@ function appendDecisionEvent(paths, event, key) {
   return sealed;
 }
 function verifyChain(events) {
-  let expectedPrev = GENESIS_PREV_HASH;
+  let expectedPrev = GENESIS_PREV_HASH2;
   for (let i = 0; i < events.length; i++) {
     const e = events[i];
     const { recordHash, ...rest } = e;

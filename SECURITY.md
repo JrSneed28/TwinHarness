@@ -51,12 +51,24 @@ a security sandbox. The orchestrator can legitimately:
 
 The **gate-mutation audit ledger** (`.twinharness/gate-ledger.jsonl`) records
 every gate-relevant state change, so such overrides can be reviewed after the
-fact. It supports accountability rather than prevention — but it is **not
-tamper-evident**: unlike the SHA-256 hash-chained `decisions.jsonl`,
-`gate-ledger.jsonl` is a plain append-only log with no hash chain, so an actor
-with write access to `.twinharness/` can edit or delete its entries without
-detection. Treat it as a best-effort review aid, not an authoritative or
-tamper-proof record.
+fact. It supports accountability rather than prevention, and it is now
+**tamper-evident**: like the `decisions.jsonl` store, `gate-ledger.jsonl` is a
+SHA-256 hash-chained append-only log — each entry seals a `recordHash` over its
+own canonical content (timestamp included) plus the prior entry's `recordHash`,
+so an actor with write access to `.twinharness/` who edits, backdates, deletes,
+or reorders a sealed entry breaks the chain detectably. `th doctor` verifies the
+chain and reports a break (a warning by default; `th doctor --strict` fails on
+it). Three honest limits remain: (1) ledgers that predate the hash chain begin with
+unsealed legacy lines, which are an unverifiable pre-migration prefix rather than
+a tamper signal — verification covers the sealed run that follows; (2) the
+chain is keyless, so an actor who rewrites the WHOLE sealed run from the first
+sealed entry forward can forge a self-consistent chain; and (3) because the
+pre-migration legacy prefix is tolerated, an actor can also DELETE the entire
+sealed run (reverting the file to legacy-only or empty), which verification cannot
+distinguish from a ledger that was never sealed — detection is per-link, not
+anchored to an expected entry count, so a fully-truncated ledger reports an intact
+(zero-sealed) chain. It is therefore a strong review aid that makes targeted edits
+detectable, not an unforgeable record.
 
 **CLI vs MCP asymmetry for gate fields.** The gate-owned fields
 (`implementation_allowed`, `tier`, `current_stage`, `write_gate`,

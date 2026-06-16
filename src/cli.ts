@@ -497,7 +497,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
     case "migrate":
       return runMigrate(paths);
     case "doctor":
-      return runDoctor(paths);
+      return runDoctor(paths, { strict: parsed.flags.strict });
     case "next":
       return runNext(paths, { explain: parsed.flags.explain });
     case "preview":
