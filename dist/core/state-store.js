@@ -166,6 +166,26 @@ function withStateLock(paths, fn) {
     // it and use STALE_MS + N instead of hardcoding the magic literal (TEST-006).
     const TIMEOUT_MS = 25_000;
     const deadline = Date.now() + TIMEOUT_MS;
+    // Backoff-with-jitter for the inter-attempt wait (PERF-008). A FIXED cadence
+    // made N contending writers wake in lock-step (thundering herd) and collide on
+    // the same mkdir over and over. Instead, grow the wait per failed attempt
+    // (5,10,20,40,80 ms) capped at BACKOFF_CAP_MS, and pick the actual sleep
+    // uniformly in [0, backoff) ("full jitter") so contenders desynchronize.
+    //
+    // This ONLY changes how long a waiter sleeps between attempts — never whether
+    // it may steal-if-stale or acquire. TIMEOUT_MS (25s), STALE_MS stealing, and
+    // the owner-token TOCTOU guard are all unchanged.
+    //
+    // The cap (80 ms) is kept far below TIMEOUT_MS so a freed lock is re-acquired
+    // promptly (worst-case extra latency after a release is one ~80ms nap). With a
+    // ~80ms ceiling the expected per-attempt sleep is ~40ms, giving each waiter
+    // ~25 acquisition attempts/sec; that comfortably supports tens of concurrent
+    // writers (the realistic ceiling for a parallel `th` build wave) without the
+    // lock-step collisions of the old fixed wait. Backoff is per-call state, so it
+    // resets between invocations and never accumulates across critical sections.
+    const BACKOFF_BASE_MS = 5;
+    const BACKOFF_CAP_MS = 80;
+    let attempt = 0;
     for (;;) {
         try {
             fs.mkdirSync(lockDir); // atomic test-and-set: throws EEXIST (POSIX) / EPERM|EACCES (Windows) if held
@@ -210,8 +230,15 @@ function withStateLock(paths, fn) {
                 throw new LockTimeoutError(lockDir);
             }
             // Zero-CPU wait (PERF-007): the CLI has no event loop to yield to, and the
-            // old `while`-spin pegged a core while waiting on a held lock. Same 20ms.
-            (0, sleep_1.sleepSync)(20);
+            // old `while`-spin pegged a core while waiting on a held lock.
+            //
+            // Backoff-with-jitter (PERF-008): the backoff ceiling for THIS attempt is
+            // BACKOFF_BASE_MS * 2^attempt, clamped to BACKOFF_CAP_MS; we then sleep a
+            // uniformly random duration in [0, ceiling) so N contenders desynchronize
+            // instead of waking in lock-step. sleepSync is still the zero-CPU primitive.
+            const backoffCeil = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempt);
+            attempt++;
+            (0, sleep_1.sleepSync)(Math.random() * backoffCeil);
         }
     }
     try {

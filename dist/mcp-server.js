@@ -15831,6 +15831,9 @@ function withStateLock(paths, fn) {
   const myToken = `${process.pid}-${Math.random().toString(36).slice(2)}`;
   const TIMEOUT_MS = 25e3;
   const deadline = Date.now() + TIMEOUT_MS;
+  const BACKOFF_BASE_MS = 5;
+  const BACKOFF_CAP_MS = 80;
+  let attempt = 0;
   for (; ; ) {
     try {
       fs3.mkdirSync(lockDir);
@@ -15858,7 +15861,9 @@ function withStateLock(paths, fn) {
       if (Date.now() > deadline) {
         throw new LockTimeoutError(lockDir);
       }
-      sleepSync(20);
+      const backoffCeil = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempt);
+      attempt++;
+      sleepSync(Math.random() * backoffCeil);
     }
   }
   try {
