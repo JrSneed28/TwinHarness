@@ -13,6 +13,9 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.STAGE_PIPELINE = void 0;
+exports.canonicalizeStage = canonicalizeStage;
+exports.isFinalVerification = isFinalVerification;
+exports.isKnownStage = isKnownStage;
 exports.stageContract = stageContract;
 exports.engagedStages = engagedStages;
 exports.nextStageAfter = nextStageAfter;
@@ -34,6 +37,37 @@ exports.STAGE_PIPELINE = [
     { stage: "documentation", tiers: ["T1", "T2", "T3"], produces: "", criticMode: "documentation", humanGate: false, summary: "Tier-scaled docs; Critic-reviewed; no human gate." },
     { stage: "final-verification", tiers: ["T1", "T2", "T3"], produces: "docs/10-verification-report.md", criticMode: "final-verification", humanGate: true, summary: "Coherence (Critic) vs correctness (tests + human); human signs off." },
 ];
+/**
+ * Canonicalize a free-form `current_stage` string to a comparable pipeline id.
+ * Trims and lowercases, then strips a leading `NN-` numeric ordering prefix
+ * (e.g. `10-final-verification` → `final-verification`) ONLY when that yields a
+ * known pipeline stage. Unknown input is returned trimmed+lowercased but
+ * otherwise unchanged, so non-pipeline stages (`init`, `stage-05`, …) still flow
+ * through untouched. This is the single source of truth for "is this stage X?"
+ * shared by the stop-gate (hook.ts) and `th next` (next.ts) so they never
+ * disagree on near-miss spellings (C-1, M-2).
+ */
+function canonicalizeStage(raw) {
+    const trimmed = (raw ?? "").trim().toLowerCase();
+    if (trimmed === "")
+        return "";
+    if (exports.STAGE_PIPELINE.some((s) => s.stage === trimmed))
+        return trimmed;
+    const deprefixed = trimmed.replace(/^\d+-/, "");
+    if (deprefixed !== trimmed && exports.STAGE_PIPELINE.some((s) => s.stage === deprefixed)) {
+        return deprefixed;
+    }
+    return trimmed;
+}
+/** True iff `stage` canonicalizes to the final-verification pipeline stage. */
+function isFinalVerification(stage) {
+    return canonicalizeStage(stage) === "final-verification";
+}
+/** True iff `stage` canonicalizes to a known pipeline stage id. */
+function isKnownStage(stage) {
+    const canonical = canonicalizeStage(stage);
+    return exports.STAGE_PIPELINE.some((s) => s.stage === canonical);
+}
 /** Look up a stage contract by id (case-insensitive). */
 function stageContract(stage) {
     const key = stage.toLowerCase();

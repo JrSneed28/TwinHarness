@@ -69,6 +69,7 @@ const log_1 = require("../core/log");
 const state_store_1 = require("../core/state-store");
 const state_store_2 = require("../core/state-store");
 const decisions_1 = require("../core/decisions");
+const decision_key_1 = require("../core/decision-key");
 /** `th decision check` exit code when an unapproved decision gates the stage (IF-004). */
 exports.DECISION_GATE_EXIT = 6;
 /** Parse a comma-separated flag value the same way `--components` is parsed. */
@@ -106,7 +107,10 @@ function runDecisionAdd(paths, opts = {}) {
             data: { error: "missing_field", field: "rationale" },
         });
     }
-    const links = opts.links ?? [];
+    // Canonicalize stage links at record time (F-6 item 2c) so a `stage:` near-miss
+    // is stored canonically and a gating decision keeps gating after current_stage
+    // is normalized.
+    const links = (opts.links ?? []).map(decisions_1.canonicalizeLink);
     const proposer = opts.proposer?.trim() || "orchestrator";
     const now = opts.now ?? (() => new Date());
     // Read-modify-append serialized via withStateLock (the proven primitive).
@@ -263,11 +267,22 @@ function listShape(d) {
  * Anchor: REQ-NFR-008 — paths-first; one structuredLog; returns CommandResult.
  */
 function runDecisionList(paths, _opts = {}) {
-    const reduced = (0, decisions_1.sortDecisions)((0, decisions_1.reduceDecisions)((0, decisions_1.readDecisionEvents)(paths)));
+    const events = (0, decisions_1.readDecisionEvents)(paths);
+    // Fail closed on a broken chain (C-3a): never list a tampered ledger as clean.
+    const chain = (0, decisions_1.verifyChain)(events);
+    if (!chain.ok) {
+        (0, log_1.structuredLog)({ cmd: "decision list", error: "chain_broken", brokenAt: chain.brokenAt });
+        return (0, output_1.failure)({
+            human: `decisions.jsonl hash chain is broken at index ${chain.brokenAt} (${chain.reason}); refusing to list a tampered ledger as clean. Inspect \`.twinharness/decisions.jsonl\`.`,
+            data: { error: "chain_broken", brokenAt: chain.brokenAt, reason: chain.reason },
+        });
+    }
+    const reduced = (0, decisions_1.sortDecisions)((0, decisions_1.reduceDecisions)(events));
     const decisions = reduced.map(listShape);
+    const seal = sealWarningData(events);
     (0, log_1.structuredLog)({ cmd: "decision list", decisions: decisions.length });
     return (0, output_1.success)({
-        data: { decisions },
+        data: { decisions, ...seal },
         human: decisions.length === 0
             ? "No decisions recorded."
             : reduced.map((d) => `${d.id}  [${d.status}]  ${d.title}`).join("\n"),
@@ -422,7 +437,9 @@ function runDecisionApprove(paths, id, opts = {}) {
         };
         if (supersede)
             event.supersededBy = supersedeTarget;
-        (0, decisions_1.appendDecisionEvent)(paths, event);
+        // Seal the approval transition with the opt-in key when one is explicitly set
+        // (C-3b). resolveDecisionKey() returns null by default → no seal, no behavior change.
+        (0, decisions_1.appendDecisionEvent)(paths, event, (0, decision_key_1.resolveDecisionKey)());
         const data = { id, to: toEvent, approver };
         if (supersede)
             data.supersededBy = supersedeTarget;
@@ -451,15 +468,32 @@ function runDecisionApprove(paths, id, opts = {}) {
  * Anchor: REQ-NFR-008 — paths-first; one structuredLog; returns CommandResult.
  */
 function runDecisionCheck(paths, _opts = {}) {
-    const decisions = (0, decisions_1.reduceDecisions)((0, decisions_1.readDecisionEvents)(paths));
+    const events = (0, decisions_1.readDecisionEvents)(paths);
+    // Tamper gate (C-3a) — verify the keyless chain FIRST and fail CLOSED. A broken
+    // chain means the ledger is untrustworthy, so `check` must NOT report it clean.
+    // Reuses exit 6 (guard #7) but with a DISTINCT data.error discriminator
+    // ("chain_broken") vs the unapproved-gating path ("unapproved_gating").
+    const chain = (0, decisions_1.verifyChain)(events);
+    if (!chain.ok) {
+        (0, log_1.structuredLog)({ cmd: "decision check", error: "chain_broken", brokenAt: chain.brokenAt });
+        return {
+            ok: false,
+            exitCode: exports.DECISION_GATE_EXIT,
+            data: { error: "chain_broken", brokenAt: chain.brokenAt, reason: chain.reason },
+            human: `decisions.jsonl hash chain is broken at index ${chain.brokenAt} (${chain.reason}); ` +
+                `the decision ledger has been edited/reordered. Refusing to report it as clean.`,
+        };
+    }
+    const decisions = (0, decisions_1.reduceDecisions)(events);
     const state = (0, state_store_1.readState)(paths).state;
     const gating = (0, decisions_1.gatingObligations)(decisions, state);
+    const seal = sealWarningData(events);
     if (gating.length > 0) {
         (0, log_1.structuredLog)({ cmd: "decision check", gating: gating.length });
         return {
             ok: false,
             exitCode: exports.DECISION_GATE_EXIT,
-            data: { ok: false, gating },
+            data: { ok: false, error: "unapproved_gating", gating, ...seal },
             human: [
                 "Unapproved decisions gate the current stage:",
                 ...gating.map((g) => `  ${g.decisionId} blocks stage '${g.blockedStage}'`),
@@ -467,5 +501,18 @@ function runDecisionCheck(paths, _opts = {}) {
         };
     }
     (0, log_1.structuredLog)({ cmd: "decision check", gating: 0 });
-    return (0, output_1.success)({ data: { gating: [] }, human: "No unapproved gating decisions." });
+    return (0, output_1.success)({ data: { gating: [], ...seal }, human: "No unapproved gating decisions." });
+}
+/**
+ * Optional keyed-seal warning (C-3b, warn-only). Returns `{}` unless a key is
+ * EXPLICITLY set (TH_DECISION_KEY) AND a present seal mismatches — in which case
+ * it returns a `sealWarning` marker for the data payload. NEVER changes the exit
+ * code (a per-environment key difference must not turn a clean ledger red).
+ */
+function sealWarningData(events) {
+    const key = (0, decision_key_1.resolveDecisionKey)();
+    if (!key)
+        return {};
+    const res = (0, decisions_1.verifyApprovalSeals)(events, key);
+    return res.ok ? {} : { sealWarning: { mismatches: res.mismatches } };
 }

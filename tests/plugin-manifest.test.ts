@@ -181,9 +181,58 @@ describe("REQ-PLUGIN-003: every component resolves `th` without relying on PATH"
     },
   );
 
+  it.each(commandFiles)(
+    "%s pre-authorizes the th MCP tools via allowed-tools (commands prefer MCP, fall back to CLI)",
+    (rel) => {
+      // Every command body routes coordination/observability/state through the
+      // typed `mcp__plugin_twinharness_th__*` tools first (reference/mcp-tools.md),
+      // so the allowlist must pre-authorize them — not just the CLI fallback.
+      expect(frontmatter(read(rel))["allowed-tools"]).toContain("mcp__plugin_twinharness_th__");
+    },
+  );
+
   it("the skill has name + description frontmatter", () => {
     const fm = frontmatter(read("skills/twinharness/SKILL.md"));
     expect(fm.name).toBe("twinharness");
     expect(fm.description).toBeTruthy();
   });
+});
+
+describe("REQ-PLUGIN-004: pre-prompt `!` snapshot directives are non-fatal", () => {
+  // A `!`-prefixed directive runs BEFORE the prompt as a best-effort context
+  // snapshot. Claude Code ABORTS the whole slash command if that directive exits
+  // non-zero — so a `th` snapshot that legitimately fails on an uninitialized
+  // project (NOT_INIT, exit 1) would make the command unusable in exactly the
+  // fresh-dir case where it is needed most. Every CLI snapshot directive must
+  // therefore be neutralized with `|| true`.
+  //
+  // Claude Code matches compound commands per-subcommand (separators `&&`, `||`,
+  // `;`, `|`, ...), and `true` is NOT in the auto-approved read-only builtin set
+  // — so a file using `|| true` must also pre-authorize `Bash(true)` in
+  // allowed-tools, or the second subcommand prompts for permission.
+  const commandFiles = fs
+    .readdirSync(path.join(ROOT, "commands"))
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => `commands/${f}`);
+
+  /** Extract every `!`…` pre-prompt directive command from a command file. */
+  const directives = (md: string): string[] =>
+    [...md.matchAll(/^!`(.+?)`\s*$/gm)].map((m) => m[1]!.trim());
+
+  it.each(commandFiles)("%s: every CLI `!` snapshot directive ends with `|| true`", (rel) => {
+    const cliDirectives = directives(read(rel)).filter((d) => d.includes("dist/cli.js"));
+    for (const d of cliDirectives) {
+      expect(d.endsWith("|| true")).toBe(true);
+    }
+  });
+
+  it.each(commandFiles)(
+    "%s: a `|| true` directive pre-authorizes Bash(true) (compound commands match per-subcommand)",
+    (rel) => {
+      const md = read(rel);
+      if (directives(md).some((d) => d.endsWith("|| true"))) {
+        expect(frontmatter(md)["allowed-tools"]).toContain("Bash(true)");
+      }
+    },
+  );
 });

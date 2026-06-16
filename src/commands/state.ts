@@ -5,15 +5,11 @@ import { validateState, STATE_FIELD_ORDER } from "../core/state-schema";
 import { structuredLog } from "../core/log";
 import { appendLedger, GATE_LEDGER_KEYS } from "../core/ledger";
 import { NOT_INIT, formatIssues } from "../core/guards";
+import { fieldPolicy } from "../core/state-fields";
+import { canonicalizeStage, STAGE_PIPELINE } from "../core/stages";
 
 /** Key segments that must never be written through a dotted path (proto-pollution guard, S3). */
 const UNSAFE_KEY_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
-
-/** Fields owned by a dedicated command; `state set` refuses them to keep the owning invariant. */
-const MANAGED_FIELDS: Record<string, string> = {
-  drift_open_blocking: "Use `th drift add` / `th drift resolve` — this counter is owned by the drift flow.",
-  debate_open_blocking: "Use `th debate add` / `th debate resolve` — this counter is owned by the debate flow.",
-};
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -103,11 +99,15 @@ function runStateSetLocked(paths: ProjectPaths, key: string, rawValue: string): 
     });
   }
 
-  // Managed-field guard: refuse writes to fields owned by a dedicated command.
-  // These fields have an owning invariant that `state set` would silently bypass.
-  if (Object.prototype.hasOwnProperty.call(MANAGED_FIELDS, firstSegment)) {
+  // Managed-field guard (H-2): refuse writes to fields whose owning command keeps
+  // an invariant a raw set would corrupt (the drift/debate counters). Gate-owned
+  // fields (implementation_allowed/tier/current_stage/write_gate) are NOT refused
+  // here — setting them on the CLI is the documented unlock/advance path — but the
+  // MCP raw setter refuses them (F-7) and current_stage is enum-normalized below.
+  const policy = fieldPolicy(firstSegment);
+  if (policy?.refusedByStateSet) {
     return failure({
-      human: `Refusing to set managed field "${firstSegment}". ${MANAGED_FIELDS[firstSegment]}`,
+      human: `Refusing to set managed field "${firstSegment}". ${policy.owner}`,
       data: { error: "managed_field", field: firstSegment },
     });
   }
@@ -116,7 +116,29 @@ function runStateSetLocked(paths: ProjectPaths, key: string, rawValue: string): 
   if (!r.exists) return NOT_INIT;
   if (!r.state) return failure({ human: `Existing state.json is invalid; fix it before setting values:\n${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
 
-  const value = parseValue(rawValue);
+  let value = parseValue(rawValue);
+
+  // current_stage enum-normalization (C-1 write-path defense): canonicalize the
+  // value and reject anything that is not a known pipeline stage, so near-miss /
+  // bogus stage strings (done, complete, Final-Verification, 10-final-verification)
+  // can never be stored via the CLI — closing the gate-bypass vector at the source
+  // while the schema itself stays permissive (existing tests write non-pipeline
+  // stages like `stage-05` directly via writeState; plan §F-5: do NOT tighten the
+  // schema). Scoped to the exact `current_stage` key only.
+  if (key === "current_stage") {
+    const canonical = canonicalizeStage(String(value));
+    // `canonical` is already canonical, so membership-test directly rather than
+    // calling isKnownStage (which would canonicalize a second time).
+    if (!STAGE_PIPELINE.some((s) => s.stage === canonical)) {
+      return failure({
+        human:
+          `Refusing to set current_stage to "${String(value)}": not a known pipeline stage. ` +
+          `Valid stages: ${STAGE_PIPELINE.map((s) => s.stage).join(", ")}.`,
+        data: { error: "unknown_stage", value: String(value), validStages: STAGE_PIPELINE.map((s) => s.stage) },
+      });
+    }
+    value = canonical; // persist the canonical id (e.g. "10-final-verification" → "final-verification")
+  }
   const next = JSON.parse(JSON.stringify(r.state)) as Record<string, unknown>;
   setByPath(next, key, value);
 

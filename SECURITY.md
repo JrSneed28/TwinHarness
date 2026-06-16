@@ -53,6 +53,18 @@ The **gate-mutation audit ledger** (`.twinharness/gate-ledger.jsonl`) records
 every gate-relevant state change, making such overrides reviewable after the
 fact. This is the primary accountability mechanism — not prevention.
 
+**CLI vs MCP asymmetry for gate fields.** The gate-owned fields
+(`implementation_allowed`, `tier`, `current_stage`, `write_gate`) remain settable
+through the **human-driven CLI** `th state set` (the documented unlock/advance
+path; validated and audit-ledgered). The **MCP `th_state_set` tool refuses them**:
+an agent acting over the MCP surface cannot flip a gate field, and the MCP server
+additionally validates every tool call against the tool's closed, typed schema
+(extra / wrong-typed / missing-required arguments are rejected before dispatch).
+`th decision approve` is likewise CLI-/human-only and is never exposed over MCP.
+The managed drift/debate counters are refused on both surfaces (they are owned by
+`th drift`/`th debate`). `current_stage` is enum-normalized on the CLI set path,
+so a non-pipeline stage value cannot be stored.
+
 ### `th verify run` executes configured commands
 
 `th verify run` is the **only** `th` command that executes project commands. It
@@ -102,7 +114,7 @@ The `th repo` layer (SLICE-0..5 — `th repo map`, `th repo relevant`, `th repo 
 The following guarantees hold across all three commands and their MCP equivalents:
 
 - **Candidate commands are never executed.** The scanner reads `scripts`, `Makefile` targets, CI workflow steps, and similar build/test declarations and records them as inert strings (`CandidateCommand.raw`). These candidate commands are recorded and surfaced as suggestions, never executed (RULE-004). The no-exec guarantee is verified by a sentinel-file test in `tests/repo.test.ts` (`REQ-RU-091`).
-- **All user-supplied paths are root-contained via `resolveWithinRoot()`.** Every `--file` and path-form `--component` argument is validated by `resolveWithinRoot` before any filesystem read. A path that resolves outside the project root is rejected with `path_outside_root` before any I/O is performed; symlinks are not followed (REQ-RU-024/032/042/092). This is the same helper used by `th artifact register`, `th coverage`, and `th tier`.
+- **All user-supplied paths are root-contained via `resolveWithinRoot()`.** Every `--file` and path-form `--component` argument is validated by `resolveWithinRoot` before any filesystem read. A path that resolves outside the project root is rejected with `path_outside_root` before any I/O is performed. Containment is re-checked after `realpath` resolution, so a symlink or NTFS junction placed inside the root that points outside it cannot be used to escape — the realpath'd target is compared against the realpath'd root and rejected when it falls outside (REQ-RU-024/032/042/092). This is the same helper used by `th artifact register`, `th coverage`, and `th tier`.
 - **No network I/O anywhere in the layer.** The map build (`th repo map`) and both query commands (`th repo relevant`, `th repo impact`) make no outbound network requests (REQ-NFR-008). The layer is entirely local and read-only with respect to external services.
 - **No PII or credentials are persisted.** The `.twinharness/repo-map.json` schema stores only file paths, detection keywords, and REQ anchor IDs. No file contents, no secrets, and no absolute paths are written to disk.
 - **Byte-stable, no run-specific data.** The persisted map contains no timestamps, PIDs, absolute paths, or nonces — only POSIX-relative paths and sorted collections. Two runs on an unchanged repo produce byte-identical output (REQ-NFR-001).

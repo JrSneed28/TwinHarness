@@ -35,6 +35,14 @@ Pass that exact invocation on to every agent you spawn (they receive the same su
 restate it in your delegation prompt so there is no ambiguity). A globally linked `th` (dev
 `npm link` setups) also works, but prefer the plugin's own copy.
 
+**A returned error result is NOT a broken tool.** When an MCP tool *returns* a structured error —
+`not_initialized` (no `state.json` yet), `map_missing`, `slice_not_found` — it **worked**: it reported
+a fact (the MCP result carries `isError: true` only because the underlying command exited non-zero).
+**Keep using the MCP tools.** Switch to the CLI only when the verb has no MCP tool (the fallback list
+above) or the server is genuinely unreachable (tools not advertised / a transport-level error — not a
+domain result). A `not_initialized` is your cue to `th init` (CLI — it has no MCP tool), then **resume
+the MCP tools**; it is never a reason to abandon them.
+
 ## Mechanical truths are CODE, not prose (critical)
 
 Instructions do not enforce themselves (spec §11). All **mechanical** operations go through the `th`
@@ -83,6 +91,10 @@ each stage. This section is the compact routing guide.
 ### 1. Init
 
 Run `th init` in the project root (creates `docs/`, `.twinharness/state.json`, `drift-log.md`).
+**When this skill (or `/twinharness:th-run`) is invoked and no `.twinharness/state.json` exists, run
+`th init` YOURSELF and proceed through the flow — never stop to ask the user to initialize.** ("No
+state" / "not initialized" — whether from the pre-prompt snapshot, `th state status`, or a
+`th_state_get` / `th_next` MCP result — is the cue to START a run, not an error to report back.)
 
 **Greenfield vs. brownfield — an explicit decision at init.** Before scaffolding, decide whether
 this is a greenfield run (a fresh project) or a brownfield run (building INTO an existing repo) and

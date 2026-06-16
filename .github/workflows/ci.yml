@@ -33,11 +33,14 @@ jobs:
       - name: Build
         run: npm run build
 
-      # dist/ is the committed, shipped artifact; assert the build matches it.
-      # Linux only — it is the canonical build OS, and cross-OS line-ending
-      # normalization would make a byte-exact diff flaky elsewhere.
+      # dist/ is the committed, shipped artifact; assert the build reproduces it
+      # byte-for-byte on EVERY OS (incl. windows-latest). tsc is pinned to LF
+      # newlines (tsconfig "newLine": "lf") and esbuild always emits LF, so the
+      # build is byte-identical across platforms; `.gitattributes` pins dist/** to
+      # no EOL conversion so the committed LF bytes are checked out verbatim. A
+      # strict (no --ignore-cr-at-eol) diff therefore catches real content drift
+      # AND any CRLF-tainted dist that would break cross-platform reproducibility.
       - name: Assert dist/ is in sync with build
-        if: matrix.os == 'ubuntu-latest'
         run: git diff --exit-code dist/
 
       - name: Test

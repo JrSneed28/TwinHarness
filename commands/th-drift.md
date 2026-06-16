@@ -1,17 +1,19 @@
 ---
 description: Review and ratify the TwinHarness drift log — async derived-layer changes and open blocking escalations.
 argument-hint: [DRIFT-NNN to ratify, optional]
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node:*), Bash(true), mcp__plugin_twinharness_th__*
 ---
 
 Review the TwinHarness drift log (spec §10) for this project.
 
 Live drift log (captured before this prompt runs):
 
-!`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" drift list`
+!`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" drift list || true`
 
-For the machine-readable form (the `th` CLI ships inside this plugin — `th <args>` below means this
-invocation):
+Prefer the typed `mcp__plugin_twinharness_th__*` MCP tools where exposed — e.g. `th_drift_add` to log a
+new discovery, `th_state_get` to read `drift_open_blocking`. `drift list` and `drift resolve` are
+**not** exposed as MCP tools yet, so use the CLI for those (the `th` CLI ships inside this plugin —
+`th <args>` below means this invocation; see `reference/mcp-tools.md`):
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" drift list --json

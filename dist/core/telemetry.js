@@ -61,6 +61,7 @@ exports.appendTelemetry = appendTelemetry;
 exports.readTelemetryLog = readTelemetryLog;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+const atomic_io_1 = require("./atomic-io");
 /** `<stateDir>/telemetry.json` — the opt-in switch. */
 function telemetryConfigPath(paths) {
     return path.join(paths.stateDir, "telemetry.json");
@@ -95,11 +96,9 @@ function readTelemetryConfig(paths) {
  * is never observed as a half-flipped switch.
  */
 function writeTelemetryConfig(paths, cfg) {
-    fs.mkdirSync(paths.stateDir, { recursive: true });
     const serialized = JSON.stringify({ enabled: cfg.enabled }, null, 2) + "\n";
-    const tmp = path.join(paths.stateDir, `telemetry.json.tmp-${process.pid}`);
-    fs.writeFileSync(tmp, serialized, "utf8");
-    fs.renameSync(tmp, telemetryConfigPath(paths));
+    // atomicWriteFile creates parent dirs and uses temp+rename with bounded retry (C-2 / S-C).
+    (0, atomic_io_1.atomicWriteFile)(telemetryConfigPath(paths), serialized);
 }
 /**
  * Append one record (as a single JSON line) to the local log — but ONLY when

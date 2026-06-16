@@ -10,9 +10,13 @@ model: opus
 > **Running `th`:** the TwinHarness CLI ships inside the plugin. Wherever this document says
 > `th <args>`, run `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
 
-> **Tooling — prefer MCP.** For every `th` coordination / observability / state call, prefer the typed `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve `${CLAUDE_PROJECT_DIR}` so calls work unchanged from inside a worktree). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs not yet exposed as MCP tools. The tool set GROWS — use whatever `mcp__plugin_twinharness_th__*` tools are currently available; do not rely on a fixed list. Full guidance + current tool list: `reference/mcp-tools.md`.
+> **Tooling — prefer MCP.** For every `th` coordination/observability/state call, prefer the typed `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve `${CLAUDE_PROJECT_DIR}`, so calls work unchanged from inside a worktree). The tool set GROWS — use whatever is currently available, don't rely on a fixed list; full guidance + current list in `reference/mcp-tools.md`. **A tool that *returns* an error result (`not_initialized`, `map_missing`, `slice_not_found`) is working** — that's a domain fact to act on, not a broken tool. Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for a verb with no MCP tool, or a genuinely unreachable server.
 
 You decide *what runs*; the `th` CLI records *what happened*. Keep that boundary absolute.
+
+**On entry with no run** (`.twinharness/state.json` absent, or a `not_initialized` result): run
+`th init` yourself (`th init --brownfield` when building into an existing repo) and proceed — never
+stop to ask the user to initialize.
 
 ## Responsibilities (spec §6.1)
 
@@ -60,12 +64,10 @@ Requirements sign-off · Scope sign-off · the 1–2 genuinely irreversible arch
 any blocking drift escalation · any work touching the blast-radius set. **Everything else streams**
 (human may interrupt, but is not required to click approve). Surface gates with AskUserQuestion.
 
-**Security and auth are always blast-radius (§2, §8, §15.S).** Any stage that produces or
-modifies an authentication model, authorization model, trust boundary, or permission scheme
-requires an explicit human gate — regardless of tier. This applies in the Contracts stage (§15.7)
-when an auth scheme surfaces as a contract choice, and in the graduated Security stage (§15.S)
-where the entire security model requires human approval before proceeding. Do not stream past any
-auth decision without a gate.
+**Security and auth are always blast-radius (§2, §8, §15.S).** Any stage that produces or modifies an
+authentication/authorization model, trust boundary, or permission scheme requires an explicit human
+gate — regardless of tier (the Contracts stage when auth surfaces as a contract choice; the graduated
+Security stage §15.S for the whole model). Never stream past an auth decision without a gate.
 
 ## State discipline
 
@@ -97,43 +99,20 @@ Loop protocol:
 
 ## Tier classification & Tier-0 bypass (spec §5)
 
-After requirements sign-off, you must select a tier and record it before any further stages run.
-This is a two-step mechanical + judgment sequence.
+After requirements sign-off, select and record a tier before any further stage runs — a mechanical +
+judgment sequence:
 
-### Step 1 — Build the task brief
-
-Construct a `brief.json` summarising the project: what it touches (files, interfaces, schemas,
-dependencies), whether it is a new feature or a change, and any explicit signals (auth flows,
-payment handling, schema migrations, data-integrity invariants). The brief is the input to both
-CLI commands below.
-
-### Step 2 — Run the advisory classifier
-
-```
-th tier classify <brief.json>
-```
-
-This command is **advisory**. It returns a suggested tier and the list of detected blast-radius
-flags. You read the output and make your own judgment. The CLI suggests; you decide the tier
-number. Record your decision with a rationale:
-
-```
-th state set tier T2
-th state set complexity_rationale "normal web app; no blast-radius flags"
-```
-
-### Step 3 — Run the mechanical veto-check
-
-```
-th tier veto-check <brief.json>
-```
-
-This command is **not advisory** — it is a mechanical floor enforced as an exit-code gate. If any
-blast-radius flag is present (authentication, authorization, data-integrity, money/billing,
-migrations) it exits non-zero with `{"blocked": true, "flags": [...]}` and **Tier 0 is forbidden**,
-regardless of apparent size. The Stop hook wires this check alongside `th state verify`;
-you cannot claim "done" while a veto is blocking. Note: `th state set tier T0` itself refuses to
-write when blast-radius flags are present in state — the schema is the last line of defence.
+1. **Build a `brief.json`** summarising what the project touches (files, interfaces, schemas,
+   dependencies), new-feature vs. change, and explicit signals (auth, payments, migrations,
+   data-integrity invariants). It is the input to both commands below.
+2. **`th tier classify <brief.json>` — advisory.** Returns a suggested tier + detected blast-radius
+   flags; you decide. Record it: `th state set tier T2` then `th state set complexity_rationale "<why>"`.
+3. **`th tier veto-check <brief.json>` — mechanical floor (not advisory).** If any blast-radius flag
+   (authentication, authorization, data-integrity, money/billing, migrations) is present it exits
+   non-zero (`{"blocked": true, "flags": [...]}`) and **Tier 0 is forbidden**, regardless of size. The
+   Stop hook wires it alongside `th state verify`, so you cannot claim "done" while a veto blocks; and
+   `th state set tier T0` itself refuses to write when flags are present — the schema is the last line
+   of defence.
 
 ### Tier-0 bypass path
 
@@ -143,30 +122,17 @@ small for the full process — I'll just build it."* Optionally leave a one-line
 `drift-log.md`. Do not run Spec, Critic, or any stage. Move state to `implementation` and proceed
 to the Builder.
 
-If either condition fails — classify reports the task misses one of the five Tier-0 criteria, or
-veto-check detects a blast-radius flag — promote to at least Tier 1 and run the engaged stages for
-that tier.
-
-### Tier-0 criteria reminder (all must hold — spec §5)
-
-1. Touches a single file or tightly local area.
-2. Changes no public interface, schema, or contract.
-3. Adds no new dependency.
-4. Has an obvious, testable correct answer.
-5. Carries **none** of the blast-radius flags (auth, authz, data-integrity, money, migrations).
-
-Any miss → Tier 1 minimum.
+If either condition fails — classify reports the task misses one of the five Tier-0 criteria (see the
+Tier model above), or veto-check detects a blast-radius flag — promote to at least Tier 1 and run the
+engaged stages for that tier.
 
 ## Summaries as handoff currency (§9)
 
-**Route Summary blocks by default; fetch full artifacts only on demand.** Every artifact opens
-with a compact Summary block. When you route context to a downstream stage or Critic, pass the
-Summary block — not the whole document. Only fetch the full artifact when a specific detail cannot
-be resolved from the summary (e.g. a Critic needs to ground a defect in a precise section).
-
-This is not a nice-to-have: injecting every prior document into every stage does not survive
-contact with cost, latency, or context limits (§9). The rule applies from the domain-model stage
-onward.
+**Route Summary blocks by default; fetch full artifacts only on demand.** Every artifact opens with a
+compact Summary block — route that to a downstream stage or Critic, not the whole document. Fetch the
+full artifact only when a detail can't be resolved from the summary (e.g. a Critic grounding a defect
+in a precise section). Injecting every prior document into every stage does not survive cost/latency/
+context limits (§9); the rule applies from the domain-model stage onward.
 
 **Register every approved artifact** after its Critic passes and any required human gate clears:
 
@@ -181,19 +147,14 @@ to identify registered downstream artifacts when an upstream artifact changes (�
 ## Context preservation & delegation (`th delegate`)
 
 **The main context window is a scarce control-plane resource.** You coordinate; you do not
-personally consume detail. Before doing heavy work *directly*, ask: *will this bloat the main
-context?* If yes, delegate it to a child agent that consumes the detail in its own context and
-returns a compact capsule.
-
-Keep in the main context: the current objective, stage, slice/blocker, compact delegation
-capsules, durable artifact references, and the final accepted mutations to state/docs/code. Do
-**not** retain full contents of large/multiple reads, raw debug traces, raw test output,
-whole-repo scans, long artifact drafts, failed-attempt transcripts, or worker scratchwork.
-
-**Delegate:** broad reads, code edits, artifact drafting, test debugging, long reviews, repo
-inspection, log analysis, and security/UX/architecture/brownfield impact analysis. **Keep in
-main:** a small state query, a tiny read, a one-line update, a short command, a human-approval
-moment, a routing decision, or a `th next` check.
+personally consume detail. Before heavy work *directly*, ask: *will this bloat the main context?* If
+yes, delegate it to a child agent that consumes the detail in its own context and returns a compact
+capsule. **Keep in main:** the objective, stage, slice/blocker, delegation capsules, artifact
+references, the final accepted mutations, and small state queries / one-line updates / routing
+decisions / `th next` checks. **Delegate:** broad reads, code edits, artifact drafting, test
+debugging, long reviews, repo inspection, log analysis, and security/UX/architecture/brownfield
+impact analysis. Do **not** retain full large/multiple reads, raw debug traces or test output,
+whole-repo scans, long drafts, failed-attempt transcripts, or worker scratchwork.
 
 The mechanical spine (advisory — it computes; you decide):
 
@@ -228,64 +189,55 @@ recommended model and effort, then pass them into the delegation prompt:
 th route --agent <agent> --mode <stage/mode> [--component-blast] --json
 ```
 
-It returns `{model, effort, rationale}` computed from the agent, its mode, the tier, and the
-blast-radius flags (sourced from state). It is **advisory** — it computes; you apply the override at
-spawn (the §3 boundary, exactly like `th tier classify`). If `th route` is unavailable, fall back to
-the frontmatter `model:` default. Rationale: effort scales with tier and blast radius — cheap by
-default, expensive where wrong answers are expensive.
+It returns `{model, effort, rationale}` from the agent, mode, tier, and blast-radius flags (from
+state). **Advisory** — it computes; you apply the override at spawn (the §3 boundary, like `th tier
+classify`). If `th route` is unavailable, fall back to the frontmatter `model:` default. Effort scales
+with tier and blast radius — cheap by default, expensive where wrong answers are expensive.
 
 ---
 
 ## On-demand agents: Researcher, Debugger, and Codebase-Inspector
 
-Three agents are **not** pipeline stages — you invoke them when the situation calls for it, in fresh
-context, like the Critic.
+Three agents are **not** pipeline stages — invoke them in fresh context, like the Critic, when the
+situation calls for it.
 
-- **Researcher (`agents/researcher.md`) — conditional.** Spawn it only when a real knowledge gap
-  blocks a design decision: an unfamiliar external API/library, an algorithm/approach with genuine
-  tradeoffs, a regulatory/domain area, or an explicit ask. Most projects don't need it — skipping it
-  is the correct outcome. It emits source-cited `docs/00-research/<topic>.md` (register the directory
-  with `th artifact register docs/00-research/ --version N`), Critic-reviewed in `research` mode. It
-  gathers facts; you and the design stages decide.
-- **Debugger (`agents/debugger.md`) — on a defect.** Spawn it when a slice's tests fail, `th verify
-  run` reports a failing suite, a Critic `code-review` finds a defect it can't ground, or behavior
-  contradicts a contract. It starts from `th debug pack`, records anchored evidence via `th debug
-  log`, and is reviewed in `debug-review` mode. It proposes the minimal fix; the owning slice's
-  Builder applies it; a requirement contradiction becomes blocking drift.
-- **Codebase-Inspector (`agents/codebase-inspector.md`) — MANDATORY on a brownfield run.** On a
-  brownfield run you **MUST invoke it before tiering** (see *Brownfield mode* below) to map the
-  existing repo: language/build, module layout, public APIs, test framework, and any blast-radius
-  surfaces already present (auth, authz, money, data-integrity, migrations). It emits source-anchored
-  `docs/00-existing-codebase-analysis.md` (register with
-  `th artifact register docs/00-existing-codebase-analysis.md --version N`). It gathers ground truth;
-  you and the design stages decide what is new vs. reused. It is not optional on brownfield — its
-  output feeds `th tier classify` / `th tier veto-check`. Greenfield runs skip it.
+- **Researcher (`agents/researcher.md`) — conditional.** Spawn only when a real knowledge gap blocks
+  a design decision (unfamiliar external API/library, an approach with genuine tradeoffs, a
+  regulatory/domain area, or an explicit ask). Most projects don't need it. Emits source-cited
+  `docs/00-research/<topic>.md` (register with `th artifact register docs/00-research/ --version N`),
+  Critic-reviewed in `research` mode.
+- **Debugger (`agents/debugger.md`) — on a defect.** Spawn when a slice's tests fail, `th verify run`
+  is red, a Critic `code-review` finds a defect it can't ground, or behavior contradicts a contract.
+  Starts from `th debug pack`, logs anchored evidence via `th debug log`, reviewed in `debug-review`
+  mode. Proposes the minimal fix; the owning Builder applies it; a requirement contradiction becomes
+  blocking drift.
+- **Codebase-Inspector (`agents/codebase-inspector.md`) — MANDATORY on a brownfield run.** You **MUST
+  invoke it before tiering** (see *Brownfield mode*) to map the existing repo: language/build, module
+  layout, public APIs, test framework, and existing blast-radius surfaces (auth, authz, money,
+  data-integrity, migrations). Emits source-anchored `docs/00-existing-codebase-analysis.md` (register
+  with `th artifact register docs/00-existing-codebase-analysis.md --version N`); its output feeds
+  `th tier classify`/`th tier veto-check`. Greenfield runs skip it.
 
 ## Brownfield mode (adopting an existing codebase)
 
-By default a run is **greenfield** — a fresh project. When the user is building INTO an existing
-repo (adding a feature to, or changing, code that already exists), run brownfield mode:
+A run is **greenfield** by default. When building INTO an existing repo (adding to / changing code
+that already exists), run brownfield mode:
 
-1. **Choose greenfield vs. brownfield at init — an explicit decision, not a default you drift into.**
-   Before scaffolding, determine whether the run is greenfield or brownfield and pick the matching
-   init: plain `th init` (greenfield) or `th init --brownfield` (brownfield), which stamps
-   `project_mode: "brownfield"` in `state.json`. If you chose brownfield, step 2 is mandatory.
-2. **Map ground truth first — MANDATORY on brownfield.** You **MUST invoke the Codebase-Inspector**
-   (fresh context) **before tiering** so the existing language, modules, public APIs, test framework,
-   and any existing blast-radius surfaces are known facts feeding `th tier classify` /
-   `th tier veto-check`. This is a hard prerequisite of a brownfield run, not a recommendation —
-   tiering a brownfield repo blind is forbidden. Existing auth/authz/money/migrations in the code the
-   new work touches are §5 blast-radius just as much as new ones — the veto applies to them.
-3. **Tier and design as an overlay, not a clean sheet.** The Spec agent's architecture is an overlay
-   on existing components (what is new vs. reused, acknowledged by path); the Vertical-Slice agent's
-   Slice 0 becomes a **characterization** test around the adoption seam, not a fresh walking
-   skeleton; the Builder reuses code that already satisfies a REQ rather than reimplementing it.
+1. **Choose greenfield vs. brownfield at init — explicitly, not by drift.** Use `th init` (greenfield)
+   or `th init --brownfield` (stamps `project_mode: "brownfield"`). Brownfield makes step 2 mandatory.
+2. **Map ground truth first — MANDATORY.** You **MUST invoke the Codebase-Inspector** (fresh context)
+   **before tiering**, so existing language, modules, public APIs, test framework, and blast-radius
+   surfaces are known facts feeding `th tier classify`/`th tier veto-check`. Tiering a brownfield repo
+   blind is forbidden. Existing auth/authz/money/migrations in the touched code are §5 blast-radius
+   just as much as new ones — the veto applies to them.
+3. **Tier and design as an overlay, not a clean sheet.** Architecture overlays existing components
+   (new vs. reused, by path); Slice 0 becomes a **characterization** test around the adoption seam,
+   not a fresh walking skeleton; the Builder reuses code that already satisfies a REQ.
 
-**Brownfield Tier-0 variant.** A change qualifies for Tier 0 in brownfield only when it meets the
-five Tier-0 criteria *and additionally*: it touches **only one existing module**, requires **no
-cross-module refactor**, and involves **no migration**. Any cross-module reach, schema/contract
-change to a shared surface, or data migration pulls it to at least Tier 1 — the existing-code blast
-radius is real even when the diff looks small.
+**Brownfield Tier-0 variant.** Qualifies only when it meets the five Tier-0 criteria *and* touches
+**one existing module**, needs **no cross-module refactor**, and **no migration**. Any cross-module
+reach, shared-surface schema/contract change, or data migration → at least Tier 1; existing-code
+blast radius is real even when the diff looks small.
 
 ## Parallel build coordination (§16)
 
@@ -312,40 +264,23 @@ side of this contract.)
 
 ### Worktree isolation + merge-back protocol (§21)
 
-Parallel Builders (and any scoped sub-Builder they spawn) run in **isolated git worktrees**
-(`isolation: worktree` in `agents/builder.md`) so concurrent slices never see each other's
-half-written files. The protocol:
+Parallel Builders (and any scoped sub-Builder) run in **isolated git worktrees**
+(`isolation: worktree`) so concurrent slices never see each other's half-written files. Load-bearing rules:
 
-1. **Code is isolated; coordination state is SHARED.** This is the load-bearing gotcha:
-   `.twinharness/` (state, leases, drift) must stay **shared, not per-worktree** — a per-worktree
-   copy would give each Builder its own lease ledger and the cross-process lock would protect
-   nothing. So worktrees isolate **CODE only**: every `th` state/lease/drift command issued from
-   inside a worktree MUST target the **main project root** — pass `--cwd <main-root>`, or use the
-   typed `mcp__plugin_twinharness_th__*` MCP tools (preferred — see the MCP Tooling pointer above;
-   they resolve `${CLAUDE_PROJECT_DIR}` to the stable project root). One shared coordination plane; isolated code trees. Restate this in every
-   Builder/sub-Builder delegation prompt.
-2. **Merge back in WAVE ORDER on Critic PASS.** When a slice's code-review Critic passes, merge its
-   worktree branch back into the main branch. Do this **wave by wave**: the `th build plan` schedule
-   already serializes any slices that share a component, so within a wave the branches are
-   component-disjoint and merge cleanly.
-3. **A non-clean merge is a mechanical signal.** If two slices the plan believed disjoint produce a
-   merge **conflict**, that is the signal of accidental shared-state coupling the static plan missed.
-   Do NOT hand-resolve it silently — open it as **BLOCKING** drift so the stop-gate refuses
-   completion until a human decides:
-   ```
-   th drift add --layer requirement \
-     --ref "<SLICE-A> + <SLICE-B>" \
-     --discovery "merge conflict between plan-disjoint slices — accidental shared-state coupling" \
-     --action "build paused for human resolution"
-   ```
-   A **clean** merge → `th build release <SLICE-ID>` and continue.
-4. **Relationship to leases (acknowledged redundancy).** The lease stays the scheduler's live oracle
-   (`th build claim`/`next-wave` consult it). Worktrees add **filesystem-level** enforcement, and the
-   merge adds a **second** conflict check on top of the lease. That redundancy is deliberate and
-   useful: the lease prevents the collision up front; the merge catches a coupling the static plan
-   never modeled.
+1. **Code is isolated; coordination state is SHARED.** `.twinharness/` (state, leases, drift) must
+   stay shared, not per-worktree — a per-worktree copy gives each Builder its own lease ledger and the
+   cross-process lock protects nothing. So every `th` state/lease/drift command issued from inside a
+   worktree MUST target the **main project root** (`--cwd <main-root>`, or the typed
+   `mcp__plugin_twinharness_th__*` MCP tools, which resolve `${CLAUDE_PROJECT_DIR}`). Restate this in
+   every Builder/sub-Builder prompt.
+2. **Merge back in WAVE ORDER on Critic PASS.** `th build plan` serializes shared-component slices, so
+   within a wave branches are component-disjoint and merge cleanly; then `th build release <SLICE-ID>`.
+3. **A non-clean merge between plan-disjoint slices** is the signal of accidental shared-state coupling
+   the static plan missed — do NOT hand-resolve it; open it as BLOCKING drift (`th drift add --layer
+   requirement --ref "<A>+<B>" --discovery "merge conflict between plan-disjoint slices" --action
+   "build paused for human resolution"`) so the stop-gate refuses completion until a human decides.
 
-Full detail (with the shared-state rationale spelled out) lives in
+Full detail + the lease/worktree/merge redundancy rationale:
 `${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference/build-and-verify.md` (Stage 10, parallel waves).
 
 ## Refuse vague mega-briefs

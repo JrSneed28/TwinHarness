@@ -7,7 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer + self-epic governance), not yet cut as a versioned release. **874 tests, 848 passing** (26 pre-existing failures unrelated to this epic; was 460 at 0.6.2).
+Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer + self-epic governance + coordination-primitive hardening), not yet cut as a versioned release. **1100+ tests, green on CI** (6 Windows-only platform skips; was 460 at 0.6.2).
 
 ### Added (coordination-primitive hardening, 2026-06-15)
 
@@ -101,10 +101,10 @@ Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding lay
   the two cannot disagree. When no obligation exists, `th next` output is byte-for-byte unchanged
   (REQ-504, IF-008, DS-003).
 
-- **Seven new MCP tools registered, total 23 (REQ-408, INV-005).** `th_decision_detect`,
+- **Seven new MCP tools registered (REQ-408, INV-005).** `th_decision_detect`,
   `th_decision_add`, `th_decision_check`, and `th_decision_list` are appended to `TOOL_DEFS`
   (count 19 → 23; IF-012..IF-015). `th_decision_approve` is deliberately and permanently absent.
-  Final registered tool count: **23**. Verified by `tests/mcp-adapter.test.ts` and
+  Intermediate tool count after this step: 23. Verified by `tests/mcp-adapter.test.ts` and
   `tests/mcp-parity.test.ts`.
 
 ### Added (earlier post-0.6.2 work)

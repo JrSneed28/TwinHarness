@@ -158,7 +158,7 @@ Usage:
   th decision approve <DECISION-ID> [--reject | --supersede <id>] [--as <actor>]
                                     HUMAN-ONLY: interactive-TTY-gated transition (proposed→approved/rejected; approved→superseded). Never an MCP tool.
   th decision check                 Fail (exit 6) when an unapproved decision gates the current stage; else exit 0
-  th decision list                  List the decision set (ids/titles/statuses/links/audit), sorted (exit 0)
+  th decision list                  List the decision set (ids/titles/statuses/links/audit), sorted (exit 0; non-zero if the hash chain is broken)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
   th version                        Print the CLI version
@@ -879,7 +879,24 @@ function main() {
             process.exit(out.exitCode);
         }
     }
-    const result = dispatch(parsed);
+    let result;
+    try {
+        result = dispatch(parsed);
+    }
+    catch (e) {
+        // Contention on the state store (lock timeout, or a write that lost the
+        // rename race past its retry budget) surfaces as a typed error. Convert it
+        // to a clean structured failure here — at the single CLI boundary — so every
+        // mutating command gets non-zero exit + valid --json instead of a raw stack
+        // crash (C-2 / M-3). Any other error is a real bug and must propagate.
+        const code = e.code;
+        if (code === "state_lock_timeout" || code === "state_write_contended") {
+            result = (0, output_1.failure)({ human: e.message, data: { error: code } });
+        }
+        else {
+            throw e;
+        }
+    }
     process.stdout.write((0, output_1.renderResult)(result, parsed.flags.json) + "\n");
     process.exit(result.exitCode);
 }

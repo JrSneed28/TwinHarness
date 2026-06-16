@@ -33,19 +33,35 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.LockTimeoutError = void 0;
 exports.readState = readState;
 exports.writeState = writeState;
 exports.isLockHeldError = isLockHeldError;
 exports.withStateLock = withStateLock;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+const atomic_io_1 = require("./atomic-io");
 const state_schema_1 = require("./state-schema");
+/**
+ * Thrown by {@link withStateLock} when the lock cannot be acquired within the
+ * timeout. Carries a stable `code` so the CLI boundary maps it to
+ * `failure({ error: "state_lock_timeout" })` and `--json` callers get clean
+ * output instead of a raw stack (M-3).
+ */
+class LockTimeoutError extends Error {
+    code = "state_lock_timeout";
+    constructor(lockDir) {
+        super(`state lock timeout: ${lockDir} is held; remove it if no \`th\` process is running.`);
+        this.name = "LockTimeoutError";
+    }
+}
+exports.LockTimeoutError = LockTimeoutError;
 /** Read + validate state.json. Distinguishes "missing" from "present but invalid". */
 function readState(paths) {
     if (!fs.existsSync(paths.stateFile)) {
         return { exists: false };
     }
-    const raw = fs.readFileSync(paths.stateFile, "utf8");
+    const raw = (0, atomic_io_1.readFileWithRetry)(paths.stateFile);
     let parsed;
     try {
         parsed = JSON.parse(raw);
@@ -66,11 +82,11 @@ function readState(paths) {
  * observed and is *replaced, not duplicated* on resume (spec §18 idempotency).
  */
 function writeState(paths, state) {
-    fs.mkdirSync(paths.stateDir, { recursive: true });
-    const serialized = (0, state_schema_1.serializeState)(state);
-    const tmp = path.join(paths.stateDir, `state.json.tmp-${process.pid}`);
-    fs.writeFileSync(tmp, serialized, "utf8");
-    fs.renameSync(tmp, paths.stateFile);
+    // atomicWriteFile retries the rename on transient contention (a concurrent
+    // reader holding the file open → EPERM/EACCES/EBUSY on Windows) and, only if
+    // the budget is exhausted, throws StateWriteContendedError — which the CLI
+    // boundary turns into a clean structured failure (C-2).
+    (0, atomic_io_1.atomicWriteFile)(paths.stateFile, (0, state_schema_1.serializeState)(state));
 }
 /**
  * Run `fn` while holding an exclusive, cross-process advisory lock on the state
@@ -115,16 +131,45 @@ function writeState(paths, state) {
 function isLockHeldError(code) {
     return code === "EEXIST" || code === "EPERM" || code === "EACCES";
 }
+/** Read the lock's owner token, or null if absent/unreadable. */
+function readLockOwner(ownerFile) {
+    try {
+        return fs.readFileSync(ownerFile, "utf8");
+    }
+    catch {
+        return null;
+    }
+}
 function withStateLock(paths, fn) {
     if (!fs.existsSync(paths.stateDir))
         return fn();
     const lockDir = path.join(paths.stateDir, ".state.lock");
-    const STALE_MS = 30_000;
-    const TIMEOUT_MS = 10_000;
+    const ownerFile = path.join(lockDir, "owner");
+    // A pid+nonce stamped into the lock on acquire. Used to close the 3-party
+    // stale-lock TOCTOU: a waiter only steals the SAME stale lock it observed.
+    const myToken = `${process.pid}-${Math.random().toString(36).slice(2)}`;
+    // STALE_MS < TIMEOUT_MS so a crashed holder's lock becomes stealable strictly
+    // before a healthy waiter gives up (the original had STALE 30s > TIMEOUT 10s,
+    // which could wedge waiters: they'd time out before the lock ever went stale).
+    // STALE_MS must ALSO comfortably exceed the longest legitimate critical section:
+    // a live holder never refreshes its lock mtime/owner while inside fn(), so a
+    // too-small threshold lets a waiter steal a LIVE-but-slow holder's lock and run
+    // fn() concurrently — the exact lost-update this lock exists to prevent. 5s was
+    // too tight (a GC/scheduler pause or a contended atomic-write retry budget can
+    // approach it); 15s clears any sub-second JSON read-modify-write with wide margin
+    // while a crashed holder is still reclaimed well before the 25s waiter timeout.
+    const STALE_MS = 15_000;
+    const TIMEOUT_MS = 25_000;
     const deadline = Date.now() + TIMEOUT_MS;
     for (;;) {
         try {
             fs.mkdirSync(lockDir); // atomic test-and-set: throws EEXIST (POSIX) / EPERM|EACCES (Windows) if held
+            try {
+                fs.writeFileSync(ownerFile, myToken, "utf8");
+            }
+            catch {
+                /* best-effort owner stamp; absence just means a steal can't TOCTOU-verify */
+            }
             break;
         }
         catch (e) {
@@ -138,9 +183,16 @@ function withStateLock(paths, fn) {
             // permission error (not contention) so we rethrow the original; for EEXIST
             // the dir just vanished and we retry.
             try {
+                const ownerBefore = readLockOwner(ownerFile);
                 const age = Date.now() - fs.statSync(lockDir).mtimeMs;
                 if (age > STALE_MS) {
-                    fs.rmSync(lockDir, { recursive: true, force: true });
+                    // TOCTOU guard: only steal if the owner token is unchanged since we
+                    // observed the stale lock. If another waiter already stole and
+                    // re-acquired (fresh token, or a fresh mtime), we must NOT clobber its
+                    // live lock — fall through and retry/wait instead.
+                    if (readLockOwner(ownerFile) === ownerBefore) {
+                        fs.rmSync(lockDir, { recursive: true, force: true });
+                    }
                     continue;
                 }
             }
@@ -150,7 +202,7 @@ function withStateLock(paths, fn) {
                 continue; // EEXIST: lock vanished between mkdir and stat — retry
             }
             if (Date.now() > deadline) {
-                throw new Error(`state lock timeout: ${lockDir} is held; remove it if no \`th\` process is running.`);
+                throw new LockTimeoutError(lockDir);
             }
             const spinUntil = Date.now() + 20;
             while (Date.now() < spinUntil) {

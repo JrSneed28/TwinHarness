@@ -114,7 +114,7 @@ describe("REQ-PCO-000: withStateLock treats Windows EPERM/EACCES as 'held' and r
       const lockDir = path.join(tp.paths.stateDir, ".state.lock");
 
       // Simulate a crashed holder: a lock dir whose mtime is older than the stale
-      // threshold (30s). The contention branch must steal it and let fn run.
+      // threshold (STALE_MS, now 15s). The contention branch must steal it and let fn run.
       fs.mkdirSync(lockDir, { recursive: true });
       const old = Date.now() - 60_000;
       fs.utimesSync(lockDir, new Date(old), new Date(old));
