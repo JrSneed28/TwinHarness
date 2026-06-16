@@ -1,0 +1,22 @@
+name: Hygiene
+
+on:
+  pull_request:
+
+jobs:
+  tracked-file-hygiene:
+    name: No build-cache in tracked files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assert no target/ or node_modules/ in tracked files
+        run: |
+          bad=$(git ls-files | grep -E '(^|/)(target|node_modules)/' || true)
+          if [ -n "$bad" ]; then
+            echo "ERROR: tracked files include build-cache or dependency dirs:"
+            printf '  %s\n' "$bad"
+            echo "Remove them from the index with: git rm -r --cached <path>"
+            exit 1
+          fi
+          echo "OK: no target/ or node_modules/ paths in tracked files."

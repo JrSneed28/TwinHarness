@@ -24,5 +24,23 @@ if [ -n "$src_staged" ] && [ -z "$dist_staged" ]; then
   exit 1
 fi
 
+# Guard: reject staged target/ or node_modules/ (build caches / deps) anywhere
+# in the tree, and example project dist/target/ dirs.
+# IMPORTANT: the plugin's own root dist/ is deliberately excluded — it is the
+# committed shipped artifact and MUST be staged when src/ changes.
+_bc_dirty=$(printf '%s\n' "$staged" | grep -E '(^|/)(target|node_modules)/' || true)
+_ex_dirty=$(printf '%s\n' "$staged" | grep -E '^examples/.+/(dist|target)/' || true)
+_all_dirty=$(printf '%s\n%s' "$_bc_dirty" "$_ex_dirty" | grep . || true)
+
+if [ -n "$_all_dirty" ]; then
+  echo "pre-commit: staged file(s) include build-cache or dependency dirs:" >&2
+  printf '%s\n' "$_all_dirty" | while IFS= read -r _line; do
+    echo "  $_line" >&2
+  done
+  echo "            Unstage them before committing." >&2
+  echo "            (or commit with --no-verify to bypass)." >&2
+  exit 1
+fi
+
 echo "pre-commit: type-checking..." >&2
 npm run typecheck
