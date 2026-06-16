@@ -15898,12 +15898,106 @@ ${formatIssues(r.issues)}`,
   return { state: r.state };
 }
 
+// src/core/state-fields.ts
+var STATE_FIELD_POLICY = {
+  drift_open_blocking: {
+    managed: true,
+    gateOwned: false,
+    owner: "Use `th drift add` / `th drift resolve` \u2014 this counter is owned by the drift flow.",
+    refusedByStateSet: true
+  },
+  debate_open_blocking: {
+    managed: true,
+    gateOwned: false,
+    owner: "Use `th debate add` / `th debate resolve` \u2014 this counter is owned by the debate flow.",
+    refusedByStateSet: true
+  },
+  implementation_allowed: {
+    managed: true,
+    gateOwned: true,
+    owner: "orchestrator unlock flow (`th state set implementation_allowed true` on the CLI)",
+    refusedByStateSet: false
+  },
+  tier: {
+    managed: true,
+    gateOwned: true,
+    owner: "`th tier classify`",
+    refusedByStateSet: false
+  },
+  current_stage: {
+    managed: true,
+    gateOwned: true,
+    owner: "`th next` / stage advance",
+    refusedByStateSet: false
+  },
+  write_gate: {
+    managed: true,
+    gateOwned: true,
+    owner: "operator policy",
+    refusedByStateSet: false
+  }
+};
+var GATE_OWNED = new Set(
+  Object.entries(STATE_FIELD_POLICY).filter(([, p]) => p.gateOwned).map(([k]) => k)
+);
+function fieldPolicy(field) {
+  return Object.prototype.hasOwnProperty.call(STATE_FIELD_POLICY, field) ? STATE_FIELD_POLICY[field] : void 0;
+}
+
+// src/core/stages.ts
+var STAGE_PIPELINE = [
+  { stage: "requirements", tiers: ["T1", "T2", "T3"], produces: "docs/01-requirements.md", criticMode: "requirements", humanGate: true, summary: "Turn the idea into REQ-ID'd intent; sticky human sign-off." },
+  { stage: "scope", tiers: ["T1", "T2", "T3"], produces: "docs/02-scope.md", criticMode: "scope", humanGate: true, summary: "MVP vs later; sticky human sign-off." },
+  { stage: "domain-model", tiers: ["T2", "T3"], produces: "docs/03-domain-model.md", criticMode: "domain-model", humanGate: false, summary: "Entities and rules anchored to REQ-IDs; streams." },
+  { stage: "architecture", tiers: ["T1", "T2", "T3"], produces: "docs/04-architecture.md", criticMode: "architecture", humanGate: true, summary: "Components/data flow; gate only the 1-2 irreversible decisions." },
+  { stage: "ui-design", tiers: ["T1", "T2", "T3"], produces: "docs/04b-ui-design.md", criticMode: "ui-design", humanGate: true, summary: "Conditional on a UI; human picks 1 of 2-3 directions." },
+  { stage: "adrs", tiers: ["T3"], produces: "docs/05-adrs/", criticMode: "adr", humanGate: false, summary: "One ADR per significant, costly-to-reverse decision; streams." },
+  { stage: "technical-design", tiers: ["T3"], produces: "docs/06-technical-design.md", criticMode: "technical-design", humanGate: false, summary: "Internal behaviour the architecture left abstract; streams." },
+  { stage: "contracts", tiers: ["T2", "T3"], produces: "docs/07-contracts.md", criticMode: "contracts", humanGate: true, summary: "Interface I/O/errors; auth choices are a blast-radius human gate." },
+  { stage: "security", tiers: ["T3"], produces: "docs/08a-security-threat-model.md", criticMode: "security", humanGate: true, summary: "Graduated for T3/blast-radius; security model needs human approval." },
+  { stage: "failure-modes", tiers: ["T3"], produces: "docs/08b-failure-edge-cases.md", criticMode: "failure-modes", humanGate: false, summary: "Graduated for T3/reliability-critical; data-loss tradeoffs gate." },
+  { stage: "test-strategy", tiers: ["T2", "T3"], produces: "docs/08-test-strategy.md", criticMode: "test-strategy", humanGate: false, summary: "Test pyramid; each REQ-ID gets >=1 verifying test; streams." },
+  { stage: "implementation-planning", tiers: ["T1", "T2", "T3"], produces: "docs/09-implementation-plan.md", criticMode: "slice", humanGate: false, summary: "Vertical slices + coverage map; hard gate: th coverage check." },
+  { stage: "implementation", tiers: ["T1", "T2", "T3"], produces: "", criticMode: "code-review", humanGate: false, summary: "Build slice-by-slice with tests; Critic code-review per slice; drift loop." },
+  { stage: "documentation", tiers: ["T1", "T2", "T3"], produces: "", criticMode: "documentation", humanGate: false, summary: "Tier-scaled docs; Critic-reviewed; no human gate." },
+  { stage: "final-verification", tiers: ["T1", "T2", "T3"], produces: "docs/10-verification-report.md", criticMode: "final-verification", humanGate: true, summary: "Coherence (Critic) vs correctness (tests + human); human signs off." }
+];
+function canonicalizeStage(raw) {
+  const trimmed = (raw ?? "").trim().toLowerCase();
+  if (trimmed === "") return "";
+  if (STAGE_PIPELINE.some((s) => s.stage === trimmed)) return trimmed;
+  const deprefixed = trimmed.replace(/^\d+-/, "");
+  if (deprefixed !== trimmed && STAGE_PIPELINE.some((s) => s.stage === deprefixed)) {
+    return deprefixed;
+  }
+  return trimmed;
+}
+function isFinalVerification(stage) {
+  return canonicalizeStage(stage) === "final-verification";
+}
+function isKnownStage(stage) {
+  const canonical = canonicalizeStage(stage);
+  return STAGE_PIPELINE.some((s) => s.stage === canonical);
+}
+function stageContract(stage) {
+  const key = stage.toLowerCase();
+  return STAGE_PIPELINE.find((s) => s.stage === key);
+}
+function engagedStages(tier) {
+  if (!tier || tier === "T0") return [];
+  return STAGE_PIPELINE.filter((s) => s.tiers.includes(tier));
+}
+function nextStageAfter(currentStage, tier) {
+  const engaged = engagedStages(tier);
+  if (engaged.length === 0) return void 0;
+  const key = currentStage.toLowerCase();
+  const idx = engaged.findIndex((s) => s.stage === key);
+  if (idx < 0) return engaged[0];
+  return engaged[idx + 1];
+}
+
 // src/commands/state.ts
 var UNSAFE_KEY_SEGMENTS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constructor"]);
-var MANAGED_FIELDS = {
-  drift_open_blocking: "Use `th drift add` / `th drift resolve` \u2014 this counter is owned by the drift flow.",
-  debate_open_blocking: "Use `th debate add` / `th debate resolve` \u2014 this counter is owned by the debate flow."
-};
 function isRecord(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -15976,9 +16070,10 @@ function runStateSetLocked(paths, key, rawValue) {
       data: { error: "unsafe_key", key }
     });
   }
-  if (Object.prototype.hasOwnProperty.call(MANAGED_FIELDS, firstSegment)) {
+  const policy = fieldPolicy(firstSegment);
+  if (policy?.refusedByStateSet) {
     return failure({
-      human: `Refusing to set managed field "${firstSegment}". ${MANAGED_FIELDS[firstSegment]}`,
+      human: `Refusing to set managed field "${firstSegment}". ${policy.owner}`,
       data: { error: "managed_field", field: firstSegment }
     });
   }
@@ -15986,7 +16081,17 @@ function runStateSetLocked(paths, key, rawValue) {
   if (!r.exists) return NOT_INIT;
   if (!r.state) return failure({ human: `Existing state.json is invalid; fix it before setting values:
 ${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
-  const value = parseValue(rawValue);
+  let value = parseValue(rawValue);
+  if (key === "current_stage") {
+    const canonical = canonicalizeStage(String(value));
+    if (!isKnownStage(canonical)) {
+      return failure({
+        human: `Refusing to set current_stage to "${String(value)}": not a known pipeline stage. Valid stages: ${STAGE_PIPELINE.map((s) => s.stage).join(", ")}.`,
+        data: { error: "unknown_stage", value: String(value), validStages: STAGE_PIPELINE.map((s) => s.stage) }
+      });
+    }
+    value = canonical;
+  }
   const next = JSON.parse(JSON.stringify(r.state));
   setByPath(next, key, value);
   const validation = validateState(next);
@@ -16946,54 +17051,6 @@ function runRoute(paths, opts) {
 // src/commands/next.ts
 var fs17 = __toESM(require("node:fs"));
 var path16 = __toESM(require("node:path"));
-
-// src/core/stages.ts
-var STAGE_PIPELINE = [
-  { stage: "requirements", tiers: ["T1", "T2", "T3"], produces: "docs/01-requirements.md", criticMode: "requirements", humanGate: true, summary: "Turn the idea into REQ-ID'd intent; sticky human sign-off." },
-  { stage: "scope", tiers: ["T1", "T2", "T3"], produces: "docs/02-scope.md", criticMode: "scope", humanGate: true, summary: "MVP vs later; sticky human sign-off." },
-  { stage: "domain-model", tiers: ["T2", "T3"], produces: "docs/03-domain-model.md", criticMode: "domain-model", humanGate: false, summary: "Entities and rules anchored to REQ-IDs; streams." },
-  { stage: "architecture", tiers: ["T1", "T2", "T3"], produces: "docs/04-architecture.md", criticMode: "architecture", humanGate: true, summary: "Components/data flow; gate only the 1-2 irreversible decisions." },
-  { stage: "ui-design", tiers: ["T1", "T2", "T3"], produces: "docs/04b-ui-design.md", criticMode: "ui-design", humanGate: true, summary: "Conditional on a UI; human picks 1 of 2-3 directions." },
-  { stage: "adrs", tiers: ["T3"], produces: "docs/05-adrs/", criticMode: "adr", humanGate: false, summary: "One ADR per significant, costly-to-reverse decision; streams." },
-  { stage: "technical-design", tiers: ["T3"], produces: "docs/06-technical-design.md", criticMode: "technical-design", humanGate: false, summary: "Internal behaviour the architecture left abstract; streams." },
-  { stage: "contracts", tiers: ["T2", "T3"], produces: "docs/07-contracts.md", criticMode: "contracts", humanGate: true, summary: "Interface I/O/errors; auth choices are a blast-radius human gate." },
-  { stage: "security", tiers: ["T3"], produces: "docs/08a-security-threat-model.md", criticMode: "security", humanGate: true, summary: "Graduated for T3/blast-radius; security model needs human approval." },
-  { stage: "failure-modes", tiers: ["T3"], produces: "docs/08b-failure-edge-cases.md", criticMode: "failure-modes", humanGate: false, summary: "Graduated for T3/reliability-critical; data-loss tradeoffs gate." },
-  { stage: "test-strategy", tiers: ["T2", "T3"], produces: "docs/08-test-strategy.md", criticMode: "test-strategy", humanGate: false, summary: "Test pyramid; each REQ-ID gets >=1 verifying test; streams." },
-  { stage: "implementation-planning", tiers: ["T1", "T2", "T3"], produces: "docs/09-implementation-plan.md", criticMode: "slice", humanGate: false, summary: "Vertical slices + coverage map; hard gate: th coverage check." },
-  { stage: "implementation", tiers: ["T1", "T2", "T3"], produces: "", criticMode: "code-review", humanGate: false, summary: "Build slice-by-slice with tests; Critic code-review per slice; drift loop." },
-  { stage: "documentation", tiers: ["T1", "T2", "T3"], produces: "", criticMode: "documentation", humanGate: false, summary: "Tier-scaled docs; Critic-reviewed; no human gate." },
-  { stage: "final-verification", tiers: ["T1", "T2", "T3"], produces: "docs/10-verification-report.md", criticMode: "final-verification", humanGate: true, summary: "Coherence (Critic) vs correctness (tests + human); human signs off." }
-];
-function canonicalizeStage(raw) {
-  const trimmed = (raw ?? "").trim().toLowerCase();
-  if (trimmed === "") return "";
-  if (STAGE_PIPELINE.some((s) => s.stage === trimmed)) return trimmed;
-  const deprefixed = trimmed.replace(/^\d+-/, "");
-  if (deprefixed !== trimmed && STAGE_PIPELINE.some((s) => s.stage === deprefixed)) {
-    return deprefixed;
-  }
-  return trimmed;
-}
-function isFinalVerification(stage) {
-  return canonicalizeStage(stage) === "final-verification";
-}
-function stageContract(stage) {
-  const key = stage.toLowerCase();
-  return STAGE_PIPELINE.find((s) => s.stage === key);
-}
-function engagedStages(tier) {
-  if (!tier || tier === "T0") return [];
-  return STAGE_PIPELINE.filter((s) => s.tiers.includes(tier));
-}
-function nextStageAfter(currentStage, tier) {
-  const engaged = engagedStages(tier);
-  if (engaged.length === 0) return void 0;
-  const key = currentStage.toLowerCase();
-  const idx = engaged.findIndex((s) => s.stage === key);
-  if (idx < 0) return engaged[0];
-  return engaged[idx + 1];
-}
 
 // src/core/health.ts
 var fs13 = __toESM(require("node:fs"));
