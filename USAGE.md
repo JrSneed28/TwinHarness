@@ -564,6 +564,52 @@ the worktree adds filesystem-level enforcement and the merge a second conflict c
 useful redundancy). Full protocol: `skills/twinharness/reference/build-and-verify.md` (Stage 10) and
 `agents/orchestrator.md` (parallel-build coordination).
 
+### Parallel collaborative orchestration (collab · debate · section-level artifact leases)
+
+When several agents work the **same stage** at once (a fan-out design round, a multi-author artifact),
+three coordination primitives keep them collision-safe and reconcilable. Like every other `th` command,
+they only *record and compute* — they never decide who runs.
+
+**Blackboard fragments (`th collab`)** — a shared per-stage scratch space so parallel authors drop
+contributions without overwriting each other; a Reconciler later merges them:
+
+```
+th collab init --stage <s>                                   # initialize the blackboard stage dir (REQ-PCO-040)
+th collab fragment --stage <s> --round <r> --name <n> --text <t> [--force]
+                                                             # drop a fragment (refuses to overwrite without --force)
+th collab list --stage <s> [--round <r>]                     # list fragments
+th collab merge --stage <s> --round <r>                      # concatenate fragments (REQ-anchor-validated) for the Reconciler
+```
+
+**Debates (`th debate`)** — a BLOCKING reconciliation obligation when authors disagree; an open debate
+blocks completion exactly like a requirement-layer drift, until explicitly resolved (REQ-PCO-042):
+
+```
+th debate add --topic <t> [--positions ...] [--links a,b] [--source ...]   # open a BLOCKING debate
+th debate list                                                             # ledger entries + open blocking count
+th debate resolve --id <DEBATE-ID> --resolution <r>                        # resolve (clears the obligation)
+```
+
+**Section-level artifact leases (`th artifact claim/release/leases`)** — finer-grained than the
+build-component lease: a collision guard for intra-artifact fan-out (several agents editing different
+sections of one document, REQ-PCO-041):
+
+```
+th artifact claim <file#section> --holder <id>     # take a section-level lease
+th artifact release <file#section> --holder <id>   # release it
+th artifact leases                                 # list active section-level leases
+```
+
+**Batch wave dispatch (`th build dispatch`)** — the companion to `th build next-wave`: it emits the
+full parallel wave **plus** a per-slice spawn descriptor (model/effort) in one payload, so the
+Orchestrator can spawn an entire wave of Builders in a single message. Like `next-wave` it is a pure
+read of state — it dispatches nothing and mutates nothing; each slice still needs its own
+`in-progress` + `th build claim` before its Builder is spawned.
+
+**SubagentStop hook (`th hook subagent-stop`)** — emits a Claude Code SubagentStop-hook decision (a
+state-validity guard), the sub-agent analogue of the Stop-gate. It is wired by `hooks/hooks.json`; you
+do not normally invoke it by hand.
+
 ### Debug — evidence-first defect tracing (the Debugger agent)
 
 ```

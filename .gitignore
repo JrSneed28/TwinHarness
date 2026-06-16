@@ -18,6 +18,7 @@ node_modules/
 # state recreated at runtime by local tooling — never commit it.
 .claude/
 .omc/
+/.case-studies/
 
 # Harness-development artifacts: audit/review reports and session scratch
 # produced while developing TwinHarness itself. They are working documents,
