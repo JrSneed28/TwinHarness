@@ -1,0 +1,8 @@
+{
+  "//": "Typecheck-only config (M-1): same as tsconfig.json but RE-INCLUDES src/mcp-server.ts (its `exclude` replaces the base one and omits mcp-server.ts) and never emits. So `npm run typecheck` still fully type-checks the MCP server even though tsconfig.json excludes it from EMIT to protect the esbuild bundle.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "exclude": ["node_modules", "dist", "tests"]
+}
