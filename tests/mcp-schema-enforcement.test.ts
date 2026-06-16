@@ -55,12 +55,17 @@ describe("F-7/H-1: validateToolArgs enforces the closed, typed inputSchema", () 
 });
 
 describe("F-7/H-2: th_state_set refuses GATE_OWNED fields over MCP", () => {
-  it.each(["implementation_allowed", "tier", "current_stage", "write_gate"])(
+  it.each(["implementation_allowed", "tier", "current_stage", "write_gate", "blast_radius_flags"])(
     "refuses gate-owned field %j via the MCP adapter even though the CLI allows it",
     (field) => {
       tp = makeTempProject();
       runInit(tp.paths, {});
-      const value = field === "implementation_allowed" ? "true" : field === "tier" ? "T1" : field === "current_stage" ? "requirements" : "deny";
+      const value =
+        field === "implementation_allowed" ? "true"
+        : field === "tier" ? "T1"
+        : field === "current_stage" ? "requirements"
+        : field === "blast_radius_flags" ? "[]"
+        : "deny";
       const res = defFor("th_state_set").run(tp.paths, { key: field, value });
       expect(res.ok).toBe(false);
       expect(res.data?.error).toBe("gate_owned_field");
@@ -70,8 +75,9 @@ describe("F-7/H-2: th_state_set refuses GATE_OWNED fields over MCP", () => {
   it("still allows a non-gate, non-managed field via MCP (regression)", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    // blast_radius_flags is settable; an array value round-trips through JSON.
-    const res = defFor("th_state_set").run(tp.paths, { key: "blast_radius_flags", value: "[]" });
+    // complexity_rationale is a free-form string field — neither gate-owned nor a
+    // managed counter — so the MCP raw setter still accepts it.
+    const res = defFor("th_state_set").run(tp.paths, { key: "complexity_rationale", value: "just a note" });
     expect(res.ok).toBe(true);
   });
 

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "./paths";
 import { atomicWriteFile, readFileWithRetry } from "./atomic-io";
+import { sleepSync } from "./sleep";
 import {
   type TwinHarnessState,
   type ValidationIssue,
@@ -77,8 +78,9 @@ export function writeState(paths: ProjectPaths, state: TwinHarnessState): void {
  * would leave `drift_open_blocking` too low and let the stop-gate pass a run it
  * should block. This serializes the whole read→write span.
  *
- * The lock is an atomic `mkdir` on `<stateDir>/.state.lock`. It busy-waits
- * (the CLI is synchronous and each critical section is short), times out after
+ * The lock is an atomic `mkdir` on `<stateDir>/.state.lock`. It waits between
+ * attempts with a zero-CPU {@link sleepSync} (the CLI is synchronous and each
+ * critical section is short; the old `while`-spin pegged a core, PERF-007), times out after
  * ~10s rather than hang forever, and steals a lock older than the stale
  * threshold so a crashed holder can't wedge the project permanently.
  *
@@ -178,10 +180,9 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
       if (Date.now() > deadline) {
         throw new LockTimeoutError(lockDir);
       }
-      const spinUntil = Date.now() + 20;
-      while (Date.now() < spinUntil) {
-        /* busy-wait: the CLI has no event loop to yield to */
-      }
+      // Zero-CPU wait (PERF-007): the CLI has no event loop to yield to, and the
+      // old `while`-spin pegged a core while waiting on a held lock. Same 20ms.
+      sleepSync(20);
     }
   }
 

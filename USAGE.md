@@ -931,9 +931,9 @@ Pre-edit blast-radius analysis over the persisted `repo-map.json`. Reads no stat
 | `map_invalid-json` / `map_schema` / `map_version` | Map file malformed or unknown version | Run `th repo map` to regenerate |
 | `unknown_slice` | `--slice` names no known slice | Check `th state status` for valid slice IDs |
 
-#### MCP tools (registered count 9 → 13)
+#### MCP tools (registered count 35)
 
-Four MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin (REQ-RU-051 — identical code path):
+35 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin (REQ-RU-051 — identical code path). The four repo-understanding tools are shown below:
 
 | Tool name | CLI equivalent | Notes |
 |---|---|---|
@@ -942,7 +942,7 @@ Four MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner ada
 | `th_repo_impact` | `th repo impact` | `file`, `component` inputs |
 | `th_context_pack` | `th context pack` | `slice` input; wraps the existing handler |
 
-All four schemas are strict and closed (`additionalProperties: false`). Output mirrors the CLI structured payload (`result.data`) as `structuredContent` plus the human text block. Compact by default — the full `repo-map.json` is never dumped into a prompt (REQ-NFR-004).
+All MCP tool schemas are strict and closed (`additionalProperties: false`). Output mirrors the CLI structured payload (`result.data`) as `structuredContent` plus the human text block. Compact by default — the full `repo-map.json` is never dumped into a prompt (REQ-NFR-004).
 
 #### Brownfield workflow (REQ-RU-060/062)
 

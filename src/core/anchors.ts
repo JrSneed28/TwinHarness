@@ -40,6 +40,52 @@ export function extractReqIds(text: string): string[] {
 const SCAN_SKIP_DIRS = new Set([".git", "node_modules", "dist"]);
 
 /**
+ * BOUNDED-COST caps for the anchor walk (PERF-001). Without a per-file byte cap,
+ * `scanDirForReqIds` would `readFileSync` an arbitrarily large file fully into
+ * memory — a single 30 MB source file that passes the name filter defeats the
+ * advertised bounded-cost guarantee. These defaults mirror the repo-map scanner's
+ * caps so the two walks stay consistent; the scanner overrides them with its OWN
+ * exported constants (`MAX_READ_BYTES` / `FILE_COUNT_CAP` / `TOTAL_BYTES_CAP`) at
+ * the call site, which is the single source of truth (REQ-NFR-007). The Phase-3
+ * single-walk unification (P3-1) deletes this standalone cap; until then this
+ * keeps the standalone walk bounded.
+ */
+const DEFAULT_MAX_READ_BYTES = 2 * 1024 * 1024; // 2 MB — oversize files are skipped, not read.
+const DEFAULT_FILE_COUNT_CAP = 25_000;
+const DEFAULT_TOTAL_BYTES_CAP = 64 * 1024 * 1024; // 64 MB.
+
+/**
+ * Options for {@link scanDirForReqIds}. All optional; production callers (the
+ * repo-map scanner) inject the scanner's own cap constants so the standalone
+ * anchor walk obeys the SAME bounded-cost budget as the main walk. Tests lower the
+ * caps to exercise the partial path with tiny fixtures.
+ */
+export interface ScanDirOptions {
+  /** Restrict which files are read, by file name. */
+  extPredicate?: (name: string) => boolean;
+  /** Largest single file (bytes) that is read; larger files are skipped, not read. */
+  maxReadBytes?: number;
+  /** Stop after this many files are read (partial result). */
+  fileCountCap?: number;
+  /** Stop once cumulative bytes read would exceed this (partial result). */
+  totalBytesCap?: number;
+  /** Directory names never descended into (defaults to `.git`/`node_modules`/`dist`). */
+  skipDirs?: ReadonlySet<string>;
+}
+
+/** Outcome of a capped anchor walk. `capHit` is non-null when a cap stopped it early. */
+export interface ScanDirResult {
+  /** REQ-ID → list of root-relative (forward-slash) file paths where it appears. */
+  anchors: Map<string, string[]>;
+  /** Total bytes actually READ (oversize/skipped files are NOT counted). */
+  bytesRead: number;
+  /** Number of files actually read. */
+  filesRead: number;
+  /** Non-null if a cap stopped the walk early (PARTIAL result). */
+  capHit: null | "file-count" | "total-bytes";
+}
+
+/**
  * Recursively scan `dir` for REQ-ID anchors and return a map of
  * `REQ-ID → list of root-relative (forward-slash) file paths` where it appears.
  *
@@ -48,24 +94,91 @@ const SCAN_SKIP_DIRS = new Set([".git", "node_modules", "dist"]);
  * - `node_modules`, `dist`, and `.git` are always skipped.
  * - File paths are relative to `dir` and use forward slashes for cross-platform
  *   stable output. A missing/non-directory `dir` yields an empty map.
+ * - BOUNDED COST (PERF-001): a file larger than the per-file byte cap is NEVER
+ *   read (it is skipped without `readFileSync`); the walk also stops once the
+ *   file-count or total-bytes cap is reached, yielding a PARTIAL map. This keeps
+ *   the cost bounded even on a repo containing a giant file.
+ *
+ * The legacy positional `extPredicate` second argument is still accepted for
+ * backward compatibility; new callers pass a {@link ScanDirOptions} object.
  */
 export function scanDirForReqIds(
   dir: string,
-  extPredicate?: (name: string) => boolean,
+  optsOrPredicate?: ScanDirOptions | ((name: string) => boolean),
 ): Map<string, string[]> {
+  return scanDirForReqIdsCapped(dir, optsOrPredicate).anchors;
+}
+
+/**
+ * Capped variant of {@link scanDirForReqIds} that also returns the bytes/files
+ * actually read and a `capHit` partial signal. The repo-map scanner uses this so
+ * the standalone anchor walk's byte cost is bounded by — and folded into — the
+ * scanner's BOUNDED-COST budget (PERF-001 / REQ-NFR-007).
+ */
+export function scanDirForReqIdsCapped(
+  dir: string,
+  optsOrPredicate?: ScanDirOptions | ((name: string) => boolean),
+): ScanDirResult {
+  const opts: ScanDirOptions =
+    typeof optsOrPredicate === "function" ? { extPredicate: optsOrPredicate } : optsOrPredicate ?? {};
+  const extPredicate = opts.extPredicate;
+  const maxReadBytes = opts.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
+  const fileCountCap = opts.fileCountCap ?? DEFAULT_FILE_COUNT_CAP;
+  const totalBytesCap = opts.totalBytesCap ?? DEFAULT_TOTAL_BYTES_CAP;
+  const skipDirs = opts.skipDirs ?? SCAN_SKIP_DIRS;
+
   const out = new Map<string, string[]>();
-  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return out;
+  const result: ScanDirResult = { anchors: out, bytesRead: 0, filesRead: 0, capHit: null };
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return result;
 
   const walk = (abs: string): void => {
-    for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
+    if (result.capHit) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(abs, { withFileTypes: true });
+    } catch {
+      return; // unreadable dir — skip, do not crash.
+    }
+    for (const entry of entries) {
+      if (result.capHit) return;
       if (entry.isDirectory()) {
-        if (SCAN_SKIP_DIRS.has(entry.name)) continue;
+        if (skipDirs.has(entry.name)) continue;
         walk(path.join(abs, entry.name));
       } else if (entry.isFile()) {
         if (extPredicate && !extPredicate(entry.name)) continue;
         const filePath = path.join(abs, entry.name);
+
+        // BOUNDED COST: stat first — a file larger than the per-file cap is NEVER
+        // read (no readFileSync), so a 30 MB file costs one stat, not 30 MB of IO.
+        let size: number;
+        try {
+          size = fs.statSync(filePath).size;
+        } catch {
+          continue; // unreadable stat — skip.
+        }
+        if (size > maxReadBytes) continue; // oversize → skip, do not read.
+
+        // File-count cap → partial (a cap is not an error).
+        if (result.filesRead >= fileCountCap) {
+          result.capHit = "file-count";
+          return;
+        }
+        // Total-bytes cap → partial.
+        if (result.bytesRead + size > totalBytesCap) {
+          result.capHit = "total-bytes";
+          return;
+        }
+
+        let content: string;
+        try {
+          content = fs.readFileSync(filePath, "utf8");
+        } catch {
+          continue; // unreadable read — skip (do not count).
+        }
+        result.bytesRead += size;
+        result.filesRead++;
+
         const rel = path.relative(dir, filePath).split(path.sep).join("/");
-        const content = fs.readFileSync(filePath, "utf8");
         for (const id of extractReqIds(content)) {
           const files = out.get(id);
           if (files) {
@@ -78,5 +191,5 @@ export function scanDirForReqIds(
     }
   };
   walk(dir);
-  return out;
+  return result;
 }

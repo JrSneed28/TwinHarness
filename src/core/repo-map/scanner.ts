@@ -21,7 +21,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { scanDirForReqIds } from "../anchors";
+import { scanDirForReqIdsCapped } from "../anchors";
 import { BLAST_RADIUS_FLAGS, type BlastRadiusFlag } from "../state-schema";
 import {
   type RepoMap,
@@ -91,8 +91,13 @@ const PRODUCER_DIRS = new Set([".twinharness", ".agentic-sdlc"]);
  */
 const GENERATED_ARTIFACTS = new Set(["docs/00-repo-map.md"]);
 
-/** Largest single file we will read for content-based detection (bytes). */
-const MAX_READ_BYTES = 2 * 1024 * 1024; // 2 MB — oversize files are name-only.
+/**
+ * Largest single file we will read for content-based detection (bytes). Exported
+ * so the REUSED anchor walk (`scanDirForReqIdsCapped`) obeys the SAME per-file
+ * byte cap — without it that walk would `readFileSync` an arbitrarily large file
+ * and defeat the BOUNDED-COST guarantee (PERF-001, REQ-NFR-007).
+ */
+export const MAX_READ_BYTES = 2 * 1024 * 1024; // 2 MB — oversize files are name-only.
 
 /** Extension → language name. */
 const EXT_LANG: Record<string, string> = {
@@ -507,7 +512,23 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
     const first = loc.split("/")[0];
     return first !== undefined && (GENERATED_DIRS.has(first) || PRODUCER_DIRS.has(first));
   };
-  const reqIdToFiles = scanDirForReqIds(absRoot);
+  // BOUNDED COST (PERF-001, REQ-NFR-007): this is a SEPARATE second pass over the
+  // tree (the single-walk unification is P3-1), so it gets its own full budget of
+  // the scanner's OWN cap constants — the key guarantee is that the cost is
+  // per-walk bounded. The decisive fix is `maxReadBytes`: a file larger than the
+  // per-file cap is NEVER read here (previously it was fully `readFileSync`-ed,
+  // defeating bounded cost). The file-count/total-bytes caps bound the walk as a
+  // whole; a cap hit is folded into `capHit` below. Skip the same generated/
+  // producer dirs the main walk skips so excluded bytes are never read (the
+  // post-filter still drops any path that slips through).
+  const anchorSkipDirs = new Set([...GENERATED_DIRS, ...PRODUCER_DIRS]);
+  const anchorScan = scanDirForReqIdsCapped(absRoot, {
+    maxReadBytes: MAX_READ_BYTES,
+    fileCountCap,
+    totalBytesCap,
+    skipDirs: anchorSkipDirs,
+  });
+  const reqIdToFiles = anchorScan.anchors;
   const reqAnchors: ReqAnchor[] = [];
   const fileToReqIds = new Map<string, string[]>();
   for (const [reqId, locations] of reqIdToFiles.entries()) {
@@ -578,7 +599,9 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
   map.scanReport = {
     filesScanned: st.filesScanned,
     filesSkipped: st.filesSkipped,
-    capHit: st.capHit,
+    // A cap hit in EITHER walk makes the map PARTIAL (REQ-NFR-007). The main walk
+    // wins if both tripped; otherwise surface the anchor walk's cap.
+    capHit: st.capHit ?? anchorScan.capHit,
   };
 
   return map;

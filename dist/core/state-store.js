@@ -41,6 +41,7 @@ exports.withStateLock = withStateLock;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const atomic_io_1 = require("./atomic-io");
+const sleep_1 = require("./sleep");
 const state_schema_1 = require("./state-schema");
 /**
  * Thrown by {@link withStateLock} when the lock cannot be acquired within the
@@ -100,8 +101,9 @@ function writeState(paths, state) {
  * would leave `drift_open_blocking` too low and let the stop-gate pass a run it
  * should block. This serializes the whole read→write span.
  *
- * The lock is an atomic `mkdir` on `<stateDir>/.state.lock`. It busy-waits
- * (the CLI is synchronous and each critical section is short), times out after
+ * The lock is an atomic `mkdir` on `<stateDir>/.state.lock`. It waits between
+ * attempts with a zero-CPU {@link sleepSync} (the CLI is synchronous and each
+ * critical section is short; the old `while`-spin pegged a core, PERF-007), times out after
  * ~10s rather than hang forever, and steals a lock older than the stale
  * threshold so a crashed holder can't wedge the project permanently.
  *
@@ -204,10 +206,9 @@ function withStateLock(paths, fn) {
             if (Date.now() > deadline) {
                 throw new LockTimeoutError(lockDir);
             }
-            const spinUntil = Date.now() + 20;
-            while (Date.now() < spinUntil) {
-                /* busy-wait: the CLI has no event loop to yield to */
-            }
+            // Zero-CPU wait (PERF-007): the CLI has no event loop to yield to, and the
+            // old `while`-spin pegged a core while waiting on a held lock. Same 20ms.
+            (0, sleep_1.sleepSync)(20);
         }
     }
     try {

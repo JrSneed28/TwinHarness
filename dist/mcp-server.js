@@ -15547,6 +15547,15 @@ var path3 = __toESM(require("node:path"));
 // src/core/atomic-io.ts
 var fs2 = __toESM(require("node:fs"));
 var path2 = __toESM(require("node:path"));
+
+// src/core/sleep.ts
+function sleepSync(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  const sab = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(sab, 0, 0, ms);
+}
+
+// src/core/atomic-io.ts
 function isTransientIoError(code) {
   return code === "EPERM" || code === "EACCES" || code === "EBUSY";
 }
@@ -15560,11 +15569,6 @@ var StateWriteContendedError = class extends Error {
     this.name = "StateWriteContendedError";
   }
 };
-function busyWait(ms) {
-  const until = Date.now() + ms;
-  while (Date.now() < until) {
-  }
-}
 function atomicWriteFile(absPath, content, rename = fs2.renameSync) {
   fs2.mkdirSync(path2.dirname(absPath), { recursive: true });
   const tmp = `${absPath}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
@@ -15584,7 +15588,7 @@ function atomicWriteFile(absPath, content, rename = fs2.renameSync) {
         if (transient) throw new StateWriteContendedError(absPath, attempt);
         throw e;
       }
-      busyWait(Math.min(4 * attempt, 40));
+      sleepSync(Math.min(4 * attempt, 40));
     }
   }
 }
@@ -15595,7 +15599,7 @@ function readFileWithRetry(absPath, read = (p) => fs2.readFileSync(p, "utf8")) {
     } catch (e) {
       const code = e.code;
       if (!isTransientIoError(code) || attempt >= MAX_IO_ATTEMPTS) throw e;
-      busyWait(Math.min(4 * attempt, 40));
+      sleepSync(Math.min(4 * attempt, 40));
     }
   }
 }
@@ -15830,9 +15834,7 @@ function withStateLock(paths, fn) {
       if (Date.now() > deadline) {
         throw new LockTimeoutError(lockDir);
       }
-      const spinUntil = Date.now() + 20;
-      while (Date.now() < spinUntil) {
-      }
+      sleepSync(20);
     }
   }
   try {
@@ -15933,6 +15935,12 @@ var STATE_FIELD_POLICY = {
     refusedByStateSet: false
   },
   write_gate: {
+    managed: true,
+    gateOwned: true,
+    owner: "operator policy",
+    refusedByStateSet: false
+  },
+  blast_radius_flags: {
     managed: true,
     gateOwned: true,
     owner: "operator policy",
@@ -16220,16 +16228,43 @@ function shareComponent(a, b) {
 }
 function scheduleWaves(slices) {
   const waves = [];
-  for (const slice of slices) {
-    let placed = false;
-    for (const wave of waves) {
+  const waveOf = /* @__PURE__ */ new Map();
+  const known = new Set(slices.map((s) => s.id));
+  const place = (slice, ignoreUnmet) => {
+    let minWave = 0;
+    for (const dep of slice.depends_on ?? []) {
+      if (!known.has(dep) || dep === slice.id) continue;
+      const depWave = waveOf.get(dep);
+      if (depWave === void 0) {
+        if (!ignoreUnmet) return false;
+        continue;
+      }
+      if (depWave + 1 > minWave) minWave = depWave + 1;
+    }
+    for (let w = minWave; w < waves.length; w++) {
+      const wave = waves[w];
       if (wave.every((member) => !shareComponent(member, slice))) {
         wave.push(slice);
-        placed = true;
-        break;
+        waveOf.set(slice.id, w);
+        return true;
       }
     }
-    if (!placed) waves.push([slice]);
+    waves.push([slice]);
+    waveOf.set(slice.id, waves.length - 1);
+    return true;
+  };
+  let remaining = slices.filter(() => true);
+  for (let pass = 0; remaining.length > 0; pass++) {
+    const forced = pass >= slices.length;
+    const next = [];
+    for (const slice of remaining) {
+      if (!place(slice, forced)) next.push(slice);
+    }
+    if (next.length === remaining.length && !forced) {
+      for (const slice of next) place(slice, true);
+      break;
+    }
+    remaining = next;
   }
   return waves.map((wave) => wave.map((s) => s.id));
 }
@@ -16461,12 +16496,15 @@ ${formatIssues(r.issues)}`,
   const waves = scheduleWaves(selected);
   const conflicts = conflictPairs(selected);
   const parallelism = waves.reduce((max, w) => Math.max(max, w.length), 0);
+  const deps = validateDeps(r.state.slices);
+  const depIssues = hasDepIssues(deps);
   structuredLog({
     cmd: "build plan",
     slices: selected.length,
     waves: waves.length,
     conflicts: conflicts.length,
-    parallelism
+    parallelism,
+    depIssues
   });
   const waveLines = waves.length ? waves.map((w, i) => `Wave ${i + 1} (parallel): ${w.join(", ")}`) : ["(no slices to schedule)"];
   const conflictLines = conflicts.length ? ["Serialized conflicts (shared components):", ...conflicts.map((c) => `  ${c.a} \xD7 ${c.b} (shared: ${c.shared.join(", ")})`)] : ["Serialized conflicts (shared components): (none)"];
@@ -16474,15 +16512,24 @@ ${formatIssues(r.issues)}`,
     "",
     `ADVISORY (parallelism optimizer, REQ-PCO-030): current max wave width = ${parallelism} across ${waves.length} wave${waves.length === 1 ? "" : "s"}; ${conflicts.length} conflict pair${conflicts.length === 1 ? "" : "s"} serialize the plan. To widen build waves, re-cut slices to MINIMIZE shared components and depends_on edges (the coverage hard-gate and vertical-slice integrity stay unchanged).`
   ] : [];
+  const depLines = [];
+  for (const c of deps.cycles) depLines.push(`DEPENDENCY CYCLE: ${c.join(" \u2192 ")} \u2192 ${c[0]} (unsatisfiable \u2014 break the cycle in the plan)`);
+  for (const d of deps.dangling) depLines.push(`DANGLING DEPENDENCY: ${d.slice} depends on unknown slice(s): ${d.missing.join(", ")}`);
+  const depBlock = depIssues ? ["", ...depLines] : [];
   const human = [
     ...waveLines,
     "",
     ...conflictLines,
     "",
     "Within a wave Builders may run concurrently (\xA716); across waves they serialize.",
-    ...adviseLines
+    ...adviseLines,
+    ...depBlock
   ].join("\n");
-  return success({ data: { waves, conflicts, parallelism, advise: opts.advise === true }, human });
+  const data = { waves, conflicts, parallelism, advise: opts.advise === true, deps, depIssues };
+  if (depIssues) {
+    return failure({ exitCode: 7, data: { ...data, error: "dependency_graph_unsatisfiable" }, human });
+  }
+  return success({ data, human });
 }
 function runBuildNextWave(paths) {
   const r = readState(paths);
@@ -16705,19 +16752,62 @@ function extractReqIds(text) {
   return out;
 }
 var SCAN_SKIP_DIRS = /* @__PURE__ */ new Set([".git", "node_modules", "dist"]);
-function scanDirForReqIds(dir, extPredicate) {
+var DEFAULT_MAX_READ_BYTES = 2 * 1024 * 1024;
+var DEFAULT_FILE_COUNT_CAP = 25e3;
+var DEFAULT_TOTAL_BYTES_CAP = 64 * 1024 * 1024;
+function scanDirForReqIds(dir, optsOrPredicate) {
+  return scanDirForReqIdsCapped(dir, optsOrPredicate).anchors;
+}
+function scanDirForReqIdsCapped(dir, optsOrPredicate) {
+  const opts = typeof optsOrPredicate === "function" ? { extPredicate: optsOrPredicate } : optsOrPredicate ?? {};
+  const extPredicate = opts.extPredicate;
+  const maxReadBytes = opts.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
+  const fileCountCap = opts.fileCountCap ?? DEFAULT_FILE_COUNT_CAP;
+  const totalBytesCap = opts.totalBytesCap ?? DEFAULT_TOTAL_BYTES_CAP;
+  const skipDirs = opts.skipDirs ?? SCAN_SKIP_DIRS;
   const out = /* @__PURE__ */ new Map();
-  if (!fs7.existsSync(dir) || !fs7.statSync(dir).isDirectory()) return out;
+  const result = { anchors: out, bytesRead: 0, filesRead: 0, capHit: null };
+  if (!fs7.existsSync(dir) || !fs7.statSync(dir).isDirectory()) return result;
   const walk = (abs) => {
-    for (const entry of fs7.readdirSync(abs, { withFileTypes: true })) {
+    if (result.capHit) return;
+    let entries;
+    try {
+      entries = fs7.readdirSync(abs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (result.capHit) return;
       if (entry.isDirectory()) {
-        if (SCAN_SKIP_DIRS.has(entry.name)) continue;
+        if (skipDirs.has(entry.name)) continue;
         walk(path6.join(abs, entry.name));
       } else if (entry.isFile()) {
         if (extPredicate && !extPredicate(entry.name)) continue;
         const filePath = path6.join(abs, entry.name);
+        let size;
+        try {
+          size = fs7.statSync(filePath).size;
+        } catch {
+          continue;
+        }
+        if (size > maxReadBytes) continue;
+        if (result.filesRead >= fileCountCap) {
+          result.capHit = "file-count";
+          return;
+        }
+        if (result.bytesRead + size > totalBytesCap) {
+          result.capHit = "total-bytes";
+          return;
+        }
+        let content;
+        try {
+          content = fs7.readFileSync(filePath, "utf8");
+        } catch {
+          continue;
+        }
+        result.bytesRead += size;
+        result.filesRead++;
         const rel = path6.relative(dir, filePath).split(path6.sep).join("/");
-        const content = fs7.readFileSync(filePath, "utf8");
         for (const id of extractReqIds(content)) {
           const files = out.get(id);
           if (files) {
@@ -16730,7 +16820,7 @@ function scanDirForReqIds(dir, extPredicate) {
     }
   };
   walk(dir);
-  return out;
+  return result;
 }
 
 // src/core/coverage.ts
@@ -17939,7 +18029,14 @@ function scanRepo(root, opts = {}) {
     const first = loc.split("/")[0];
     return first !== void 0 && (GENERATED_DIRS.has(first) || PRODUCER_DIRS.has(first));
   };
-  const reqIdToFiles = scanDirForReqIds(absRoot);
+  const anchorSkipDirs = /* @__PURE__ */ new Set([...GENERATED_DIRS, ...PRODUCER_DIRS]);
+  const anchorScan = scanDirForReqIdsCapped(absRoot, {
+    maxReadBytes: MAX_READ_BYTES,
+    fileCountCap,
+    totalBytesCap,
+    skipDirs: anchorSkipDirs
+  });
+  const reqIdToFiles = anchorScan.anchors;
   const reqAnchors = [];
   const fileToReqIds = /* @__PURE__ */ new Map();
   for (const [reqId, locations] of reqIdToFiles.entries()) {
@@ -17991,7 +18088,9 @@ function scanRepo(root, opts = {}) {
   map.scanReport = {
     filesScanned: st.filesScanned,
     filesSkipped: st.filesSkipped,
-    capHit: st.capHit
+    // A cap hit in EITHER walk makes the map PARTIAL (REQ-NFR-007). The main walk
+    // wins if both tripped; otherwise surface the anchor walk's cap.
+    capHit: st.capHit ?? anchorScan.capHit
   };
   return map;
 }

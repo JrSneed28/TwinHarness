@@ -13,6 +13,21 @@ import { readVerifyConfig, readVerifyReport, runCommands } from "../src/core/ver
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
 
+// Portable, cross-platform stand-ins for POSIX `true`/`false`/`sleep` so these
+// tests pass on a bare-Windows runner with no Git Bash on PATH. runCommands uses
+// spawnSync(shell: true) → cmd.exe on Windows, which cannot resolve `true`/
+// `false`/`sleep`; `node` is always on PATH wherever vitest runs. The quoting is
+// safe under both cmd.exe and sh (no shell-special chars outside the quotes).
+// (P1-3 / DOC-003≡TEST-002)
+const PASS_CMD = `node -e "process.exit(0)"`;
+const FAIL_CMD = `node -e "process.exit(1)"`;
+// Hangs > any test budget so the timeout-kill path is exercised. It chdir's out
+// of the spawn cwd (the temp project root) first: on Windows a SIGKILL of the
+// shell does not kill this grandchild, and a process holding the temp root as
+// its cwd would block the afterEach rmSync (EPERM). chdir releases that lock so
+// the lingering (harmless) process can't wedge teardown.
+const HANG_CMD = `node -e "process.chdir(require('os').tmpdir());setTimeout(()=>{},10000)"`;
+
 describe("REQ-VERIFY-001: add/list/clear manage the command list (outside state.json)", () => {
   it("add appends; list reflects; clear empties — and state.json is untouched", () => {
     tp = makeTempProject();
@@ -44,8 +59,8 @@ describe("REQ-VERIFY-002: run executes configured commands and records a report"
   it("all green → success, report.ok true, exit 0", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runVerifyAdd(tp.paths, "true");
-    runVerifyAdd(tp.paths, "true");
+    runVerifyAdd(tp.paths, PASS_CMD);
+    runVerifyAdd(tp.paths, PASS_CMD);
 
     const res = runVerifyRun(tp.paths);
     expect(res.ok).toBe(true);
@@ -60,8 +75,8 @@ describe("REQ-VERIFY-002: run executes configured commands and records a report"
   it("a failing command → failure, report.ok false, exit 1, but all commands still ran", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runVerifyAdd(tp.paths, "true");
-    runVerifyAdd(tp.paths, "false");
+    runVerifyAdd(tp.paths, PASS_CMD);
+    runVerifyAdd(tp.paths, FAIL_CMD);
 
     const res = runVerifyRun(tp.paths);
     expect(res.ok).toBe(false);
@@ -90,19 +105,19 @@ describe("REQ-VERIFY-004: runCommands timestamp is injectable (clock-free testin
   it("ranAt uses the injected clock", () => {
     tp = makeTempProject();
     const fixed = new Date("2026-01-01T00:00:00.000Z");
-    const report = runCommands(tp.root, ["true"], () => fixed);
+    const report = runCommands(tp.root, [PASS_CMD], () => fixed);
     expect(report.ranAt).toBe("2026-01-01T00:00:00.000Z");
     expect(report.ok).toBe(true);
   });
 });
 
 describe("REQ-VERIFY-005: a hanging command is killed by the timeout, not blocked forever", () => {
-  it("`sleep 10` with a short budget → recorded as a failure and the run returns", () => {
+  it("a hanging command with a short budget → recorded as a failure and the run returns", () => {
     tp = makeTempProject();
     const start = Date.now();
     // 2s budget: long enough to be robust against spawn jitter under full-suite
-    // parallel load, short enough to prove a 10s sleep is killed well before it ends.
-    const report = runCommands(tp.root, ["sleep 10"], undefined, 2000);
+    // parallel load, short enough to prove a 10s hang is killed well before it ends.
+    const report = runCommands(tp.root, [HANG_CMD], undefined, 2000);
     const elapsed = Date.now() - start;
     expect(elapsed).toBeLessThan(8000); // returned well before the 10s sleep would finish
     expect(report.ok).toBe(false);
@@ -114,7 +129,7 @@ describe("REQ-VERIFY-005: a hanging command is killed by the timeout, not blocke
     tp = makeTempProject();
     // Use the default (5-minute) budget — a 150ms budget is NOT generous for a
     // real shell spawn and flakes under full-suite parallel load on slower hosts.
-    const report = runCommands(tp.root, ["true"]);
+    const report = runCommands(tp.root, [PASS_CMD]);
     expect(report.ok).toBe(true);
   });
 });

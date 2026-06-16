@@ -7,7 +7,54 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer + self-epic governance + coordination-primitive hardening), not yet cut as a versioned release. **1100+ tests, green on CI** (6 Windows-only platform skips; was 460 at 0.6.2).
+Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer + self-epic governance + coordination-primitive hardening), not yet cut as a versioned release. **1100+ tests, green on CI** (1 platform-conditional skip in `tests/concurrency.test.ts`; was 460 at 0.6.2).
+
+### Fixed (audit remediation, 2026-06-16)
+
+- **`th verify`/coverage-report tests are now genuinely cross-platform.** `tests/verify.test.ts`
+  and `tests/coverage-report.test.ts` previously invoked POSIX `true`/`false`/`sleep` via
+  `runCommands` (`spawnSync(shell: true)` → `cmd.exe` on Windows), so they only passed when Git
+  Bash's coreutils happened to be on PATH and *failed* on a bare-Windows runner. The docs
+  previously mis-described them as platform skips — they were never skips at all. The commands are
+  now portable `node -e "…"` stand-ins that resolve on every OS, and the docs (README, this file)
+  are corrected to the real state: **1 platform-conditional skip**.
+
+- **Documented the single intentional test skip.** `tests/concurrency.test.ts:142`
+  (`it.skipIf(win32 || uid === 0)`) is the suite's only skip — a POSIX-only permission-error case
+  that Windows and root cannot reproduce. It is intentional and covered on Linux/macOS CI; a
+  doc-truth guard now asserts the suite has exactly one skip declaration and that the docs no
+  longer claim the stale "N Windows-only platform skips".
+
+- **`th build plan` now emits a dependency-respecting wave order (ARCH-001).** `scheduleWaves`
+  (`src/core/schedule.ts`) was dependency-blind — it serialized slices only on shared-component
+  overlap and ignored `depends_on`, so a slice could be planned in the same or an earlier wave than
+  a slice it hard-depends on. It is now dependency-aware: a slice's wave index is strictly greater
+  than the max wave index of its `depends_on`, in addition to the existing component-conflict rule.
+  `runBuildPlan` (`src/commands/build.ts`) overlays `validateDeps` to surface dependency cycles and
+  dangling references. `scheduleWaves` (static plan) and `computeWave` (live dispatch) remain
+  deliberately distinct. Pure/deterministic; new `tests/schedule.test.ts` coverage.
+
+- **Bounded REQ-anchor scan restores the BOUNDED-COST guarantee (PERF-001).** `scanDirForReqIds`
+  (`src/core/anchors.ts`) previously `readFileSync`-read every regular file with no size, count, or
+  byte cap, defeating the advertised bound on a large repo. It now gates each read behind the
+  scanner's existing per-file byte cap and honors the file-count / total-byte caps and exclusions,
+  so an oversize/binary file is skipped and the scan returns its capped (PARTIAL) result. Guarded by
+  a path-agnostic `tests/repo-bounded-cost.test.ts` asserting "bytes read ≤ cap" at the `scanRepo`
+  boundary.
+
+- **Cross-process state lock no longer CPU-pegs while waiting (PERF-007).** The lock acquisition
+  path (`src/core/state-store.ts`) and the atomic write/read retry path (`src/core/atomic-io.ts`)
+  busy-waited (`while (Date.now() < until) {}`), spinning a full core during contention. Both now
+  use a shared zero-CPU `sleepSync` (`src/core/sleep.ts`) built on `Atomics.wait` over a
+  `SharedArrayBuffer`-backed `Int32Array`. Wait durations and all lock/retry semantics are
+  unchanged; the duplicated busy-wait is retired. New `tests/sleep.test.ts`; concurrency serialization
+  unchanged.
+
+- **`blast_radius_flags` is now gate-owned (GOV-4) — documented behavior change.** The Tier-0 veto
+  floor `blast_radius_flags` was writable by an agent over MCP `th_state_set`, contradicting
+  `SECURITY.md`. It is now in `GATE_OWNED` (`src/core/state-fields.ts`), so MCP `th_state_set
+  blast_radius_flags …` is **refused** with `error:"gate_owned_field"` (was `ok:true`). The CLI
+  `th state set blast_radius_flags …` — the only legitimate write path — is unaffected.
 
 ### Added (coordination-primitive hardening, 2026-06-15)
 

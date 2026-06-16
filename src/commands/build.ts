@@ -62,12 +62,24 @@ export function runBuildPlan(paths: ProjectPaths, opts: BuildPlanOptions = {}): 
   const conflicts = conflictPairs(selected);
   const parallelism = waves.reduce((max, w) => Math.max(max, w.length), 0);
 
+  // Anchor: ARCH-001 — validate the `depends_on` graph alongside the static plan.
+  // `scheduleWaves` orders waves by hard deps but silently tolerates an
+  // unsatisfiable graph (it can't order a cycle, and a dangling ref names a slice
+  // that doesn't exist); surface both here so a structurally-broken plan fails the
+  // command instead of emitting a misleading "schedule" — mirroring how the live
+  // next-wave/dispatch path reports cycles/dangling. Validate the FULL slice set
+  // (not just `selected`): a dangling/cyclic edge is a plan defect regardless of
+  // whether the planner happens to skip a `done` slice this run.
+  const deps = validateDeps(r.state.slices);
+  const depIssues = hasDepIssues(deps);
+
   structuredLog({
     cmd: "build plan",
     slices: selected.length,
     waves: waves.length,
     conflicts: conflicts.length,
     parallelism,
+    depIssues,
   });
 
   const waveLines = waves.length
@@ -86,6 +98,13 @@ export function runBuildPlan(paths: ProjectPaths, opts: BuildPlanOptions = {}): 
           `(the coverage hard-gate and vertical-slice integrity stay unchanged).`,
       ]
     : [];
+  // ARCH-001 — surface an unsatisfiable dependency graph in the human view (a
+  // cycle deadlocks the build forever; a dangling ref names a slice that can
+  // never go `done`). Same wording as the live next-wave/dispatch path.
+  const depLines: string[] = [];
+  for (const c of deps.cycles) depLines.push(`DEPENDENCY CYCLE: ${c.join(" → ")} → ${c[0]} (unsatisfiable — break the cycle in the plan)`);
+  for (const d of deps.dangling) depLines.push(`DANGLING DEPENDENCY: ${d.slice} depends on unknown slice(s): ${d.missing.join(", ")}`);
+  const depBlock = depIssues ? ["", ...depLines] : [];
   const human = [
     ...waveLines,
     "",
@@ -93,9 +112,20 @@ export function runBuildPlan(paths: ProjectPaths, opts: BuildPlanOptions = {}): 
     "",
     "Within a wave Builders may run concurrently (§16); across waves they serialize.",
     ...adviseLines,
+    ...depBlock,
   ].join("\n");
 
-  return success({ data: { waves, conflicts, parallelism, advise: opts.advise === true }, human });
+  const data = { waves, conflicts, parallelism, advise: opts.advise === true, deps, depIssues };
+
+  // ARCH-001 — a structurally-broken dependency graph fails the command (exit 7):
+  // the emitted wave order can't be honored (a cycle has no valid order; a
+  // dangling dep can never complete), so it must not read as a clean plan. The
+  // full plan data is still returned so `--json` consumers see both at once.
+  if (depIssues) {
+    return failure({ exitCode: 7, data: { ...data, error: "dependency_graph_unsatisfiable" }, human });
+  }
+
+  return success({ data, human });
 }
 
 /* ------------------------------------------------------------------ *

@@ -2,7 +2,7 @@
 
 **Turns "build me X" into working, tested software** by forcing the idea through requirements, scope, design, and slice-by-slice implementation with verification gates — as a Claude Code plugin.
 
-> **Early development notice.** TwinHarness is at v0.6.x. The pipeline has been exercised end-to-end and ships 1100+ tests, green on CI (6 Windows-only platform skips in `tests/verify.test.ts` and `tests/coverage-report.test.ts`, not failures), but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
+> **Early development notice.** TwinHarness is at v0.6.x. The pipeline has been exercised end-to-end and ships 1100+ tests, green on CI (1 platform-conditional skip in `tests/concurrency.test.ts` — POSIX-only permission-error case, intentionally skipped on Windows/root and covered on Linux/macOS CI), but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
 
 ---
 

@@ -53,7 +53,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GENERATED_DIRS = exports.TOTAL_BYTES_CAP = exports.FILE_COUNT_CAP = void 0;
+exports.MAX_READ_BYTES = exports.GENERATED_DIRS = exports.TOTAL_BYTES_CAP = exports.FILE_COUNT_CAP = void 0;
 exports.scanRepo = scanRepo;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
@@ -108,8 +108,13 @@ const PRODUCER_DIRS = new Set([".twinharness", ".agentic-sdlc"]);
  * path; the JSON lives under `.twinharness/` which is already a PRODUCER_DIR.
  */
 const GENERATED_ARTIFACTS = new Set(["docs/00-repo-map.md"]);
-/** Largest single file we will read for content-based detection (bytes). */
-const MAX_READ_BYTES = 2 * 1024 * 1024; // 2 MB — oversize files are name-only.
+/**
+ * Largest single file we will read for content-based detection (bytes). Exported
+ * so the REUSED anchor walk (`scanDirForReqIdsCapped`) obeys the SAME per-file
+ * byte cap — without it that walk would `readFileSync` an arbitrarily large file
+ * and defeat the BOUNDED-COST guarantee (PERF-001, REQ-NFR-007).
+ */
+exports.MAX_READ_BYTES = 2 * 1024 * 1024; // 2 MB — oversize files are name-only.
 /** Extension → language name. */
 const EXT_LANG = {
     ".ts": "TypeScript",
@@ -415,7 +420,7 @@ function scanRepo(root, opts = {}) {
             recordBlast(rel);
             // Manifest content detectors (commands, entrypoints, public-api hints) — only
             // for small manifests; oversize files are name-only (REQ-RU-090).
-            if (nameLower === "package.json" && size <= MAX_READ_BYTES) {
+            if (nameLower === "package.json" && size <= exports.MAX_READ_BYTES) {
                 let text;
                 try {
                     text = fs.readFileSync(abs, "utf8");
@@ -462,7 +467,7 @@ function scanRepo(root, opts = {}) {
                     }
                 }
             }
-            else if (nameLower === "makefile" && size <= MAX_READ_BYTES) {
+            else if (nameLower === "makefile" && size <= exports.MAX_READ_BYTES) {
                 // Makefile targets → candidate commands (RECORDED, NEVER EXECUTED).
                 let text;
                 try {
@@ -498,7 +503,23 @@ function scanRepo(root, opts = {}) {
         const first = loc.split("/")[0];
         return first !== undefined && (exports.GENERATED_DIRS.has(first) || PRODUCER_DIRS.has(first));
     };
-    const reqIdToFiles = (0, anchors_1.scanDirForReqIds)(absRoot);
+    // BOUNDED COST (PERF-001, REQ-NFR-007): this is a SEPARATE second pass over the
+    // tree (the single-walk unification is P3-1), so it gets its own full budget of
+    // the scanner's OWN cap constants — the key guarantee is that the cost is
+    // per-walk bounded. The decisive fix is `maxReadBytes`: a file larger than the
+    // per-file cap is NEVER read here (previously it was fully `readFileSync`-ed,
+    // defeating bounded cost). The file-count/total-bytes caps bound the walk as a
+    // whole; a cap hit is folded into `capHit` below. Skip the same generated/
+    // producer dirs the main walk skips so excluded bytes are never read (the
+    // post-filter still drops any path that slips through).
+    const anchorSkipDirs = new Set([...exports.GENERATED_DIRS, ...PRODUCER_DIRS]);
+    const anchorScan = (0, anchors_1.scanDirForReqIdsCapped)(absRoot, {
+        maxReadBytes: exports.MAX_READ_BYTES,
+        fileCountCap,
+        totalBytesCap,
+        skipDirs: anchorSkipDirs,
+    });
+    const reqIdToFiles = anchorScan.anchors;
     const reqAnchors = [];
     const fileToReqIds = new Map();
     for (const [reqId, locations] of reqIdToFiles.entries()) {
@@ -563,7 +584,9 @@ function scanRepo(root, opts = {}) {
     map.scanReport = {
         filesScanned: st.filesScanned,
         filesSkipped: st.filesSkipped,
-        capHit: st.capHit,
+        // A cap hit in EITHER walk makes the map PARTIAL (REQ-NFR-007). The main walk
+        // wins if both tripped; otherwise surface the anchor walk's cap.
+        capHit: st.capHit ?? anchorScan.capHit,
     };
     return map;
 }

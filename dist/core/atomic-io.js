@@ -11,9 +11,10 @@
  * so an unguarded rename loses the write — leaving e.g. `drift_open_blocking` too
  * low and letting the Stop hook pass a run it should block.
  *
- * `atomicWriteFile` retries the rename with a short escalating busy-wait
- * (the CLI is synchronous; there is no event loop to await) and, only after the
- * budget is exhausted, throws a typed {@link StateWriteContendedError} so the CLI
+ * `atomicWriteFile` retries the rename with a short escalating zero-CPU wait
+ * ({@link sleepSync} — the CLI is synchronous; there is no event loop to await,
+ * and the old `while`-spin pegged a core during contention, PERF-007) and, only
+ * after the budget is exhausted, throws a typed {@link StateWriteContendedError} so the CLI
  * boundary can surface a clean structured failure instead of a raw crash.
  * `readFileWithRetry` retries once on a transient read error (a reader that
  * collides with a concurrent rename).
@@ -57,14 +58,15 @@ exports.atomicWriteFile = atomicWriteFile;
 exports.readFileWithRetry = readFileWithRetry;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+const sleep_1 = require("./sleep");
 /** Transient, retryable I/O errors caused by concurrent access (not real faults). */
 function isTransientIoError(code) {
     return code === "EPERM" || code === "EACCES" || code === "EBUSY";
 }
 /** Bounded retry budget for a contended rename OR read. ~12 tries with an
- * escalating short busy-wait keeps the total well under ~1s while comfortably
- * outlasting a colliding open/rename window. Shared by writer and reader so the
- * read side is no weaker than the write side. */
+ * escalating short zero-CPU wait ({@link sleepSync}) keeps the total well under
+ * ~1s while comfortably outlasting a colliding open/rename window. Shared by
+ * writer and reader so the read side is no weaker than the write side. */
 const MAX_IO_ATTEMPTS = 12;
 /**
  * Thrown by {@link atomicWriteFile} when the rename could not complete within the
@@ -81,12 +83,6 @@ class StateWriteContendedError extends Error {
     }
 }
 exports.StateWriteContendedError = StateWriteContendedError;
-function busyWait(ms) {
-    const until = Date.now() + ms;
-    while (Date.now() < until) {
-        /* synchronous CLI: no event loop to yield to */
-    }
-}
 /**
  * Write `content` to `absPath` atomically (write temp, then rename over target),
  * creating parent directories as needed. Retries the rename on a transient
@@ -121,7 +117,7 @@ function atomicWriteFile(absPath, content, rename = fs.renameSync) {
                     throw new StateWriteContendedError(absPath, attempt);
                 throw e; // genuine, non-transient failure (ENOSPC, EROFS, …)
             }
-            busyWait(Math.min(4 * attempt, 40)); // ~4,8,…,40ms — total budget < ~1s
+            (0, sleep_1.sleepSync)(Math.min(4 * attempt, 40)); // ~4,8,…,40ms — total budget < ~1s (zero-CPU, PERF-007)
         }
     }
 }
@@ -144,7 +140,7 @@ function readFileWithRetry(absPath, read = (p) => fs.readFileSync(p, "utf8")) {
             const code = e.code;
             if (!isTransientIoError(code) || attempt >= MAX_IO_ATTEMPTS)
                 throw e;
-            busyWait(Math.min(4 * attempt, 40));
+            (0, sleep_1.sleepSync)(Math.min(4 * attempt, 40)); // zero-CPU backoff (PERF-007)
         }
     }
 }

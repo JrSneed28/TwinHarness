@@ -93,7 +93,7 @@ Usage:
   th verify list                    Show configured verify commands
   th verify clear                   Remove all configured verify commands
   th verify run                     Run every configured verify command; writes a report; exit 1 on failure
-  th build plan [--include-done] [--advise]  Schedule slices into conflict-free build waves (§16); --advise emits the parallelism-optimizer advisory (max wave width + serializing conflict pairs)
+  th build plan [--include-done] [--advise]  Schedule slices into dependency-aware, conflict-free build waves (§16; a slice's wave is strictly after its hard depends_on); --advise emits the parallelism-optimizer advisory (max wave width + serializing conflict pairs); exit 7 when the depends_on graph is unsatisfiable (cycle/dangling)
   th build next-wave                Live oracle: slices dispatchable in parallel now (deps done, components free)
   th build dispatch                 Live oracle: full parallel wave + per-slice spawn descriptors in one payload (for single-message batch spawn)
   th build claim|release <SLICE-ID> Take/release a live component lease (collision guard for parallel Builders)

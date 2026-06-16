@@ -56,6 +56,12 @@ exports.STATE_FIELD_POLICY = {
         owner: "operator policy",
         refusedByStateSet: false,
     },
+    blast_radius_flags: {
+        managed: true,
+        gateOwned: true,
+        owner: "operator policy",
+        refusedByStateSet: false,
+    },
 };
 /** Fields the MCP raw setter must refuse (the proven H-2 surface). */
 exports.GATE_OWNED = new Set(Object.entries(exports.STATE_FIELD_POLICY)

@@ -144,4 +144,108 @@ describe("DOC-TRUTH: docs match mechanical reality", () => {
     expect(content).not.toContain("848 passing");
     expect(content).not.toContain("874 total");
   });
+
+  // -------------------------------------------------------------------------
+  // DERIVED FILE-COUNT GUARD (P1-2 / TEST-001): any "N test files" literal in
+  // README must equal the mechanical *.test.ts count. Defensive — README
+  // currently states "1100+ tests" (no exact file-count literal, by design, so
+  // adding a test never breaks CI), but a future stale literal like
+  // "81 test files" must fail this guard.
+  // -------------------------------------------------------------------------
+  it("README: every 'N test files' literal equals the real test-file count", () => {
+    const content = read("README.md");
+    const fileCount = fs
+      .readdirSync(path.join(ROOT, "tests"))
+      .filter((f) => f.endsWith(".test.ts")).length;
+    for (const m of content.matchAll(/(\d+)\s+test files\b/gi)) {
+      expect(
+        Number(m[1]),
+        `README says "${m[0].trim()}" but there are ${fileCount} *.test.ts files in tests/`,
+      ).toBe(fileCount);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // CONTRIBUTING AGENT-COUNT GUARD (P1-5 / DOC-001): both the invariants-table
+  // cell ("| Agent count | N |") and the layout note ("Agent prompt files
+  // (N total)") must equal the real agents/*.md count. The base AGENT_MENTION
+  // regex only catches the "N agents" prose form (number BEFORE the word), so
+  // these label-first / parenthesised forms need their own patterns.
+  // -------------------------------------------------------------------------
+  it("CONTRIBUTING.md: stated agent counts equal the real agent count", () => {
+    const content = read("CONTRIBUTING.md");
+    const patterns = [/Agent count\s*\|\s*(\d+)/gi, /Agent prompt files\s*\((\d+)\s+total\)/gi];
+    let matched = 0;
+    for (const re of patterns) {
+      for (const m of content.matchAll(re)) {
+        matched++;
+        expect(
+          Number(m[1]),
+          `CONTRIBUTING says "${m[0].trim()}" but there are ${agentCount} agent files in agents/`,
+        ).toBe(agentCount);
+      }
+    }
+    expect(matched, "CONTRIBUTING must state at least one guarded agent count").toBeGreaterThan(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // USAGE TOOL-COUNT GUARD (P1-6 / DOC-002): USAGE's MCP "registered count N"
+  // must equal TOOL_DEFS.length, and any numeric "N tools"/"N-tool" claim in
+  // USAGE must too (mirrors the README assertion at the test above). The
+  // word-form "four MCP tools" describing the repo-understanding *layer*
+  // (USAGE.md ~:842) is intentionally a word, not a digit, and is not matched.
+  // -------------------------------------------------------------------------
+  it("USAGE.md: MCP 'registered count N' equals TOOL_DEFS.length", () => {
+    const content = read("USAGE.md");
+    const matches = [...content.matchAll(/registered count (\d+)/gi)];
+    expect(matches.length, "USAGE must state the MCP registered count").toBeGreaterThan(0);
+    for (const m of matches) {
+      expect(
+        Number(m[1]),
+        `USAGE says "registered count ${m[1]}" but TOOL_DEFS.length is ${TOOL_DEFS.length}`,
+      ).toBe(TOOL_DEFS.length);
+    }
+  });
+
+  it("USAGE.md: every 'N tools' / 'N-tool' numeric claim equals TOOL_DEFS.length", () => {
+    const content = read("USAGE.md");
+    const toolMentions = [
+      ...content.matchAll(/(\d+)\s+tools?\b/gi),
+      ...content.matchAll(/(\d+)-tool\b/gi),
+    ];
+    for (const m of toolMentions) {
+      expect(
+        Number(m[1]),
+        `USAGE says "${m[0].trim()}" but TOOL_DEFS.length is ${TOOL_DEFS.length}`,
+      ).toBe(TOOL_DEFS.length);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // SKIP-COUNT TRUTH (P1-3 / DOC-003≡TEST-002): the suite has exactly ONE
+  // platform-conditional skip (tests/concurrency.test.ts — skipIf win32||root).
+  // verify/coverage-report no longer use POSIX-only commands, so the old
+  // "6 Windows-only platform skips in verify/coverage-report" claim is false
+  // and must never reappear in shipped docs.
+  // -------------------------------------------------------------------------
+  it("docs describe the single platform-conditional skip, not the stale '6 Windows skips'", () => {
+    const skipDeclCount = fs
+      .readdirSync(path.join(ROOT, "tests"))
+      .filter((f) => f.endsWith(".test.ts"))
+      .reduce((n, f) => {
+        const src = fs.readFileSync(path.join(ROOT, "tests", f), "utf8");
+        const m = src.match(/\.(?:skip|skipIf)\s*\(/g);
+        return n + (m ? m.length : 0);
+      }, 0);
+    expect(skipDeclCount, "expected exactly one platform-conditional skip declaration in tests/").toBe(1);
+    for (const rel of ["README.md", "CHANGELOG.md"]) {
+      const content = read(rel);
+      expect(content, `${rel} still claims the stale 'N Windows-only platform skips'`).not.toMatch(
+        /\d+\s+Windows-only platform skips/i,
+      );
+      expect(content, `${rel} must reference the real skip site (concurrency.test.ts)`).toContain(
+        "concurrency.test.ts",
+      );
+    }
+  });
 });
