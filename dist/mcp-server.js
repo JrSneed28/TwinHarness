@@ -16296,6 +16296,22 @@ var path5 = __toESM(require("node:path"));
 function leasesPath(paths) {
   return path5.join(paths.stateDir, "build-leases.jsonl");
 }
+var LEASE_FIELD_ORDER = [
+  "ts",
+  "event",
+  "slice",
+  "components",
+  "parent"
+];
+function serializeLeaseEvent(event) {
+  const ordered = {};
+  const src = event;
+  for (const key of LEASE_FIELD_ORDER) {
+    const val = src[key];
+    if (val !== void 0) ordered[key] = val;
+  }
+  return JSON.stringify(ordered);
+}
 function readLeaseEvents(paths) {
   const file = leasesPath(paths);
   if (!fs6.existsSync(file)) return [];
@@ -16318,7 +16334,7 @@ function readLeaseEvents(paths) {
 }
 function appendLeaseEvent(paths, event, now = () => /* @__PURE__ */ new Date()) {
   fs6.mkdirSync(paths.stateDir, { recursive: true });
-  const line = JSON.stringify({ ts: now().toISOString(), ...event }) + "\n";
+  const line = serializeLeaseEvent({ ts: now().toISOString(), ...event }) + "\n";
   fs6.appendFileSync(leasesPath(paths), line, "utf8");
 }
 function activeLeases(paths) {

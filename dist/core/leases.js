@@ -48,7 +48,9 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.LEASE_FIELD_ORDER = void 0;
 exports.leasesPath = leasesPath;
+exports.serializeLeaseEvent = serializeLeaseEvent;
 exports.readLeaseEvents = readLeaseEvents;
 exports.appendLeaseEvent = appendLeaseEvent;
 exports.activeLeases = activeLeases;
@@ -68,6 +70,38 @@ const path = __importStar(require("node:path"));
 /** `<stateDir>/build-leases.jsonl` — the lease ledger's location. */
 function leasesPath(paths) {
     return path.join(paths.stateDir, "build-leases.jsonl");
+}
+/**
+ * Canonical field order for a serialized lease line (ARCH-004). This makes the
+ * ledger's on-disk byte layout an EXPLICIT, compile-time-visible contract instead
+ * of relying on the `{ ts, ...event }` spread's insertion order. It is byte-identical
+ * to the historical implicit order (`ts`, then the event's own keys), so existing
+ * lease ledgers and their hashes are unaffected. `parent` is last and omitted when
+ * undefined (the optional-field convention mirroring `STATE_FIELD_ORDER`).
+ */
+exports.LEASE_FIELD_ORDER = [
+    "ts",
+    "event",
+    "slice",
+    "components",
+    "parent",
+];
+/**
+ * Deterministic single-line serialization of a lease event in {@link LEASE_FIELD_ORDER}.
+ * Copies fields into a fresh object in canonical order and drops any `undefined` key
+ * (so a top-level lease without `parent` round-trips to the pre-sub-lease format).
+ * `JSON.stringify` with no indentation — one event per JSONL line. Byte-identical to
+ * the previous `JSON.stringify({ ts, ...event })` for every caller's key order.
+ */
+function serializeLeaseEvent(event) {
+    const ordered = {};
+    const src = event;
+    for (const key of exports.LEASE_FIELD_ORDER) {
+        const val = src[key];
+        if (val !== undefined)
+            ordered[key] = val;
+    }
+    return JSON.stringify(ordered);
 }
 /** Read + parse every lease event. Missing file → empty. Bad lines skipped. */
 function readLeaseEvents(paths) {
@@ -101,10 +135,11 @@ function readLeaseEvents(paths) {
 /** Append one lease event. Clock-injectable for deterministic tests. */
 function appendLeaseEvent(paths, event, now = () => new Date()) {
     fs.mkdirSync(paths.stateDir, { recursive: true });
-    // JSON.stringify drops `undefined`-valued keys, so a top-level lease (no
-    // `parent`) serializes byte-identically to the pre-sub-lease format; only a
-    // sub-lease (parent set to a string) carries the extra field.
-    const line = JSON.stringify({ ts: now().toISOString(), ...event }) + "\n";
+    // Explicit canonical serialization (LEASE_FIELD_ORDER): drops `undefined`-valued
+    // keys, so a top-level lease (no `parent`) serializes byte-identically to the
+    // pre-sub-lease format; only a sub-lease (parent set to a string) carries the
+    // extra field. Byte-identical to the historical `{ ts, ...event }` spread.
+    const line = serializeLeaseEvent({ ts: now().toISOString(), ...event }) + "\n";
     fs.appendFileSync(leasesPath(paths), line, "utf8");
 }
 /**
