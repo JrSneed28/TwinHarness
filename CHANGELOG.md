@@ -85,7 +85,66 @@ Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding lay
   mechanism" claim — `gate-ledger.jsonl` is a plain append-only log and is **not tamper-evident**
   (unlike the SHA-256 hash-chained `decisions.jsonl`); the claim is softened to "best-effort review
   aid." A falsifiable `tests/security-doc-lint.test.ts` pins the corrected text and the absence of
-  the stale claims. *(The gate-ledger hash-chain itself is a post-1.0 follow-up.)*
+  the stale claims. *(The gate-ledger hash-chain itself is a post-1.0 follow-up — **now landed, see Phase 3 below**.)*
+
+#### Phase 3 — maintainability / performance dedup + remaining Mediums (2026-06-16)
+
+- **Single capped repo-map walk (PERF-003/004, subsumes PERF-001).** `scanRepo` did two
+  tree walks (a main walk + a separate REQ-anchor re-read of every file); they are now one
+  walk that reads each file at most once (under the per-file byte cap) and derives anchors
+  + manifest data from that single buffer. Verified byte-identical to the prior two-pass
+  output on the real repo (211 702 bytes / 463 files / 359 anchors); new read-once + golden
+  byte-stability tests guard it.
+- **O(N) decision-ledger appends (PERF-009).** `appendDecisionEvent` re-read and re-parsed
+  the entire hash-chained ledger on every append (O(N²)); it now derives `prevHash` from a
+  tail read (last valid line only). `next.ts` reads the decision ledger once per command.
+  Chain bytes/integrity unchanged.
+- **Explicit lease serialization order + canonical byte-stability test (ARCH-004).** The
+  lease ledger's implicit `{ts,…event}` key order is now an explicit `LEASE_FIELD_ORDER`
+  (byte-identical to before); a new round-trip test pins canonical byte-stability across
+  every optional field for the state / decision / lease serializers.
+- **Gate-ledger is now tamper-evident (GOV-2).** `gate-ledger.jsonl` is SHA-256 hash-chained
+  like `decisions.jsonl` (per-entry `recordHash`/`prevHash`, ts sealed). `th doctor` verifies
+  the chain — a warning by default, a hard fail under `th doctor --strict`. Back-compat:
+  pre-migration unsealed lines are an unverifiable prefix, not a tamper signal. `SECURITY.md`
+  is **re-elevated** to "tamper-evident", with three honest limits (legacy prefix; keyless
+  full-rewrite; wholesale deletion of the sealed run); the doc lint is flipped accordingly.
+  *(This supersedes the post-1.0 note above.)*
+- **Dedup cluster (CQ-001/002/003/005/006/007).** Extracted a shared append-only markdown-
+  ledger module behind drift-log/debate-log (byte-identical output); deleted dead
+  `findDecision`; migrated byte-identical `requireState` sites; extracted `loadPersistedMap`;
+  decomposed the 679-line `runHookPretoolGate` write-gate into behavior-identical phase-gate
+  helpers (all gate negative-suites green).
+- **Boundary / coupling fixes (ARCH-002/003/005/007).** Typed `PathContainmentError` mapped
+  to a structured `--json` failure (exit 2) at the CLI boundary (no more raw stacks, e.g.
+  `th collab fragment --name "../x"`); the MCP adapter now carries the numeric `exitCode` in
+  `structuredContent`; the state validator warns on unknown top-level keys (non-fatal); the
+  repo-map freshness/exit-code taxonomy moved into `core/repo-map/freshness.ts`. Also fixed a
+  verify-report flake: `writeVerifyReport` is now atomic and `readVerifyReport` retries
+  transient contention (a present report no longer reads as absent under load).
+- **Lock fairness + oversized docs (PERF-008, PERF-002, DOC-004..007).** The state-lock retry
+  uses full-jitter exponential backoff (≤80 ms) instead of a fixed 20 ms wait (no thundering
+  herd; zero-CPU `Atomics.wait`; lock semantics unchanged). Split `critic-modes.md` (819→index
+  +3 parts) and `pipeline-stages.md` (637→index+4 parts) under the ~500-line budget; added the
+  missing README group rows and USAGE state-field / exit-code / hook-wiring tables.
+- **Test hardening (TEST-004..009).** BYPASS-KNOWN write-gate regression suite; build-artifact
+  guards `skipIf` instead of throwing; bounded polls / deterministic timeouts; coordination
+  prose-grep suites labelled `DOC-LINT`; `STALE_MS` imported rather than hardcoded.
+
+#### Phase 4 — cross-OS CI + dependency posture + batched lows (2026-06-16)
+
+- **Cross-OS CI matrix (TEST-002 follow-through).** GitHub Actions runs build + dist-sync +
+  the suite + a `th version` smoke on Linux / macOS / Windows, all under `shell: pwsh` so the
+  de-POSIX-ified tests are exercised without Git Bash.
+- **Dependency-audit posture (SEC-002/003).** The shipped/production tree is clean
+  (`npm audit --omit=dev` → 0). CI adds an informational full-tree audit that surfaces the 5
+  dev-toolchain highs (vite/vitest → nested esbuild) and the bundled `@modelcontextprotocol/sdk`
+  without failing the build — those advisories do **not** ship, and clearing them requires a
+  breaking vitest 4 migration tracked as a separate follow-up.
+- **Batched low-severity cleanups (TEST-010/011, CQ-010/011/013).** `TH_NO_LOG=1` in vitest
+  global setup (removes ~1200 telemetry log lines from test output); required-doc existence is
+  now asserted (not silently skipped); `readFileOrUndefined` deduped; dead `allInProgress`
+  dropped; stale lock-timeout comment corrected.
 
 ### Added (coordination-primitive hardening, 2026-06-15)
 

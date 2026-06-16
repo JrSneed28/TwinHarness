@@ -68,3 +68,14 @@ jobs:
       - name: Audit production dependencies
         if: matrix.os == 'ubuntu-latest'
         run: npm audit --omit=dev
+
+      # SEC-002 / SEC-003 visibility (informational, non-blocking): surface the
+      # dev-toolchain advisories AND the bundled @modelcontextprotocol/sdk — a
+      # devDependency esbuild inlines into dist/, which the `--omit=dev` gate above
+      # skips. The known dev-chain highs (vite/vitest → nested esbuild) do NOT ship
+      # (the production audit is the gate) and clearing them needs a breaking
+      # vitest 4 migration tracked separately, so this is reported, not enforced.
+      - name: Audit full dependency tree (informational — dev advisories + bundled SDK)
+        if: matrix.os == 'ubuntu-latest'
+        continue-on-error: true
+        run: npm audit
