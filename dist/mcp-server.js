@@ -16891,6 +16891,19 @@ var STAGE_PIPELINE = [
   { stage: "documentation", tiers: ["T1", "T2", "T3"], produces: "", criticMode: "documentation", humanGate: false, summary: "Tier-scaled docs; Critic-reviewed; no human gate." },
   { stage: "final-verification", tiers: ["T1", "T2", "T3"], produces: "docs/10-verification-report.md", criticMode: "final-verification", humanGate: true, summary: "Coherence (Critic) vs correctness (tests + human); human signs off." }
 ];
+function canonicalizeStage(raw) {
+  const trimmed = (raw ?? "").trim().toLowerCase();
+  if (trimmed === "") return "";
+  if (STAGE_PIPELINE.some((s) => s.stage === trimmed)) return trimmed;
+  const deprefixed = trimmed.replace(/^\d+-/, "");
+  if (deprefixed !== trimmed && STAGE_PIPELINE.some((s) => s.stage === deprefixed)) {
+    return deprefixed;
+  }
+  return trimmed;
+}
+function isFinalVerification(stage) {
+  return canonicalizeStage(stage) === "final-verification";
+}
 function stageContract(stage) {
   const key = stage.toLowerCase();
   return STAGE_PIPELINE.find((s) => s.stage === key);
@@ -18781,9 +18794,9 @@ function runNext(paths, opts = {}) {
       );
     }
   }
-  const current = s.current_stage;
+  const current = canonicalizeStage(s.current_stage);
   const contract = stageContract(current);
-  if (contract && contract.produces && current !== "final-verification") {
+  if (contract && contract.produces && !isFinalVerification(current)) {
     const produced = contract.produces.replace(/\/$/, "");
     const abs = path15.resolve(paths.root, produced);
     const registered = s.approved_artifacts.some((a) => a.file === produced);
@@ -18815,7 +18828,7 @@ function runNext(paths, opts = {}) {
     const cov = coverageBlocker(paths);
     if (cov) return emit(cov);
   }
-  if (current === "final-verification") {
+  if (isFinalVerification(current)) {
     const prog = sliceProgress(s);
     if (!prog.allSettled && prog.total > 0) {
       const open = s.slices.filter((sl) => sl.status !== "done" && sl.status !== "blocked").map((sl) => sl.id);

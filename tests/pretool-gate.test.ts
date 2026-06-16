@@ -499,6 +499,56 @@ describe("REQ-WGATE-009: Phase A Bash-mediated write defense-in-depth", () => {
     expect(out.exitCode).toBe(0);
     expect(permissionDecision(out)).toBe("deny");
   });
+
+  // M-4: copy/move family destination heuristic + metachar false-positive guard.
+  it("Phase A + cp into src/ → gate FIRES (ask) [M-4 copy-command dest]", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { current_stage: "stage-05" });
+    const input: PreToolHookInput = {
+      tool_name: "Bash",
+      tool_input: { command: "cp templates/base.ts src/foo.ts" },
+      cwd: tp.root,
+    };
+    const out = runHookPretoolGate(tp.paths, input);
+    expect(out.exitCode).toBe(0);
+    expect(permissionDecision(out)).toBe("ask");
+  });
+
+  it("Phase A + touch on an impl path → gate FIRES (ask) [M-4]", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { current_stage: "stage-05" });
+    const input: PreToolHookInput = {
+      tool_name: "Bash",
+      tool_input: { command: "touch src/new.ts" },
+      cwd: tp.root,
+    };
+    const out = runHookPretoolGate(tp.paths, input);
+    expect(permissionDecision(out)).toBe("ask");
+  });
+
+  it("Phase A + mv into src/ (chained after a build) → gate FIRES (ask) [M-4 per-segment]", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { current_stage: "stage-05" });
+    const input: PreToolHookInput = {
+      tool_name: "Bash",
+      tool_input: { command: "npm run build && mv build/out.js src/bundle.ts" },
+      cwd: tp.root,
+    };
+    const out = runHookPretoolGate(tp.paths, input);
+    expect(permissionDecision(out)).toBe("ask");
+  });
+
+  it("Phase A + redirect to a metachar target ($f) → no false-positive (allow) [M-4]", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { current_stage: "stage-05" });
+    const input: PreToolHookInput = {
+      tool_name: "Bash",
+      tool_input: { command: "echo hi > $f" },
+      cwd: tp.root,
+    };
+    const out = runHookPretoolGate(tp.paths, input);
+    expect(isAllow(out)).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

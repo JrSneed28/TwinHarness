@@ -3,7 +3,7 @@ import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success } from "../core/output";
 import { readState } from "../core/state-store";
-import { stageContract, nextStageAfter } from "../core/stages";
+import { stageContract, nextStageAfter, canonicalizeStage, isFinalVerification } from "../core/stages";
 import { artifactIntegrity, sliceProgress, reviseEscalations } from "../core/health";
 import { computeBreakdown } from "../core/coverage";
 import { readVerifyConfig, readVerifyReport } from "../core/verify";
@@ -206,14 +206,17 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
     }
   }
 
-  // 5. Stage-specific obligations for the current stage.
-  const current = s.current_stage;
+  // 5. Stage-specific obligations for the current stage. Canonicalize ONCE so the
+  // exact-compare branches below (and nextStageAfter) agree with the stop-gate on
+  // near-miss spellings like `Final-Verification` / `10-final-verification`
+  // (C-1/M-2 — without this, hook.ts and next.ts disagree).
+  const current = canonicalizeStage(s.current_stage);
   const contract = stageContract(current);
 
   // final-verification produces its report LAST — after slices settle and
   // coverage is clean — so it owns its full obligation order below (step 7),
   // not the generic produce/register check here.
-  if (contract && contract.produces && current !== "final-verification") {
+  if (contract && contract.produces && !isFinalVerification(current)) {
     const produced = contract.produces.replace(/\/$/, "");
     const abs = path.resolve(paths.root, produced);
     const registered = s.approved_artifacts.some((a) => a.file === produced);
@@ -249,7 +252,7 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
   }
 
   // 7. Final-verification: all slices settled + coverage clean + human signs off.
-  if (current === "final-verification") {
+  if (isFinalVerification(current)) {
     const prog = sliceProgress(s);
     if (!prog.allSettled && prog.total > 0) {
       const open = s.slices.filter((sl) => sl.status !== "done" && sl.status !== "blocked").map((sl) => sl.id);

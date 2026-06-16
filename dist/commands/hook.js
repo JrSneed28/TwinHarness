@@ -43,6 +43,7 @@ const path = __importStar(require("node:path"));
 const state_store_1 = require("../core/state-store");
 const verify_1 = require("../core/verify");
 const decisions_1 = require("../core/decisions");
+const stages_1 = require("../core/stages");
 /**
  * Decide whether the orchestrator may declare completion.
  *
@@ -113,7 +114,7 @@ function evaluateStopGate(paths) {
             ],
         };
     }
-    if (r.state.current_stage === "final-verification") {
+    if ((0, stages_1.isFinalVerification)(r.state.current_stage)) {
         const incomplete = r.state.slices.filter((s) => s.status !== "done" && s.status !== "blocked");
         if (incomplete.length > 0) {
             const ids = incomplete.map((s) => s.id).join(", ");
@@ -245,20 +246,32 @@ function runHookSubagentStop(paths, input) {
 }
 /**
  * Extract candidate write-target path tokens from a Bash command string using
- * conservative heuristics. Covers redirections (> / >>), tee, dd of=, and
- * sed -i. Returns deduplicated non-empty non-flag tokens. Never throws.
+ * conservative heuristics. Covers redirections (> / >>), tee, dd of=, sed -i, and
+ * the copy/move family (cp/mv/install/touch/rsync). Returns deduplicated non-empty
+ * non-flag tokens. Never throws.
+ *
+ * Tokens containing a shell metacharacter (`$`, backtick, `*`, `?`, `(`, `)`,
+ * `{`, `}`) are skipped: they are not literal paths (e.g. `$f`, a glob), so
+ * flagging them produces false positives the gate can't reason about. This keeps
+ * the matcher conservative — the honest "Bash writes are out of scope as a hard
+ * guarantee" caveat in SECURITY.md still stands (python -c / node -e / awk and
+ * metachar-obscured targets are intentionally not caught).
  *
  * Patterns:
  *   - `>` or `>>` followed by optional spaces then a path token.
  *   - `tee` (optionally `-a`) followed by a path token.
  *   - `dd ... of=PATH`.
  *   - `sed -i` in-place: last bareword token of the command.
+ *   - cp/mv/install/touch/rsync: the last non-flag bareword of the segment is the
+ *     destination (per shell segment, split on `;`/`&`/`|`).
  */
 function extractBashWriteTargets(command) {
     const seen = new Set();
+    const SHELL_METACHARS = /[$`*?(){}]/;
     const add = (token) => {
-        if (token && !token.startsWith("-"))
-            seen.add(token);
+        const t = token.replace(/^["']|["']$/g, "");
+        if (t && !t.startsWith("-") && !SHELL_METACHARS.test(t))
+            seen.add(t);
     };
     // Redirections: > or >> followed by optional whitespace then a path token.
     const redirectRe = /(?:>>?)\s*("?)([^\s"'|;&<>]+)\1/g;
@@ -284,6 +297,23 @@ function extractBashWriteTargets(command) {
         const lastToken = /([^\s"'|;&<>]+)\s*$/.exec(command);
         if (lastToken && lastToken[1])
             add(lastToken[1]);
+    }
+    // Copy/move family (cp/mv/install/touch/rsync): the LAST non-flag argument of
+    // each shell segment is the write destination. Split on shell separators so a
+    // chained command (`build && cp x dst.ts`) is handled per segment.
+    const COPY_CMDS = new Set(["cp", "mv", "install", "touch", "rsync"]);
+    for (const segment of command.split(/[;&|]+/)) {
+        const tokens = segment.trim().split(/\s+/).filter(Boolean);
+        const head = tokens[0];
+        if (!head || !COPY_CMDS.has(head))
+            continue;
+        for (let i = tokens.length - 1; i >= 1; i--) {
+            const tok = tokens[i];
+            if (tok && !tok.startsWith("-")) {
+                add(tok);
+                break;
+            }
+        }
     }
     return Array.from(seen);
 }
