@@ -23,6 +23,10 @@ import * as path from "node:path";
  * are mechanical / prose-coordination truths, so they are asserted by code.
  */
 
+// DOC-LINT: tests in this file assert keyword/prose presence in .md agent and playbook files.
+// They verify documentation completeness, not behavioral dispatch — a broken
+// runtime that kept the words in the prompt would still pass.
+
 const ROOT = path.resolve(__dirname, "..");
 const read = (rel: string): string => fs.readFileSync(path.join(ROOT, rel), "utf8");
 const exists = (rel: string): boolean => fs.existsSync(path.join(ROOT, rel));
@@ -44,28 +48,28 @@ const TEST_AUTHOR = "agents/test-author.md";
 const BUILDER = "agents/builder.md";
 const BUILD_VERIFY = "skills/twinharness/reference/build-and-verify.md";
 
-describe("REQ-PCO-020: Merge-Coordinator agent", () => {
-  it("REQ-PCO-020: agents/merge-coordinator.md exists", () => {
+describe("DOC-LINT: REQ-PCO-020: Merge-Coordinator agent", () => {
+  it("DOC-LINT: REQ-PCO-020: agents/merge-coordinator.md exists", () => {
     expect(exists(MERGE_COORDINATOR)).toBe(true);
   });
 
-  it("REQ-PCO-020: has name: merge-coordinator + a description", () => {
+  it("DOC-LINT: REQ-PCO-020: has name: merge-coordinator + a description", () => {
     const fm = frontmatter(read(MERGE_COORDINATOR));
     expect(fm.name).toBe("merge-coordinator");
     expect(fm.description).toBeTruthy();
   });
 
-  it("REQ-PCO-020: declares a disallowedTools denylist and NO tools allowlist (MCP reachability)", () => {
+  it("DOC-LINT: REQ-PCO-020: declares a disallowedTools denylist and NO tools allowlist (MCP reachability)", () => {
     const fm = frontmatter(read(MERGE_COORDINATOR));
     expect(fm.tools).toBeUndefined();
     expect(fm.disallowedTools).toBeTruthy();
   });
 
-  it("REQ-PCO-020: references `th build release` for clean wave-order merges", () => {
+  it("DOC-LINT: REQ-PCO-020: references `th build release` for clean wave-order merges", () => {
     expect(read(MERGE_COORDINATOR)).toContain("th build release");
   });
 
-  it("REQ-PCO-020: opens BLOCKING requirement-layer drift on a plan-disjoint conflict", () => {
+  it("DOC-LINT: REQ-PCO-020: opens BLOCKING requirement-layer drift on a plan-disjoint conflict", () => {
     const content = read(MERGE_COORDINATOR);
     expect(content).toContain("th drift add");
     expect(content).toMatch(/--layer\s+requirement/);
@@ -73,24 +77,24 @@ describe("REQ-PCO-020: Merge-Coordinator agent", () => {
   });
 });
 
-describe("REQ-PCO-021: Test-Author agent", () => {
-  it("REQ-PCO-021: agents/test-author.md exists", () => {
+describe("DOC-LINT: REQ-PCO-021: Test-Author agent", () => {
+  it("DOC-LINT: REQ-PCO-021: agents/test-author.md exists", () => {
     expect(exists(TEST_AUTHOR)).toBe(true);
   });
 
-  it("REQ-PCO-021: has name: test-author + a description", () => {
+  it("DOC-LINT: REQ-PCO-021: has name: test-author + a description", () => {
     const fm = frontmatter(read(TEST_AUTHOR));
     expect(fm.name).toBe("test-author");
     expect(fm.description).toBeTruthy();
   });
 
-  it("REQ-PCO-021: declares a disallowedTools denylist and NO tools allowlist (MCP reachability)", () => {
+  it("DOC-LINT: REQ-PCO-021: declares a disallowedTools denylist and NO tools allowlist (MCP reachability)", () => {
     const fm = frontmatter(read(TEST_AUTHOR));
     expect(fm.tools).toBeUndefined();
     expect(fm.disallowedTools).toBeTruthy();
   });
 
-  it("REQ-PCO-021: mentions the triad, concurrent REQ-anchored test authoring, and the blackboard", () => {
+  it("DOC-LINT: REQ-PCO-021: mentions the triad, concurrent REQ-anchored test authoring, and the blackboard", () => {
     const content = read(TEST_AUTHOR);
     expect(content).toMatch(/triad/i);
     expect(content).toMatch(/REQ-ID/);
@@ -99,20 +103,20 @@ describe("REQ-PCO-021: Test-Author agent", () => {
   });
 });
 
-describe("REQ-PCO-021: Builder advertises the triad partnership", () => {
-  it("REQ-PCO-021: builder.md references the triad and the test-author", () => {
+describe("DOC-LINT: REQ-PCO-021: Builder advertises the triad partnership", () => {
+  it("DOC-LINT: REQ-PCO-021: builder.md references the triad and the test-author", () => {
     const content = read(BUILDER);
     expect(content).toMatch(/triad/i);
     expect(content).toContain("test-author");
   });
 });
 
-describe("REQ-PCO-020 / REQ-PCO-021: build-and-verify playbook names the new agents", () => {
-  it("REQ-PCO-020: build-and-verify.md names merge-coordinator", () => {
+describe("DOC-LINT: REQ-PCO-020 / REQ-PCO-021: build-and-verify playbook names the new agents", () => {
+  it("DOC-LINT: REQ-PCO-020: build-and-verify.md names merge-coordinator", () => {
     expect(read(BUILD_VERIFY)).toContain("merge-coordinator");
   });
 
-  it("REQ-PCO-021: build-and-verify.md names test-author", () => {
+  it("DOC-LINT: REQ-PCO-021: build-and-verify.md names test-author", () => {
     expect(read(BUILD_VERIFY)).toContain("test-author");
   });
 });

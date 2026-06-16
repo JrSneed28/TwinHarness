@@ -204,7 +204,13 @@ describe("SLICE-4 — decisions.jsonl concurrency + durability", () => {
         if (buf.includes("LOCKED")) resolve();
       });
       child.on("error", reject);
-      setTimeout(() => resolve(), 5_000); // safety: proceed even if no signal
+      // Fail deterministically if the child never signals readiness: a silent
+      // resolve here would mask a missing-signal bug by letting the test pass
+      // even if the lock was never acquired. The happy path resolves on "LOCKED"
+      // almost immediately; this bound only gates a genuine failure, so keep it
+      // generous (5s) to avoid false failures from slow `node -e` child spawn on a
+      // loaded CI runner (incl. bare-Windows, where process startup is slower).
+      setTimeout(() => reject(new Error("child did not signal LOCKED within 5s — lock was never acquired")), 5_000);
     });
     child.kill("SIGKILL");
 
