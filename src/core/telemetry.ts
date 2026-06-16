@@ -22,6 +22,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "./paths";
+import { atomicWriteFile } from "./atomic-io";
 
 export interface TelemetryConfig {
   enabled: boolean;
@@ -62,11 +63,9 @@ export function readTelemetryConfig(paths: ProjectPaths): TelemetryConfig {
  * is never observed as a half-flipped switch.
  */
 export function writeTelemetryConfig(paths: ProjectPaths, cfg: TelemetryConfig): void {
-  fs.mkdirSync(paths.stateDir, { recursive: true });
   const serialized = JSON.stringify({ enabled: cfg.enabled }, null, 2) + "\n";
-  const tmp = path.join(paths.stateDir, `telemetry.json.tmp-${process.pid}`);
-  fs.writeFileSync(tmp, serialized, "utf8");
-  fs.renameSync(tmp, telemetryConfigPath(paths));
+  // atomicWriteFile creates parent dirs and uses temp+rename with bounded retry (C-2 / S-C).
+  atomicWriteFile(telemetryConfigPath(paths), serialized);
 }
 
 /**

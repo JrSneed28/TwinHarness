@@ -18372,11 +18372,7 @@ var FORMATS = ["summary", "json", "md"];
 var REPO_MAP_JSON_REL = ".twinharness/repo-map.json";
 var REPO_MAP_MD_REL = "docs/00-repo-map.md";
 function atomicWrite(absFile, content) {
-  const dir = path15.dirname(absFile);
-  fs16.mkdirSync(dir, { recursive: true });
-  const tmp = path15.join(dir, `${path15.basename(absFile)}.tmp-${process.pid}`);
-  fs16.writeFileSync(tmp, content, "utf8");
-  fs16.renameSync(tmp, absFile);
+  atomicWriteFile(absFile, content);
 }
 function runRepoMap(paths, opts = {}) {
   const write = opts.write !== false;

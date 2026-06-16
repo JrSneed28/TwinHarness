@@ -26,3 +26,6 @@ AUDIT.md
 /audit*.md
 /*-report.md
 /scratch/
+
+# examples/ are reference projects, not part of the shipped plugin.
+/examples/

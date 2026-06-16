@@ -26,6 +26,7 @@ import { requireState } from "../core/guards";
 import { scanRepo } from "../core/repo-map/scanner";
 import { serializeRepoMap, renderRepoMapMarkdown, parseRepoMap, type RepoMap } from "../core/repo-map/schema";
 import { hashContent } from "../core/hash";
+import { atomicWriteFile } from "../core/atomic-io";
 import { computeRelevance, computeImpact, type Selector, type ImpactSelector } from "../core/repo-map/query";
 
 /** `--format` text-rendering values (distinct from the global `--json` envelope). */
@@ -46,13 +47,9 @@ export interface RepoMapOptions {
 const REPO_MAP_JSON_REL = ".twinharness/repo-map.json";
 const REPO_MAP_MD_REL = "docs/00-repo-map.md";
 
-/** Atomic write: temp file then rename (the `writeState` idiom — REQ-RU-014). */
+/** Atomic write: delegates to the shared atomic-io helper (C-2 / S-C). */
 function atomicWrite(absFile: string, content: string): void {
-  const dir = path.dirname(absFile);
-  fs.mkdirSync(dir, { recursive: true });
-  const tmp = path.join(dir, `${path.basename(absFile)}.tmp-${process.pid}`);
-  fs.writeFileSync(tmp, content, "utf8");
-  fs.renameSync(tmp, absFile);
+  atomicWriteFile(absFile, content);
 }
 
 /**

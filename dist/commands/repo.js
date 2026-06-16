@@ -64,19 +64,16 @@ const guards_1 = require("../core/guards");
 const scanner_1 = require("../core/repo-map/scanner");
 const schema_1 = require("../core/repo-map/schema");
 const hash_1 = require("../core/hash");
+const atomic_io_1 = require("../core/atomic-io");
 const query_1 = require("../core/repo-map/query");
 /** `--format` text-rendering values (distinct from the global `--json` envelope). */
 const FORMATS = ["summary", "json", "md"];
 /** Relative artifact paths (POSIX) reported in `data.artifacts`. */
 const REPO_MAP_JSON_REL = ".twinharness/repo-map.json";
 const REPO_MAP_MD_REL = "docs/00-repo-map.md";
-/** Atomic write: temp file then rename (the `writeState` idiom — REQ-RU-014). */
+/** Atomic write: delegates to the shared atomic-io helper (C-2 / S-C). */
 function atomicWrite(absFile, content) {
-    const dir = path.dirname(absFile);
-    fs.mkdirSync(dir, { recursive: true });
-    const tmp = path.join(dir, `${path.basename(absFile)}.tmp-${process.pid}`);
-    fs.writeFileSync(tmp, content, "utf8");
-    fs.renameSync(tmp, absFile);
+    (0, atomic_io_1.atomicWriteFile)(absFile, content);
 }
 /**
  * `th repo map [--write|--no-write] [--format <summary|json|md>]` — scan, build
