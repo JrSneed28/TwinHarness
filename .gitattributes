@@ -1,0 +1,5 @@
+# dist/ is committed on purpose and CI runs `git diff --exit-code dist/`. With
+# core.autocrlf=true this barrier flaps on Windows (LF in repo vs CRLF in the
+# working tree) even when content is unchanged. Pin dist to no EOL conversion so
+# the dist-sync barrier is reliable across platforms and worktrees. (Realignment §2.0)
+dist/** -text
