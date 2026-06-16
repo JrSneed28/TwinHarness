@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
     environment: "node",
-    // Each test isolates its own temp project dir; no global setup needed.
+    globalSetup: ["tests/global-setup.ts"],
     pool: "threads",
   },
 });

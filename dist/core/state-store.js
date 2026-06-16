@@ -106,7 +106,7 @@ function writeState(paths, state) {
  * The lock is an atomic `mkdir` on `<stateDir>/.state.lock`. It waits between
  * attempts with a zero-CPU {@link sleepSync} (the CLI is synchronous and each
  * critical section is short; the old `while`-spin pegged a core, PERF-007), times out after
- * ~10s rather than hang forever, and steals a lock older than the stale
+ * ~25s rather than hang forever, and steals a lock older than the stale
  * threshold so a crashed holder can't wedge the project permanently.
  *
  * Contention is recognized by THREE errno codes, not just `EEXIST`: on POSIX a

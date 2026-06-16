@@ -581,9 +581,8 @@ function phaseBFileGate(
   if (state.slices.length > 0) {
     const owners = findOwningSlices(relFwd, state.slices, paths.root);
     if (owners.length > 0) {
-      const allInProgress = owners.every((o) => o.status === "in-progress");
       const anyInProgress = owners.some((o) => o.status === "in-progress");
-      if (anyInProgress || allInProgress) {
+      if (anyInProgress) {
         // At least one in-progress owner → allow.
         return null;
       }

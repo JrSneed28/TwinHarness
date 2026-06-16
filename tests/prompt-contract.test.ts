@@ -13,8 +13,8 @@ import { SLICE_STATUSES } from "../src/core/state-schema";
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 
-/** Files to scan for `th slice set-status` invocations. */
-const FILES_TO_SCAN: string[] = [
+/** Files that MUST exist; a missing file is a test failure. */
+const REQUIRED_FILES: string[] = [
   "skills/twinharness/SKILL.md",
   "agents/orchestrator.md",
   "agents/builder.md",
@@ -23,9 +23,15 @@ const FILES_TO_SCAN: string[] = [
   "commands/th-status.md",
   "commands/th-drift.md",
   "commands/th-escalate.md",
-  // optional — included if it exists
+];
+
+/** Files that are genuinely optional — skipped when absent. */
+const OPTIONAL_FILES: string[] = [
   "USAGE.md",
 ];
+
+/** Files to scan for `th slice set-status` invocations. */
+const FILES_TO_SCAN: string[] = [...REQUIRED_FILES, ...OPTIONAL_FILES];
 
 /** Regex matching `set-status <SLICE-ID> <token>` — captures the status token. */
 const SET_STATUS_RE = /set-status\s+\S+\s+(\S+)/g;
@@ -47,12 +53,20 @@ function isPlaceholder(token: string): boolean {
 
 const VALID_STATUSES = new Set<string>(SLICE_STATUSES);
 
+const REQUIRED_SET = new Set(REQUIRED_FILES);
+
 describe("REQ-CONTRACT-001: th slice set-status tokens must be valid slice statuses", () => {
   for (const rel of FILES_TO_SCAN) {
     const abs = path.join(REPO_ROOT, rel);
+    const isRequired = REQUIRED_SET.has(rel);
     it(`${rel}: all set-status tokens are valid (${SLICE_STATUSES.join(" | ")})`, () => {
-      if (!fs.existsSync(abs)) {
-        // Optional files (e.g. USAGE.md may not exist in all checkouts) — skip.
+      const exists = fs.existsSync(abs);
+      if (!exists) {
+        if (isRequired) {
+          // Required docs must exist; a missing one is a real failure.
+          expect(exists, `Required file "${rel}" is missing from the repo.`).toBe(true);
+        }
+        // Optional file absent — nothing to check.
         return;
       }
       const content = fs.readFileSync(abs, "utf8");

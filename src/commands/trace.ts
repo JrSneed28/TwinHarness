@@ -4,6 +4,7 @@ import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { extractReqIds, scanDirForReqIds } from "../core/anchors";
 import { structuredLog } from "../core/log";
+import { readFileOrUndefined } from "../core/coverage";
 
 /**
  * `th trace render` — the RENDERED traceability view (spec §17). Traceability is
@@ -42,11 +43,6 @@ export interface TraceRow {
 /** SLICE-/TASK- token shape surfaced from the plan as a best-effort convenience. */
 const SLICE_TASK_PATTERN = /\b(?:SLICE|TASK)-\d+\b/g;
 
-/** Read a file as UTF-8, or return undefined if it is absent / not a file. */
-function readFileOrUndefined(abs: string): string | undefined {
-  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return undefined;
-  return fs.readFileSync(abs, "utf8");
-}
 
 /**
  * Invert a `REQ-ID → files` scan into a `REQ-ID → Set<files>` lookup, optionally
