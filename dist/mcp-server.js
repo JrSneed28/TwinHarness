@@ -15468,12 +15468,50 @@ function resolveWithinRoot(root, p) {
   const absRoot = path.resolve(root);
   const abs = path.isAbsolute(p) ? p : path.resolve(absRoot, p);
   const rel = path.relative(absRoot, abs);
-  if (rel === "") return abs;
-  if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  if (rel !== "" && (rel.startsWith("..") || path.isAbsolute(rel))) return null;
+  const realRoot = realpathSafe(absRoot);
+  const realAbs = realpathExistingPrefix(abs);
+  const realRel = path.relative(realRoot, realAbs);
+  if (realRel === "") return abs;
+  if (realRel.startsWith("..") || path.isAbsolute(realRel)) return null;
   return abs;
 }
+function realpathSafe(p) {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return p;
+    }
+  }
+}
+function realpathExistingPrefix(abs) {
+  let existing = abs;
+  const tail = [];
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) break;
+    tail.unshift(path.basename(existing));
+    existing = parent;
+  }
+  const real = realpathSafe(existing);
+  return tail.length === 0 ? real : path.join(real, ...tail);
+}
 function resolveProjectPaths(root) {
-  const abs = path.resolve(root);
+  const startAbs = path.resolve(root);
+  let abs = startAbs;
+  let cursor = startAbs;
+  while (true) {
+    if (fs.existsSync(path.join(cursor, ".twinharness")) || fs.existsSync(path.join(cursor, ".agentic-sdlc", "state.json"))) {
+      abs = cursor;
+      break;
+    }
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
   let stateDir;
   const newDir = path.join(abs, ".twinharness");
   const legacyStateFile = path.join(abs, ".agentic-sdlc", "state.json");
