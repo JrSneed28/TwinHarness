@@ -138,10 +138,13 @@ function runNext(paths, opts = {}) {
     //     predicate (RULE-007 / ARCH-RISK-005 — no second implementation). Tolerant
     //     reader: a corrupt decisions.jsonl skips bad lines and falls through cleanly.
     {
-        const obligations = (0, decisions_1.gatingObligations)((0, decisions_1.reduceDecisions)((0, decisions_1.readDecisionEvents)(paths)), s);
+        // Read + reduce the decision ledger ONCE (PERF-009): both the gating check
+        // and the title lookup below consume the same reduced set.
+        const decisions = (0, decisions_1.reduceDecisions)((0, decisions_1.readDecisionEvents)(paths));
+        const obligations = (0, decisions_1.gatingObligations)(decisions, s);
         if (obligations.length > 0) {
             const first = obligations[0];
-            const title = (0, decisions_1.reduceDecisions)((0, decisions_1.readDecisionEvents)(paths)).find((d) => d.id === first.decisionId)?.title ?? "";
+            const title = decisions.find((d) => d.id === first.decisionId)?.title ?? "";
             const titlePart = title ? ` (title: "${title}")` : "";
             return emit({
                 kind: "resolve-decision-obligation",

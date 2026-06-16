@@ -17352,6 +17352,21 @@ function readDecisionEvents(paths) {
   }
   return out;
 }
+function readLastDecisionRecordHash(paths) {
+  const file = decisionsPath(paths);
+  if (!fs14.existsSync(file)) return GENESIS_PREV_HASH;
+  const lines = fs14.readFileSync(file, "utf8").split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (isValidEvent(parsed)) return parsed.recordHash;
+    } catch {
+    }
+  }
+  return GENESIS_PREV_HASH;
+}
 function numericSuffix(id) {
   const m = /^DECISION-(\d+)$/.exec(id);
   if (!m) return null;
@@ -17370,8 +17385,7 @@ function mintNextId(events) {
 }
 function appendDecisionEvent(paths, event, key) {
   fs14.mkdirSync(paths.stateDir, { recursive: true });
-  const existing = readDecisionEvents(paths);
-  const prevHash = existing.length > 0 ? existing[existing.length - 1].recordHash : GENESIS_PREV_HASH;
+  const prevHash = readLastDecisionRecordHash(paths);
   const withPrev = { ...event, prevHash };
   const recordHash = computeRecordHash(withPrev);
   const sealed = { ...withPrev, recordHash };
@@ -19068,10 +19082,11 @@ function runNext(paths, opts = {}) {
     }
   }
   {
-    const obligations = gatingObligations(reduceDecisions(readDecisionEvents(paths)), s);
+    const decisions = reduceDecisions(readDecisionEvents(paths));
+    const obligations = gatingObligations(decisions, s);
     if (obligations.length > 0) {
       const first = obligations[0];
-      const title = reduceDecisions(readDecisionEvents(paths)).find((d) => d.id === first.decisionId)?.title ?? "";
+      const title = decisions.find((d) => d.id === first.decisionId)?.title ?? "";
       const titlePart = title ? ` (title: "${title}")` : "";
       return emit(
         {
