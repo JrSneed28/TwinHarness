@@ -17879,6 +17879,7 @@ function scanRepo(root, opts = {}) {
   const files = [];
   const blastMatches = /* @__PURE__ */ new Map();
   const apiHints = [];
+  const reqIdToFiles = /* @__PURE__ */ new Map();
   const recordLang = (name, evidence, source) => {
     let e = langs.get(name);
     if (!e) {
@@ -17978,23 +17979,40 @@ function scanRepo(root, opts = {}) {
         componentFileCounts.set(component, (componentFileCounts.get(component) ?? 0) + 1);
         ownershipHints.set(component, component);
       }
-      files.push({
+      const fileEntry = {
         path: rel,
         component,
         language: langName ?? null,
         is_test: isTest,
         req_ids: []
-        // filled from scanDirForReqIds below.
-      });
+        // filled from this file's single read below.
+      };
+      files.push(fileEntry);
       recordBlast(rel);
-      if (nameLower === "package.json" && size <= MAX_READ_BYTES) {
-        let text;
+      let content;
+      if (size <= MAX_READ_BYTES) {
         try {
-          text = fs15.readFileSync(abs, "utf8");
+          content = fs15.readFileSync(abs, "utf8");
         } catch {
-          text = void 0;
+          content = void 0;
         }
-        const json = text ? safeParseJson(text) : void 0;
+      }
+      if (content !== void 0) {
+        const ids = extractReqIds(content);
+        if (ids.length > 0) {
+          fileEntry.req_ids = ids;
+          for (const id of ids) {
+            let set = reqIdToFiles.get(id);
+            if (!set) {
+              set = /* @__PURE__ */ new Set();
+              reqIdToFiles.set(id, set);
+            }
+            set.add(rel);
+          }
+        }
+      }
+      if (nameLower === "package.json" && content !== void 0) {
+        const json = safeParseJson(content);
         if (json) {
           const scripts = json.scripts;
           if (typeof scripts === "object" && scripts !== null && !Array.isArray(scripts)) {
@@ -18025,19 +18043,11 @@ function scanRepo(root, opts = {}) {
             apiHints.push({ name: path14.basename(rel), source: "package.json:exports" });
           }
         }
-      } else if (nameLower === "makefile" && size <= MAX_READ_BYTES) {
-        let text;
-        try {
-          text = fs15.readFileSync(abs, "utf8");
-        } catch {
-          text = void 0;
-        }
-        if (text) {
-          for (const line of text.split(/\r?\n/)) {
-            const m = /^([A-Za-z0-9_.-]+):(?!=)/.exec(line);
-            if (m && m[1] && m[1] !== ".PHONY") {
-              commands.push({ label: m[1], raw: `make ${m[1]}`, source_file: rel, kind: classifyCommand(m[1]) });
-            }
+      } else if (nameLower === "makefile" && content !== void 0) {
+        for (const line of content.split(/\r?\n/)) {
+          const m = /^([A-Za-z0-9_.-]+):(?!=)/.exec(line);
+          if (m && m[1] && m[1] !== ".PHONY") {
+            commands.push({ label: m[1], raw: `make ${m[1]}`, source_file: rel, kind: classifyCommand(m[1]) });
           }
         }
       }
@@ -18047,34 +18057,9 @@ function scanRepo(root, opts = {}) {
     }
   };
   walk(absRoot, 0);
-  const isExcludedLocation = (loc) => {
-    if (GENERATED_ARTIFACTS.has(loc)) return true;
-    const first = loc.split("/")[0];
-    return first !== void 0 && (GENERATED_DIRS.has(first) || PRODUCER_DIRS.has(first));
-  };
-  const anchorSkipDirs = /* @__PURE__ */ new Set([...GENERATED_DIRS, ...PRODUCER_DIRS]);
-  const anchorScan = scanDirForReqIdsCapped(absRoot, {
-    maxReadBytes: MAX_READ_BYTES,
-    fileCountCap,
-    totalBytesCap,
-    skipDirs: anchorSkipDirs
-  });
-  const reqIdToFiles = anchorScan.anchors;
   const reqAnchors = [];
-  const fileToReqIds = /* @__PURE__ */ new Map();
   for (const [reqId, locations] of reqIdToFiles.entries()) {
-    const kept = [...locations].filter((loc) => !isExcludedLocation(loc));
-    if (kept.length === 0) continue;
-    reqAnchors.push({ req_id: reqId, locations: kept });
-    for (const loc of kept) {
-      const existing = fileToReqIds.get(loc);
-      if (existing) existing.push(reqId);
-      else fileToReqIds.set(loc, [reqId]);
-    }
-  }
-  for (const f of files) {
-    const ids = fileToReqIds.get(f.path);
-    if (ids) f.req_ids = ids;
+    reqAnchors.push({ req_id: reqId, locations: [...locations] });
   }
   map.languages = [...langs.entries()].map(([name, e]) => ({
     name,
@@ -18111,9 +18096,9 @@ function scanRepo(root, opts = {}) {
   map.scanReport = {
     filesScanned: st.filesScanned,
     filesSkipped: st.filesSkipped,
-    // A cap hit in EITHER walk makes the map PARTIAL (REQ-NFR-007). The main walk
-    // wins if both tripped; otherwise surface the anchor walk's cap.
-    capHit: st.capHit ?? anchorScan.capHit
+    // The single main walk is the sole source of the cap signal now (P3-1): a cap
+    // hit makes the map PARTIAL (REQ-NFR-007); a cap is NOT an error (RULE-014).
+    capHit: st.capHit
   };
   return map;
 }

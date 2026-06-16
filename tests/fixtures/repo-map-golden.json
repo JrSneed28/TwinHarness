@@ -1,0 +1,285 @@
+{
+  "schema_version": 1,
+  "languages": [
+    {
+      "name": "Go",
+      "evidence": [
+        "go.mod",
+        "main.go"
+      ],
+      "source": "both"
+    },
+    {
+      "name": "JavaScript/TypeScript",
+      "evidence": [
+        "package.json"
+      ],
+      "source": "manifest"
+    },
+    {
+      "name": "TypeScript",
+      "evidence": [
+        "src/auth/login.ts",
+        "src/commands/repo.ts",
+        "src/core/a.ts",
+        "src/core/b.ts",
+        "tests/a.test.ts"
+      ],
+      "source": "extension"
+    }
+  ],
+  "package_managers": [
+    {
+      "name": "go modules",
+      "manifest_paths": [
+        "go.mod"
+      ]
+    },
+    {
+      "name": "npm",
+      "manifest_paths": [
+        "package.json"
+      ]
+    }
+  ],
+  "candidate_commands": [
+    {
+      "label": "build",
+      "raw": "make build",
+      "source_file": "Makefile",
+      "kind": "build"
+    },
+    {
+      "label": "test",
+      "raw": "make test",
+      "source_file": "Makefile",
+      "kind": "test"
+    },
+    {
+      "label": "build",
+      "raw": "tsc",
+      "source_file": "package.json",
+      "kind": "build"
+    },
+    {
+      "label": "test",
+      "raw": "vitest run",
+      "source_file": "package.json",
+      "kind": "test"
+    }
+  ],
+  "source_roots": [
+    "src"
+  ],
+  "test_roots": [
+    "tests"
+  ],
+  "docs_roots": [
+    "docs"
+  ],
+  "generated_paths": [],
+  "components": [
+    {
+      "name": "src/auth",
+      "path": "src/auth",
+      "file_count": 1
+    },
+    {
+      "name": "src/commands",
+      "path": "src/commands",
+      "file_count": 1
+    },
+    {
+      "name": "src/core",
+      "path": "src/core",
+      "file_count": 2
+    }
+  ],
+  "entrypoints": [
+    {
+      "name": "th",
+      "path": "dist/cli.js",
+      "source": "package.json:bin"
+    },
+    {
+      "name": "main",
+      "path": "dist/index.js",
+      "source": "package.json:main"
+    },
+    {
+      "name": "main.go",
+      "path": "main.go",
+      "source": "convention"
+    }
+  ],
+  "public_api": {
+    "hints": [
+      {
+        "name": "package.json",
+        "source": "package.json:exports"
+      }
+    ],
+    "confidence": "heuristic"
+  },
+  "ownership_hints": [
+    {
+      "path_prefix": "src/auth",
+      "component": "src/auth"
+    },
+    {
+      "path_prefix": "src/commands",
+      "component": "src/commands"
+    },
+    {
+      "path_prefix": "src/core",
+      "component": "src/core"
+    }
+  ],
+  "files": [
+    {
+      "path": "Makefile",
+      "component": null,
+      "language": null,
+      "is_test": false,
+      "req_ids": [
+        "REQ-RU-051"
+      ]
+    },
+    {
+      "path": "docs/x.md",
+      "component": null,
+      "language": null,
+      "is_test": false,
+      "req_ids": [
+        "REQ-RU-099"
+      ]
+    },
+    {
+      "path": "go.mod",
+      "component": null,
+      "language": null,
+      "is_test": false,
+      "req_ids": []
+    },
+    {
+      "path": "main.go",
+      "component": null,
+      "language": "Go",
+      "is_test": false,
+      "req_ids": []
+    },
+    {
+      "path": "package.json",
+      "component": null,
+      "language": null,
+      "is_test": false,
+      "req_ids": [
+        "REQ-RU-050"
+      ]
+    },
+    {
+      "path": "src/auth/login.ts",
+      "component": "src/auth",
+      "language": "TypeScript",
+      "is_test": false,
+      "req_ids": [
+        "REQ-RU-013"
+      ]
+    },
+    {
+      "path": "src/commands/repo.ts",
+      "component": "src/commands",
+      "language": "TypeScript",
+      "is_test": false,
+      "req_ids": [
+        "REQ-RU-003"
+      ]
+    },
+    {
+      "path": "src/core/a.ts",
+      "component": "src/core",
+      "language": "TypeScript",
+      "is_test": false,
+      "req_ids": [
+        "REQ-RU-001"
+      ]
+    },
+    {
+      "path": "src/core/b.ts",
+      "component": "src/core",
+      "language": "TypeScript",
+      "is_test": false,
+      "req_ids": [
+        "REQ-RU-001",
+        "REQ-RU-002"
+      ]
+    },
+    {
+      "path": "tests/a.test.ts",
+      "component": null,
+      "language": "TypeScript",
+      "is_test": true,
+      "req_ids": [
+        "REQ-RU-001"
+      ]
+    }
+  ],
+  "req_anchors": [
+    {
+      "req_id": "REQ-RU-001",
+      "locations": [
+        "src/core/a.ts",
+        "src/core/b.ts",
+        "tests/a.test.ts"
+      ]
+    },
+    {
+      "req_id": "REQ-RU-002",
+      "locations": [
+        "src/core/b.ts"
+      ]
+    },
+    {
+      "req_id": "REQ-RU-003",
+      "locations": [
+        "src/commands/repo.ts"
+      ]
+    },
+    {
+      "req_id": "REQ-RU-013",
+      "locations": [
+        "src/auth/login.ts"
+      ]
+    },
+    {
+      "req_id": "REQ-RU-050",
+      "locations": [
+        "package.json"
+      ]
+    },
+    {
+      "req_id": "REQ-RU-051",
+      "locations": [
+        "Makefile"
+      ]
+    },
+    {
+      "req_id": "REQ-RU-099",
+      "locations": [
+        "docs/x.md"
+      ]
+    }
+  ],
+  "blast_radius_signals": [
+    {
+      "flag": "authentication",
+      "matching_paths": [
+        "src/auth/login.ts"
+      ],
+      "trigger_patterns": [
+        "auth",
+        "login"
+      ]
+    }
+  ]
+}
