@@ -188,6 +188,61 @@ describe("REQ-COVERAGE-SEC-001: path traversal outside project root is rejected"
   });
 });
 
+describe("REQ-COV-TESTONLY-001 (GOV-1): the TEST dimension counts only RECOGNIZED test files", () => {
+  // Before the fix, `collectDirReqIds(testsDir)` counted a REQ-ID anchored in ANY
+  // file under tests/ — including prose/fixtures — so `th coverage check` was
+  // satisfiable with NO real test. The test dimension must now require the anchor
+  // to live in a recognized test file (*.test.* / *.spec.* / *_test.* /
+  // test_*.* / under a tests dir).
+  it("a REQ anchored ONLY in a prose/non-test file under tests/ is NOT tested → gap, exit 1", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
+    writeFile(tp, "docs/09-implementation-plan.md", "Slice covers REQ-001.\n");
+    // Anchor appears ONLY in a non-test prose file that happens to live under tests/.
+    writeFile(tp, "tests/NOTES.md", "Design notes mentioning REQ-001 in prose.\n");
+
+    const res = runCoverageCheck(tp.paths);
+    expect(res.ok).toBe(false);
+    expect(res.exitCode).toBe(1);
+    // The gap is specifically "no test" (it IS in a slice).
+    expect(res.data?.gaps).toEqual([{ req: "REQ-001", inSlice: true, inTest: false }]);
+  });
+
+  it("the SAME anchor in a real *.test.* file IS counted → covered, exit 0", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
+    writeFile(tp, "docs/09-implementation-plan.md", "Slice covers REQ-001.\n");
+    // Same prose file present (must not help), PLUS a real test file with the anchor.
+    writeFile(tp, "tests/NOTES.md", "Design notes mentioning REQ-001 in prose.\n");
+    writeFile(tp, "tests/feature.test.ts", "// REQ-001 is exercised here\n");
+
+    const res = runCoverageCheck(tp.paths);
+    expect(res.ok).toBe(true);
+    expect(res.exitCode).toBe(0);
+    expect(res.data?.covered).toBe(1);
+    expect(res.data?.gaps).toEqual([]);
+  });
+
+  it("a non-test source-style file (README.md / fixture .json) under tests/ does not count", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/01-requirements.md", "REQ-100 and REQ-200.\n");
+    writeFile(tp, "docs/09-implementation-plan.md", "Slice covers REQ-100 and REQ-200.\n");
+    writeFile(tp, "tests/README.md", "REQ-100 documented here.\n");
+    writeFile(tp, "tests/fixtures/data.json", "{ \"note\": \"REQ-200 lives in a fixture\" }\n");
+
+    const res = runCoverageCheck(tp.paths);
+    expect(res.ok).toBe(false);
+    // Neither anchor is in a recognized test file → both are test-gaps.
+    expect(res.data?.gaps).toEqual([
+      { req: "REQ-100", inSlice: true, inTest: false },
+      { req: "REQ-200", inSlice: true, inTest: false },
+    ]);
+  });
+});
+
 describe("REQ-COVERAGE-008: multi-language test files are scanned (full recursion)", () => {
   it("Python test file (test_*.py) is scanned for REQ-IDs", () => {
     tp = makeTempProject();

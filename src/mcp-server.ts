@@ -36,6 +36,8 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 import { resolveProjectPaths, type ProjectPaths } from "./core/paths";
 import type { CommandResult } from "./core/output";
@@ -771,8 +773,42 @@ export function listTools(): Tool[] {
  * ------------------------------------------------------------------ */
 
 const SERVER_NAME = "twinharness-th";
-/** Version advertised to clients; kept in sync with the plugin/package version. */
-const SERVER_VERSION = "0.6.2";
+
+/**
+ * Read the server version from package.json at runtime — MIRRORS cli.ts's
+ * `readCliVersion()` exactly so the MCP server and the CLI always advertise the
+ * SAME version (ARCH-006 / CQ-004 / PKG-007: a hardcoded literal silently
+ * desynced on every version bump). Tries `__dirname/../package.json`
+ * (dist/mcp-server.js → root package.json) then `__dirname/../../package.json`
+ * (src/mcp-server.ts in a ts-node/test context). Returns "unknown" if neither is
+ * found or parsing fails. Read via `fs` (NOT `import`): package.json is outside
+ * `src/` (a tsc rootDir error) and importing it would inline the whole file into
+ * the esbuild bundle — keeping the read here preserves the zero-runtime-dep MCP
+ * bundle boundary this file documents above.
+ */
+export function readServerVersion(): string {
+  const candidates = [
+    path.join(__dirname, "..", "package.json"),
+    path.join(__dirname, "..", "..", "package.json"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        const json = JSON.parse(fs.readFileSync(candidate, "utf8")) as unknown;
+        if (typeof json === "object" && json !== null && "version" in json) {
+          const v = (json as Record<string, unknown>).version;
+          if (typeof v === "string") return v;
+        }
+      }
+    } catch {
+      // Try next candidate.
+    }
+  }
+  return "unknown";
+}
+
+/** Version advertised to clients — read from package.json so it never desyncs. */
+export const SERVER_VERSION = readServerVersion();
 
 /* ------------------------------------------------------------------ *
  * Runtime argument validation (H-1)                                   *

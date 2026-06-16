@@ -412,9 +412,12 @@ th stale --artifact <file>                  Same lookup, by file key (safe befor
   `docs/05-adrs` (trailing slash normalized away). `th stale --artifact docs/05-adrs` round-trips
   on it. Single files behave exactly as before.
 - **Coverage** asserts every MVP REQ-ID maps to ≥ 1 slice *and* ≥ 1 test. Non-zero exit = the
-  build may not start. Scans tests/ **fully recursively** in any language; applies MVP filter from
-  `docs/02-scope.md`'s `## MVP Scope` section (or `--scope <file>` override). Defaults:
-  `--reqs docs/01-requirements.md --plan docs/09-implementation-plan.md --tests tests`.
+  build may not start. Scans tests/ **fully recursively** in any language, but the **tested**
+  dimension counts a REQ-ID only when its anchor is in a **recognized test file** (`*.test.*`,
+  `*.spec.*`, `*_test.*`, `test_*.*`, or any file under a `tests/`/`__tests__/`/`spec/` dir) — an
+  anchor in a prose/README/fixture file under `tests/` does **not** satisfy the gate. Applies the
+  MVP filter from `docs/02-scope.md`'s `## MVP Scope` section (or `--scope <file>` override).
+  Defaults: `--reqs docs/01-requirements.md --plan docs/09-implementation-plan.md --tests tests`.
 - **`th coverage report`** is the read-only breakdown (it is **not** a gate — `th coverage check`
   stays the gate). Per REQ-ID it reports four dimensions: **planned** (in a slice), **implemented**
   (anchored in the code dir — `--code`, default `src`), **tested** (anchored in a test), and

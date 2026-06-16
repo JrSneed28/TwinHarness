@@ -3230,8 +3230,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path21) {
-      let input = path21;
+    function removeDotSegments(path22) {
+      let input = path22;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3483,8 +3483,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path21, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path21 && path21 !== "/" ? path21 : void 0;
+        const [path22, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path22 && path22 !== "/" ? path22 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs23, exportName) {
+    function addFormats(ajv, list, fs24, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs23[f]);
+        ajv.addFormat(f, fs24[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -6893,9 +6893,11 @@ var require_dist = __commonJS({
 // src/mcp-server.ts
 var mcp_server_exports = {};
 __export(mcp_server_exports, {
+  SERVER_VERSION: () => SERVER_VERSION,
   TOOL_DEFS: () => TOOL_DEFS,
   buildServer: () => buildServer,
   listTools: () => listTools,
+  readServerVersion: () => readServerVersion,
   resolvePathsForCall: () => resolvePathsForCall,
   toToolResult: () => toToolResult,
   validateToolArgs: () => validateToolArgs
@@ -7142,10 +7144,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path21) {
-  if (!path21)
+function getElementAtPath(obj, path22) {
+  if (!path22)
     return obj;
-  return path21.reduce((acc, key) => acc?.[key], obj);
+  return path22.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7554,11 +7556,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path21, issues) {
+function prefixIssues(path22, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path21);
+    iss.path.unshift(path22);
     return iss;
   });
 }
@@ -7705,16 +7707,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path21 = []) => {
+  const processError = (error3, path22 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path21, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path22, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path21, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path22, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path21, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path22, ...issue2.path]);
       } else {
-        const fullpath = [...path21, ...issue2.path];
+        const fullpath = [...path22, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -15462,6 +15464,10 @@ var StdioServerTransport = class {
   }
 };
 
+// src/mcp-server.ts
+var fs23 = __toESM(require("node:fs"));
+var path21 = __toESM(require("node:path"));
+
 // src/core/paths.ts
 var fs = __toESM(require("node:fs"));
 var path = __toESM(require("node:path"));
@@ -16852,6 +16858,23 @@ function collectDirReqIds(dir) {
   const scanMap = scanDirForReqIds(dir);
   return [...scanMap.keys()];
 }
+function isRecognizedTestFile(relPosixPath) {
+  const lower = relPosixPath.toLowerCase();
+  const base = lower.split("/").pop() ?? lower;
+  if (/\.(test|spec)\.[^./]+$/.test(base)) return true;
+  if (/_test\.[^./]+$/.test(base)) return true;
+  if (/^test_[^/]*\.[^./]+$/.test(base)) return true;
+  if (/(^|\/)(tests?|__tests__|specs?)(\/|$)/.test(lower)) return true;
+  return false;
+}
+function collectTestReqIds(dir) {
+  const scanMap = scanDirForReqIds(dir);
+  const out = [];
+  for (const [reqId, files] of scanMap) {
+    if (files.some(isRecognizedTestFile)) out.push(reqId);
+  }
+  return out;
+}
 function resolveReqSet(reqsContent, scopeContent) {
   const allReqIds = extractReqIds(reqsContent);
   const mvpFilter = scopeContent !== void 0 ? extractMvpScopeReqIds(scopeContent) : void 0;
@@ -16878,7 +16901,7 @@ function computeBreakdown(root, opts = {}) {
   const { reqSet, filterDescription } = resolveReqSet(reqsContent, readFileOrUndefined(scopeAbs));
   const planContent = readFileOrUndefined(planAbs);
   const sliceSet = new Set(planContent === void 0 ? [] : extractReqIds(planContent));
-  const testSet = new Set(collectDirReqIds(testsAbs));
+  const testSet = new Set(collectTestReqIds(testsAbs));
   const codeSet = new Set(collectDirReqIds(codeAbs));
   const rows = reqSet.map((req) => ({
     req,
@@ -16967,7 +16990,7 @@ function runCoverageCheck(paths, opts = {}) {
   void allReqIds;
   const planContent = readFileOrUndefined(planAbs);
   const sliceSet = planContent === void 0 ? [] : extractReqIds(planContent);
-  const testSet = collectDirReqIds(testsAbs);
+  const testSet = collectTestReqIds(testsAbs);
   const gaps = [];
   for (const req of reqSet) {
     const inSlice = sliceSet.includes(req);
@@ -20883,7 +20906,26 @@ function listTools() {
   }));
 }
 var SERVER_NAME = "twinharness-th";
-var SERVER_VERSION = "0.6.2";
+function readServerVersion() {
+  const candidates = [
+    path21.join(__dirname, "..", "package.json"),
+    path21.join(__dirname, "..", "..", "package.json")
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs23.existsSync(candidate)) {
+        const json = JSON.parse(fs23.readFileSync(candidate, "utf8"));
+        if (typeof json === "object" && json !== null && "version" in json) {
+          const v = json.version;
+          if (typeof v === "string") return v;
+        }
+      }
+    } catch {
+    }
+  }
+  return "unknown";
+}
+var SERVER_VERSION = readServerVersion();
 function valueMatchesType(v, type) {
   if (type === "string") return typeof v === "string";
   if (type === "boolean") return typeof v === "boolean";
@@ -20966,9 +21008,11 @@ if (require.main === module) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  SERVER_VERSION,
   TOOL_DEFS,
   buildServer,
   listTools,
+  readServerVersion,
   resolvePathsForCall,
   toToolResult,
   validateToolArgs

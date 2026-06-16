@@ -84,7 +84,9 @@ function runCoverageCheck(paths, opts = {}) {
     void allReqIds;
     const planContent = (0, coverage_1.readFileOrUndefined)(planAbs);
     const sliceSet = planContent === undefined ? [] : (0, anchors_1.extractReqIds)(planContent);
-    const testSet = (0, coverage_1.collectDirReqIds)(testsAbs);
+    // TEST dimension counts only RECOGNIZED test files (GOV-1): an anchor in a
+    // prose/fixture file under tests/ no longer satisfies the gate.
+    const testSet = (0, coverage_1.collectTestReqIds)(testsAbs);
     const gaps = [];
     for (const req of reqSet) {
         const inSlice = sliceSet.includes(req);

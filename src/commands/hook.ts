@@ -357,6 +357,27 @@ export function extractBashWriteTargets(command: string): string[] {
 }
 
 /**
+ * Best-effort read of a top-level `write_gate: "strict"` opt-in from the RAW
+ * (possibly schema-invalid) state.json bytes — used only on the invalid-state
+ * fail-closed path (GOV-3). The state object failed schema validation, so we
+ * cannot trust `r.state`; we ask the narrower question "did the operator declare
+ * strict mode?" directly against the parsed JSON. Returns true ONLY for an exact
+ * top-level string `"strict"`. Never throws: undefined raw, non-JSON, non-object,
+ * or any non-strict/absent value all return false (→ historical fail-open).
+ */
+function rawWriteGateIsStrict(raw: string | undefined): boolean {
+  if (typeof raw !== "string") return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false; // Unparseable bytes carry no readable opt-in → fail open.
+  }
+  if (typeof parsed !== "object" || parsed === null) return false;
+  return (parsed as Record<string, unknown>)["write_gate"] === "strict";
+}
+
+/**
  * Helper: convert an absolute path to a root-relative forward-slash string,
  * or null if the path is outside the project root (caller should allow it).
  */
@@ -430,7 +451,10 @@ function findOwningSlices(
  * Implements the decision ladder from spec/write-gate-design.md §Decision ladder:
  * a. No state.json → allow ({}).
  * b. TH_DISABLE_WRITE_GATE=1 or write_gate=off → allow.
- * c. state.json invalid → allow + systemMessage warning.
+ * c. state.json invalid → allow + systemMessage warning (fail-open), UNLESS the
+ *    raw bytes carry a top-level `write_gate: "strict"` opt-in, in which case the
+ *    invalid state is fail-CLOSED: deny the write until state.json is repaired
+ *    (GOV-3). Default/absent/other modes keep the historical fail-open behaviour.
  * c2. Phase A + Bash tool: heuristically detect shell-mediated writes into in-root
  *     implementation paths and fire the gate on the first offending target (fail-open:
  *     if no offending target is found, fall through). NOT applied in Phase B.
@@ -482,8 +506,34 @@ export function runHookPretoolGate(
   const r = readState(paths);
   if (!r.exists) return allow();
 
-  // Step c: Invalid state → allow + warning.
+  // Step c: Invalid state.
+  //
+  // Default (and historical) behaviour is fail-OPEN: an invalid state.json makes
+  // the write-gate stand down and ALLOW the write (with a warning), because a
+  // false block on every write in a project whose state merely drifted would be
+  // worse than the gate going quiet — the stop-gate still blocks completion.
+  //
+  // GOV-3 opt-in (`write_gate: "strict"`): a strict operator has declared that an
+  // invalid/corrupt state is itself a stop condition — a mid-session corruption
+  // must NOT silently disarm the gate. So when the (otherwise-invalid) state.json
+  // still carries a top-level `write_gate: "strict"`, we fail-CLOSED and DENY the
+  // write instead of allowing it. We read the mode from the raw bytes because
+  // there is no validated `state` object here; only an exact top-level
+  // `"strict"` opt-in trips the fail-closed path. Bytes that do not parse at all,
+  // or that carry any non-strict / absent mode, keep the historical fail-open
+  // behaviour (we cannot read a strict opt-in we cannot see — staying honest
+  // rather than denying on unprovable intent).
   if (!r.state) {
+    if (rawWriteGateIsStrict(r.raw)) {
+      const reason =
+        `TwinHarness write-gate (strict mode — fail-closed) DENIED this write because state.json is invalid. ` +
+        `Under \`write_gate: "strict"\` an unreadable/invalid state is treated as a stop condition, not a stand-down: ` +
+        `the gate refuses writes until state.json is repaired (the default modes fail open here). ` +
+        `Repair state.json to restore normal gating. ` +
+        `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1. ` +
+        `AGENT INSTRUCTION: do NOT retry this write — escalate to the human to repair state.json.`;
+      return fireGate("deny", reason);
+    }
     return allowWithWarning(
       "TwinHarness write-gate is standing down because state.json is invalid (the stop-gate still blocks completion). " +
         "Repair state.json and re-run to restore gating.",

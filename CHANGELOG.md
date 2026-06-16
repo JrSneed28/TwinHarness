@@ -56,6 +56,37 @@ Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding lay
   blast_radius_flags …` is **refused** with `error:"gate_owned_field"` (was `ok:true`). The CLI
   `th state set blast_radius_flags …` — the only legitimate write path — is unaffected.
 
+- **MCP server version is single-sourced from `package.json` (ARCH-006 / CQ-004 / PKG-007).**
+  `src/mcp-server.ts` advertised a hardcoded `SERVER_VERSION = "0.6.2"` literal that could silently
+  desync from the dynamic CLI version on a bump. It now reads `package.json` at runtime via
+  `readServerVersion()`, mirroring the CLI's `readCliVersion()` (same candidate resolution, zero
+  runtime deps). `tests/version-sync.test.ts` asserts the served version equals `package.json`.
+
+- **`th coverage check` "tested" dimension now requires a real test file (GOV-1) — behavior change.**
+  `collectDirReqIds` (`src/core/coverage.ts`) counted a REQ-ID as tested if its anchor appeared in
+  *any* file, so a prose/README/fixture anchor under `tests/` could satisfy the gate with no real
+  test. The tested dimension now counts a REQ-ID only when its anchor lives in a recognized test
+  file (`*.test.*` / `*.spec.*` / `*_test.*` / `test_*.*`, or under a `tests/`/`__tests__/`/`spec/`
+  dir); the requirement and implementation dimensions are unchanged. Execution truth remains
+  `th verify run` + the stop-gate. New probe tests in `tests/coverage.test.ts`; USAGE clarified.
+
+- **Opt-in `write_gate: "strict"` fail-closed on invalid state (GOV-3).** The PreToolUse write-gate
+  historically *failed open* on present-but-invalid `state.json` (allow + "standing down" warning),
+  while the stop-gate fails closed. A new opt-in branch (`src/commands/hook.ts`) **denies** the write
+  when state is present-but-invalid **and** the raw bytes carry top-level `write_gate: "strict"`.
+  Default/`ask`/`deny`/`off` modes are **unchanged** (still fail open) — no breaking change. New
+  `tests/write-gate-strict.test.ts`; the ~56-case pretool-gate negative suite stays green.
+
+- **Corrected `SECURITY.md` claims (SEC-001, GOV-2).** Two published claims were inaccurate:
+  (1) the repo-map "no secrets persisted" claim — `.twinharness/repo-map.json` in fact persists
+  **verbatim candidate-command strings** (the committed `docs/00-repo-map.md` emits only a count);
+  the stale "No file contents, no secrets, and no absolute paths are written to disk" clause is
+  removed and replaced with the accurate enumeration. (2) the gate-ledger "primary accountability
+  mechanism" claim — `gate-ledger.jsonl` is a plain append-only log and is **not tamper-evident**
+  (unlike the SHA-256 hash-chained `decisions.jsonl`); the claim is softened to "best-effort review
+  aid." A falsifiable `tests/security-doc-lint.test.ts` pins the corrected text and the absence of
+  the stale claims. *(The gate-ledger hash-chain itself is a post-1.0 follow-up.)*
+
 ### Added (coordination-primitive hardening, 2026-06-15)
 
 - **Decision obligations block completion (RULE-007).** The Stop-gate (`evaluateStopGate`,
