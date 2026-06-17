@@ -20,7 +20,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && npm run build:mcp",
-    "build:mcp": "esbuild src/mcp-server.ts --bundle --platform=node --target=node18 --format=cjs --outfile=dist/mcp-server.js",
+    "build:mcp": "esbuild src/mcp-server.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/mcp-server.js",
     "th": "node dist/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -973,10 +973,23 @@ async function dispatchProof(parsed: ParsedArgs, paths: ProjectPaths): Promise<C
   }
 }
 
+/**
+ * Write `text` to stdout, then exit with `code` ONLY after the bytes have drained.
+ * stdout to a pipe is ASYNCHRONOUS on POSIX (macOS/Linux), so a bare `process.exit()`
+ * right after a large `write` truncates it mid-flush — the proven failure was
+ * `th help` losing its tail (the `proof` command block) on macOS CI while passing on
+ * Linux/Windows. Exiting from the write callback guarantees the OS accepted the data
+ * first; `process.exitCode` is mirrored so a natural drain still carries the code.
+ */
+function writeAndExit(text: string, code: number): never {
+  process.exitCode = code;
+  process.stdout.write(text, () => process.exit(code));
+  return undefined as never;
+}
+
 /** Render a {@link CommandResult} to stdout (honoring `--json`) and exit with its code. */
 function emitAndExit(result: CommandResult, json: boolean): never {
-  process.stdout.write(renderResult(result, json) + "\n");
-  process.exit(result.exitCode);
+  return writeAndExit(renderResult(result, json) + "\n", result.exitCode);
 }
 
 /**
@@ -1033,8 +1046,7 @@ function main(): void {
       human,
       data: { error: "bad_args", unknownFlags: parsed.unknownFlags, errors: parsed.errors },
     });
-    process.stdout.write(renderResult(result, parsed.flags.json) + "\n");
-    process.exit(result.exitCode);
+    writeAndExit(renderResult(result, parsed.flags.json) + "\n", result.exitCode);
   }
 
   // Hook commands speak the Claude Code hook protocol on stdout (not --json).
@@ -1042,8 +1054,7 @@ function main(): void {
     if (parsed.positionals[1] === "stop-gate") {
       const paths = resolveProjectPaths(parsed.flags.cwd);
       const out = runHookStopGate(paths, readHookStdin<StopHookInput>());
-      process.stdout.write(out.stdout + "\n");
-      process.exit(out.exitCode);
+      writeAndExit(out.stdout + "\n", out.exitCode);
     }
     if (parsed.positionals[1] === "pretool-gate") {
       // Prefer the payload's cwd for path resolution when --cwd was not explicitly passed.
@@ -1053,14 +1064,12 @@ function main(): void {
         cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : parsed.flags.cwd;
       const paths = resolveProjectPaths(effectiveCwd);
       const out = runHookPretoolGate(paths, stdinPayload);
-      process.stdout.write(out.stdout + "\n");
-      process.exit(out.exitCode);
+      writeAndExit(out.stdout + "\n", out.exitCode);
     }
     if (parsed.positionals[1] === "subagent-stop") {
       const paths = resolveProjectPaths(parsed.flags.cwd);
       const out = runHookSubagentStop(paths, readHookStdin<SubagentStopHookInput>());
-      process.stdout.write(out.stdout + "\n");
-      process.exit(out.exitCode);
+      writeAndExit(out.stdout + "\n", out.exitCode);
     }
   }
 

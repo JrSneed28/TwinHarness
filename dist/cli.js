@@ -887,10 +887,22 @@ async function dispatchProof(parsed, paths) {
             return (0, output_1.failure)({ human: `unknown 'proof' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
     }
 }
+/**
+ * Write `text` to stdout, then exit with `code` ONLY after the bytes have drained.
+ * stdout to a pipe is ASYNCHRONOUS on POSIX (macOS/Linux), so a bare `process.exit()`
+ * right after a large `write` truncates it mid-flush — the proven failure was
+ * `th help` losing its tail (the `proof` command block) on macOS CI while passing on
+ * Linux/Windows. Exiting from the write callback guarantees the OS accepted the data
+ * first; `process.exitCode` is mirrored so a natural drain still carries the code.
+ */
+function writeAndExit(text, code) {
+    process.exitCode = code;
+    process.stdout.write(text, () => process.exit(code));
+    return undefined;
+}
 /** Render a {@link CommandResult} to stdout (honoring `--json`) and exit with its code. */
 function emitAndExit(result, json) {
-    process.stdout.write((0, output_1.renderResult)(result, json) + "\n");
-    process.exit(result.exitCode);
+    return writeAndExit((0, output_1.renderResult)(result, json) + "\n", result.exitCode);
 }
 /**
  * Map a KNOWN typed core error to a clean structured failure — the single CLI
@@ -946,16 +958,14 @@ function main() {
             human,
             data: { error: "bad_args", unknownFlags: parsed.unknownFlags, errors: parsed.errors },
         });
-        process.stdout.write((0, output_1.renderResult)(result, parsed.flags.json) + "\n");
-        process.exit(result.exitCode);
+        writeAndExit((0, output_1.renderResult)(result, parsed.flags.json) + "\n", result.exitCode);
     }
     // Hook commands speak the Claude Code hook protocol on stdout (not --json).
     if (parsed.positionals[0] === "hook") {
         if (parsed.positionals[1] === "stop-gate") {
             const paths = (0, paths_1.resolveProjectPaths)(parsed.flags.cwd);
             const out = (0, hook_1.runHookStopGate)(paths, readHookStdin());
-            process.stdout.write(out.stdout + "\n");
-            process.exit(out.exitCode);
+            writeAndExit(out.stdout + "\n", out.exitCode);
         }
         if (parsed.positionals[1] === "pretool-gate") {
             // Prefer the payload's cwd for path resolution when --cwd was not explicitly passed.
@@ -964,14 +974,12 @@ function main() {
             const effectiveCwd = cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : parsed.flags.cwd;
             const paths = (0, paths_1.resolveProjectPaths)(effectiveCwd);
             const out = (0, hook_1.runHookPretoolGate)(paths, stdinPayload);
-            process.stdout.write(out.stdout + "\n");
-            process.exit(out.exitCode);
+            writeAndExit(out.stdout + "\n", out.exitCode);
         }
         if (parsed.positionals[1] === "subagent-stop") {
             const paths = (0, paths_1.resolveProjectPaths)(parsed.flags.cwd);
             const out = (0, hook_1.runHookSubagentStop)(paths, readHookStdin());
-            process.stdout.write(out.stdout + "\n");
-            process.exit(out.exitCode);
+            writeAndExit(out.stdout + "\n", out.exitCode);
         }
     }
     // `proof` commands include async handlers (real OS-process spawns), so they run
