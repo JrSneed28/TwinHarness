@@ -18,11 +18,12 @@ const CORPUS_ROOT = path.resolve(__dirname, "../proof/corpus");
 describe("loadCorpus + validateCorpus over the bundled corpus", () => {
   it("loads every enumerated brief with resolved absolute paths", () => {
     const corpus = loadCorpus(CORPUS_ROOT);
-    expect(corpus.briefs.length).toBe(4);
+    expect(corpus.briefs.length).toBe(5);
 
     const ids = corpus.briefs.map((b) => b.id).sort();
     expect(ids).toEqual([
       "medium-app-greenfield",
+      "mini-claude-code-greenfield",
       "small-lib-brownfield",
       "small-lib-greenfield",
       "tiny-cli-greenfield",

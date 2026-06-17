@@ -22,6 +22,7 @@ import { writeVerifyReport } from "../src/core/verify";
 import {
   canAdvanceStage,
   canUnlockImplementation,
+  checkImplementationSettled,
   validateTierTransition,
 } from "../src/core/gate-preconditions";
 import type { ProjectPaths } from "../src/core/paths";
@@ -147,5 +148,26 @@ describe("validateTierTransition — AC-B14 + T0 veto + unlock-lock", () => {
   });
   it("set-from-null to T0 with blast-radius flags → t0_blast_radius_veto", () => {
     expect(validateTierTransition(base({ tier: null, blast_radius_flags: ["money"] }), "T0").error).toBe("t0_blast_radius_veto");
+  });
+});
+
+describe("checkImplementationSettled — empty slice set is vacuously settled", () => {
+  const base = (o: Partial<TwinHarnessState>): TwinHarnessState => ({ ...initialState(), ...o });
+
+  it("zero slices PASSES (must not block the advance with a contradictory slices_unsettled:total0)", () => {
+    expect(checkImplementationSettled(base({ slices: [] }))).toEqual({ ok: true });
+  });
+  it("an open (pending) slice → slices_unsettled", () => {
+    const s = base({ slices: [{ id: "SLICE-1", status: "pending", components: [] }] });
+    expect(checkImplementationSettled(s).error).toBe("slices_unsettled");
+  });
+  it("all slices terminal (done|blocked) → PASS", () => {
+    const s = base({
+      slices: [
+        { id: "SLICE-1", status: "done", components: [] },
+        { id: "SLICE-2", status: "blocked", components: [] },
+      ],
+    });
+    expect(checkImplementationSettled(s)).toEqual({ ok: true });
   });
 });

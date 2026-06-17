@@ -19526,7 +19526,7 @@ function checkCoverage(paths) {
 }
 function checkImplementationSettled(state) {
   const prog = sliceProgress(state);
-  if (!prog.allSettled) {
+  if (prog.total > 0 && !prog.allSettled) {
     return {
       ok: false,
       error: "slices_unsettled",

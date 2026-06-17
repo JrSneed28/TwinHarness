@@ -202,7 +202,10 @@ export function checkCoverage(paths: ProjectPaths): GateResult {
  */
 export function checkImplementationSettled(state: TwinHarnessState): GateResult {
   const prog = sliceProgress(state);
-  if (!prog.allSettled) {
+  // An EMPTY slice set is vacuously settled (mirrors checkFinalVerification's
+  // `prog.total > 0` floor): with no slices there is nothing to finish, so it must
+  // not block the advance with a self-contradictory `slices_unsettled` (total:0).
+  if (prog.total > 0 && !prog.allSettled) {
     return {
       ok: false,
       error: "slices_unsettled",
