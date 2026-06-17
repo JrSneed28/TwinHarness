@@ -16446,7 +16446,7 @@ function scheduleWaves(slices) {
     waveOf.set(slice.id, waves.length - 1);
     return true;
   };
-  let remaining = slices.filter(() => true);
+  let remaining = [...slices];
   for (let pass = 0; remaining.length > 0; pass++) {
     const forced = pass >= slices.length;
     const next = [];

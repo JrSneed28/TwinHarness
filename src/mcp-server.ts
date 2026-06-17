@@ -123,6 +123,14 @@ export function toToolResult(result: CommandResult): CallToolResult {
   // Surface the machine payload + the numeric exit code as structuredContent.
   // Additive: `exitCode` is always present so callers get the full CLI exit-code
   // taxonomy (not just isError); `result.data` fields are merged in when present.
+  //
+  // Reserved-key precedence (LATENT guard): `exitCode` is the envelope's
+  // CommandResult.exitCode and is spread LAST, so it deterministically WINS over
+  // any `exitCode` a future command might nest inside `result.data`. No command
+  // does today (the envelope is the single source of the CLI exit code), but
+  // writing the envelope value last keeps `exitCode` an unambiguous reserved key:
+  // a `data.exitCode` can never silently shadow the real process exit code. The
+  // mcp-adapter test pins this precedence so the invariant can't regress.
   out.structuredContent = { ...(result.data ?? {}), exitCode: result.exitCode };
   return out;
 }

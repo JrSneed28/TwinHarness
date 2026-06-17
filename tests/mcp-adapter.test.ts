@@ -75,6 +75,36 @@ describe("ARCH-005: toToolResult carries the numeric exitCode in structuredConte
     expect(mapped.isError).toBe(true);
     expect((mapped.structuredContent as Record<string, unknown>).exitCode).toBe(5);
   });
+
+  // ARCH-005 / finding #6 (build plan exit-7 contract surfaces over MCP). The
+  // build-plan dependency_graph_unsatisfiable failure carries exitCode 7; pin
+  // that the envelope code reaches structuredContent unchanged through the
+  // adapter, so a `--json`/MCP consumer can branch on the full exit-code taxonomy
+  // (not just isError) for the cyclic/dangling-dep case.
+  it("finding #6: a build-plan exit-7 failure surfaces exitCode:7 in structuredContent", () => {
+    const r: CommandResult = failure({ exitCode: 7, data: { error: "dependency_graph_unsatisfiable" } });
+    const mapped = toToolResult(r);
+    expect(mapped.isError).toBe(true);
+    expect((mapped.structuredContent as Record<string, unknown>).exitCode).toBe(7);
+    expect((mapped.structuredContent as Record<string, unknown>).error).toBe("dependency_graph_unsatisfiable");
+  });
+
+  // Finding #5 (LATENT reserved-key guard, characterization). `exitCode` is a
+  // RESERVED key in structuredContent: the envelope's CommandResult.exitCode is
+  // spread LAST, so it deterministically wins over any `exitCode` a (hypothetical)
+  // future command might nest inside `result.data`. No command does this today —
+  // this is a forward-looking guard, not a live clobber — so we synthesize a
+  // `data.exitCode` to PIN the precedence and prevent a silent regression where a
+  // nested data field could shadow the real process exit code.
+  it("finding #5: a nested data.exitCode never shadows the envelope exitCode (reserved-key precedence)", () => {
+    const r: CommandResult = { ok: false, exitCode: 4, data: { exitCode: 99, shape: "stale" } };
+    const mapped = toToolResult(r);
+    const sc = mapped.structuredContent as Record<string, unknown>;
+    // The ENVELOPE code (4) wins — the synthetic data.exitCode (99) is overwritten.
+    expect(sc.exitCode).toBe(4);
+    // Sibling data fields are still merged untouched.
+    expect(sc.shape).toBe("stale");
+  });
 });
 
 describe("REQ-MCP-MAP-002: toToolResult maps ok:false → isError:true", () => {

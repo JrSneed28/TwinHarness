@@ -96,7 +96,7 @@ function scheduleWaves(slices) {
     // dependencies are all satisfied. Bounded by the slice count: each non-final
     // pass that makes no progress means the remainder is a cycle (or depends on
     // one), so the LAST allowed pass forces placement ignoring unmet deps.
-    let remaining = slices.filter(() => true);
+    let remaining = [...slices];
     for (let pass = 0; remaining.length > 0; pass++) {
         const forced = pass >= slices.length; // safety net: cannot exceed N passes
         const next = [];

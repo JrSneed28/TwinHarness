@@ -9,9 +9,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer + self-epic governance + coordination-primitive hardening), not yet cut as a versioned release. **1100+ tests, green on CI** (1 platform-conditional skip in `tests/concurrency.test.ts`; was 460 at 0.6.2).
 
-### Fixed (audit remediation, 2026-06-16)
+### PR #14 code-review remediation (2026-06-16)
 
-- **`th verify`/coverage-report tests are now genuinely cross-platform.** `tests/verify.test.ts`
+- **`th build plan` exit code `7` is a documented, test-locked contract (finding #6).** When the
+  slice `depends_on` graph is unsatisfiable — a dependency **cycle** (no valid wave order) or a
+  **dangling** reference (a dep on an unknown slice that can never complete) — `runBuildPlan`
+  (`src/commands/build.ts`) returns `failure({ exitCode: 7, error: "dependency_graph_unsatisfiable" })`
+  while still emitting the full plan data so `--json`/MCP consumers see both at once. This exit code
+  is now an explicit part of the CLI contract (alongside `th repo check`'s 0/4/5/1 taxonomy) and is
+  regression-locked by `tests/schedule.test.ts`; the MCP adapter surfaces it verbatim in
+  `structuredContent.exitCode` (`tests/mcp-adapter.test.ts`). No behavior change — documentation +
+  test coverage of already-shipped behavior.
+
+- **`structuredContent.exitCode` is a reserved key with deterministic precedence (finding #5).** In
+  `toToolResult` (`src/mcp-server.ts`) the envelope `CommandResult.exitCode` is spread **last**, so it
+  always wins over any `exitCode` a future command might nest inside `result.data`; a nested
+  `data.exitCode` can never silently shadow the real process exit code. No command nests `exitCode`
+  today (latent/forward-looking guard) — pinned by a characterization test so the precedence can't
+  regress.
+
+ `tests/verify.test.ts`
   and `tests/coverage-report.test.ts` previously invoked POSIX `true`/`false`/`sleep` via
   `runCommands` (`spawnSync(shell: true)` → `cmd.exe` on Windows), so they only passed when Git
   Bash's coreutils happened to be on PATH and *failed* on a bare-Windows runner. The docs

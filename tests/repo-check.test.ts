@@ -435,6 +435,28 @@ describe("ARCH-002 — pure freshness taxonomy (computeFreshness / diffHashes)",
     expect(o.human).toContain("repo-map.json is stale.");
   });
 
+  // finding #10 (CHARACTERIZATION, no behavior change). The `case "diff"` defensive
+  // copy+sort is the PUBLIC API-boundary normalizer for the FreshnessInput union:
+  // computeFreshness guarantees deterministic, sorted output regardless of the
+  // order the caller built the buckets in. The current sole caller (repo.ts:745)
+  // already passes diffHashes' pre-sorted buckets, so the sort is redundant FOR
+  // THAT caller — but it protects every other (present/future) constructor of the
+  // `diff` input. Feed ALL THREE buckets unsorted and pin that each comes back
+  // sorted, so a future "remove the redundant re-sort" cleanup fails loudly here.
+  it("finding #10: computeFreshness normalizes UNSORTED added/removed/modified buckets (API-boundary contract)", () => {
+    const o = computeFreshness({
+      kind: "diff",
+      added: ["delta", "alpha", "charlie"],
+      removed: ["zeta", "beta"],
+      modified: ["yankee", "mike", "alfa"],
+    });
+    expect(o.data).toMatchObject({
+      added: ["alpha", "charlie", "delta"],
+      removed: ["beta", "zeta"],
+      modified: ["alfa", "mike", "yankee"],
+    });
+  });
+
   it("diffHashes classifies added / removed / modified deterministically", () => {
     const stored = { keep: "h1", change: "h2", gone: "h3" };
     const current = { keep: "h1", change: "h2-NEW", born: "h4" };
