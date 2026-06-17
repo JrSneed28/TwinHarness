@@ -76,6 +76,7 @@ const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const hash_1 = require("./hash");
 Object.defineProperty(exports, "GENESIS_PREV_HASH", { enumerable: true, get: function () { return hash_1.GENESIS_PREV_HASH; } });
+const jsonl_1 = require("./jsonl");
 /** Top-level state keys whose mutation is gate-relevant and therefore audited. */
 exports.GATE_LEDGER_KEYS = new Set([
     "implementation_allowed",
@@ -137,28 +138,17 @@ function computeLedgerRecordHash(entry) {
  * line, or a legacy unsealed line, is skipped while scanning upward.
  */
 function readLastLedgerRecordHash(paths) {
-    const file = ledgerPath(paths);
-    if (!fs.existsSync(file))
-        return hash_1.GENESIS_PREV_HASH;
-    const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
-    for (let i = lines.length - 1; i >= 0; i--) {
-        const trimmed = lines[i].trim();
-        if (!trimmed)
-            continue;
-        try {
-            const parsed = JSON.parse(trimmed);
-            if (typeof parsed === "object" && parsed !== null) {
-                const rh = parsed.recordHash;
-                if (typeof rh === "string" && hash_1.HEX64.test(rh))
-                    return rh;
-                // A legacy (unsealed) line — keep scanning upward for a sealed one.
-            }
-        }
-        catch {
-            // Tolerant: skip a malformed / partial-tail line and keep scanning.
-        }
-    }
-    return hash_1.GENESIS_PREV_HASH;
+    // Last sealed entry = the last line that is an object carrying a HEX64
+    // `recordHash`; legacy/unsealed lines (no valid recordHash) are skipped while
+    // scanning upward. None / missing file → GENESIS (the first NEW seal anchors the
+    // chain). The tolerant tail scan is the shared `scanTailValid` (#11).
+    const last = (0, jsonl_1.scanTailValid)(ledgerPath(paths), (p) => {
+        if (typeof p !== "object" || p === null)
+            return false;
+        const rh = p.recordHash;
+        return typeof rh === "string" && hash_1.HEX64.test(rh);
+    });
+    return last ? last.recordHash : hash_1.GENESIS_PREV_HASH;
 }
 /**
  * Append one entry to the gate ledger, sealing it into the hash chain.
@@ -188,26 +178,10 @@ function appendLedger(paths, entry) {
         // Never throw from the audit path.
     }
 }
-/** Read + parse every ledger entry. Missing file → empty. Bad lines skipped. */
+/** Read + parse every ledger entry. Missing file → empty. Bad lines skipped.
+ *  Tolerant full forward read via the shared `readJsonlValues` (#11). */
 function readLedger(paths) {
-    const file = ledgerPath(paths);
-    if (!fs.existsSync(file))
-        return [];
-    const out = [];
-    for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (!trimmed)
-            continue;
-        try {
-            const parsed = JSON.parse(trimmed);
-            if (typeof parsed === "object" && parsed !== null)
-                out.push(parsed);
-        }
-        catch {
-            // Skip malformed lines; the ledger is append-only and tolerant.
-        }
-    }
-    return out;
+    return (0, jsonl_1.readJsonlValues)(ledgerPath(paths), (p) => typeof p === "object" && p !== null);
 }
 /**
  * Verify the tamper-evidence chain over the ledger's SEALED entries.

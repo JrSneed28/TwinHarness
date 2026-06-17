@@ -62,6 +62,7 @@ exports.readTelemetryLog = readTelemetryLog;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const atomic_io_1 = require("./atomic-io");
+const jsonl_1 = require("./jsonl");
 /** `<stateDir>/telemetry.json` — the opt-in switch. */
 function telemetryConfigPath(paths) {
     return path.join(paths.stateDir, "telemetry.json");
@@ -118,24 +119,8 @@ function appendTelemetry(paths, record) {
         // Never throw from the (opt-in, local) telemetry path.
     }
 }
-/** Read + parse every log record. Missing file → empty. Malformed lines skipped. */
+/** Read + parse every log record. Missing file → empty. Malformed lines skipped.
+ *  Tolerant full forward read via the shared `readJsonlValues` (#11). */
 function readTelemetryLog(paths) {
-    const file = telemetryLogPath(paths);
-    if (!fs.existsSync(file))
-        return [];
-    const out = [];
-    for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (!trimmed)
-            continue;
-        try {
-            const parsed = JSON.parse(trimmed);
-            if (typeof parsed === "object" && parsed !== null)
-                out.push(parsed);
-        }
-        catch {
-            // Skip malformed lines; the log is append-only and tolerant.
-        }
-    }
-    return out;
+    return (0, jsonl_1.readJsonlValues)(telemetryLogPath(paths), (p) => typeof p === "object" && p !== null);
 }

@@ -23,6 +23,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "./paths";
 import { atomicWriteFile } from "./atomic-io";
+import { readJsonlValues } from "./jsonl";
 
 export interface TelemetryConfig {
   enabled: boolean;
@@ -85,20 +86,8 @@ export function appendTelemetry(paths: ProjectPaths, record: object): void {
   }
 }
 
-/** Read + parse every log record. Missing file → empty. Malformed lines skipped. */
+/** Read + parse every log record. Missing file → empty. Malformed lines skipped.
+ *  Tolerant full forward read via the shared `readJsonlValues` (#11). */
 export function readTelemetryLog(paths: ProjectPaths): object[] {
-  const file = telemetryLogPath(paths);
-  if (!fs.existsSync(file)) return [];
-  const out: object[] = [];
-  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed = JSON.parse(trimmed) as unknown;
-      if (typeof parsed === "object" && parsed !== null) out.push(parsed as object);
-    } catch {
-      // Skip malformed lines; the log is append-only and tolerant.
-    }
-  }
-  return out;
+  return readJsonlValues(telemetryLogPath(paths), (p): p is object => typeof p === "object" && p !== null);
 }

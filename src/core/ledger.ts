@@ -34,6 +34,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "./paths";
 import { hashContent, GENESIS_PREV_HASH, HEX64 } from "./hash";
+import { readJsonlValues, scanTailValid } from "./jsonl";
 
 // GENESIS_PREV_HASH + HEX64 are shared with the decision ledger and now live in
 // core/hash.ts (#14 dedup). Re-export GENESIS_PREV_HASH so existing importers
@@ -124,24 +125,16 @@ export function computeLedgerRecordHash(entry: Omit<LedgerEntry, "recordHash">):
  * line, or a legacy unsealed line, is skipped while scanning upward.
  */
 export function readLastLedgerRecordHash(paths: ProjectPaths): string {
-  const file = ledgerPath(paths);
-  if (!fs.existsSync(file)) return GENESIS_PREV_HASH;
-  const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const trimmed = lines[i]!.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed = JSON.parse(trimmed) as unknown;
-      if (typeof parsed === "object" && parsed !== null) {
-        const rh = (parsed as Record<string, unknown>).recordHash;
-        if (typeof rh === "string" && HEX64.test(rh)) return rh;
-        // A legacy (unsealed) line — keep scanning upward for a sealed one.
-      }
-    } catch {
-      // Tolerant: skip a malformed / partial-tail line and keep scanning.
-    }
-  }
-  return GENESIS_PREV_HASH;
+  // Last sealed entry = the last line that is an object carrying a HEX64
+  // `recordHash`; legacy/unsealed lines (no valid recordHash) are skipped while
+  // scanning upward. None / missing file → GENESIS (the first NEW seal anchors the
+  // chain). The tolerant tail scan is the shared `scanTailValid` (#11).
+  const last = scanTailValid(ledgerPath(paths), (p): p is { recordHash: string } => {
+    if (typeof p !== "object" || p === null) return false;
+    const rh = (p as Record<string, unknown>).recordHash;
+    return typeof rh === "string" && HEX64.test(rh);
+  });
+  return last ? last.recordHash : GENESIS_PREV_HASH;
 }
 
 /**
@@ -172,22 +165,10 @@ export function appendLedger(paths: ProjectPaths, entry: Omit<LedgerEntry, "ts" 
   }
 }
 
-/** Read + parse every ledger entry. Missing file → empty. Bad lines skipped. */
+/** Read + parse every ledger entry. Missing file → empty. Bad lines skipped.
+ *  Tolerant full forward read via the shared `readJsonlValues` (#11). */
 export function readLedger(paths: ProjectPaths): LedgerEntry[] {
-  const file = ledgerPath(paths);
-  if (!fs.existsSync(file)) return [];
-  const out: LedgerEntry[] = [];
-  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed = JSON.parse(trimmed) as unknown;
-      if (typeof parsed === "object" && parsed !== null) out.push(parsed as LedgerEntry);
-    } catch {
-      // Skip malformed lines; the ledger is append-only and tolerant.
-    }
-  }
-  return out;
+  return readJsonlValues(ledgerPath(paths), (p): p is LedgerEntry => typeof p === "object" && p !== null);
 }
 
 // ---------------------------------------------------------------------------

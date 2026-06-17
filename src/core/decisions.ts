@@ -21,6 +21,7 @@ import * as path from "node:path";
 import { createHmac } from "node:crypto";
 import type { ProjectPaths } from "./paths";
 import { hashContent, GENESIS_PREV_HASH, HEX64 } from "./hash";
+import { readJsonlValues, scanTailValid } from "./jsonl";
 import { canonicalizeStage } from "./stages";
 
 // GENESIS_PREV_HASH + HEX64 are shared with the gate ledger and now live in
@@ -177,20 +178,9 @@ function isValidEvent(parsed: unknown): parsed is DecisionEvent {
  * `verifyChain`, not here.
  */
 export function readDecisionEvents(paths: ProjectPaths): DecisionEvent[] {
-  const file = decisionsPath(paths);
-  if (!fs.existsSync(file)) return [];
-  const out: DecisionEvent[] = [];
-  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (isValidEvent(parsed)) out.push(parsed);
-    } catch {
-      // Tolerant: skip malformed / partial-tail lines.
-    }
-  }
-  return out;
+  // Tolerant full forward read via the shared `readJsonlValues` (#11): every line
+  // that parses AND passes `isValidEvent`, in file order; bad lines skipped.
+  return readJsonlValues(decisionsPath(paths), isValidEvent);
 }
 
 /**
@@ -208,20 +198,10 @@ export function readDecisionEvents(paths: ProjectPaths): DecisionEvent[] {
  * line is skipped, so a torn last write never corrupts the next `prevHash`.
  */
 export function readLastDecisionRecordHash(paths: ProjectPaths): string {
-  const file = decisionsPath(paths);
-  if (!fs.existsSync(file)) return GENESIS_PREV_HASH;
-  const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const trimmed = lines[i]!.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (isValidEvent(parsed)) return parsed.recordHash;
-    } catch {
-      // Tolerant: skip a malformed / partial-tail line and keep scanning upward.
-    }
-  }
-  return GENESIS_PREV_HASH;
+  // Tolerant tail scan via the shared `scanTailValid` (#11): the last line that
+  // passes `isValidEvent`; missing file / no valid tail line → GENESIS.
+  const last = scanTailValid(decisionsPath(paths), isValidEvent);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
 }
 
 // ---------------------------------------------------------------------------

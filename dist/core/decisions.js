@@ -72,6 +72,7 @@ const path = __importStar(require("node:path"));
 const node_crypto_1 = require("node:crypto");
 const hash_1 = require("./hash");
 Object.defineProperty(exports, "GENESIS_PREV_HASH", { enumerable: true, get: function () { return hash_1.GENESIS_PREV_HASH; } });
+const jsonl_1 = require("./jsonl");
 const stages_1 = require("./stages");
 /** Lifecycle transitions that carry an optional keyed seal (the human-gate events). */
 const APPROVAL_TRANSITIONS = new Set(["approved", "rejected", "superseded"]);
@@ -167,24 +168,9 @@ function isValidEvent(parsed) {
  * `verifyChain`, not here.
  */
 function readDecisionEvents(paths) {
-    const file = decisionsPath(paths);
-    if (!fs.existsSync(file))
-        return [];
-    const out = [];
-    for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (!trimmed)
-            continue;
-        try {
-            const parsed = JSON.parse(trimmed);
-            if (isValidEvent(parsed))
-                out.push(parsed);
-        }
-        catch {
-            // Tolerant: skip malformed / partial-tail lines.
-        }
-    }
-    return out;
+    // Tolerant full forward read via the shared `readJsonlValues` (#11): every line
+    // that parses AND passes `isValidEvent`, in file order; bad lines skipped.
+    return (0, jsonl_1.readJsonlValues)(decisionsPath(paths), isValidEvent);
 }
 /**
  * The `recordHash` of the ledger's last VALID event — the only thing
@@ -201,24 +187,10 @@ function readDecisionEvents(paths) {
  * line is skipped, so a torn last write never corrupts the next `prevHash`.
  */
 function readLastDecisionRecordHash(paths) {
-    const file = decisionsPath(paths);
-    if (!fs.existsSync(file))
-        return hash_1.GENESIS_PREV_HASH;
-    const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
-    for (let i = lines.length - 1; i >= 0; i--) {
-        const trimmed = lines[i].trim();
-        if (!trimmed)
-            continue;
-        try {
-            const parsed = JSON.parse(trimmed);
-            if (isValidEvent(parsed))
-                return parsed.recordHash;
-        }
-        catch {
-            // Tolerant: skip a malformed / partial-tail line and keep scanning upward.
-        }
-    }
-    return hash_1.GENESIS_PREV_HASH;
+    // Tolerant tail scan via the shared `scanTailValid` (#11): the last line that
+    // passes `isValidEvent`; missing file / no valid tail line → GENESIS.
+    const last = (0, jsonl_1.scanTailValid)(decisionsPath(paths), isValidEvent);
+    return last ? last.recordHash : hash_1.GENESIS_PREV_HASH;
 }
 // ---------------------------------------------------------------------------
 // Id minting (DS-001 / TD §Id-Minting) — monotonic; never reused
