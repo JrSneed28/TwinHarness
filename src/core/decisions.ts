@@ -20,11 +20,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHmac } from "node:crypto";
 import type { ProjectPaths } from "./paths";
-import { hashContent } from "./hash";
+import { hashContent, GENESIS_PREV_HASH, HEX64 } from "./hash";
 import { canonicalizeStage } from "./stages";
 
-/** `prevHash` of the very first event line — 64 hex zeros (DS-001). */
-export const GENESIS_PREV_HASH = "0".repeat(64);
+// GENESIS_PREV_HASH + HEX64 are shared with the gate ledger and now live in
+// core/hash.ts (#14 dedup). Re-export GENESIS_PREV_HASH so existing importers
+// (`import { GENESIS_PREV_HASH } from "./decisions"`) keep working unchanged.
+export { GENESIS_PREV_HASH };
 
 /** A decision's lifecycle event type. */
 export type DecisionEventType = "proposed" | "approved" | "rejected" | "superseded";
@@ -152,7 +154,6 @@ export function computeKeyedHash(event: Omit<DecisionEvent, "recordHash" | "keye
 // Tolerant reader (mirrors readLeaseEvents) — never throws
 // ---------------------------------------------------------------------------
 
-const HEX64 = /^[0-9a-f]{64}$/;
 const ID_RE = /^DECISION-\d{3,}$/;
 const EVENT_TYPES = new Set<DecisionEventType>(["proposed", "approved", "rejected", "superseded"]);
 

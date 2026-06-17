@@ -75,8 +75,7 @@ exports.verifyLedgerChain = verifyLedgerChain;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const hash_1 = require("./hash");
-/** `prevHash` of the first sealed entry — 64 hex zeros (the migration anchor). */
-exports.GENESIS_PREV_HASH = "0".repeat(64);
+Object.defineProperty(exports, "GENESIS_PREV_HASH", { enumerable: true, get: function () { return hash_1.GENESIS_PREV_HASH; } });
 /** Top-level state keys whose mutation is gate-relevant and therefore audited. */
 exports.GATE_LEDGER_KEYS = new Set([
     "implementation_allowed",
@@ -125,7 +124,6 @@ function computeLedgerRecordHash(entry) {
 // ---------------------------------------------------------------------------
 // Tail read (PERF — mirrors readLastDecisionRecordHash) — last sealed link only
 // ---------------------------------------------------------------------------
-const HEX64 = /^[0-9a-f]{64}$/;
 /**
  * The `recordHash` of the ledger's last SEALED entry — the only thing
  * `appendLedger` needs to chain the next link. Reads the file once but parses
@@ -141,7 +139,7 @@ const HEX64 = /^[0-9a-f]{64}$/;
 function readLastLedgerRecordHash(paths) {
     const file = ledgerPath(paths);
     if (!fs.existsSync(file))
-        return exports.GENESIS_PREV_HASH;
+        return hash_1.GENESIS_PREV_HASH;
     const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
     for (let i = lines.length - 1; i >= 0; i--) {
         const trimmed = lines[i].trim();
@@ -151,7 +149,7 @@ function readLastLedgerRecordHash(paths) {
             const parsed = JSON.parse(trimmed);
             if (typeof parsed === "object" && parsed !== null) {
                 const rh = parsed.recordHash;
-                if (typeof rh === "string" && HEX64.test(rh))
+                if (typeof rh === "string" && hash_1.HEX64.test(rh))
                     return rh;
                 // A legacy (unsealed) line — keep scanning upward for a sealed one.
             }
@@ -160,7 +158,7 @@ function readLastLedgerRecordHash(paths) {
             // Tolerant: skip a malformed / partial-tail line and keep scanning.
         }
     }
-    return exports.GENESIS_PREV_HASH;
+    return hash_1.GENESIS_PREV_HASH;
 }
 /**
  * Append one entry to the gate ledger, sealing it into the hash chain.
@@ -239,14 +237,14 @@ function verifyLedgerChain(entries) {
     let start = -1;
     for (let i = 0; i < entries.length; i++) {
         const rh = entries[i].recordHash;
-        if (typeof rh === "string" && HEX64.test(rh)) {
+        if (typeof rh === "string" && hash_1.HEX64.test(rh)) {
             start = i;
             break;
         }
     }
     if (start === -1)
         return { ok: true }; // fully-legacy (unsealed) ledger — nothing to verify
-    let expectedPrev = exports.GENESIS_PREV_HASH; // first sealed entry anchors to GENESIS
+    let expectedPrev = hash_1.GENESIS_PREV_HASH; // first sealed entry anchors to GENESIS
     for (let i = start; i < entries.length; i++) {
         const e = entries[i];
         const { recordHash, ...rest } = e;
@@ -256,7 +254,7 @@ function verifyLedgerChain(entries) {
         if (recomputed !== recordHash) {
             return { ok: false, brokenAt: i, reason: "edited" };
         }
-        if ((e.prevHash ?? exports.GENESIS_PREV_HASH) !== expectedPrev) {
+        if ((e.prevHash ?? hash_1.GENESIS_PREV_HASH) !== expectedPrev) {
             return { ok: false, brokenAt: i, reason: "prev_mismatch" };
         }
         expectedPrev = recordHash;

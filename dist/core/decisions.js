@@ -71,9 +71,8 @@ const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const node_crypto_1 = require("node:crypto");
 const hash_1 = require("./hash");
+Object.defineProperty(exports, "GENESIS_PREV_HASH", { enumerable: true, get: function () { return hash_1.GENESIS_PREV_HASH; } });
 const stages_1 = require("./stages");
-/** `prevHash` of the very first event line — 64 hex zeros (DS-001). */
-exports.GENESIS_PREV_HASH = "0".repeat(64);
 /** Lifecycle transitions that carry an optional keyed seal (the human-gate events). */
 const APPROVAL_TRANSITIONS = new Set(["approved", "rejected", "superseded"]);
 /** `<stateDir>/decisions.jsonl` — the decision ledger's location. */
@@ -140,7 +139,6 @@ function computeKeyedHash(event, key) {
 // ---------------------------------------------------------------------------
 // Tolerant reader (mirrors readLeaseEvents) — never throws
 // ---------------------------------------------------------------------------
-const HEX64 = /^[0-9a-f]{64}$/;
 const ID_RE = /^DECISION-\d{3,}$/;
 const EVENT_TYPES = new Set(["proposed", "approved", "rejected", "superseded"]);
 /** Validate the shape of a parsed line; malformed lines are skipped (DS-001). */
@@ -152,9 +150,9 @@ function isValidEvent(parsed) {
         return false;
     if (typeof e.event !== "string" || !EVENT_TYPES.has(e.event))
         return false;
-    if (typeof e.prevHash !== "string" || !HEX64.test(e.prevHash))
+    if (typeof e.prevHash !== "string" || !hash_1.HEX64.test(e.prevHash))
         return false;
-    if (typeof e.recordHash !== "string" || !HEX64.test(e.recordHash))
+    if (typeof e.recordHash !== "string" || !hash_1.HEX64.test(e.recordHash))
         return false;
     if (e.links !== undefined && !Array.isArray(e.links))
         return false;
@@ -205,7 +203,7 @@ function readDecisionEvents(paths) {
 function readLastDecisionRecordHash(paths) {
     const file = decisionsPath(paths);
     if (!fs.existsSync(file))
-        return exports.GENESIS_PREV_HASH;
+        return hash_1.GENESIS_PREV_HASH;
     const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
     for (let i = lines.length - 1; i >= 0; i--) {
         const trimmed = lines[i].trim();
@@ -220,7 +218,7 @@ function readLastDecisionRecordHash(paths) {
             // Tolerant: skip a malformed / partial-tail line and keep scanning upward.
         }
     }
-    return exports.GENESIS_PREV_HASH;
+    return hash_1.GENESIS_PREV_HASH;
 }
 // ---------------------------------------------------------------------------
 // Id minting (DS-001 / TD §Id-Minting) — monotonic; never reused
@@ -297,7 +295,7 @@ function appendDecisionEvent(paths, event, key) {
  * subsequent `prevHash`, so one linear pass detects tampering (ADR-001).
  */
 function verifyChain(events) {
-    let expectedPrev = exports.GENESIS_PREV_HASH;
+    let expectedPrev = hash_1.GENESIS_PREV_HASH;
     for (let i = 0; i < events.length; i++) {
         const e = events[i];
         const { recordHash, ...rest } = e;

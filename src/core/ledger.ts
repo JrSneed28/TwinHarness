@@ -33,10 +33,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "./paths";
-import { hashContent } from "./hash";
+import { hashContent, GENESIS_PREV_HASH, HEX64 } from "./hash";
 
-/** `prevHash` of the first sealed entry — 64 hex zeros (the migration anchor). */
-export const GENESIS_PREV_HASH = "0".repeat(64);
+// GENESIS_PREV_HASH + HEX64 are shared with the decision ledger and now live in
+// core/hash.ts (#14 dedup). Re-export GENESIS_PREV_HASH so existing importers
+// (`import { GENESIS_PREV_HASH } from "./ledger"`) keep working unchanged.
+export { GENESIS_PREV_HASH };
 
 /** Top-level state keys whose mutation is gate-relevant and therefore audited. */
 export const GATE_LEDGER_KEYS = new Set<string>([
@@ -108,8 +110,6 @@ export function computeLedgerRecordHash(entry: Omit<LedgerEntry, "recordHash">):
 // ---------------------------------------------------------------------------
 // Tail read (PERF — mirrors readLastDecisionRecordHash) — last sealed link only
 // ---------------------------------------------------------------------------
-
-const HEX64 = /^[0-9a-f]{64}$/;
 
 /**
  * The `recordHash` of the ledger's last SEALED entry — the only thing

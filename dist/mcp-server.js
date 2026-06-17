@@ -15911,6 +15911,8 @@ function hashContent(content) {
   const normalized = content.replace(/\r\n/g, "\n");
   return (0, import_node_crypto.createHash)("sha256").update(normalized, "utf8").digest("hex");
 }
+var GENESIS_PREV_HASH = "0".repeat(64);
+var HEX64 = /^[0-9a-f]{64}$/;
 var HASH_SKIP_DIRS = /* @__PURE__ */ new Set([".git", "node_modules", "dist"]);
 var MAX_HASH_FILES = 5e3;
 var MAX_HASH_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -15971,7 +15973,6 @@ function shortHashPath(abs) {
 }
 
 // src/core/ledger.ts
-var GENESIS_PREV_HASH = "0".repeat(64);
 var GATE_LEDGER_KEYS = /* @__PURE__ */ new Set([
   "implementation_allowed",
   "drift_open_blocking",
@@ -15996,7 +15997,6 @@ function ledgerCanonicalText(entry) {
 function computeLedgerRecordHash(entry) {
   return hashContent(ledgerCanonicalText(entry));
 }
-var HEX64 = /^[0-9a-f]{64}$/;
 function readLastLedgerRecordHash(paths) {
   const file = ledgerPath(paths);
   if (!fs5.existsSync(file)) return GENESIS_PREV_HASH;
@@ -17406,7 +17406,6 @@ function reviseEscalations(state, cap = DEFAULT_REVISE_CAP) {
 var fs14 = __toESM(require("node:fs"));
 var path13 = __toESM(require("node:path"));
 var import_node_crypto2 = require("node:crypto");
-var GENESIS_PREV_HASH2 = "0".repeat(64);
 var APPROVAL_TRANSITIONS = /* @__PURE__ */ new Set(["approved", "rejected", "superseded"]);
 function decisionsPath(paths) {
   return path13.join(paths.stateDir, "decisions.jsonl");
@@ -17443,7 +17442,6 @@ function computeRecordHash(event) {
 function computeKeyedHash(event, key) {
   return (0, import_node_crypto2.createHmac)("sha256", key).update(canonicalText(event)).digest("hex");
 }
-var HEX642 = /^[0-9a-f]{64}$/;
 var ID_RE = /^DECISION-\d{3,}$/;
 var EVENT_TYPES = /* @__PURE__ */ new Set(["proposed", "approved", "rejected", "superseded"]);
 function isValidEvent(parsed) {
@@ -17451,8 +17449,8 @@ function isValidEvent(parsed) {
   const e = parsed;
   if (typeof e.id !== "string" || !ID_RE.test(e.id)) return false;
   if (typeof e.event !== "string" || !EVENT_TYPES.has(e.event)) return false;
-  if (typeof e.prevHash !== "string" || !HEX642.test(e.prevHash)) return false;
-  if (typeof e.recordHash !== "string" || !HEX642.test(e.recordHash)) return false;
+  if (typeof e.prevHash !== "string" || !HEX64.test(e.prevHash)) return false;
+  if (typeof e.recordHash !== "string" || !HEX64.test(e.recordHash)) return false;
   if (e.links !== void 0 && !Array.isArray(e.links)) return false;
   if (e.keyedHash !== void 0 && typeof e.keyedHash !== "string") return false;
   return true;
@@ -17474,7 +17472,7 @@ function readDecisionEvents(paths) {
 }
 function readLastDecisionRecordHash(paths) {
   const file = decisionsPath(paths);
-  if (!fs14.existsSync(file)) return GENESIS_PREV_HASH2;
+  if (!fs14.existsSync(file)) return GENESIS_PREV_HASH;
   const lines = fs14.readFileSync(file, "utf8").split(/\r?\n/);
   for (let i = lines.length - 1; i >= 0; i--) {
     const trimmed = lines[i].trim();
@@ -17485,7 +17483,7 @@ function readLastDecisionRecordHash(paths) {
     } catch {
     }
   }
-  return GENESIS_PREV_HASH2;
+  return GENESIS_PREV_HASH;
 }
 function numericSuffix(id) {
   const m = /^DECISION-(\d+)$/.exec(id);
@@ -17516,7 +17514,7 @@ function appendDecisionEvent(paths, event, key) {
   return sealed;
 }
 function verifyChain(events) {
-  let expectedPrev = GENESIS_PREV_HASH2;
+  let expectedPrev = GENESIS_PREV_HASH;
   for (let i = 0; i < events.length; i++) {
     const e = events[i];
     const { recordHash, ...rest } = e;
