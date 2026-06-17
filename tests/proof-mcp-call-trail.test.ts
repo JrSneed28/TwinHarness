@@ -44,8 +44,8 @@ describe("REQ-PROOF-C1: dedicated proof-calls.jsonl producer trail (C1/A1/A2)", 
     tp.cleanup();
   });
 
-  it("success site appends {tool,ts,ok:true} for a real, non-throwing tool call", () => {
-    const res = callTool("th_state_get", {});
+  it("success site appends {tool,ts,ok:true} for a real, non-throwing tool call", async () => {
+    const res = await callTool("th_state_get", {});
     expect(res.isError).toBeFalsy();
 
     const calls = readProofCalls(tp.paths);
@@ -56,7 +56,7 @@ describe("REQ-PROOF-C1: dedicated proof-calls.jsonl producer trail (C1/A1/A2)", 
     expect(hit!.ts.length).toBeGreaterThan(0);
   });
 
-  it("catch site appends {tool,ts,ok:false} when a handler throws", () => {
+  it("catch site appends {tool,ts,ok:false} when a handler throws", async () => {
     const target = TOOL_DEFS.find((t) => t.name === "th_repo_map")!;
     const original = target.run;
     // `as const` makes TOOL_DEFS readonly at the type level only — the entries are
@@ -65,7 +65,7 @@ describe("REQ-PROOF-C1: dedicated proof-calls.jsonl producer trail (C1/A1/A2)", 
       throw new Error("boom: injected to exercise the catch-site trail append");
     };
     try {
-      const res = callTool("th_repo_map", {});
+      const res = await callTool("th_repo_map", {});
       // The throw is mapped to a tool error, never crashing the call.
       expect(res.isError).toBe(true);
     } finally {
@@ -77,21 +77,22 @@ describe("REQ-PROOF-C1: dedicated proof-calls.jsonl producer trail (C1/A1/A2)", 
     expect(hit!.ok).toBe(false);
   });
 
-  it("trail is decoupled from the telemetry opt-in (M3): records with telemetry OFF", () => {
+  it("trail is decoupled from the telemetry opt-in (M3): records with telemetry OFF", async () => {
     // makeTempProject + runInit leave telemetry default-OFF, so telemetry.jsonl is
     // never created — yet the dedicated trail still records the call.
-    callTool("th_state_get", {});
+    await callTool("th_state_get", {});
 
     expect(readProofCalls(tp.paths).length).toBeGreaterThan(0);
     expect(fs.existsSync(path.join(tp.paths.stateDir, "telemetry.jsonl"))).toBe(false);
   });
 
-  it("best-effort: a failing append never breaks the tool call", () => {
+  it("best-effort: a failing append never breaks the tool call", async () => {
     // Remove the state dir so the append target's directory is gone; the call must
-    // still return a normal result and must not throw.
+    // still resolve to a normal result and must not reject.
     fs.rmSync(tp.paths.stateDir, { recursive: true, force: true });
 
-    expect(() => callTool("th_state_get", {})).not.toThrow();
+    const res = await callTool("th_state_get", {});
+    expect(res).toBeDefined();
     // Append silently dropped (no dir), no crash, no trail.
     expect(readProofCalls(tp.paths)).toEqual([]);
   });

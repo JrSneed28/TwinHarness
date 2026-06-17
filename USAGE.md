@@ -956,9 +956,9 @@ Pre-edit blast-radius analysis over the persisted `repo-map.json`. Reads no stat
 | `map_invalid-json` / `map_schema` / `map_version` | Map file malformed or unknown version | Run `th repo map` to regenerate |
 | `unknown_slice` | `--slice` names no known slice | Check `th state status` for valid slice IDs |
 
-#### MCP tools (registered count 35)
+#### MCP tools (registered count 38)
 
-35 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin (REQ-RU-051 — identical code path). The four repo-understanding tools are shown below:
+38 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin (REQ-RU-051 — identical code path). The four repo-understanding tools are shown below; the operational proof suite also registers the read/coordination-only `th_proof_run`, `th_proof_component`, and `th_proof_report` (tail-appended, never gate-mutating):
 
 | Tool name | CLI equivalent | Notes |
 |---|---|---|

@@ -60,14 +60,15 @@ describe("SLICE-6 — MCP parity: th_repo_check + four th_decision_* tools (coun
 
   // ---- REQ-408 (non-negotiable tripwire): approve absent; full registry count ----
   it(
-    "REQ-408: test_REQ408_mcp_has_no_decision_approve_tool_count_35 — th_decision_approve absent (non-negotiable); total registered tool count exactly 35 after the coordination tools were added",
+    "REQ-408: test_REQ408_mcp_has_no_decision_approve_tool_count_38 — th_decision_approve absent (non-negotiable); total registered tool count exactly 38 after the coordination + proof tools were added",
     () => {
       const names = TOOL_DEFS.map((t) => t.name);
       // Tripwire: approve MUST NEVER appear (RULE-011, INV-005)
       expect(names).not.toContain("th_decision_approve");
       // The SLICE-6 baseline was 23; the artifact-lease/collab/debate trios plus
-      // th_build_dispatch/th_build_plan bring the registry to 35.
-      expect(TOOL_DEFS.length).toBe(35);
+      // th_build_dispatch/th_build_plan brought it to 35, and the th_proof_* trio
+      // (run/component/report) appends at the tail to reach 38 (PS-Q4).
+      expect(TOOL_DEFS.length).toBe(38);
     },
   );
 

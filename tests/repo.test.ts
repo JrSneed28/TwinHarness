@@ -90,7 +90,7 @@ describe("REQ-RU-001: dispatch() attachment point — `repo` group now wired (SL
 // Pinning the exact count + names makes any future change to the surface deliberate.
 // ---------------------------------------------------------------------------
 
-describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 35 tools registered (coordination-primitive layer added th_build_dispatch/plan, th_artifact_*, th_collab_*, th_debate_* on top of the prior 23)", () => {
+describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 38 tools registered (coordination-primitive layer added th_build_dispatch/plan, th_artifact_*, th_collab_*, th_debate_* on top of the prior 23; the operational proof suite appends th_proof_run/component/report)", () => {
   // Anchor: REQ-NFR-002
   const EXPECTED_TOOL_NAMES = [
     "th_state_get",
@@ -128,13 +128,16 @@ describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 35 tools registered (coord
     "th_debate_add",
     "th_debate_list",
     "th_debate_resolve",
+    "th_proof_run",
+    "th_proof_component",
+    "th_proof_report",
   ] as const;
 
-  it("REQ-NFR-002 — TOOL_DEFS.length === 35 (coordination-primitive layer added th_build_dispatch/plan, th_artifact_claim/release/leases, th_collab_init/fragment/list/merge, th_debate_add/list/resolve on top of the prior 23)", () => {
-    expect(TOOL_DEFS.length).toBe(35);
+  it("REQ-NFR-002 — TOOL_DEFS.length === 38 (coordination-primitive layer added th_build_dispatch/plan, th_artifact_claim/release/leases, th_collab_init/fragment/list/merge, th_debate_add/list/resolve on top of the prior 23; the proof suite appends th_proof_run/component/report → 38)", () => {
+    expect(TOOL_DEFS.length).toBe(38);
   });
 
-  it("REQ-NFR-002 — TOOL_DEFS contains exactly the 35 expected tool names", () => {
+  it("REQ-NFR-002 — TOOL_DEFS contains exactly the 38 expected tool names", () => {
     const names = TOOL_DEFS.map((t) => t.name);
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
   });

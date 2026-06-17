@@ -334,11 +334,12 @@ describe("SLICE-4 / TASK-010 — MCP adapter: repo-map tool wiring (REQ-RU-044..
 // SLICE-4 / TASK-011 — REQ-RU-094 + REQ-RU-040 (MCP half)
 // ===========================================================================
 
-describe("SLICE-4 / TASK-011 — MCP tool-count 35 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
+describe("SLICE-4 / TASK-011 — MCP tool-count 38 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
   // Full registry, in registration order. The original 23-tool battery (REQ-RU-094)
   // is extended by the 12 coordination tools added after it: th_build_dispatch and
   // th_build_plan slot into the build group (after th_build_release), and the
-  // artifact-lease / collab / debate trios append at the tail.
+  // artifact-lease / collab / debate trios append at the tail — and finally the
+  // th_proof_* trio (run/component/report) appends at the very tail (35→38, PS-Q4).
   const expectedAll = [
     "th_state_get",
     "th_state_set",
@@ -375,10 +376,13 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 35 + schema/no-exec battery (REQ
     "th_debate_add",
     "th_debate_list",
     "th_debate_resolve",
+    "th_proof_run",
+    "th_proof_component",
+    "th_proof_report",
   ];
 
-  // ---- REQ-RU-094: full registry, in order (originally 23; now 35 with the coordination tools) ----
-  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_35 — TOOL_DEFS exposes exactly 35 tools in order", () => {
+  // ---- REQ-RU-094: full registry, in order (originally 23; now 38 with the coordination + proof tools) ----
+  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_38 — TOOL_DEFS exposes exactly 38 tools in order", () => {
     expect(TOOL_DEFS.map((t) => t.name)).toEqual(expectedAll);
   });
 
