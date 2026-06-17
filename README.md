@@ -85,7 +85,7 @@ flowchart TD
 
 ## Getting started
 
-**Prerequisites:** Claude Code (≥ 1.0.0; targets the hook + agent manifest schema v1); Node >= 18 on PATH.
+**Prerequisites:** Claude Code (≥ 1.0.0; targets the hook + agent manifest schema v1); Node >= 20 on PATH.
 
 ### Install
 
@@ -303,4 +303,4 @@ MIT
 
 ---
 
-[![version](https://img.shields.io/badge/version-0.6.2-blue)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-7c3aed) ![node](https://img.shields.io/badge/node-%E2%89%A5%2018-339933)
+[![version](https://img.shields.io/badge/version-0.6.2-blue)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-7c3aed) ![node](https://img.shields.io/badge/node-%E2%89%A5%2020-339933)

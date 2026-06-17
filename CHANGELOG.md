@@ -67,6 +67,20 @@ Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding lay
   the design deliberately avoids a circular `count <= length` "regression" check. `th doctor` counts
   anchors separately from gate-mutation entries.
 
+### Changed (PR #14 review remediation — dev toolchain, 2026-06-16)
+
+- **vitest 3 → 4; Node floor raised to >= 20 (finding #16).** Bumps `vitest` to `^4`, clearing 5
+  dev-chain CVEs (vite → nested esbuild: RCE via `NPM_CONFIG_REGISTRY`, and the Windows dev-server
+  arbitrary-file-read) that surfaced in `npm audit` — `npm audit` now reports **0 vulnerabilities**.
+  These never shipped: vitest is `devDependencies` only and the runtime bundle is `tsc + esbuild`,
+  so `dist/` is byte-unchanged by this bump. vitest 4 requires Node `>= 20`, so `engines.node` is
+  raised `>=18` → `>=20` (Node 18 is EOL since 2025-04) and the README prerequisite/badge follow.
+  `vitest.config.ts` gains a 15s default `testTimeout`/`hookTimeout`: vitest 4's heavier per-run
+  import phase overlaps with execution, so the first real-subprocess test (`runCLI` spawning a cold
+  `node dist/cli.js`) could exceed the old 5s default under full-suite load — a false-red (it passes
+  in isolation), not a product change. Full suite green ×2 under v4 (1363 pass / 1 skip); rollback is
+  a single-commit revert of `package.json` + `package-lock.json` + `vitest.config.ts`.
+
 ### Fixed (audit remediation, 2026-06-16)
 
 - **`th verify`/coverage-report tests are now genuinely cross-platform.** `tests/verify.test.ts`

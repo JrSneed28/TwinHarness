@@ -30,14 +30,14 @@
     "prepare": "git config core.hooksPath .githooks || exit 0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/node": "^22.10.0",
     "esbuild": "^0.28.1",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.0.0"
   },
   "license": "MIT"
 }
