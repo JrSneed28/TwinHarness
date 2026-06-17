@@ -4,7 +4,7 @@ import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState } from "../core/state-store";
 import { CURRENT_SCHEMA_VERSION } from "../core/state-schema";
-import { readLedger, verifyLedgerChain, ledgerPath } from "../core/ledger";
+import { readLedger, verifyLedgerChain, verifyLedgerSeals, ledgerPath } from "../core/ledger";
 import { artifactIntegrity, sliceProgress, reviseEscalations } from "../core/health";
 import { computeBreakdown } from "../core/coverage";
 import { readVerifyReport } from "../core/verify";
@@ -61,8 +61,17 @@ function ledgerChecks(paths: ProjectPaths, opts: { strict?: boolean }): Check[] 
   if (!fs.existsSync(ledgerPath(paths))) return [];
   const ledgerEntries = readLedger(paths);
   const ledgerCount = ledgerEntries.length;
+  // Count gate mutations separately from high-water anchors (#8): an anchor is a
+  // sealed bookkeeping line, not a gate mutation, so the "gate-mutation entries"
+  // figure must exclude it to stay accurate.
+  const anchors = ledgerEntries.filter((e) => e.event === "high-water").length;
+  const gateMutations = ledgerCount - anchors;
   const out: Check[] = [
-    { name: "audit ledger", status: "ok", detail: `${ledgerCount} gate-mutation entr${ledgerCount === 1 ? "y" : "ies"}` },
+    {
+      name: "audit ledger",
+      status: "ok",
+      detail: `${gateMutations} gate-mutation entr${gateMutations === 1 ? "y" : "ies"}${anchors > 0 ? ` (+${anchors} high-water anchor${anchors === 1 ? "" : "s"})` : ""}`,
+    },
   ];
   const chain = verifyLedgerChain(ledgerEntries);
   if (chain.ok) {
@@ -73,6 +82,25 @@ function ledgerChecks(paths: ProjectPaths, opts: { strict?: boolean }): Check[] 
       status: opts.strict ? "fail" : "warn",
       detail: `BROKEN at entry ${chain.brokenAt} (${chain.reason}) — a sealed entry was edited, deleted, or reordered${opts.strict ? "" : " (run \`th doctor --strict\` to fail on this)"}`,
     });
+  }
+
+  // Keyed-seal verification (#8) — ONLY when TH_LEDGER_KEY is set. WARN-ONLY (even
+  // under --strict): a per-environment key difference or the wrong key must never
+  // turn a committed ledger red, so a mismatch informs rather than fails. The
+  // in-chain `high-water` anchor needs NO separate check — it is a sealed entry like
+  // any other, verified by the chain walk above; do NOT add a circular
+  // `count <= sealed-run-length` comparison (it cannot detect truncation — see
+  // appendHighWater / the #8 threat model).
+  const key = process.env.TH_LEDGER_KEY;
+  if (key) {
+    const seals = verifyLedgerSeals(ledgerEntries, key);
+    if (seals.ok) {
+      const sealed = ledgerEntries.filter((e) => typeof e.keyedHash === "string").length;
+      out.push({ name: "ledger seals", status: "ok", detail: sealed > 0 ? `${sealed} keyed seal(s) verified` : "no keyed seals present" });
+    } else {
+      const where = seals.mismatches.map((m) => `entry ${m.index} (${m.event})`).join(", ");
+      out.push({ name: "ledger seals", status: "warn", detail: `keyed-seal MISMATCH at ${where} — wrong TH_LEDGER_KEY or a sealed field was tampered (warn-only)` });
+    }
   }
   return out;
 }

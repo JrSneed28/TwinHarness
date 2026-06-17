@@ -15902,6 +15902,7 @@ function structuredLog(event) {
 // src/core/ledger.ts
 var fs6 = __toESM(require("node:fs"));
 var path5 = __toESM(require("node:path"));
+var import_node_crypto2 = require("node:crypto");
 
 // src/core/hash.ts
 var import_node_crypto = require("node:crypto");
@@ -16019,7 +16020,7 @@ function ledgerPath(paths) {
 function ledgerCanonicalText(entry) {
   const ordered = {};
   for (const key of Object.keys(entry).sort()) {
-    if (key === "recordHash") continue;
+    if (key === "recordHash" || key === "keyedHash") continue;
     const val = entry[key];
     if (val === void 0) continue;
     ordered[key] = val;
@@ -16028,6 +16029,9 @@ function ledgerCanonicalText(entry) {
 }
 function computeLedgerRecordHash(entry) {
   return hashContent(ledgerCanonicalText(entry));
+}
+function computeLedgerKeyedHash(entry, key) {
+  return (0, import_node_crypto2.createHmac)("sha256", key).update(ledgerCanonicalText(entry)).digest("hex");
 }
 function readLastLedgerRecordHash(paths) {
   const last = scanTailValid(ledgerPath(paths), (p) => {
@@ -16044,9 +16048,20 @@ function appendLedger(paths, entry) {
     const withPrev = { ts: (/* @__PURE__ */ new Date()).toISOString(), ...entry, prevHash };
     const recordHash = computeLedgerRecordHash(withPrev);
     const sealed = { ...withPrev, recordHash };
+    const key = process.env.TH_LEDGER_KEY;
+    if (key) {
+      sealed.keyedHash = computeLedgerKeyedHash(withPrev, key);
+    }
     fs6.appendFileSync(ledgerPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   } catch {
   }
+}
+function appendHighWater(paths) {
+  const sealedCount = readLedger(paths).filter((e) => typeof e.recordHash === "string").length;
+  appendLedger(paths, { event: "high-water", count: sealedCount });
+}
+function readLedger(paths) {
+  return readJsonlValues(ledgerPath(paths), (p) => typeof p === "object" && p !== null);
 }
 
 // src/core/guards.ts
@@ -16282,6 +16297,7 @@ ${formatIssues(validation.issues)}`,
   structuredLog({ cmd: "state set", key });
   if (GATE_LEDGER_KEYS.has(firstSegment)) {
     appendLedger(paths, { event: "gate-state-change", key, value });
+    appendHighWater(paths);
   }
   return success({ data: { key, value }, human: `Set ${key} = ${JSON.stringify(value)}` });
 }
@@ -17427,7 +17443,7 @@ function reviseEscalations(state, cap = DEFAULT_REVISE_CAP) {
 // src/core/decisions.ts
 var fs15 = __toESM(require("node:fs"));
 var path13 = __toESM(require("node:path"));
-var import_node_crypto2 = require("node:crypto");
+var import_node_crypto3 = require("node:crypto");
 var APPROVAL_TRANSITIONS = /* @__PURE__ */ new Set(["approved", "rejected", "superseded"]);
 function decisionsPath(paths) {
   return path13.join(paths.stateDir, "decisions.jsonl");
@@ -17462,7 +17478,7 @@ function computeRecordHash(event) {
   return hashContent(canonicalText(event));
 }
 function computeKeyedHash(event, key) {
-  return (0, import_node_crypto2.createHmac)("sha256", key).update(canonicalText(event)).digest("hex");
+  return (0, import_node_crypto3.createHmac)("sha256", key).update(canonicalText(event)).digest("hex");
 }
 var ID_RE = /^DECISION-\d{3,}$/;
 var EVENT_TYPES = /* @__PURE__ */ new Set(["proposed", "approved", "rejected", "superseded"]);

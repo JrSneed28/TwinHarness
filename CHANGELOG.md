@@ -45,6 +45,28 @@ Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding lay
   assertions). Both are documented in the predicate and pinned by a table test in
   `tests/coverage.test.ts`. Decision recorded in `docs/05-adrs/ADR-005`. No behavior change.
 
+### Added (PR #14 review remediation — GOV-2 ledger hardening, 2026-06-16)
+
+- **Opt-in HMAC keyed seal for the gate ledger (finding #8, SECURITY).** Mirroring the decision
+  ledger, `core/ledger.ts` gains `computeLedgerKeyedHash` + `verifyLedgerSeals` (warn-only) and
+  `appendLedger` now attaches an HMAC `keyedHash` over each entry's canonical text **when
+  `TH_LEDGER_KEY` is set** (a NEW env, a separate trust domain from `TH_DECISION_KEY`; never
+  auto-generated; an unset/empty key seals nothing). `keyedHash` is excluded from the canonical text,
+  so the keyless `recordHash`/chain is **byte-identical** with or without a key — legacy ledgers stay
+  fully back-compatible. The seal catches an attacker who re-hashes the keyless chain after editing a
+  field but cannot forge the HMAC without the key. `th doctor` adds a `ledger seals` check
+  (WARN-only, even under `--strict`, so a wrong/missing key never turns a committed ledger red).
+
+- **Sealed in-chain high-water anchor (finding #8).** `appendHighWater` writes a sealed
+  `{ event:"high-water", count:N }` entry (N = sealed entries before it) into the hash chain itself —
+  re-homed from the rejected UNSEALED `state.json` counter (ADR-001 sidecar precedent). It is emitted
+  after a `gate-state-change` flip. Editing/reordering/mid-deleting it breaks `verifyLedgerChain` like
+  any sealed entry. **Documented residual:** it does NOT detect tail truncation — the chain walk is
+  length-agnostic, so a truncated tail is a valid prefix (`verifyLedgerChain` → `ok`); a negative
+  characterization test pins this so no future reader mistakes the anchor for truncation closure, and
+  the design deliberately avoids a circular `count <= length` "regression" check. `th doctor` counts
+  anchors separately from gate-mutation entries.
+
 ### Fixed (audit remediation, 2026-06-16)
 
 - **`th verify`/coverage-report tests are now genuinely cross-platform.** `tests/verify.test.ts`

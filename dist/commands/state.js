@@ -156,6 +156,12 @@ function runStateSetLocked(paths, key, rawValue) {
     // the blocking-drift count changed. Observability only — never blocks.
     if (ledger_1.GATE_LEDGER_KEYS.has(firstSegment)) {
         (0, ledger_1.appendLedger)(paths, { event: "gate-state-change", key, value });
+        // Seal an in-chain high-water anchor after the gate flip (#8): a sealed
+        // {event:"high-water", count} entry whose count is the sealed-entry count before
+        // it. Strengthens edit/reorder/mid-delete evidence for the gate-flip run and
+        // keeps the count out of an unsealed sidecar (ADR-001 precedent). It does NOT
+        // detect tail truncation (documented residual — see appendHighWater). Best-effort.
+        (0, ledger_1.appendHighWater)(paths);
     }
     return (0, output_1.success)({ data: { key, value }, human: `Set ${key} = ${JSON.stringify(value)}` });
 }

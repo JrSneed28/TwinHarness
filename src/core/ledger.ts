@@ -32,6 +32,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHmac } from "node:crypto";
 import type { ProjectPaths } from "./paths";
 import { hashContent, GENESIS_PREV_HASH, HEX64 } from "./hash";
 import { readJsonlValues, scanTailValid } from "./jsonl";
@@ -67,6 +68,14 @@ export interface LedgerEntry {
    * is what marks an entry as SEALED.
    */
   recordHash?: string;
+  /**
+   * OPTIONAL keyed seal (GOV-2 / #8) — HMAC-SHA256 of the SAME canonical text as
+   * `recordHash`, present ONLY on entries sealed while `TH_LEDGER_KEY` was set.
+   * EXCLUDED from `ledgerCanonicalText` (so it never affects the keyless chain).
+   * Verified warn-only via {@link verifyLedgerSeals}; never auto-generated. Mirrors
+   * the decision ledger's `keyedHash` (`core/decisions.ts`).
+   */
+  keyedHash?: string;
   [key: string]: unknown;
 }
 
@@ -95,7 +104,10 @@ export function ledgerCanonicalText(entry: Omit<LedgerEntry, "recordHash">): str
   // blast_radius_flags); a nested OBJECT value would NOT be key-normalized, so do
   // not seal one without extending this canonicalizer.
   for (const key of Object.keys(entry).sort()) {
-    if (key === "recordHash") continue; // never an input to its own hash
+    // Neither hash output is an input to the canonical text: `recordHash` is the
+    // keyless digest, `keyedHash` is the optional HMAC seal (#8). Excluding both
+    // keeps the keyless recordHash/chain byte-identical whether or not a seal exists.
+    if (key === "recordHash" || key === "keyedHash") continue;
     const val = (entry as Record<string, unknown>)[key];
     if (val === undefined) continue; // omit absent keys (mirrors decisions)
     ordered[key] = val;
@@ -106,6 +118,17 @@ export function ledgerCanonicalText(entry: Omit<LedgerEntry, "recordHash">): str
 /** `recordHash` for an entry = SHA-256 of its canonical text (recordHash omitted). */
 export function computeLedgerRecordHash(entry: Omit<LedgerEntry, "recordHash">): string {
   return hashContent(ledgerCanonicalText(entry));
+}
+
+/**
+ * OPTIONAL keyed seal (GOV-2 / #8) for an entry = HMAC-SHA256(key, canonicalText).
+ * Byte-stable given the key — no nonce — so a sealed ledger stays deterministic
+ * (REQ-NFR-001). Computed over the SAME canonical text as `recordHash` (`keyedHash`
+ * is excluded from that text, so the keyless chain is unaffected by its presence).
+ * Mirrors `computeKeyedHash` in the decision ledger.
+ */
+export function computeLedgerKeyedHash(entry: Omit<LedgerEntry, "recordHash" | "keyedHash">, key: string): string {
+  return createHmac("sha256", key).update(ledgerCanonicalText(entry)).digest("hex");
 }
 
 // ---------------------------------------------------------------------------
@@ -146,8 +169,14 @@ export function readLastLedgerRecordHash(paths: ProjectPaths): string {
  * from a tail read so N appends are O(N) total. The serialized line stores every
  * field INCLUDING `recordHash`; the hash itself is over the canonical text
  * WITHOUT `recordHash`.
+ *
+ * OPT-IN KEYED SEAL (GOV-2 / #8): when `TH_LEDGER_KEY` is set in the environment,
+ * an HMAC `keyedHash` over the same canonical text is also attached (never
+ * auto-generated; an unset/empty key seals nothing). `keyedHash` is excluded from
+ * the canonical text, so the keyless `recordHash`/chain is byte-identical whether
+ * or not a key is in use — a ledger built without a key stays fully back-compatible.
  */
-export function appendLedger(paths: ProjectPaths, entry: Omit<LedgerEntry, "ts" | "prevHash" | "recordHash">): void {
+export function appendLedger(paths: ProjectPaths, entry: Omit<LedgerEntry, "ts" | "prevHash" | "recordHash" | "keyedHash">): void {
   try {
     fs.mkdirSync(paths.stateDir, { recursive: true });
     const prevHash = readLastLedgerRecordHash(paths);
@@ -159,10 +188,38 @@ export function appendLedger(paths: ProjectPaths, entry: Omit<LedgerEntry, "ts" 
     const withPrev: Record<string, unknown> = { ts: new Date().toISOString(), ...entry, prevHash };
     const recordHash = computeLedgerRecordHash(withPrev as Omit<LedgerEntry, "recordHash">);
     const sealed = { ...withPrev, recordHash } as LedgerEntry;
+    // Opt-in keyed seal: only when TH_LEDGER_KEY is explicitly set (empty/unset →
+    // no seal). Over the SAME canonical text as recordHash, so the keyless chain is
+    // unchanged. Separate trust domain from TH_DECISION_KEY — do not reuse that key.
+    const key = process.env.TH_LEDGER_KEY;
+    if (key) {
+      sealed.keyedHash = computeLedgerKeyedHash(withPrev as Omit<LedgerEntry, "recordHash" | "keyedHash">, key);
+    }
     fs.appendFileSync(ledgerPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   } catch {
     // Never throw from the audit path.
   }
+}
+
+/**
+ * Append a SEALED in-chain HIGH-WATER ANCHOR `{ event:"high-water", count:N }`,
+ * where N = the number of SEALED entries currently in the ledger (entries carrying
+ * a `recordHash`), i.e. the count BEFORE this anchor (it excludes itself). The
+ * count is sealed content, so rewriting it in place breaks the keyless chain (an
+ * EDIT, detected by `verifyLedgerChain`). Re-homed INTO the chain (ADR-001 sidecar
+ * precedent) rather than an UNSEALED `state.json` counter an attacker could edit.
+ *
+ * SCOPE (documented residual — #8 threat model): this does NOT make tail truncation
+ * detectable. `verifyLedgerChain` is a length-agnostic forward walk, so a truncated
+ * tail past this anchor is a valid PREFIX and still verifies `ok`. The honest gain
+ * over an unsealed counter is (a) edit/reorder/mid-delete of the anchor gets the
+ * same chain protection as any sealed entry, and (b) no unsealed sidecar exists.
+ * Do NOT add a `count <= sealed-run-length` "regression" check — it is CIRCULAR
+ * (both operands are read from the same truncatable ledger and shrink together).
+ */
+export function appendHighWater(paths: ProjectPaths): void {
+  const sealedCount = readLedger(paths).filter((e) => typeof e.recordHash === "string").length;
+  appendLedger(paths, { event: "high-water", count: sealedCount });
 }
 
 /** Read + parse every ledger entry. Missing file → empty. Bad lines skipped.
@@ -230,4 +287,37 @@ export function verifyLedgerChain(entries: LedgerEntry[]): VerifyLedgerResult {
     expectedPrev = recordHash!;
   }
   return { ok: true };
+}
+
+export interface LedgerSealVerifyResult {
+  ok: boolean;
+  /** Entries whose PRESENT keyedHash does not match the supplied key: {index, event}. */
+  mismatches: { index: number; event: string }[];
+}
+
+/**
+ * Verify the optional keyed seals (GOV-2 / #8) — run ONLY when a key is explicitly
+ * supplied. For each entry that CARRIES a `keyedHash`, recompute the HMAC over its
+ * canonical text and flag a mismatch. This catches a competently re-sealed keyless
+ * chain (which `verifyLedgerChain` cannot): an attacker who re-hashes the keyless
+ * chain after editing a field cannot reproduce a left-behind `keyedHash` without
+ * `TH_LEDGER_KEY`, so the stale seal stops matching the tampered content.
+ *
+ * WARN-ONLY by contract (mirrors `verifyApprovalSeals`): the caller surfaces
+ * mismatches as a WARNING, never a fail-closed break, because a per-environment key
+ * difference (or the wrong key) must never turn a legitimately-committed ledger red.
+ * Residual (documented, mirrors decisions.ts): an attacker who STRIPS the keyedHash
+ * entirely — or who holds the key — is not detected here; the key is held out-of-band.
+ */
+export function verifyLedgerSeals(entries: LedgerEntry[], key: string): LedgerSealVerifyResult {
+  const mismatches: { index: number; event: string }[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i]!;
+    if (typeof e.keyedHash !== "string") continue; // unsealed (no keyed seal) — not a mismatch
+    const { recordHash: _rh, keyedHash, ...rest } = e;
+    if (computeLedgerKeyedHash(rest as Omit<LedgerEntry, "recordHash" | "keyedHash">, key) !== keyedHash) {
+      mismatches.push({ index: i, event: typeof e.event === "string" ? e.event : "" });
+    }
+  }
+  return { ok: mismatches.length === 0, mismatches };
 }

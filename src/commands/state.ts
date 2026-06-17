@@ -3,7 +3,7 @@ import { type CommandResult, success, failure } from "../core/output";
 import { readState, writeState, withStateLock } from "../core/state-store";
 import { validateState, STATE_FIELD_ORDER } from "../core/state-schema";
 import { structuredLog } from "../core/log";
-import { appendLedger, GATE_LEDGER_KEYS } from "../core/ledger";
+import { appendLedger, appendHighWater, GATE_LEDGER_KEYS } from "../core/ledger";
 import { NOT_INIT, formatIssues } from "../core/guards";
 import { fieldPolicy } from "../core/state-fields";
 import { canonicalizeStage, STAGE_PIPELINE } from "../core/stages";
@@ -156,6 +156,12 @@ function runStateSetLocked(paths: ProjectPaths, key: string, rawValue: string): 
   // the blocking-drift count changed. Observability only — never blocks.
   if (GATE_LEDGER_KEYS.has(firstSegment)) {
     appendLedger(paths, { event: "gate-state-change", key, value });
+    // Seal an in-chain high-water anchor after the gate flip (#8): a sealed
+    // {event:"high-water", count} entry whose count is the sealed-entry count before
+    // it. Strengthens edit/reorder/mid-delete evidence for the gate-flip run and
+    // keeps the count out of an unsealed sidecar (ADR-001 precedent). It does NOT
+    // detect tail truncation (documented residual — see appendHighWater). Best-effort.
+    appendHighWater(paths);
   }
   return success({ data: { key, value }, human: `Set ${key} = ${JSON.stringify(value)}` });
 }
