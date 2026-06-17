@@ -883,6 +883,76 @@ export function validateToolArgs(name: string, args: unknown): { ok: true } | { 
 }
 
 /**
+ * C1/A1 — append one `{tool,ts,ok}` record to the DEDICATED producer-side MCP
+ * call trail at `<stateDir>/proof-calls.jsonl`.
+ *
+ * This is the ONLY artifact that records WHICH MCP tools a live run actually
+ * invoked, so the proof coverage-matrix can compute the MCP-tool dimension from
+ * real evidence. It is deliberately a dedicated file — NOT `telemetry.jsonl`, and
+ * NOT gated by the telemetry opt-in switch — so the coverage evidence cannot be
+ * silently emptied by the M3 opt-in, log-rotation, or route/scorecard co-mingling.
+ *
+ * Best-effort by contract (A2): the append is written at BOTH the success and the
+ * catch sites of the CallTool handler, and a logging failure must NEVER break or
+ * alter a tool call — every error is swallowed. The consumer is `readProofCalls`/
+ * `harvestScenario` in `src/core/proof/harvest.ts`.
+ */
+function appendProofCall(paths: ProjectPaths, tool: string, ok: boolean): void {
+  try {
+    const line = JSON.stringify({ tool, ts: new Date().toISOString(), ok }) + "\n";
+    fs.appendFileSync(path.join(paths.stateDir, "proof-calls.jsonl"), line);
+  } catch {
+    // best-effort: trail logging must never affect the tool call.
+  }
+}
+
+/**
+ * Execute a single MCP tool call end-to-end: look up the tool, enforce the closed
+ * typed inputSchema, dispatch to the pure `run*` handler, map the CommandResult to
+ * an MCP result, and record the call in the dedicated proof-calls trail (C1/A1/A2).
+ *
+ * Exported so the adapter — INCLUDING the trail instrumentation — is unit-testable
+ * directly, without a socket or a live transport (the same testability boundary as
+ * the exported `toToolResult`/`TOOL_DEFS`). The CallTool request handler is a thin
+ * wrapper over this.
+ */
+export function callTool(name: string, args: ToolArgs = {}): CallToolResult {
+  const def = TOOL_DEFS.find((t) => t.name === name);
+  if (!def) {
+    return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
+  }
+  // Enforce the closed, typed inputSchema BEFORE dispatch (H-1): extra,
+  // wrong-typed, or missing-required arguments are rejected as a tool error
+  // instead of being silently passed to the handler.
+  const valid = validateToolArgs(def.name, args);
+  if (!valid.ok) {
+    return {
+      content: [{ type: "text", text: `Invalid arguments for ${def.name}: ${valid.errors}` }],
+      isError: true,
+    };
+  }
+  // Handlers are pure and self-contained; an unexpected throw is mapped to a
+  // tool error rather than crashing the server process.
+  try {
+    const paths = resolvePathsForCall();
+    const result = toToolResult(def.run(paths, args));
+    // C1/A1/A2: record the successful call in the dedicated proof-calls trail.
+    appendProofCall(paths, def.name, true);
+    return result;
+  } catch (err) {
+    // C1/A1/A2: record the failed call too (ok:false). Fully guarded so a
+    // path-resolution or logging error here can never escape the catch.
+    try {
+      appendProofCall(resolvePathsForCall(), def.name, false);
+    } catch {
+      // best-effort
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: "text", text: `Tool ${def.name} failed: ${message}` }], isError: true };
+  }
+}
+
+/**
  * Build the MCP {@link Server} with the tools/list + tools/call handlers wired
  * to {@link TOOL_DEFS}. Pulled out of `main` so it is independently testable and
  * so the transport choice (stdio) stays in `main`.
@@ -895,35 +965,9 @@ export function buildServer(): Server {
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: listTools() }));
 
-  server.setRequestHandler(CallToolRequestSchema, (request): CallToolResult => {
-    const def = TOOL_DEFS.find((t) => t.name === request.params.name);
-    if (!def) {
-      return {
-        content: [{ type: "text", text: `Unknown tool: ${request.params.name}` }],
-        isError: true,
-      };
-    }
-    const args: ToolArgs = (request.params.arguments as ToolArgs | undefined) ?? {};
-    // Enforce the closed, typed inputSchema BEFORE dispatch (H-1): extra,
-    // wrong-typed, or missing-required arguments are rejected as a tool error
-    // instead of being silently passed to the handler.
-    const valid = validateToolArgs(def.name, args);
-    if (!valid.ok) {
-      return {
-        content: [{ type: "text", text: `Invalid arguments for ${def.name}: ${valid.errors}` }],
-        isError: true,
-      };
-    }
-    // Handlers are pure and self-contained; an unexpected throw is mapped to a
-    // tool error rather than crashing the server process.
-    try {
-      const paths = resolvePathsForCall();
-      return toToolResult(def.run(paths, args));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { content: [{ type: "text", text: `Tool ${def.name} failed: ${message}` }], isError: true };
-    }
-  });
+  server.setRequestHandler(CallToolRequestSchema, (request): CallToolResult =>
+    callTool(request.params.name, (request.params.arguments as ToolArgs | undefined) ?? {}),
+  );
 
   return server;
 }

@@ -6896,6 +6896,7 @@ __export(mcp_server_exports, {
   SERVER_VERSION: () => SERVER_VERSION,
   TOOL_DEFS: () => TOOL_DEFS,
   buildServer: () => buildServer,
+  callTool: () => callTool,
   listTools: () => listTools,
   readServerVersion: () => readServerVersion,
   resolvePathsForCall: () => resolvePathsForCall,
@@ -21107,36 +21108,49 @@ function validateToolArgs(name, args) {
   }
   return errors.length === 0 ? { ok: true } : { ok: false, errors: errors.join("; ") };
 }
+function appendProofCall(paths, tool, ok) {
+  try {
+    const line = JSON.stringify({ tool, ts: (/* @__PURE__ */ new Date()).toISOString(), ok }) + "\n";
+    fs24.appendFileSync(path21.join(paths.stateDir, "proof-calls.jsonl"), line);
+  } catch {
+  }
+}
+function callTool(name, args = {}) {
+  const def = TOOL_DEFS.find((t) => t.name === name);
+  if (!def) {
+    return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
+  }
+  const valid = validateToolArgs(def.name, args);
+  if (!valid.ok) {
+    return {
+      content: [{ type: "text", text: `Invalid arguments for ${def.name}: ${valid.errors}` }],
+      isError: true
+    };
+  }
+  try {
+    const paths = resolvePathsForCall();
+    const result = toToolResult(def.run(paths, args));
+    appendProofCall(paths, def.name, true);
+    return result;
+  } catch (err) {
+    try {
+      appendProofCall(resolvePathsForCall(), def.name, false);
+    } catch {
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: "text", text: `Tool ${def.name} failed: ${message}` }], isError: true };
+  }
+}
 function buildServer() {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
     { capabilities: { tools: {} } }
   );
   server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: listTools() }));
-  server.setRequestHandler(CallToolRequestSchema, (request) => {
-    const def = TOOL_DEFS.find((t) => t.name === request.params.name);
-    if (!def) {
-      return {
-        content: [{ type: "text", text: `Unknown tool: ${request.params.name}` }],
-        isError: true
-      };
-    }
-    const args = request.params.arguments ?? {};
-    const valid = validateToolArgs(def.name, args);
-    if (!valid.ok) {
-      return {
-        content: [{ type: "text", text: `Invalid arguments for ${def.name}: ${valid.errors}` }],
-        isError: true
-      };
-    }
-    try {
-      const paths = resolvePathsForCall();
-      return toToolResult(def.run(paths, args));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { content: [{ type: "text", text: `Tool ${def.name} failed: ${message}` }], isError: true };
-    }
-  });
+  server.setRequestHandler(
+    CallToolRequestSchema,
+    (request) => callTool(request.params.name, request.params.arguments ?? {})
+  );
   return server;
 }
 async function main() {
@@ -21156,6 +21170,7 @@ if (require.main === module) {
   SERVER_VERSION,
   TOOL_DEFS,
   buildServer,
+  callTool,
   listTools,
   readServerVersion,
   resolvePathsForCall,
