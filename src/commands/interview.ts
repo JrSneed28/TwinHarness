@@ -19,6 +19,7 @@
 
 import * as fs from "node:fs";
 import type { ProjectPaths } from "../core/paths";
+import { atomicWriteFile } from "../core/atomic-io";
 import { type CommandResult, success, failure } from "../core/output";
 import { structuredLog } from "../core/log";
 
@@ -81,10 +82,14 @@ function readInterview(paths: ProjectPaths): InterviewState | null {
   }
 }
 
-/** Deterministic serialization (2-space indent, trailing newline). */
+/**
+ * Deterministic serialization (2-space indent, trailing newline). Uses the same
+ * atomic write-then-rename helper as the sibling `state.json` store so a crashed or
+ * concurrent write can never leave a half-written `interview.json` (atomicWriteFile
+ * creates the parent dir, so no separate mkdir is needed).
+ */
 function writeInterview(paths: ProjectPaths, state: InterviewState): void {
-  fs.mkdirSync(paths.stateDir, { recursive: true });
-  fs.writeFileSync(paths.interviewFile, JSON.stringify(state, null, 2) + "\n", "utf8");
+  atomicWriteFile(paths.interviewFile, JSON.stringify(state, null, 2) + "\n");
 }
 
 /** `ready` is the ONLY computed value: the resolved ambiguity gate. */
@@ -163,14 +168,17 @@ export function runInterviewRecord(paths: ProjectPaths, opts: InterviewRecordOpt
     return failure({ human: "Missing required `answer`.", data: { error: "missing_field", field: "answer" } });
   }
 
-  // Validate the agent-supplied scores shape (goal/constraints/criteria, all numeric).
+  // Validate the agent-supplied scores shape (goal/constraints/criteria, all FINITE
+  // numbers). Number.isFinite (not `typeof === "number"`) so a non-finite score —
+  // e.g. `1e999` parses to Infinity over MCP — is rejected rather than silently
+  // serialized to `null` by JSON.stringify, which would corrupt the verbatim store.
   const s = opts.scores;
   if (
     typeof s !== "object" ||
     s === null ||
-    typeof (s as Record<string, unknown>).goal !== "number" ||
-    typeof (s as Record<string, unknown>).constraints !== "number" ||
-    typeof (s as Record<string, unknown>).criteria !== "number"
+    !Number.isFinite((s as Record<string, unknown>).goal) ||
+    !Number.isFinite((s as Record<string, unknown>).constraints) ||
+    !Number.isFinite((s as Record<string, unknown>).criteria)
   ) {
     structuredLog({ cmd: "interview record", error: "invalid_scores" });
     return failure({

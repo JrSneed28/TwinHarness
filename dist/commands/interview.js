@@ -56,6 +56,7 @@ exports.runInterviewStart = runInterviewStart;
 exports.runInterviewRecord = runInterviewRecord;
 exports.runInterviewStatus = runInterviewStatus;
 const fs = __importStar(require("node:fs"));
+const atomic_io_1 = require("../core/atomic-io");
 const output_1 = require("../core/output");
 const log_1 = require("../core/log");
 /** Default ambiguity-gate threshold (spec R15): the run gates once ambiguity ≤ 0.20. */
@@ -94,10 +95,14 @@ function readInterview(paths) {
         return null;
     }
 }
-/** Deterministic serialization (2-space indent, trailing newline). */
+/**
+ * Deterministic serialization (2-space indent, trailing newline). Uses the same
+ * atomic write-then-rename helper as the sibling `state.json` store so a crashed or
+ * concurrent write can never leave a half-written `interview.json` (atomicWriteFile
+ * creates the parent dir, so no separate mkdir is needed).
+ */
 function writeInterview(paths, state) {
-    fs.mkdirSync(paths.stateDir, { recursive: true });
-    fs.writeFileSync(paths.interviewFile, JSON.stringify(state, null, 2) + "\n", "utf8");
+    (0, atomic_io_1.atomicWriteFile)(paths.interviewFile, JSON.stringify(state, null, 2) + "\n");
 }
 /** `ready` is the ONLY computed value: the resolved ambiguity gate. */
 function computeReady(ambiguity, threshold) {
@@ -154,13 +159,16 @@ function runInterviewRecord(paths, opts = {}) {
         (0, log_1.structuredLog)({ cmd: "interview record", error: "missing_field", field: "answer" });
         return (0, output_1.failure)({ human: "Missing required `answer`.", data: { error: "missing_field", field: "answer" } });
     }
-    // Validate the agent-supplied scores shape (goal/constraints/criteria, all numeric).
+    // Validate the agent-supplied scores shape (goal/constraints/criteria, all FINITE
+    // numbers). Number.isFinite (not `typeof === "number"`) so a non-finite score —
+    // e.g. `1e999` parses to Infinity over MCP — is rejected rather than silently
+    // serialized to `null` by JSON.stringify, which would corrupt the verbatim store.
     const s = opts.scores;
     if (typeof s !== "object" ||
         s === null ||
-        typeof s.goal !== "number" ||
-        typeof s.constraints !== "number" ||
-        typeof s.criteria !== "number") {
+        !Number.isFinite(s.goal) ||
+        !Number.isFinite(s.constraints) ||
+        !Number.isFinite(s.criteria)) {
         (0, log_1.structuredLog)({ cmd: "interview record", error: "invalid_scores" });
         return (0, output_1.failure)({
             human: "`scores` must be an object { goal, constraints, criteria } of numbers.",

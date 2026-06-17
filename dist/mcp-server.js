@@ -22998,8 +22998,7 @@ function readInterview(paths) {
   }
 }
 function writeInterview(paths, state) {
-  fs38.mkdirSync(paths.stateDir, { recursive: true });
-  fs38.writeFileSync(paths.interviewFile, JSON.stringify(state, null, 2) + "\n", "utf8");
+  atomicWriteFile(paths.interviewFile, JSON.stringify(state, null, 2) + "\n");
 }
 function computeReady(ambiguity, threshold) {
   return ambiguity !== null && ambiguity <= threshold;
@@ -23046,7 +23045,7 @@ function runInterviewRecord(paths, opts = {}) {
     return failure({ human: "Missing required `answer`.", data: { error: "missing_field", field: "answer" } });
   }
   const s = opts.scores;
-  if (typeof s !== "object" || s === null || typeof s.goal !== "number" || typeof s.constraints !== "number" || typeof s.criteria !== "number") {
+  if (typeof s !== "object" || s === null || !Number.isFinite(s.goal) || !Number.isFinite(s.constraints) || !Number.isFinite(s.criteria)) {
     structuredLog({ cmd: "interview record", error: "invalid_scores" });
     return failure({
       human: "`scores` must be an object { goal, constraints, criteria } of numbers.",

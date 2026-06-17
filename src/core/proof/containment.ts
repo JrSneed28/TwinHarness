@@ -13,10 +13,12 @@
  *   (d) telemetry stays local — a static scan proves `telemetry.ts` imports no
  *       network module and makes no `fetch`/socket call.
  *
- * NOTE (plan Step 7): we do NOT assert against the LIVE `TOOL_DEFS` here — it still
- * carries 35 until the MCP registration phase. The live-registry equality is owned
- * by the three frozen tests updated in Phase C. Callers pass {@link EXPECTED_TOOL_ALLOWLIST}
- * (the post-registration 38) as `toolNames` to prove the allowlist's own integrity.
+ * NOTE: we do NOT assert against the LIVE `TOOL_DEFS` here — this module never
+ * imports the MCP server (R7 — no bundle cycle), so callers inject the live
+ * tool-name list. Live-registry equality (now 42 tools: 35 base + 3 proof + 4
+ * interview/init) is owned by the frozen MCP parity/manifest tests. Callers pass
+ * {@link EXPECTED_TOOL_ALLOWLIST} (42) as `toolNames` to prove the allowlist's own
+ * integrity.
  */
 
 import * as os from "node:os";
