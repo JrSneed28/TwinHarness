@@ -37,6 +37,7 @@ exports.evaluateStopGate = evaluateStopGate;
 exports.runHookStopGate = runHookStopGate;
 exports.runHookSubagentStop = runHookSubagentStop;
 exports.extractBashWriteTargets = extractBashWriteTargets;
+exports.classifyOwnership = classifyOwnership;
 exports.runHookPretoolGate = runHookPretoolGate;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
@@ -468,6 +469,15 @@ function phaseABashGate(state, bashCommand, input, paths, gateMode) {
     }
     return null;
 }
+function classifyOwnership(relFwd, slices, root) {
+    const owners = findOwningSlices(relFwd, slices, root);
+    if (owners.length === 0)
+        return { kind: "unowned" };
+    if (owners.some((o) => o.status === "in-progress"))
+        return { kind: "in-progress" };
+    const ownerSummary = owners.map((o) => `${o.id} (${o.status})`).join(", ");
+    return { kind: "violation", ownerSummary };
+}
 /**
  * Step c3 (extracted, behavior-identical): Phase B Bash-mediated write
  * enforcement — strict mode only (G4). Runs BEFORE the file_path step because a
@@ -491,13 +501,11 @@ function phaseBStrictBashGate(state, bashCommand, input, paths) {
             const relB = toRootRelative(absT, paths.root);
             if (relB === null || isAllowedDocOrStatePath(relB))
                 continue; // out-of-root / doc → allow.
-            const owners = findOwningSlices(relB, state.slices, paths.root);
-            if (owners.length === 0)
-                continue; // unowned in-root path → allow.
-            if (owners.some((o) => o.status === "in-progress"))
-                continue; // an in-progress owner → allow.
+            const verdict = classifyOwnership(relB, state.slices, paths.root);
+            if (verdict.kind !== "violation")
+                continue; // unowned in-root path / in-progress owner → allow.
             // Owned only by slices that are not in-progress → component-boundary violation.
-            const ownerSummary = owners.map((o) => `${o.id} (${o.status})`).join(", ");
+            const ownerSummary = verdict.ownerSummary;
             const reason = `TwinHarness write-gate (strict mode — Phase-B Bash enforcement) blocked this Bash-mediated write. ` +
                 `Target path: ${relB}. ` +
                 `This path is owned by slice(s): ${ownerSummary}, none of which are currently in-progress. ` +
@@ -524,15 +532,10 @@ function phaseBStrictBashGate(state, bashCommand, input, paths) {
  */
 function phaseBFileGate(relFwd, state, paths) {
     if (state.slices.length > 0) {
-        const owners = findOwningSlices(relFwd, state.slices, paths.root);
-        if (owners.length > 0) {
-            const anyInProgress = owners.some((o) => o.status === "in-progress");
-            if (anyInProgress) {
-                // At least one in-progress owner → allow.
-                return null;
-            }
+        const verdict = classifyOwnership(relFwd, state.slices, paths.root);
+        if (verdict.kind === "violation") {
             // Owned only by slices that are not in-progress → component-boundary violation.
-            const ownerSummary = owners.map((o) => `${o.id} (${o.status})`).join(", ");
+            const ownerSummary = verdict.ownerSummary;
             const reason = `TwinHarness write-gate blocked this write (Phase B — component-boundary enforcement). ` +
                 `Target path: ${relFwd}. ` +
                 `This path is owned by slice(s): ${ownerSummary}, none of which are currently in-progress. ` +
