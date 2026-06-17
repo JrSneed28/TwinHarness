@@ -15483,6 +15483,7 @@ var PathContainmentError = class extends Error {
   code = "path_containment";
 };
 function resolveWithinRoot(root, p) {
+  if (path.sep === "/" && (/^[a-zA-Z]:[\\/]/.test(p) || p.includes("\\"))) return null;
   const absRoot = path.resolve(root);
   const abs = path.isAbsolute(p) ? p : path.resolve(absRoot, p);
   const rel = path.relative(absRoot, abs);
@@ -16493,8 +16494,8 @@ function readDriftLog(paths) {
 }
 function appendDriftLog(paths, block) {
   const current = readDriftLog(paths);
-  const sep10 = current.endsWith("\n") ? "" : "\n";
-  fs7.writeFileSync(paths.driftLog, `${current}${sep10}${block}`, "utf8");
+  const sep11 = current.endsWith("\n") ? "" : "\n";
+  fs7.writeFileSync(paths.driftLog, `${current}${sep11}${block}`, "utf8");
 }
 function runDriftAdd(paths, opts) {
   return withStateLock(paths, () => runDriftAddLocked(paths, opts));
@@ -20405,8 +20406,8 @@ function readDebateLog(paths) {
 }
 function appendDebateLog(paths, block) {
   const current = readDebateLog(paths);
-  const sep10 = current.endsWith("\n") ? "" : "\n";
-  fs23.writeFileSync(debateLogPath(paths), `${current}${sep10}${block}`, "utf8");
+  const sep11 = current.endsWith("\n") ? "" : "\n";
+  fs23.writeFileSync(debateLogPath(paths), `${current}${sep11}${block}`, "utf8");
 }
 function runDebateAdd(paths, opts) {
   return withStateLock(paths, () => runDebateAddLocked(paths, opts));
