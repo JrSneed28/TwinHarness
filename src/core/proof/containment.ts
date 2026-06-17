@@ -97,14 +97,33 @@ const NETWORK_PATTERNS: readonly RegExp[] = [
   /\bXMLHttpRequest\b/,
 ];
 
-/** Best-effort read of the real `telemetry.ts` source (dist falls back to `.js`). */
-function readTelemetrySource(): string | null {
-  for (const ext of [".ts", ".js"]) {
-    const file = path.resolve(__dirname, "..", `telemetry${ext}`);
+/**
+ * Best-effort read of the real `telemetry.ts` source. The telemetry module being
+ * scanned is the TwinHarness IMPLEMENTATION's own — anchored to the install
+ * location (`__dirname`), never to the governed project/scenario root (which, in an
+ * isolated live scenario, is an empty temp SUT with no `src/`). Tries, in order:
+ *   1. `<__dirname>/../telemetry.ts` — un-bundled source/tests, where `__dirname`
+ *      is `src/core/proof`;
+ *   2. `<__dirname>/../telemetry.js` — un-bundled `dist/cli.js`, where `__dirname`
+ *      is `dist/core/proof`;
+ *   3. `<__dirname>/../src/core/telemetry.ts` — the BUNDLED `dist/mcp-server.js`,
+ *      where esbuild collapses `__dirname` to `dist/`, so candidates (1)/(2) resolve
+ *      to a non-existent `<install>/telemetry.*`;
+ *   4. `<repoRoot>/src/core/telemetry.ts` — explicit override, last resort.
+ * Returns `null` only when no candidate is readable.
+ */
+function readTelemetrySource(repoRoot?: string): string | null {
+  const candidates = [
+    path.resolve(__dirname, "..", "telemetry.ts"),
+    path.resolve(__dirname, "..", "telemetry.js"),
+    path.resolve(__dirname, "..", "src", "core", "telemetry.ts"),
+    ...(repoRoot ? [path.join(repoRoot, "src", "core", "telemetry.ts")] : []),
+  ];
+  for (const file of candidates) {
     try {
       return fs.readFileSync(file, "utf8");
     } catch {
-      /* try next */
+      /* try next candidate */
     }
   }
   return null;
@@ -121,6 +140,8 @@ export interface ContainmentInput {
   containmentRoot?: string;
   /** Override the telemetry source for the no-network scan (defaults to reading `telemetry.ts`). */
   telemetrySource?: string;
+  /** Repo root used to locate `src/core/telemetry.ts` when running the bundled `dist/cli.js`. */
+  repoRoot?: string;
 }
 
 export interface ContainmentReport {
@@ -244,7 +265,7 @@ export function assertContainment(input: ContainmentInput): ContainmentReport {
   );
 
   // (d) telemetry no-network (static source scan).
-  const telemetrySource = input.telemetrySource ?? readTelemetrySource();
+  const telemetrySource = input.telemetrySource ?? readTelemetrySource(input.repoRoot);
   const networkHits =
     telemetrySource === null
       ? ["<telemetry source unavailable>"]

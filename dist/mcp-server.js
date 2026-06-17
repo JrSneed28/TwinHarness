@@ -21995,9 +21995,14 @@ var NETWORK_PATTERNS = [
   /\bfetch\s*\(/,
   /\bXMLHttpRequest\b/
 ];
-function readTelemetrySource() {
-  for (const ext of [".ts", ".js"]) {
-    const file = path29.resolve(__dirname, "..", `telemetry${ext}`);
+function readTelemetrySource(repoRoot) {
+  const candidates = [
+    path29.resolve(__dirname, "..", "telemetry.ts"),
+    path29.resolve(__dirname, "..", "telemetry.js"),
+    path29.resolve(__dirname, "..", "src", "core", "telemetry.ts"),
+    ...repoRoot ? [path29.join(repoRoot, "src", "core", "telemetry.ts")] : []
+  ];
+  for (const file of candidates) {
     try {
       return fs34.readFileSync(file, "utf8");
     } catch {
@@ -22099,7 +22104,7 @@ function assertContainment(input) {
       hint: `GATE_OWNED should hold exactly 5 fields (implementation_allowed, tier, current_stage, write_gate, blast_radius_flags); found ${GATE_OWNED.size}.`
     }
   );
-  const telemetrySource = input.telemetrySource ?? readTelemetrySource();
+  const telemetrySource = input.telemetrySource ?? readTelemetrySource(input.repoRoot);
   const networkHits = telemetrySource === null ? ["<telemetry source unavailable>"] : NETWORK_PATTERNS.filter((re) => re.test(telemetrySource)).map((re) => re.source);
   add(
     {
@@ -22619,9 +22624,9 @@ function buildFaultsCard() {
   };
   return buildReportCard(C2, assertions, stats);
 }
-function buildContainmentCard(toolNames) {
+function buildContainmentCard(toolNames, repoRoot) {
   const C2 = "containment";
-  const report = assertContainment({ toolNames });
+  const report = assertContainment({ toolNames, repoRoot });
   return { component: C2, verdict: report.assertions.some((a) => !a.pass) ? "fail" : "pass", assertions: report.assertions, stats: report.stats, diagnostics: report.diagnostics };
 }
 function buildPlatformCard() {
@@ -22696,7 +22701,7 @@ async function runProof(opts = {}) {
     cardsByComponent.set("performance", buildPerformanceCard(metrics, regressions));
   }
   if (want.has("failure-injection")) cardsByComponent.set("failure-injection", buildFaultsCard());
-  if (want.has("containment")) cardsByComponent.set("containment", buildContainmentCard(toolNames));
+  if (want.has("containment")) cardsByComponent.set("containment", buildContainmentCard(toolNames, repoRoot));
   if (want.has("cross-platform")) cardsByComponent.set("cross-platform", buildPlatformCard());
   const subsystemsTouched = [...new Set(componentsRun.flatMap((c) => [...COMPONENT_SUBSYSTEMS[c]]))];
   const gatesTouched = want.has("runner-report") || want.has("failure-injection") ? exerciseGates() : [];
