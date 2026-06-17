@@ -133,11 +133,12 @@ describe("SLICE-1 — MCP sub-claim / sub-release wrappers", () => {
   );
 
   it(
-    "REQ-105: test_REQ105_tool_count_incremental_path_16_to_35 — TOOL_DEFS.length is 35 after the coordination-primitive layer; toToolResult round-trips for the sub-lease tools",
+    "REQ-105: test_REQ105_tool_count_incremental_path_16_to_38 — TOOL_DEFS.length is 38 after the coordination-primitive layer + proof tools; toToolResult round-trips for the sub-lease tools",
     () => {
       // The coordination-primitive layer advances the count to 35 (th_build_dispatch/plan
-      // inserted into the build group + th_artifact_*/collab_*/debate_* appended).
-      expect(TOOL_DEFS.length).toBe(35);
+      // inserted into the build group + th_artifact_*/collab_*/debate_* appended), and the
+      // th_proof_* trio (run/component/report) appends at the tail to reach 38 (PS-Q4).
+      expect(TOOL_DEFS.length).toBe(38);
 
       // Both sub-lease tools must be present.
       const names = TOOL_DEFS.map((t) => t.name);

@@ -70,6 +70,7 @@ const route_1 = require("./commands/route");
 const delegate_1 = require("./commands/delegate");
 const repo_1 = require("./commands/repo");
 const decision_1 = require("./commands/decision");
+const proof_1 = require("./commands/proof");
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
@@ -161,6 +162,13 @@ Usage:
   th decision list                  List the decision set (ids/titles/statuses/links/audit), sorted (exit 0; non-zero if the hash chain is broken)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
+  th proof run [--self-test]        Run the full operational proof suite (9 components); dual-format report + coverage matrix + regression verdict
+  th proof component <1-9>          Run a single proof component and emit its report card
+  th proof report                   Harvest finished live scenarios and emit the consolidated dual-format report
+  th proof baseline update          Re-measure mechanical perf metrics and persist them as gating baselines (PS-Q2)
+  th proof scenario start --brief <id>  Scaffold an isolated scenario root (OS temp, outside any .twinharness) and print it for CLAUDE_PROJECT_DIR (C2)
+  th proof scenario finish [--scenario-root <dir>]  Mark a scenario finished (artifacts remain for harvest)
+  th proof scenario list            List the prepared/finished proof scenario sandboxes
   th version                        Print the CLI version
   th help                           Show this help
 
@@ -220,7 +228,12 @@ Global flags:
   --proposer <n>    (decision add) Proposer attribution (default: orchestrator)
   --reject          (decision approve) Append a rejected event instead of approved (mutually exclusive with --supersede)
   --supersede <id>  (decision approve) Mark this (approved) decision superseded by <id> (mutually exclusive with --reject)
-  --as <actor>      (decision approve) Approver attribution (attribution only — NOT a barrier; default TH_APPROVAL_ACTOR or "human")`;
+  --as <actor>      (decision approve) Approver attribution (attribution only — NOT a barrier; default TH_APPROVAL_ACTOR or "human")
+  --self-test       (proof run/component) Deterministic mechanical-reachability mode (no live LLM); NEVER a live verdict for components 1/2/5
+  --brief <id>      (proof scenario start) Corpus brief id to scaffold (default: first brief)
+  --corpus-root <dir>  (proof) Override the bundled corpus root (default <repo>/proof/corpus)
+  --output-root <dir>  (proof) Override the report output root (default <root>/.twinharness/proof)
+  --scenario-root <dir>  (proof scenario finish) The scenario root to finish (default: the resolved project root)`;
 /** Boolean flags (presence = true). */
 const BOOLEAN_FLAGS = {
     "--json": "json",
@@ -242,6 +255,7 @@ const BOOLEAN_FLAGS = {
     "--no-write": "noWrite",
     "--reject": "reject",
     "--advise": "advise",
+    "--self-test": "selfTest",
 };
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
 const STRING_FLAGS = {
@@ -293,6 +307,9 @@ const STRING_FLAGS = {
     "--positions": "positions",
     "--id": "id",
     "--resolution": "resolution",
+    "--corpus-root": "corpusRoot",
+    "--output-root": "outputRoot",
+    "--scenario-root": "scenarioRoot",
 };
 /** Flags that consume a numeric value. */
 const NUMBER_FLAGS = {
@@ -329,6 +346,7 @@ function parseArgs(argv) {
         noWrite: false,
         reject: false,
         advise: false,
+        selfTest: false,
     };
     const positionals = [];
     const unknownFlags = [];
@@ -819,6 +837,95 @@ function dispatch(parsed) {
     }
 }
 /**
+ * `th proof …` dispatch — split out from the synchronous {@link dispatch} because
+ * the run/component/report/baseline handlers spawn REAL OS processes and are async
+ * (`Promise<CommandResult>`); the scenario-lifecycle handlers are synchronous and
+ * resolve immediately.
+ *
+ * The CLI passes **no MCP registry**: the zero-runtime-dependency CLI must never
+ * import the SDK-bearing `mcp-server`, so a CLI-driven proof run reports the
+ * MCP-tool coverage dimension as UNVERIFIABLE. The authoritative MCP-tool coverage
+ * comes from the `th_proof_*` MCP tools (which inject the registry) plus the
+ * dedicated `proof-calls.jsonl` trail.
+ */
+async function dispatchProof(parsed, paths) {
+    const sub = parsed.positionals[1];
+    const rest = parsed.positionals.slice(2);
+    const opts = {
+        selfTest: parsed.flags.selfTest,
+        brief: parsed.flags.brief,
+        corpusRoot: parsed.flags.corpusRoot,
+        outputRoot: parsed.flags.outputRoot,
+        scenarioRoot: parsed.flags.scenarioRoot,
+    };
+    switch (sub) {
+        case "run":
+            return (0, proof_1.runProofRun)(paths, opts);
+        case "component":
+            return (0, proof_1.runProofComponent)(paths, { ...opts, component: parsed.flags.component ?? rest[0] });
+        case "report":
+            return (0, proof_1.runProofReport)(paths, opts);
+        case "baseline":
+            switch (rest[0]) {
+                case "update":
+                    return (0, proof_1.runProofBaselineUpdate)(paths, opts);
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'proof baseline' subcommand: ${rest[0] ?? "(none)"}\n\n${HELP}` });
+            }
+        case "scenario":
+            switch (rest[0]) {
+                case "start":
+                    return (0, proof_1.runProofScenarioStart)(paths, opts);
+                case "finish":
+                    return (0, proof_1.runProofScenarioFinish)(paths, opts);
+                case "list":
+                    return (0, proof_1.runProofScenarioList)(paths, opts);
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'proof scenario' subcommand: ${rest[0] ?? "(none)"}\n\n${HELP}` });
+            }
+        default:
+            return (0, output_1.failure)({ human: `unknown 'proof' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+    }
+}
+/**
+ * Write `text` to stdout, then exit with `code` ONLY after the bytes have drained.
+ * stdout to a pipe is ASYNCHRONOUS on POSIX (macOS/Linux), so a bare `process.exit()`
+ * right after a large `write` truncates it mid-flush — the proven failure was
+ * `th help` losing its tail (the `proof` command block) on macOS CI while passing on
+ * Linux/Windows. Exiting from the write callback guarantees the OS accepted the data
+ * first; `process.exitCode` is mirrored so a natural drain still carries the code.
+ */
+function writeAndExit(text, code) {
+    process.exitCode = code;
+    process.stdout.write(text, () => process.exit(code));
+    return undefined;
+}
+/** Render a {@link CommandResult} to stdout (honoring `--json`) and exit with its code. */
+function emitAndExit(result, json) {
+    return writeAndExit((0, output_1.renderResult)(result, json) + "\n", result.exitCode);
+}
+/**
+ * Map a KNOWN typed core error to a clean structured failure — the single CLI
+ * error boundary — so every command returns a non-zero exit + a valid `--json`
+ * envelope instead of a raw Node stack crash. Two families flow here:
+ *   • State-store contention (lock timeout, or a write that lost the rename race
+ *     past its retry budget) — exit 1, "retry the command".
+ *   • Path-containment violations (an absolute / ".." / separator-bearing segment
+ *     that escapes the project root) — a client/security reject, exit 2.
+ * Any OTHER error is a real bug and is rethrown. Shared by the synchronous
+ * dispatch and the async {@link dispatchProof}.
+ */
+function mapDispatchError(e) {
+    const code = e.code;
+    if (e instanceof paths_1.PathContainmentError) {
+        return (0, output_1.failure)({ human: e.message, data: { error: e.code, segment: e.segment }, exitCode: 2 });
+    }
+    if (code === "state_lock_timeout" || code === "state_write_contended") {
+        return (0, output_1.failure)({ human: e.message, data: { error: code } });
+    }
+    throw e;
+}
+/**
  * Best-effort read of the Claude Code hook payload from stdin. Hooks always
  * receive piped JSON; a TTY means a human ran the command by hand, so skip
  * reading rather than hang waiting for EOF. Malformed/absent input → undefined.
@@ -851,16 +958,14 @@ function main() {
             human,
             data: { error: "bad_args", unknownFlags: parsed.unknownFlags, errors: parsed.errors },
         });
-        process.stdout.write((0, output_1.renderResult)(result, parsed.flags.json) + "\n");
-        process.exit(result.exitCode);
+        writeAndExit((0, output_1.renderResult)(result, parsed.flags.json) + "\n", result.exitCode);
     }
     // Hook commands speak the Claude Code hook protocol on stdout (not --json).
     if (parsed.positionals[0] === "hook") {
         if (parsed.positionals[1] === "stop-gate") {
             const paths = (0, paths_1.resolveProjectPaths)(parsed.flags.cwd);
             const out = (0, hook_1.runHookStopGate)(paths, readHookStdin());
-            process.stdout.write(out.stdout + "\n");
-            process.exit(out.exitCode);
+            writeAndExit(out.stdout + "\n", out.exitCode);
         }
         if (parsed.positionals[1] === "pretool-gate") {
             // Prefer the payload's cwd for path resolution when --cwd was not explicitly passed.
@@ -869,47 +974,29 @@ function main() {
             const effectiveCwd = cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : parsed.flags.cwd;
             const paths = (0, paths_1.resolveProjectPaths)(effectiveCwd);
             const out = (0, hook_1.runHookPretoolGate)(paths, stdinPayload);
-            process.stdout.write(out.stdout + "\n");
-            process.exit(out.exitCode);
+            writeAndExit(out.stdout + "\n", out.exitCode);
         }
         if (parsed.positionals[1] === "subagent-stop") {
             const paths = (0, paths_1.resolveProjectPaths)(parsed.flags.cwd);
             const out = (0, hook_1.runHookSubagentStop)(paths, readHookStdin());
-            process.stdout.write(out.stdout + "\n");
-            process.exit(out.exitCode);
+            writeAndExit(out.stdout + "\n", out.exitCode);
         }
+    }
+    // `proof` commands include async handlers (real OS-process spawns), so they run
+    // on an async path before the synchronous dispatch — mirroring the hook gates.
+    if (parsed.positionals[0] === "proof") {
+        const paths = (0, paths_1.resolveProjectPaths)(parsed.flags.cwd);
+        void dispatchProof(parsed, paths).then((result) => emitAndExit(result, parsed.flags.json), (e) => emitAndExit(mapDispatchError(e), parsed.flags.json));
+        return;
     }
     let result;
     try {
         result = dispatch(parsed);
     }
     catch (e) {
-        // Map KNOWN typed core errors to a clean structured failure here — at the
-        // single CLI boundary — so every command returns a non-zero exit + a valid
-        // --json envelope instead of a raw Node stack crash. Two families flow here:
-        //   • State-store contention (lock timeout, or a write that lost the rename
-        //     race past its retry budget) — C-2 / M-3.
-        //   • Path-containment violations (an absolute / ".." / separator-bearing
-        //     path segment that escapes the project root) — ARCH-003. Before this,
-        //     e.g. `th collab fragment --name "../x"` threw a raw Error whose stack,
-        //     under --json, was unstructured garbage.
-        // All are switched on by their stable `code` so the mapping stays uniform.
-        // A PathContainmentError is a client/security reject (exit 2), distinct from
-        // a transient-contention exit (1, "retry the command"). Any OTHER error is a
-        // real bug and must propagate.
-        const code = e.code;
-        if (e instanceof paths_1.PathContainmentError) {
-            result = (0, output_1.failure)({ human: e.message, data: { error: e.code, segment: e.segment }, exitCode: 2 });
-        }
-        else if (code === "state_lock_timeout" || code === "state_write_contended") {
-            result = (0, output_1.failure)({ human: e.message, data: { error: code } });
-        }
-        else {
-            throw e;
-        }
+        result = mapDispatchError(e);
     }
-    process.stdout.write((0, output_1.renderResult)(result, parsed.flags.json) + "\n");
-    process.exit(result.exitCode);
+    emitAndExit(result, parsed.flags.json);
 }
 if (require.main === module)
     main();

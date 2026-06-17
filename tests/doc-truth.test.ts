@@ -76,8 +76,8 @@ describe("DOC-TRUTH: docs match mechanical reality", () => {
   // TOOL-COUNT ASSERTIONS (H-3): every "N tools" / "N-tool" numeric claim in
   // README.md must equal TOOL_DEFS.length (the mechanical source of truth).
   // -------------------------------------------------------------------------
-  it("TOOL_DEFS.length equals 35", () => {
-    expect(TOOL_DEFS.length).toBe(35);
+  it("TOOL_DEFS.length equals 38", () => {
+    expect(TOOL_DEFS.length).toBe(38);
   });
 
   it("README: every 'N tools' / 'N-tool' numeric claim equals TOOL_DEFS.length", () => {

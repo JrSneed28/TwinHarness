@@ -40,7 +40,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { resolveProjectPaths, type ProjectPaths } from "./core/paths";
-import type { CommandResult } from "./core/output";
+import { type CommandResult, failure } from "./core/output";
 
 import { runStateGet, runStateSet } from "./commands/state";
 import { runDriftAdd } from "./commands/drift";
@@ -56,6 +56,8 @@ import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./comma
 import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from "./commands/collab";
 import { runDebateAdd, runDebateList, runDebateResolve } from "./commands/debate";
 import { GATE_OWNED } from "./core/state-fields";
+import { runProofRun, runProofComponent, runProofReport } from "./commands/proof";
+import type { ProofToolRegistry } from "./core/proof/runner";
 
 /* ------------------------------------------------------------------ *
  * Project-paths resolution                                            *
@@ -149,6 +151,13 @@ export interface ToolDef {
   inputSchema: ToolInputSchema;
   /** Build paths + call the matching `run*` handler, returning its CommandResult. */
   run: (paths: ProjectPaths, args: ToolArgs) => CommandResult;
+  /**
+   * Async handler for tools that spawn real OS processes (the th_proof_* suite).
+   * When present, the CallTool path AWAITS this instead of {@link ToolDef.run}; the
+   * synchronous `run` then serves only as the sync-contract guard (never reached
+   * for these tools), so the 35 existing sync tools keep their exact contract.
+   */
+  runAsync?: (paths: ProjectPaths, args: ToolArgs) => Promise<CommandResult>;
 }
 
 /** Coerce an arg to a trimmed non-empty string, or undefined. */
@@ -768,7 +777,76 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     },
     run: (paths, args) => runDebateResolve(paths, { id: optString(args, "id"), resolution: optString(args, "resolution") }),
   },
+  // ---- Proof suite (PS-Q4: th_proof_run/component/report, tail-appended 35→38) ----
+  // Read/coordination-only — NEVER gate-mutating (containment invariant). These run
+  // the full suite (real OS-process spawns) so they are ASYNC: dispatched via
+  // `runAsync`; `run` is the unreachable sync-contract guard. The injected registry
+  // gives the coverage matrix its known MCP-tool set (self-derived from TOOL_DEFS).
+  {
+    name: "th_proof_run",
+    description:
+      "Run the full TwinHarness operational proof suite (all nine components) and emit the dual-format report + enforced coverage matrix + split-gated regression verdict. Read/coordination-only — never gate-mutating. `selfTest` runs the deterministic mechanical-reachability mode (no live LLM; never a live verdict for components 1/2/5).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        selfTest: boolProp("Deterministic mechanical-reachability mode (no live LLM)."),
+      },
+      additionalProperties: false,
+    },
+    run: () => asyncToolGuard("th_proof_run"),
+    runAsync: (paths, args) => runProofRun(paths, { registry: proofRegistry(), selfTest: optBool(args, "selfTest") }),
+  },
+  {
+    name: "th_proof_component",
+    description:
+      "Run a single proof component (1–9) and emit its report card. Read/coordination-only. Components 1/2/5 derive verdicts only from harvested live artifacts; 3/4/6/7/8/9 are LLM-free mechanical sub-proofs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        component: numberProp("Component number to run (1–9)."),
+        selfTest: boolProp("Deterministic mechanical-reachability mode (no live LLM)."),
+      },
+      required: ["component"],
+      additionalProperties: false,
+    },
+    run: () => asyncToolGuard("th_proof_component"),
+    runAsync: (paths, args) => {
+      const n = optNumber(args, "component");
+      return runProofComponent(paths, {
+        registry: proofRegistry(),
+        component: n === undefined ? undefined : String(n),
+        selfTest: optBool(args, "selfTest"),
+      });
+    },
+  },
+  {
+    name: "th_proof_report",
+    description:
+      "Harvest the finished live proof scenarios and emit the consolidated dual-format report (the final consolidation step of the in-session workflow). Read/coordination-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: () => asyncToolGuard("th_proof_report"),
+    runAsync: (paths) => runProofReport(paths, { registry: proofRegistry() }),
+  },
 ] as const;
+
+/**
+ * The live MCP tool registry the proof engine consumes. The known MCP-tool set
+ * SELF-DERIVES from `TOOL_DEFS` (never a hand-maintained list) so the coverage
+ * matrix's MCP-tool dimension can never silently drift from what is registered.
+ */
+function proofRegistry(): ProofToolRegistry {
+  return { names: TOOL_DEFS.map((t) => t.name) };
+}
+
+/**
+ * The sync-contract guard for the async-only th_proof_* tools. The CallTool path
+ * dispatches them via {@link ToolDef.runAsync}, so this is never reached in
+ * practice; it exists only to satisfy the required synchronous `run` contract that
+ * the 35 existing tools rely on.
+ */
+function asyncToolGuard(name: string): CommandResult {
+  return failure({ human: `${name} runs asynchronously; dispatch via the awaiting CallTool path.`, data: { error: "async_tool" } });
+}
 
 /** The advertised `Tool` list (name + description + JSON-Schema input). */
 export function listTools(): Tool[] {
@@ -883,6 +961,79 @@ export function validateToolArgs(name: string, args: unknown): { ok: true } | { 
 }
 
 /**
+ * C1/A1 — append one `{tool,ts,ok}` record to the DEDICATED producer-side MCP
+ * call trail at `<stateDir>/proof-calls.jsonl`.
+ *
+ * This is the ONLY artifact that records WHICH MCP tools a live run actually
+ * invoked, so the proof coverage-matrix can compute the MCP-tool dimension from
+ * real evidence. It is deliberately a dedicated file — NOT `telemetry.jsonl`, and
+ * NOT gated by the telemetry opt-in switch — so the coverage evidence cannot be
+ * silently emptied by the M3 opt-in, log-rotation, or route/scorecard co-mingling.
+ *
+ * Best-effort by contract (A2): the append is written at BOTH the success and the
+ * catch sites of the CallTool handler, and a logging failure must NEVER break or
+ * alter a tool call — every error is swallowed. The consumer is `readProofCalls`/
+ * `harvestScenario` in `src/core/proof/harvest.ts`.
+ */
+function appendProofCall(paths: ProjectPaths, tool: string, ok: boolean): void {
+  try {
+    const line = JSON.stringify({ tool, ts: new Date().toISOString(), ok }) + "\n";
+    fs.appendFileSync(path.join(paths.stateDir, "proof-calls.jsonl"), line);
+  } catch {
+    // best-effort: trail logging must never affect the tool call.
+  }
+}
+
+/**
+ * Execute a single MCP tool call end-to-end: look up the tool, enforce the closed
+ * typed inputSchema, dispatch to the pure `run*` handler, map the CommandResult to
+ * an MCP result, and record the call in the dedicated proof-calls trail (C1/A1/A2).
+ *
+ * Exported so the adapter — INCLUDING the trail instrumentation — is unit-testable
+ * directly, without a socket or a live transport (the same testability boundary as
+ * the exported `toToolResult`/`TOOL_DEFS`). The CallTool request handler is a thin
+ * wrapper over this.
+ */
+export async function callTool(name: string, args: ToolArgs = {}): Promise<CallToolResult> {
+  const def = TOOL_DEFS.find((t) => t.name === name);
+  if (!def) {
+    return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
+  }
+  // Enforce the closed, typed inputSchema BEFORE dispatch (H-1): extra,
+  // wrong-typed, or missing-required arguments are rejected as a tool error
+  // instead of being silently passed to the handler.
+  const valid = validateToolArgs(def.name, args);
+  if (!valid.ok) {
+    return {
+      content: [{ type: "text", text: `Invalid arguments for ${def.name}: ${valid.errors}` }],
+      isError: true,
+    };
+  }
+  // Handlers are pure and self-contained; an unexpected throw is mapped to a
+  // tool error rather than crashing the server process.
+  try {
+    const paths = resolvePathsForCall();
+    // Async tools (the th_proof_* suite) spawn real OS processes — await runAsync
+    // when present; otherwise call the synchronous handler.
+    const cmd = def.runAsync ? await def.runAsync(paths, args) : def.run(paths, args);
+    const result = toToolResult(cmd);
+    // C1/A1/A2: record the successful call in the dedicated proof-calls trail.
+    appendProofCall(paths, def.name, true);
+    return result;
+  } catch (err) {
+    // C1/A1/A2: record the failed call too (ok:false). Fully guarded so a
+    // path-resolution or logging error here can never escape the catch.
+    try {
+      appendProofCall(resolvePathsForCall(), def.name, false);
+    } catch {
+      // best-effort
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: "text", text: `Tool ${def.name} failed: ${message}` }], isError: true };
+  }
+}
+
+/**
  * Build the MCP {@link Server} with the tools/list + tools/call handlers wired
  * to {@link TOOL_DEFS}. Pulled out of `main` so it is independently testable and
  * so the transport choice (stdio) stays in `main`.
@@ -895,35 +1046,9 @@ export function buildServer(): Server {
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: listTools() }));
 
-  server.setRequestHandler(CallToolRequestSchema, (request): CallToolResult => {
-    const def = TOOL_DEFS.find((t) => t.name === request.params.name);
-    if (!def) {
-      return {
-        content: [{ type: "text", text: `Unknown tool: ${request.params.name}` }],
-        isError: true,
-      };
-    }
-    const args: ToolArgs = (request.params.arguments as ToolArgs | undefined) ?? {};
-    // Enforce the closed, typed inputSchema BEFORE dispatch (H-1): extra,
-    // wrong-typed, or missing-required arguments are rejected as a tool error
-    // instead of being silently passed to the handler.
-    const valid = validateToolArgs(def.name, args);
-    if (!valid.ok) {
-      return {
-        content: [{ type: "text", text: `Invalid arguments for ${def.name}: ${valid.errors}` }],
-        isError: true,
-      };
-    }
-    // Handlers are pure and self-contained; an unexpected throw is mapped to a
-    // tool error rather than crashing the server process.
-    try {
-      const paths = resolvePathsForCall();
-      return toToolResult(def.run(paths, args));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { content: [{ type: "text", text: `Tool ${def.name} failed: ${message}` }], isError: true };
-    }
-  });
+  server.setRequestHandler(CallToolRequestSchema, (request): Promise<CallToolResult> =>
+    callTool(request.params.name, (request.params.arguments as ToolArgs | undefined) ?? {}),
+  );
 
   return server;
 }

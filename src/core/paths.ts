@@ -58,6 +58,14 @@ export interface ProjectPaths {
  * project they govern). Mirrors the write-gate's root-containment check.
  */
 export function resolveWithinRoot(root: string, p: string): string | null {
+  // Cross-platform containment: a Windows drive-absolute (`C:\…`), UNC (`\\…`), or
+  // any backslash-separated path is a real separator on Windows but would be parsed
+  // as a single innocuous filename on POSIX — letting a hostile `C:\Windows\…` slip
+  // through `path.isAbsolute`/`path.relative` and resolve *inside* the root. Reject
+  // these on POSIX so containment never depends on the host OS. On Windows the guard
+  // is skipped: the native isAbsolute/relative checks below already handle them, and
+  // legitimate in-root absolute paths are themselves drive-absolute.
+  if (path.sep === "/" && (/^[a-zA-Z]:[\\/]/.test(p) || p.includes("\\"))) return null;
   const absRoot = path.resolve(root);
   const abs = path.isAbsolute(p) ? p : path.resolve(absRoot, p);
   const rel = path.relative(absRoot, abs);

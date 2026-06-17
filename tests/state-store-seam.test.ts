@@ -217,6 +217,26 @@ describe("#3-pre: injected seam reproduces acquire / steal / timeout / rethrow i
       tp.cleanup();
     }
   });
+
+  it("EPERM acquire (Windows contention) + lock VANISHED mid-stat (ENOENT) → retries and acquires (REQ-STATE-LOCK-002)", () => {
+    const tp = lockableProject();
+    try {
+      // The windows-latest flake: mkdir threw EPERM because the lock was HELD
+      // (Windows signals contention with EPERM, not EEXIST), then the holder
+      // released it so the follow-up stat threw ENOENT. The verdict must key off
+      // the STAT error (ENOENT = vanished → retry), NOT the acquire EPERM. The old
+      // code keyed off the acquire code and rethrew a raw EPERM → crash.
+      const { state, ops } = makeFakeOps({
+        acquire: (n) => (n === 1 ? "EPERM" : null), // held once, then free
+        mtimeThrows: "ENOENT", // lock vanished between mkdir and stat
+      });
+      const out = withStateLock(tp.paths, () => "acquired", ops);
+      expect(out).toBe("acquired");
+      expect(state.attempts).toBe(2); // attempt 1 vanished → retry → attempt 2 acquires
+    } finally {
+      tp.cleanup();
+    }
+  });
 });
 
 describe("#3: the deadline is enforced at the LOOP HEAD — no retry path can busy-loop", () => {
