@@ -22730,7 +22730,8 @@ async function runProof(opts = {}) {
   }
   const anyCardFail = cards.some((c) => c.verdict === "fail");
   const gatingRegression = regressions.some((r) => r.regressed);
-  const verdict = anyCardFail || !matrix.complete || gatingRegression ? "fail" : "pass";
+  const fullRun = componentsRun.length === PROOF_COMPONENTS.length;
+  const verdict = anyCardFail || fullRun && !matrix.complete || gatingRegression ? "fail" : "pass";
   const finishedAt = (/* @__PURE__ */ new Date()).toISOString();
   const summary = {
     id: `proof-${startedAt.replace(/[:.]/g, "-")}`,

@@ -65,10 +65,11 @@ For each brief `<id>` in the proof corpus — run **one at a time, serially**:
    `CLAUDE_PROJECT_DIR` set. The skill runs the real Orchestrator→sub-agent full pipeline for
    this brief and returns when the live run is complete.
 
-4. **Finish the scenario** (CLI-only):
+4. **Finish the scenario** (CLI-only) — finishes the scenario at `CLAUDE_PROJECT_DIR`
+   (or pass `--scenario-root <scenarioRoot>` explicitly):
 
    ```
-   node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" proof scenario finish --brief <id>
+   node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" proof scenario finish
    ```
 
    Marks the scenario complete; real artifacts (`state.json`, `gate-ledger.jsonl`,

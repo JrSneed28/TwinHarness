@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { runProof } from "../src/core/proof/runner";
+import { runProof, runComponent } from "../src/core/proof/runner";
 import { PROOF_COMPONENTS } from "../src/core/proof/types";
 import { TOOL_DEFS } from "../src/mcp-server";
 
@@ -60,6 +60,26 @@ describe("proof self-test — full nine-card report, live MCP dimension NOT sati
       const mcpDiag = report.diagnostics.find((d) => d.location.startsWith("mcp-tool:"));
       expect(mcpDiag).toBeDefined();
       expect(mcpDiag!.hint.toLowerCase()).toContain("self-test");
+    },
+    120_000,
+  );
+});
+
+describe("proof subset run — matrix REPORTED but NOT gating (single-component verdict)", () => {
+  it(
+    "a passing single mechanical component yields verdict 'pass' despite an incomplete matrix",
+    async () => {
+      // A subset run can never touch every subsystem/MCP-tool/gate, so the matrix is
+      // necessarily incomplete — but that must NOT mask a passing component's verdict
+      // (otherwise `th proof component <N>` always exits non-zero / isError).
+      const report = await runComponent("failure-injection");
+
+      expect(report.cards.map((c) => c.component)).toEqual(["failure-injection"]);
+      expect(report.cards[0]!.verdict).toBe("pass");
+      // Matrix is incomplete for a subset run …
+      expect(report.matrix.complete).toBe(false);
+      // … yet does NOT gate the subset verdict: a passing component → a passing run.
+      expect(report.summary.verdict).toBe("pass");
     },
     120_000,
   );

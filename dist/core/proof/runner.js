@@ -480,7 +480,13 @@ async function runProof(opts = {}) {
     // --- Overall verdict + run summary. ---
     const anyCardFail = cards.some((c) => c.verdict === "fail");
     const gatingRegression = regressions.some((r) => r.regressed);
-    const verdict = anyCardFail || !matrix.complete || gatingRegression ? "fail" : "pass";
+    // The coverage-matrix completeness gate (AC #5) applies ONLY to a FULL nine-component
+    // run: a subset / single-component run (`th proof component <N>`) can never touch every
+    // subsystem, MCP tool, and gate, so its matrix is necessarily incomplete. For a subset
+    // run the matrix is REPORTED but NOT gating — the verdict derives from the card(s) + any
+    // gating regression — so a passing component faithfully yields a passing run.
+    const fullRun = componentsRun.length === types_1.PROOF_COMPONENTS.length;
+    const verdict = anyCardFail || (fullRun && !matrix.complete) || gatingRegression ? "fail" : "pass";
     const finishedAt = new Date().toISOString();
     const summary = {
         id: `proof-${startedAt.replace(/[:.]/g, "-")}`,
