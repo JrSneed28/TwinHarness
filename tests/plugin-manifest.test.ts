@@ -139,7 +139,7 @@ describe("REQ-PLUGIN-002: the compiled CLI ships with the plugin", () => {
 });
 
 describe("REQ-PLUGIN-003: every component resolves `th` without relying on PATH", () => {
-  const skillFiles = ["skills/twinharness/SKILL.md"];
+  const skillFiles = ["skills/twinharness/SKILL.md", "skills/twinharness-proof/SKILL.md"];
   const commandFiles = fs
     .readdirSync(path.join(ROOT, "commands"))
     .filter((f) => f.endsWith(".md"))
@@ -149,9 +149,12 @@ describe("REQ-PLUGIN-003: every component resolves `th` without relying on PATH"
     .filter((f) => f.endsWith(".md"))
     .map((f) => `agents/${f}`);
 
-  it("expected component counts (15 agents, 4 commands, 1 skill)", () => {
+  it("expected component counts (15 agents, 6 commands, 2 skills)", () => {
     expect(agentFiles).toHaveLength(15);
-    expect(commandFiles).toHaveLength(4);
+    // 4 original (th-run/status/drift/escalate) + 2 proof surfaces (th-proof, th-proof-component).
+    expect(commandFiles).toHaveLength(6);
+    // twinharness + twinharness-proof (the proof-runner skill).
+    expect(skillFiles).toHaveLength(2);
   });
 
   it.each([...skillFiles, ...commandFiles, ...agentFiles])(
