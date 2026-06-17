@@ -37,6 +37,24 @@ Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding lay
   exclusion (oversize was already pinned by `tests/repo-bounded-cost.test.ts`). Decision recorded in
   `docs/05-adrs/ADR-004`. No behavior change.
 
+- **`sleepSync` uses a single module-level lock word + a no-throw bounded fallback (finding #7, PERF-007).**
+  `src/core/sleep.ts` previously allocated a fresh `Int32Array(new SharedArrayBuffer(4))` on **every**
+  call — GC churn during the exact contention burst PERF-007/008 keep cheap, since it is called once
+  per failed attempt inside `withStateLock` (`src/core/state-store.ts`) and the atomic-io retry loops.
+  The lock word is never signalled (always `0`), so it is now allocated **exactly once** at module
+  load as a shared singleton. The allocation is also guarded: on a hardened / non-cross-origin-isolated
+  runtime where `SharedArrayBuffer` is absent the constructor THROWS, and because `withStateLock` does
+  not wrap `sleepSync`, that turned a recoverable contention wait into an uncaught raw stack instead of
+  a `LockTimeoutError`. The word is now built in a `try/catch` IIFE (`null` on failure) so **importing
+  the module can never throw**, and `sleepSync` **can never throw**: if the word is `null` or
+  `Atomics.wait` throws at call time it falls through to a bounded `while (Date.now() < until)` spin
+  that still returns after ~`ms`. That fallback reintroduces CPU spin **only** on those hardened
+  runtimes (correctness over a raw throw); the zero-CPU `Atomics.wait` path is **unchanged everywhere
+  it works**, and the behavioral contract is identical (non-finite/≤0 returns immediately; real
+  durations are honored and accumulate). New tests in `tests/sleep.test.ts` pin both guarantees
+  (no-throw when `Atomics.wait` throws, no-throw on the absent-`SharedArrayBuffer` null-word path) and
+  the singleton (the `SharedArrayBuffer` constructor is not invoked per call).
+
 - **Coverage test-file recognition residuals accepted + pinned (finding #4, ADR-005).** Two GOV-1
   edges in `isRecognizedTestFile` (`src/core/coverage.ts`) are ACCEPTED rather than tightened: (a) the
   path rule counts a fixture/prose file under a NESTED test-named dir as "tested" (a safe false

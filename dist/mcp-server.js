@@ -15565,10 +15565,25 @@ var fs2 = __toESM(require("node:fs"));
 var path2 = __toESM(require("node:path"));
 
 // src/core/sleep.ts
+var LOCK_WORD = (() => {
+  try {
+    return new Int32Array(new SharedArrayBuffer(4));
+  } catch {
+    return null;
+  }
+})();
 function sleepSync(ms) {
   if (!Number.isFinite(ms) || ms <= 0) return;
-  const sab = new Int32Array(new SharedArrayBuffer(4));
-  Atomics.wait(sab, 0, 0, ms);
+  if (LOCK_WORD !== null) {
+    try {
+      Atomics.wait(LOCK_WORD, 0, 0, ms);
+      return;
+    } catch {
+    }
+  }
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+  }
 }
 
 // src/core/atomic-io.ts
