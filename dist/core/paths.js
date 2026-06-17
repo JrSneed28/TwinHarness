@@ -191,5 +191,6 @@ function resolveProjectPaths(root) {
         stateFile: path.join(stateDir, "state.json"),
         docsDir: path.join(abs, "docs"),
         driftLog: path.join(abs, "drift-log.md"),
+        interviewFile: path.join(stateDir, "interview.json"),
     };
 }

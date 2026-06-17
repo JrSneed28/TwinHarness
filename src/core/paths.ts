@@ -49,6 +49,8 @@ export interface ProjectPaths {
   docsDir: string;
   /** `<root>/drift-log.md` */
   driftLog: string;
+  /** `<stateDir>/interview.json` — the deterministic interview store (store-only; agent supplies all scores). */
+  interviewFile: string;
 }
 
 /**
@@ -178,5 +180,6 @@ export function resolveProjectPaths(root: string): ProjectPaths {
     stateFile: path.join(stateDir, "state.json"),
     docsDir: path.join(abs, "docs"),
     driftLog: path.join(abs, "drift-log.md"),
+    interviewFile: path.join(stateDir, "interview.json"),
   };
 }

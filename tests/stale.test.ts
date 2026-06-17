@@ -187,8 +187,10 @@ describe("REQ-STALE-006: downstreamOf is the strict pipeline suffix (§18)", () 
     // docs/00-research is the most-upstream artifact → everything else is downstream.
     expect(downstreamOf("docs/00-research")).toEqual(ARTIFACT_PIPELINE.slice(1));
     expect(downstreamOf("docs/01-requirements.md")).toEqual(ARTIFACT_PIPELINE.slice(2));
-    // docs/04b-ui-design.md sits between architecture and the ADR directory.
-    expect(downstreamOf("docs/04-architecture.md").slice(0, 2)).toEqual(["docs/04b-ui-design.md", "docs/05-adrs"]);
+    // docs/04a-ux-design.md then docs/04b-ui-design.md sit between architecture and the ADR
+    // directory; UX (4a) cascades into UI (4b).
+    expect(downstreamOf("docs/04-architecture.md").slice(0, 2)).toEqual(["docs/04a-ux-design.md", "docs/04b-ui-design.md"]);
+    expect(downstreamOf("docs/04a-ux-design.md")[0]).toBe("docs/04b-ui-design.md");
     // Correct T3 stage order: Contracts → Security (08a) → Failure Modes (08b) → Test Strategy (08).
     expect(downstreamOf("docs/07-contracts.md")).toEqual([
       "docs/08a-security-threat-model.md",

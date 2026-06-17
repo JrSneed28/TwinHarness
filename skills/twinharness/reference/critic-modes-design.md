@@ -2,7 +2,7 @@
 
 This file contains the grounded-defect checklists for Critic modes in the design and analysis stages:
 `contracts`, `test-strategy`, `adr`, `technical-design`, `security`, `failure-modes`, `documentation`,
-`ui-design`, `research`, and `debug-review`.
+`ux-design`, `ui-design`, `research`, and `debug-review`.
 
 > **Running `th`:** wherever this document says `th <args>`, run
 > `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
@@ -363,12 +363,67 @@ Grounded defect examples for this mode:
 
 ---
 
+## `ux-design` — IMPLEMENTED (Stage 4a)
+
+**Context:** This mode reviews `docs/04a-ux-design.md` produced by the ux-ui-designer agent
+(Stage 4a, UX). Run in **fresh context** (spec §6.5). You have not seen the designer's direction
+conversation. That isolation ensures you check the artifact against requirements and domain
+reality, not against the designer's intent. Stage 4a precedes Stage 4b (UI) — the UX artifact
+defines users, journeys, information architecture, and task flows BEFORE any visual design.
+
+**What to check for a UX design artifact (`docs/04a-ux-design.md`):**
+
+- **Every persona, journey, and task flow serves ≥1 REQ-ID.** For each persona in the
+  Personas/User Journeys section and each flow in the Task Flows section, verify it anchors to at
+  least one REQ-ID from `docs/01-requirements.md`. A persona, journey, or flow with no REQ-ID
+  anchor is speculative scope — it may represent a user or behavior the project never required.
+  An unanchored persona/journey/flow is a grounded defect.
+- **Every MVP REQ-ID with user-facing behavior maps to ≥1 journey or task flow.** Cross-reference
+  the MVP REQ-IDs from `docs/02-scope.md` that involve user interaction against the journeys and
+  task flows. A user-facing MVP REQ-ID with no journey/flow coverage is a grounded defect — the
+  UX cannot support the requirement.
+- **Every task flow starts and ends at a defined state.** Each flow in the Task Flows section
+  must name a specific entry point and a specific outcome. A flow that begins or ends at an
+  undefined or unnamed state is a grounded defect — undefined boundaries create unresolvable
+  ambiguity for the Stage 4b screen design and for slice builders.
+- **Information architecture covers the requirements.** Every top-level and sub-area of the
+  Information Architecture must anchor to a REQ-ID or a stated persona goal. An IA group that
+  serves no requirement is speculative scope; a user-facing requirement with no place in the IA
+  is a coverage gap. Both are grounded defects.
+- **Assumptions are surfaced, not buried.** Structural UX decisions driven by an inference (not a
+  stated requirement) must appear in the UX Research & Assumptions section (or as an Open UX
+  Question). A design choice that silently depends on an unstated assumption is a grounded defect.
+- **Vocabulary matches the domain-model glossary.** Cross-reference terms used in persona names,
+  journey descriptions, IA labels, and flow steps against the Glossary in
+  `docs/03-domain-model.md` (if it exists) or against the REQ-IDs' vocabulary. Introducing a
+  synonym for a domain term is a vocabulary mismatch — a grounded defect (it leaks naming
+  inconsistency into the UI and the codebase).
+- **No journey or flow serves out-of-scope features.** Cross-reference anchors against
+  `docs/02-scope.md` Out of Scope section. A journey or flow that exists solely to support an
+  explicitly out-of-scope capability is a grounded defect — speculative scope in the UX layer.
+
+Grounded defect examples for this mode:
+
+> "Persona 'Power Analyst' in the Personas section has no REQ-ID anchor — no requirement in
+>  `01-requirements.md` references an analyst user; this persona is speculative scope"
+> "REQ-005 (bulk export) is an MVP user-facing requirement but appears in no journey or task flow —
+>  coverage gap; the UX cannot support the requirement"
+> "Task flow 'Onboarding' ends at 'the main area' — no defined outcome state; an undefined flow
+>  boundary the Stage 4b screen design cannot resolve"
+> "Information Architecture groups everything under 'Tools' with no REQ-ID or persona-goal anchor
+>  — unanchored IA group; speculative scope"
+> "Journey 'Checkout' calls the entity a 'Purchase'; `03-domain-model.md` Glossary defines the
+>  canonical term as 'Order' — vocabulary mismatch that will leak into UI and code naming"
+
+---
+
 ## `ui-design` — IMPLEMENTED (Stage 4b)
 
-**Context:** This mode reviews `docs/04b-ui-design.md` produced by the ui-designer agent
-(Stage 4b). Run in **fresh context** (spec §6.5). You have not seen the designer's direction
+**Context:** This mode reviews `docs/04b-ui-design.md` produced by the ux-ui-designer agent
+(Stage 4b, UI). Run in **fresh context** (spec §6.5). You have not seen the designer's direction
 conversation. That isolation ensures you check the artifact against requirements and domain
-reality, not against the designer's intent.
+reality, not against the designer's intent. Stage 4b follows Stage 4a (UX) — the UI realizes the
+approved UX (`docs/04a-ux-design.md`) as screens, wireframes, and tokens.
 
 **What to check for a UI design artifact (`docs/04b-ui-design.md`):**
 

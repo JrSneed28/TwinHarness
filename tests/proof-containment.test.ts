@@ -1,6 +1,6 @@
 /**
  * Component 7 (Security & containment) — plan §11; AC #12. The allowlist is the
- * exact NAME-SET (38 entries) and `th_decision_approve` is absent. A matching
+ * exact NAME-SET (42 entries) and `th_decision_approve` is absent. A matching
  * tool-name list PASSES; an extra/missing name or `th_decision_approve` FAILS with
  * an AI-actionable diagnostic naming it. Also proves GATE_OWNED 5-field refusal and
  * telemetry no-network. Containment is DEPENDENCY-INJECTED — `toolNames` is passed
@@ -20,13 +20,17 @@ const find = (
 ) => report.assertions.find((a) => a.name === name)!;
 
 describe("proof/containment — exact NAME-SET + GATE_OWNED + telemetry (AC #12)", () => {
-  it("allowlist has 38 entries and excludes th_decision_approve", () => {
-    expect(EXPECTED_TOOL_ALLOWLIST.length).toBe(38);
+  it("allowlist has 42 entries and excludes th_decision_approve", () => {
+    expect(EXPECTED_TOOL_ALLOWLIST.length).toBe(42);
     expect(EXPECTED_TOOL_ALLOWLIST).not.toContain(FORBIDDEN_MCP_TOOL);
-    // 35 base + 3 proof tools.
+    // 35 base + 3 proof + 4 new interview/init tools.
     expect(EXPECTED_TOOL_ALLOWLIST).toContain("th_proof_run");
     expect(EXPECTED_TOOL_ALLOWLIST).toContain("th_proof_component");
     expect(EXPECTED_TOOL_ALLOWLIST).toContain("th_proof_report");
+    expect(EXPECTED_TOOL_ALLOWLIST).toContain("th_interview_start");
+    expect(EXPECTED_TOOL_ALLOWLIST).toContain("th_interview_record");
+    expect(EXPECTED_TOOL_ALLOWLIST).toContain("th_interview_status");
+    expect(EXPECTED_TOOL_ALLOWLIST).toContain("th_init");
   });
 
   it("the EXPECTED allowlist as toolNames PASSES containment with no diagnostics", () => {

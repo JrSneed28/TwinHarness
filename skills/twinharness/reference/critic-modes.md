@@ -57,6 +57,7 @@ The security, failure-handling, and threat-modeling Critic modes (apply ANTI-BOI
 Post-build and investigatory Critic modes:
 
 - **`documentation`** — Enforce ANTI-BOILERPLATE on prose: every documented feature must anchor to a REQ-ID or contract, implementation must match docs, all contracts must be documented, and no generic filler prose in README, guides, API reference. [→ critic-modes-design.md](critic-modes-design.md)
+- **`ux-design`** — Verify every persona/journey/task-flow serves ≥1 REQ-ID, MVP user-facing REQ-IDs map to journeys/flows, task flows are bounded, the information architecture covers the requirements, assumptions are surfaced, and vocabulary matches the domain model in `docs/04a-ux-design.md`. [→ critic-modes-design.md](critic-modes-design.md)
 - **`ui-design`** — Verify every screen serves ≥1 REQ-ID, MVP user-facing REQ-IDs map to screens, user flows are bounded, screens define empty/loading/error states, vocabulary matches domain model, and no out-of-scope features in `docs/04b-ui-design.md`. [→ critic-modes-design.md](critic-modes-design.md)
 - **`research`** — Demand grounded evidence: every material claim must be cited to a real, reachable source with access date, sources must be verifiable (not hallucinated), opinions separated from fact, version/recency noted on version-sensitive claims, and findings anchored to REQ-IDs in `docs/00-research/`. [→ critic-modes-design.md](critic-modes-design.md)
 - **`debug-review`** — Reject narrative; demand proof. Root cause must be anchored to file:line or captured evidence, reproduction must be a real command, hypotheses must carry discriminating experiments, fixes must stay in component boundary, and requirement contradictions must be opened as blocking drift. [→ critic-modes-design.md](critic-modes-design.md)
@@ -71,4 +72,4 @@ For fast lookup by phase:
 |-------|-------|------|
 | Requirements → Scope → Domain → Architecture | `requirements` `scope` `domain-model` `architecture` | [critic-modes-spec.md](critic-modes-spec.md) |
 | Slicing → Building → Final Verification | `slice` `code-review` `final-verification` | [critic-modes-build.md](critic-modes-build.md) |
-| Design Details → Risk → Docs → Debug | `contracts` `test-strategy` `adr` `technical-design` `security` `failure-modes` `documentation` `ui-design` `research` `debug-review` | [critic-modes-design.md](critic-modes-design.md) |
+| Design Details → Risk → Docs → Debug | `contracts` `test-strategy` `adr` `technical-design` `security` `failure-modes` `documentation` `ux-design` `ui-design` `research` `debug-review` | [critic-modes-design.md](critic-modes-design.md) |

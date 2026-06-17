@@ -3,7 +3,7 @@
 > **Stage 4b — UI Design** (spec §2, §8). Runs after Architecture (`04-architecture.md`) and
 > before Contracts/Test Strategy. Engages only when the project has a user interface (the
 > Orchestrator decides). The design direction is taste-driven and irreversible once slices build
-> against it — per the §2 governing axis, it receives a **human gate**: the ui-designer agent
+> against it — per the §2 governing axis, it receives a **human gate**: the ux-ui-designer agent
 > presents 2–3 distinct directions via `AskUserQuestion` (with ASCII mockup previews) and
 > details only the direction the human approves. The bulk of the design then streams. Reads
 > Summary blocks of `01-requirements.md`, `02-scope.md`, `04-architecture.md`, and

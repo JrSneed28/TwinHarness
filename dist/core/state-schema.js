@@ -52,6 +52,7 @@ exports.STATE_FIELD_ORDER = [
     "revise_loop_counts",
     "write_gate",
     "project_mode",
+    "interview_threshold",
 ];
 /** Fresh state written by `th init` — unclassified, implementation not yet allowed. */
 function initialState() {
@@ -208,6 +209,15 @@ function validateState(value) {
     if (v.project_mode !== undefined) {
         if (typeof v.project_mode !== "string" || !exports.PROJECT_MODES.includes(v.project_mode)) {
             issues.push({ path: "project_mode", message: `must be one of ${exports.PROJECT_MODES.join(", ")} or absent` });
+        }
+    }
+    // Optional interview_threshold field (spec R15) — when present, a finite number in [0,1].
+    if (v.interview_threshold !== undefined) {
+        if (typeof v.interview_threshold !== "number" ||
+            !Number.isFinite(v.interview_threshold) ||
+            v.interview_threshold < 0 ||
+            v.interview_threshold > 1) {
+            issues.push({ path: "interview_threshold", message: "must be a finite number in [0,1] or absent" });
         }
     }
     // Cross-field invariant — the veto FLOOR (spec §5): Tier 0 is forbidden when

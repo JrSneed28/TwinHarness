@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runInit = runInit;
+exports.runInitMcp = runInitMcp;
 const fs = __importStar(require("node:fs"));
 const output_1 = require("../core/output");
 const state_schema_1 = require("../core/state-schema");
@@ -103,4 +104,29 @@ function runInit(paths, opts) {
         ...skipped.map((s) => `  skipped: ${s}`),
     ].join("\n");
     return (0, output_1.success)({ data, human });
+}
+/**
+ * MCP-facing init (`th_init`). Idempotent and NON-destructive by contract: when a
+ * project is ALREADY initialized it returns a structured `{ already_initialized:
+ * true, … }` summary WITHOUT clobbering state.json. There is NO `force` over MCP —
+ * destructive re-init stays CLI/human-only (plan R17). A fresh project delegates to
+ * the existing {@link runInit} (with `force:false`) so scaffolding is never
+ * duplicated here.
+ */
+function runInitMcp(paths, opts = {}) {
+    const existing = (0, state_store_1.readState)(paths);
+    if (existing.exists) {
+        const data = { already_initialized: true };
+        if (existing.state) {
+            data.tier = existing.state.tier;
+            data.current_stage = existing.state.current_stage;
+            data.implementation_allowed = existing.state.implementation_allowed;
+        }
+        (0, log_1.structuredLog)({ cmd: "init", already_initialized: true });
+        return (0, output_1.success)({
+            data,
+            human: "TwinHarness already initialized; not re-initializing (use the CLI `th init --force` to reset).",
+        });
+    }
+    return runInit(paths, { force: false, brownfield: opts.brownfield });
 }

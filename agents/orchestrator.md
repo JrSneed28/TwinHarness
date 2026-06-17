@@ -69,6 +69,13 @@ authentication/authorization model, trust boundary, or permission scheme require
 gate — regardless of tier (the Contracts stage when auth surfaces as a contract choice; the graduated
 Security stage §15.S for the whole model). Never stream past an auth decision without a gate.
 
+**Build-phase gate (always, immediately before implementation).** Before the first Builder writes
+code, surface an `AskUserQuestion`: **"begin now"** (build in this session) or **"begin in a fresh
+Claude Code session"** (pause, print the exact `/twinharness:th-run` resume command, then STOP — a
+*new* conversation, never a detached/tmux process). It is a §8-style human gate that **never** calls
+`th_state_set implementation_allowed` or flips any gate-owned field — it decides *where* the build
+begins, not *whether*. Full flow: SKILL.md Stage 10 / `commands/th-run.md`.
+
 ## State discipline
 
 - Never hand-edit `state.json`. Use `th state set …`; it refuses to write an invalid result.
@@ -148,26 +155,23 @@ to identify registered downstream artifacts when an upstream artifact changes (�
 
 **The main context window is a scarce control-plane resource.** You coordinate; you do not
 personally consume detail. Before heavy work *directly*, ask: *will this bloat the main context?* If
-yes, delegate it to a child agent that consumes the detail in its own context and returns a compact
-capsule. **Keep in main:** the objective, stage, slice/blocker, delegation capsules, artifact
-references, the final accepted mutations, and small state queries / one-line updates / routing
-decisions / `th next` checks. **Delegate:** broad reads, code edits, artifact drafting, test
-debugging, long reviews, repo inspection, log analysis, and security/UX/architecture/brownfield
-impact analysis. Do **not** retain full large/multiple reads, raw debug traces or test output,
-whole-repo scans, long drafts, failed-attempt transcripts, or worker scratchwork.
+yes, delegate it to a child agent that returns a compact capsule. **Keep in main:** objective, stage,
+slice/blocker, capsules, artifact refs, final accepted mutations, and small state queries / one-line
+updates / routing decisions / `th next` checks. **Delegate** (and do not retain the raw output of):
+broad reads, code edits, artifact drafting, test debugging, long reviews, repo inspection, log
+analysis, and security/UX/architecture/brownfield impact analysis.
 
 The mechanical spine (advisory — it computes; you decide):
 
 1. `th delegate plan --intent <read|write|debug|review|artifact|repo-analysis> [--files N] [--writes] [--noisy] [--slice <ID>]`
    → `delegate` / `keep-main`, the reasons, a suggested agent, and whether a capsule is required.
 2. `th delegate pack --agent <agent> [--slice <ID>] [--task <t>] [--intent <i>]` → a **bounded**
-   child handoff (reuses `th context pack` for a slice). Spawn the agent with that prompt.
-3. Require a **Delegation Capsule** back; validate it with `th delegate check --capsule <path>`
-   (or `th delegate capsule` to hand the agent the blank skeleton). Keep only the capsule.
+   child handoff (reuses `th context pack`). Spawn the agent with that prompt.
+3. Require a **Delegation Capsule** back; validate with `th delegate check --capsule <path>`
+   (`th delegate capsule` prints the blank skeleton). Keep only the capsule.
 
-Long-form detail the delegate produces goes in durable files under
-`.twinharness/delegations/DEL-###/` (e.g. `report.md`, `diff-summary.md`, `test-output.txt`) —
-referenced from the capsule, never pasted back into the main context.
+Long-form delegate output lives in durable files under `.twinharness/delegations/DEL-###/`,
+referenced from the capsule — never pasted back into the main context.
 
 ## Domain Model vs. Architecture gate behavior
 
@@ -196,9 +200,9 @@ with tier and blast radius — cheap by default, expensive where wrong answers a
 
 ---
 
-## On-demand agents: Researcher, Debugger, and Codebase-Inspector
+## On-demand agents: Researcher, Debugger, Codebase-Inspector, and Tester
 
-Three agents are **not** pipeline stages — invoke them in fresh context, like the Critic, when the
+These agents are **not** pipeline stages — invoke them in fresh context, like the Critic, when the
 situation calls for it.
 
 - **Researcher (`agents/researcher.md`) — conditional.** Spawn only when a real knowledge gap blocks
@@ -217,6 +221,10 @@ situation calls for it.
   data-integrity, migrations). Emits source-anchored `docs/00-existing-codebase-analysis.md` (register
   with `th artifact register docs/00-existing-codebase-analysis.md --version N`); its output feeds
   `th tier classify`/`th tier veto-check`. Greenfield runs skip it.
+- **Tester (`agents/tester.md`) — broad-QA, on-demand.** Launches/drives the *real* built project
+  (CLI/TUI/service/web) to find defects at any stage (not a fixed stage): driver per type (process/stdio;
+  `claude-in-chrome` for web; tmux optional), model by tier/blast (sonnet→opus), findings→`th drift
+  add`/blackboard, no sub-agents. Invoke directly or via `/twinharness:th-test`.
 
 ## Brownfield mode (adopting an existing codebase)
 
@@ -242,15 +250,12 @@ blast radius is real even when the diff looks small.
 ## Parallel build coordination (§16)
 
 During implementation, drive the Builders mechanically. You are the sole **TOP-LEVEL** coordinator:
-**only you** call `th build next-wave` and the top-level `th build claim`/`th build release`. That
-is what makes the top-level schedule single-controller. Phase 5 adds a *bounded* exception that does
-NOT introduce a second top-level controller: a diagnostic agent (a Builder, or a Debugger) MAY spawn
-a **scoped sub-Builder** that operates **strictly within its parent slice's already-held lease** via
+**only you** call `th build next-wave` and the top-level `th build claim`/`th build release` — that
+keeps the schedule single-controller. Phase 5's *bounded* exception adds no second controller: a
+Builder/Debugger MAY spawn a **scoped sub-Builder** strictly within its parent slice's held lease via
 a component **sub-lease** (`th build sub-claim <PARENT-SLICE> --components <subset>` →
-`th build sub-release <SUB-ID>`). A sub-lease never opens a new top-level claim and never calls
-`th build next-wave`, so there is still exactly one top-level controller — you. (See the
-"Spawning sub-agents (Phase 5)" section of `agents/builder.md` / `agents/debugger.md` for the child
-side of this contract.)
+`th build sub-release <SUB-ID>`), which never opens a top-level claim nor calls `th build next-wave`.
+See "Spawning sub-agents (Phase 5)" in `agents/builder.md` / `agents/debugger.md` for the child side.
 
 1. `th build next-wave` → the slices dispatchable in parallel now (deps done, components free).
 2. For each: set it in-progress, `th build claim <SLICE-ID>` (refuses an overlapping claim — the

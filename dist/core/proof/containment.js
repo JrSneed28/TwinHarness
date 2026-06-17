@@ -62,7 +62,8 @@ const paths_1 = require("../paths");
 const state_fields_1 = require("../state-fields");
 /**
  * The 35 base MCP tool names (verified against `TOOL_DEFS`, plan Step 7) PLUS the 3
- * appended proof tools — 38 total. `th_decision_approve` is INTENTIONALLY excluded
+ * appended proof tools PLUS the 4 new interview/init tools — 42 total
+ * (35 base + 3 proof + 4 new). `th_decision_approve` is INTENTIONALLY excluded
  * (RULE-011/INV-005: a human-only TTY gate is never exposed over MCP).
  */
 exports.EXPECTED_TOOL_ALLOWLIST = [
@@ -106,6 +107,11 @@ exports.EXPECTED_TOOL_ALLOWLIST = [
     "th_proof_run",
     "th_proof_component",
     "th_proof_report",
+    // --- 4 new interview/init tools (store-only / idempotent; never gate-mutating) ---
+    "th_interview_start",
+    "th_interview_record",
+    "th_interview_status",
+    "th_init",
 ];
 /** The human-only gate that must NEVER appear in the MCP allowlist. */
 exports.FORBIDDEN_MCP_TOOL = "th_decision_approve";

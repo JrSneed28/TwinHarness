@@ -90,7 +90,7 @@ describe("REQ-RU-001: dispatch() attachment point — `repo` group now wired (SL
 // Pinning the exact count + names makes any future change to the surface deliberate.
 // ---------------------------------------------------------------------------
 
-describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 38 tools registered (coordination-primitive layer added th_build_dispatch/plan, th_artifact_*, th_collab_*, th_debate_* on top of the prior 23; the operational proof suite appends th_proof_run/component/report)", () => {
+describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 42 tools registered (coordination-primitive layer added th_build_dispatch/plan, th_artifact_*, th_collab_*, th_debate_* on top of the prior 23; the operational proof suite appends th_proof_run/component/report; the interview/init tools append th_interview_*/th_init)", () => {
   // Anchor: REQ-NFR-002
   const EXPECTED_TOOL_NAMES = [
     "th_state_get",
@@ -131,13 +131,17 @@ describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 38 tools registered (coord
     "th_proof_run",
     "th_proof_component",
     "th_proof_report",
+    "th_interview_start",
+    "th_interview_record",
+    "th_interview_status",
+    "th_init",
   ] as const;
 
-  it("REQ-NFR-002 — TOOL_DEFS.length === 38 (coordination-primitive layer added th_build_dispatch/plan, th_artifact_claim/release/leases, th_collab_init/fragment/list/merge, th_debate_add/list/resolve on top of the prior 23; the proof suite appends th_proof_run/component/report → 38)", () => {
-    expect(TOOL_DEFS.length).toBe(38);
+  it("REQ-NFR-002 — TOOL_DEFS.length === 42 (coordination-primitive layer added th_build_dispatch/plan, th_artifact_claim/release/leases, th_collab_init/fragment/list/merge, th_debate_add/list/resolve on top of the prior 23; the proof suite appends th_proof_run/component/report → 38; the interview/init tools append th_interview_start/record/status + th_init → 42)", () => {
+    expect(TOOL_DEFS.length).toBe(42);
   });
 
-  it("REQ-NFR-002 — TOOL_DEFS contains exactly the 38 expected tool names", () => {
+  it("REQ-NFR-002 — TOOL_DEFS contains exactly the 42 expected tool names", () => {
     const names = TOOL_DEFS.map((t) => t.name);
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
   });

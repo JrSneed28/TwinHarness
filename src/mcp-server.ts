@@ -57,6 +57,8 @@ import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from 
 import { runDebateAdd, runDebateList, runDebateResolve } from "./commands/debate";
 import { GATE_OWNED } from "./core/state-fields";
 import { runProofRun, runProofComponent, runProofReport } from "./commands/proof";
+import { runInterviewStart, runInterviewRecord, runInterviewStatus } from "./commands/interview";
+import { runInitMcp } from "./commands/init";
 import type { ProofToolRegistry } from "./core/proof/runner";
 
 /* ------------------------------------------------------------------ *
@@ -826,6 +828,90 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: () => asyncToolGuard("th_proof_report"),
     runAsync: (paths) => runProofReport(paths, { registry: proofRegistry() }),
+  },
+  // ---- Interview + init tools (tail-appended 38→42) ----
+  // Store-only/deterministic: the interview tools RECORD agent-supplied scores and
+  // PERSIST .twinharness/interview.json (no LLM in the deterministic layer); th_init
+  // is idempotent and never gate-mutating. All four are containment-safe and join the
+  // EXPECTED_TOOL_ALLOWLIST. th_init deliberately exposes NO `force` (R17).
+  {
+    name: "th_interview_start",
+    description:
+      "Start a scored Socratic interview: create .twinharness/interview.json with the idea + resolved ambiguity threshold (default 0.20). Store-only; overwrites any prior interview. `idea` is required.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        idea: stringProp("The initial idea/brief to interview against (required)."),
+        threshold: numberProp("Ambiguity-gate threshold in [0,1] (default 0.20)."),
+      },
+      required: ["idea"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runInterviewStart(paths, { idea: optString(args, "idea"), threshold: optNumber(args, "threshold") }),
+  },
+  {
+    name: "th_interview_record",
+    description:
+      "Append one agent-supplied round to the interview store and update the latest ambiguity. Store-only — the agent supplies ALL judgment; the tool COMPUTES nothing but `ready = ambiguity <= threshold`. `scores` is a JSON object {goal,constraints,criteria}; `entities` is a JSON array of strings (both parsed in-handler). `question`, `answer`, `scores`, and `ambiguity` are required.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        question: stringProp("The question asked this round (required)."),
+        answer: stringProp("The answer captured this round (required)."),
+        scores: stringProp('JSON object of per-dimension scores, e.g. {"goal":0.2,"constraints":0.3,"criteria":0.1} (required).'),
+        ambiguity: numberProp("Agent-computed ambiguity for this round, a number in [0,1] (required)."),
+        entities: stringProp('JSON array of entity strings captured this round, e.g. ["auth","db"] (optional).'),
+      },
+      required: ["question", "answer", "scores", "ambiguity"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      // Nested args exceed the scalar validator: scores/entities arrive as JSON text
+      // and are parsed here (precedent: th_decision_add `links`). The handler then
+      // validates their shape and stores them verbatim.
+      const scoresRaw = optString(args, "scores");
+      let scores: unknown;
+      try {
+        scores = scoresRaw === undefined ? undefined : JSON.parse(scoresRaw);
+      } catch {
+        return failure({ human: "`scores` must be valid JSON for { goal, constraints, criteria }.", data: { error: "invalid_scores_json" } });
+      }
+      const entitiesRaw = optString(args, "entities");
+      let entities: unknown;
+      try {
+        entities = entitiesRaw === undefined ? undefined : JSON.parse(entitiesRaw);
+      } catch {
+        return failure({ human: "`entities` must be a valid JSON array of strings.", data: { error: "invalid_entities_json" } });
+      }
+      return runInterviewRecord(paths, {
+        question: optString(args, "question"),
+        answer: optString(args, "answer"),
+        scores,
+        ambiguity: optNumber(args, "ambiguity"),
+        entities,
+      });
+    },
+  },
+  {
+    name: "th_interview_status",
+    description:
+      "Report the interview gate state: { started, rounds, ambiguity, threshold, ready }. A missing/corrupt store reports started:false, ready:false. Read-only; COMPUTES only `ready`.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runInterviewStatus(paths),
+  },
+  {
+    name: "th_init",
+    description:
+      "Initialize TwinHarness scaffolding (docs/, state.json, drift-log.md). IDEMPOTENT and non-destructive: on an already-initialized project it returns { already_initialized: true, … } WITHOUT clobbering state.json. `brownfield` records project_mode:brownfield on a fresh init. There is NO force over MCP — destructive re-init is CLI/human-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        brownfield: boolProp("Record project_mode:brownfield for adopting an existing codebase (fresh init only)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) => runInitMcp(paths, { brownfield: optBool(args, "brownfield") }),
   },
 ] as const;
 

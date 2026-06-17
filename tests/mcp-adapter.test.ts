@@ -10,8 +10,11 @@ import {
   TOOL_DEFS,
   listTools,
   resolvePathsForCall,
+  validateToolArgs,
 } from "../src/mcp-server";
 import { capsuleTemplate } from "../src/core/delegation";
+import { runStateSet } from "../src/commands/state";
+import { readState } from "../src/core/state-store";
 
 /**
  * Phase 4 — MCP adapter tests.
@@ -145,11 +148,15 @@ describe("REQ-MCP-TOOLS-001: the exposed tool set is the intended minimal subset
     expect(TOOL_DEFS.map((t) => t.name).slice(0, 9)).toEqual(expected);
   });
 
-  it("init/migrate and the hook gates are NOT exposed", () => {
+  it("migrate and the hook gates are NOT exposed (th_init is now an idempotent MCP tool)", () => {
     const names = TOOL_DEFS.map((t) => t.name);
-    for (const forbidden of ["th_init", "th_migrate", "th_hook_stop_gate", "th_hook_pretool_gate"]) {
+    // th_init is intentionally exposed (idempotent, non-destructive, no force) —
+    // migrate and the Claude Code hook gates remain CLI/hook-only.
+    for (const forbidden of ["th_migrate", "th_hook_stop_gate", "th_hook_pretool_gate"]) {
       expect(names).not.toContain(forbidden);
     }
+    // th_init IS registered now.
+    expect(names).toContain("th_init");
   });
 
   it("listTools advertises a JSON-Schema object input for every tool", () => {
@@ -334,12 +341,13 @@ describe("SLICE-4 / TASK-010 — MCP adapter: repo-map tool wiring (REQ-RU-044..
 // SLICE-4 / TASK-011 — REQ-RU-094 + REQ-RU-040 (MCP half)
 // ===========================================================================
 
-describe("SLICE-4 / TASK-011 — MCP tool-count 38 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
+describe("SLICE-4 / TASK-011 — MCP tool-count 42 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
   // Full registry, in registration order. The original 23-tool battery (REQ-RU-094)
   // is extended by the 12 coordination tools added after it: th_build_dispatch and
   // th_build_plan slot into the build group (after th_build_release), and the
-  // artifact-lease / collab / debate trios append at the tail — and finally the
-  // th_proof_* trio (run/component/report) appends at the very tail (35→38, PS-Q4).
+  // artifact-lease / collab / debate trios append at the tail — then the
+  // th_proof_* trio (run/component/report) appends (35→38, PS-Q4), and finally the
+  // th_interview_*/th_init tools append at the very tail (38→42).
   const expectedAll = [
     "th_state_get",
     "th_state_set",
@@ -379,10 +387,14 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 38 + schema/no-exec battery (REQ
     "th_proof_run",
     "th_proof_component",
     "th_proof_report",
+    "th_interview_start",
+    "th_interview_record",
+    "th_interview_status",
+    "th_init",
   ];
 
-  // ---- REQ-RU-094: full registry, in order (originally 23; now 38 with the coordination + proof tools) ----
-  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_38 — TOOL_DEFS exposes exactly 38 tools in order", () => {
+  // ---- REQ-RU-094: full registry, in order (originally 23; now 42 with the coordination + proof + interview/init tools) ----
+  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_42 — TOOL_DEFS exposes exactly 42 tools in order", () => {
     expect(TOOL_DEFS.map((t) => t.name)).toEqual(expectedAll);
   });
 
@@ -736,5 +748,100 @@ describe("REQ-MCP-BOUNDARY-001: the zero-dependency CLI stays SDK-free; the MCP 
     expect(bundle.includes("modelcontextprotocol")).toBe(true);
     // …and there is no leftover external require of the package (would need node_modules at runtime).
     expect(/require\(["']@modelcontextprotocol/.test(bundle)).toBe(false);
+  });
+});
+
+// ===========================================================================
+// Interview + init tools (38→42) — th_interview_*/th_init wiring + invariants.
+// ===========================================================================
+
+describe("Interview/init MCP tools: th_interview_* + th_init (store-only, idempotent, no force)", () => {
+  function defFor(name: string) {
+    const d = TOOL_DEFS.find((t) => t.name === name);
+    if (!d) throw new Error(`missing tool ${name}`);
+    return d;
+  }
+
+  it("th_interview_start → record → status round-trips and flips ready once ambiguity ≤ threshold", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    const start = defFor("th_interview_start").run(tp.paths, { idea: "build a CLI", threshold: 0.2 });
+    expect(start.ok).toBe(true);
+
+    // A high-ambiguity round: not yet ready.
+    const r1 = defFor("th_interview_record").run(tp.paths, {
+      question: "What is the goal?",
+      answer: "Ship a deterministic CLI.",
+      scores: JSON.stringify({ goal: 0.5, constraints: 0.4, criteria: 0.3 }),
+      ambiguity: 0.5,
+      entities: JSON.stringify(["cli", "harness"]),
+    });
+    expect(r1.ok).toBe(true);
+    expect(r1.data?.ready).toBe(false);
+
+    // A low-ambiguity round at/below the threshold: ready flips true.
+    const r2 = defFor("th_interview_record").run(tp.paths, {
+      question: "Any constraints?",
+      answer: "Zero runtime deps.",
+      scores: JSON.stringify({ goal: 0.1, constraints: 0.1, criteria: 0.1 }),
+      ambiguity: 0.1,
+    });
+    expect(r2.ok).toBe(true);
+    expect(r2.data?.ready).toBe(true);
+
+    const status = defFor("th_interview_status").run(tp.paths, {});
+    expect(status.ok).toBe(true);
+    expect(status.data?.rounds).toBe(2);
+    expect(status.data?.ambiguity).toBe(0.1);
+    expect(status.data?.threshold).toBe(0.2);
+    expect(status.data?.ready).toBe(true);
+  });
+
+  it("th_init is idempotent on an already-initialized project (returns already_initialized, does not clobber state.json)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    // Mutate the live state so we can detect a clobber.
+    runStateSet(tp.paths, "summaries_index", "custom-summary.md");
+    const before = fs.readFileSync(tp.paths.stateFile, "utf8");
+
+    const res = defFor("th_init").run(tp.paths, { brownfield: true });
+    expect(res.ok).toBe(true);
+    expect(res.data?.already_initialized).toBe(true);
+
+    // state.json is untouched (no clobber).
+    const after = fs.readFileSync(tp.paths.stateFile, "utf8");
+    expect(after).toBe(before);
+    expect(readState(tp.paths).state?.summaries_index).toBe("custom-summary.md");
+  });
+
+  it("th_init never accepts a force property (additionalProperties:false; no force in schema)", () => {
+    const schema = defFor("th_init").inputSchema;
+    expect(schema.additionalProperties).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(schema.properties, "force")).toBe(false);
+    // The validator rejects a force arg.
+    expect(validateToolArgs("th_init", { force: true }).ok).toBe(false);
+  });
+
+  it("validateToolArgs rejects th_interview_start without the required idea", () => {
+    const res = validateToolArgs("th_interview_start", {});
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.errors).toContain("idea");
+  });
+
+  // INVERSE of the GATE_OWNED refusal battery: interview_threshold is NOT gate-owned,
+  // so runStateSet / th_state_set ALLOWS it (it is a free policy value, not a gate).
+  it("runStateSet ALLOWS interview_threshold (not gate-owned) and th_state_set does not refuse it", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    const res = runStateSet(tp.paths, "interview_threshold", "0.3");
+    expect(res.ok).toBe(true);
+    expect(readState(tp.paths).state?.interview_threshold).toBe(0.3);
+
+    // Via the MCP th_state_set wrapper too: not a gate_owned_field refusal.
+    const viaMcp = defFor("th_state_set").run(tp.paths, { key: "interview_threshold", value: "0.15" });
+    expect(viaMcp.ok).toBe(true);
+    expect(readState(tp.paths).state?.interview_threshold).toBe(0.15);
   });
 });

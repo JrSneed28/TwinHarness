@@ -103,11 +103,12 @@ Skip this stage for projects without a user interface (CLIs, background services
 libraries). For any project with a web UI, mobile UI, desktop UI, or rich TUI, engage Stage 4b
 after Architecture is approved and before Contracts/Test Strategy.
 
-Delegate to the **UI Designer agent (`agents/ui-designer.md`) in a FRESH CONTEXT** (§6.3
+Delegate to the **UX/UI Designer agent (`agents/ux-ui-designer.md`) in a FRESH CONTEXT** (§6.3
 rationale: user-centered design is contaminated by backend-architecture thinking; fresh context
-produces cleaner, user-centered results).
+produces cleaner, user-centered results). The agent runs Stage 4a UX (research/journeys/IA/flows
+→ `docs/04a-ux-design.md`) first, then Stage 4b UI (visual/wireframes → `docs/04b-ui-design.md`).
 
-**Human gate on design direction (taste-driven — §2).** The UI Designer presents 2–3 distinct
+**Human gate on design direction (taste-driven — §2).** The UX/UI Designer presents 2–3 distinct
 design directions to the human via `AskUserQuestion` with the `preview` field containing ASCII
 mockups side by side. Do not proceed until the human selects a direction. After direction
 sign-off, the detailed design streams.

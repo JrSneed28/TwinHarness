@@ -9,6 +9,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer + self-epic governance + coordination-primitive hardening), not yet cut as a versioned release. **1100+ tests, green on CI** (1 platform-conditional skip in `tests/concurrency.test.ts`; was 460 at 0.6.2).
 
+### UX/UI designer split — new Stage 4a UX (2026-06-17)
+
+- **`agents/ui-designer.md` renamed to `agents/ux-ui-designer.md`** (history preserved via
+  `git mv`). One agent now runs two ordered, fresh-context design stages when the project has a
+  UI: **Stage 4a — UX** produces `docs/04a-ux-design.md` (UX research, personas/journeys,
+  information architecture, task flows) with its own taste-driven human direction gate, then
+  **Stage 4b — UI** produces `docs/04b-ui-design.md` (visual direction, screens, wireframes,
+  tokens) as before. The agent routes to **opus**.
+- **New `ux-design` stage + cascade.** `STAGE_PIPELINE` (`src/core/stages.ts`) gains a `ux-design`
+  row (`produces: docs/04a-ux-design.md`, `criticMode: ux-design`, `humanGate: true`,
+  `tiers: T1/T2/T3`) between `architecture` and `ui-design`; `ARTIFACT_PIPELINE`
+  (`src/core/pipeline.ts`) inserts `docs/04a-ux-design.md` between `docs/04-architecture.md` and
+  `docs/04b-ui-design.md` so staleness cascades 04a → 04b → downstream.
+- **New `ux-design` Critic mode** (`skills/twinharness/reference/critic-modes-design.md` +
+  index) and a new artifact skeleton `templates/04a-ux-design.md`. Live references to the old
+  `ui-designer` agent name were updated across the skill/spec/template docs.
+
 ### PR #14 code-review remediation (2026-06-16)
 
 - **`th build plan` exit code `7` is a documented, test-locked contract (finding #6).** When the

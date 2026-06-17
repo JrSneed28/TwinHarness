@@ -28,6 +28,15 @@ describe("REQ-STAGE-001: stage list/describe", () => {
     expect(c.criticMode).toBe("architecture");
   });
 
+  it("describe returns the ux-design (Stage 4a) contract", () => {
+    const res = runStageDescribe("ux-design");
+    expect(res.ok).toBe(true);
+    const c = res.data?.stage as { humanGate: boolean; produces: string; criticMode: string };
+    expect(c.produces).toBe("docs/04a-ux-design.md");
+    expect(c.criticMode).toBe("ux-design");
+    expect(c.humanGate).toBe(true);
+  });
+
   it("describe rejects an unknown stage", () => {
     const res = runStageDescribe("not-a-stage");
     expect(res.ok).toBe(false);

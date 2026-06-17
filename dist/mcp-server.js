@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs39, exportName) {
+    function addFormats(ajv, list, fs40, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs39[f]);
+        ajv.addFormat(f, fs40[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -15466,7 +15466,7 @@ var StdioServerTransport = class {
 };
 
 // src/mcp-server.ts
-var fs38 = __toESM(require("node:fs"));
+var fs39 = __toESM(require("node:fs"));
 var path35 = __toESM(require("node:path"));
 
 // src/core/paths.ts
@@ -15546,7 +15546,8 @@ function resolveProjectPaths(root) {
     stateDir,
     stateFile: path.join(stateDir, "state.json"),
     docsDir: path.join(abs, "docs"),
-    driftLog: path.join(abs, "drift-log.md")
+    driftLog: path.join(abs, "drift-log.md"),
+    interviewFile: path.join(stateDir, "interview.json")
   };
 }
 
@@ -15665,7 +15666,8 @@ var STATE_FIELD_ORDER = [
   "debate_open_blocking",
   "revise_loop_counts",
   "write_gate",
-  "project_mode"
+  "project_mode",
+  "interview_threshold"
 ];
 function initialState() {
   return {
@@ -15799,6 +15801,11 @@ function validateState(value) {
   if (v.project_mode !== void 0) {
     if (typeof v.project_mode !== "string" || !PROJECT_MODES.includes(v.project_mode)) {
       issues.push({ path: "project_mode", message: `must be one of ${PROJECT_MODES.join(", ")} or absent` });
+    }
+  }
+  if (v.interview_threshold !== void 0) {
+    if (typeof v.interview_threshold !== "number" || !Number.isFinite(v.interview_threshold) || v.interview_threshold < 0 || v.interview_threshold > 1) {
+      issues.push({ path: "interview_threshold", message: "must be a finite number in [0,1] or absent" });
     }
   }
   if (v.tier === "T0" && Array.isArray(v.blast_radius_flags) && v.blast_radius_flags.length > 0) {
@@ -16205,6 +16212,7 @@ var STAGE_PIPELINE = [
   { stage: "scope", tiers: ["T1", "T2", "T3"], produces: "docs/02-scope.md", criticMode: "scope", humanGate: true, summary: "MVP vs later; sticky human sign-off." },
   { stage: "domain-model", tiers: ["T2", "T3"], produces: "docs/03-domain-model.md", criticMode: "domain-model", humanGate: false, summary: "Entities and rules anchored to REQ-IDs; streams." },
   { stage: "architecture", tiers: ["T1", "T2", "T3"], produces: "docs/04-architecture.md", criticMode: "architecture", humanGate: true, summary: "Components/data flow; gate only the 1-2 irreversible decisions." },
+  { stage: "ux-design", tiers: ["T1", "T2", "T3"], produces: "docs/04a-ux-design.md", criticMode: "ux-design", humanGate: true, summary: "Conditional on a UI; UX research/journeys/IA/flows; human picks direction." },
   { stage: "ui-design", tiers: ["T1", "T2", "T3"], produces: "docs/04b-ui-design.md", criticMode: "ui-design", humanGate: true, summary: "Conditional on a UI; human picks 1 of 2-3 directions." },
   { stage: "adrs", tiers: ["T3"], produces: "docs/05-adrs/", criticMode: "adr", humanGate: false, summary: "One ADR per significant, costly-to-reverse decision; streams." },
   { stage: "technical-design", tiers: ["T3"], produces: "docs/06-technical-design.md", criticMode: "technical-design", humanGate: false, summary: "Internal behaviour the architecture left abstract; streams." },
@@ -16786,7 +16794,16 @@ function validateDeps(slices) {
 }
 
 // src/core/routing.ts
-var OPUS_DESIGN_MODES = /* @__PURE__ */ new Set(["architecture", "security", "failure-modes", "technical-design"]);
+var OPUS_DESIGN_MODES = /* @__PURE__ */ new Set([
+  "architecture",
+  "technical-design",
+  "security",
+  "failure-modes",
+  "adrs",
+  "contracts",
+  "ux-design",
+  "ui-design"
+]);
 var OPUS_CRITIC_MODES = /* @__PURE__ */ new Set(["slice", "code-review"]);
 var OPUS_DEFAULT_AGENTS = /* @__PURE__ */ new Set(["orchestrator", "vertical-slice"]);
 function computeRoute(input) {
@@ -16798,14 +16815,14 @@ function computeRoute(input) {
   if (input.summarization) {
     return { model: "haiku", effort: "low", rationale: "trivial mechanical summarization (\xA72)" };
   }
-  if (mode && OPUS_DESIGN_MODES.has(mode) && (t3 || blast) && agent !== "critic") {
+  if (mode && OPUS_DESIGN_MODES.has(mode) && agent !== "critic") {
     if (mode === "security" && t3 && blast) {
       return { model: "opus", effort: "max", rationale: `security design on a T3 blast-radius project (${mode}, \xA72/\xA715.S)` };
     }
     return {
       model: "opus",
       effort: t3 && blast ? "xhigh" : "high",
-      rationale: `heavy design mode "${mode}" on ${t3 ? "T3" : "a blast-radius project"} (\xA72)`
+      rationale: `heavy design mode "${mode}" \u2192 opus unconditionally (\xA72)`
     };
   }
   if (agent === "critic" && mode && OPUS_CRITIC_MODES.has(mode) && blast) {
@@ -16815,8 +16832,15 @@ function computeRoute(input) {
       rationale: `critic "${mode}" on a blast-radius project (\xA72)`
     };
   }
-  if (agent === "builder" && (input.componentBlast || blast)) {
-    return { model: "opus", effort: "high", rationale: "builder on a blast-radius component (\xA72)" };
+  if (agent === "builder" || agent === "tester") {
+    if (input.componentBlast || blast) {
+      const effort = t3 ? "xhigh" : tier === "T2" ? "high" : tier === "T1" ? "medium" : "high";
+      return { model: "opus", effort, rationale: `${agent} on a blast-radius component (\xA72)` };
+    }
+    if (t3) return { model: "opus", effort: "xhigh", rationale: `${agent} T3 tier ladder (\xA72)` };
+    if (tier === "T2") return { model: "opus", effort: "high", rationale: `${agent} T2 tier ladder (\xA72)` };
+    if (tier === "T1") return { model: "opus", effort: "medium", rationale: `${agent} T1 tier ladder (\xA72)` };
+    return { model: "sonnet", effort: "high", rationale: `${agent} T0 tier floor (\xA72)` };
   }
   if (agent && OPUS_DEFAULT_AGENTS.has(agent)) {
     return { model: "opus", effort: t3 || blast ? "high" : "medium", rationale: `${agent} default (opus)` };
@@ -20605,6 +20629,23 @@ function runInit(paths, opts) {
   ].join("\n");
   return success({ data, human });
 }
+function runInitMcp(paths, opts = {}) {
+  const existing = readState(paths);
+  if (existing.exists) {
+    const data = { already_initialized: true };
+    if (existing.state) {
+      data.tier = existing.state.tier;
+      data.current_stage = existing.state.current_stage;
+      data.implementation_allowed = existing.state.implementation_allowed;
+    }
+    structuredLog({ cmd: "init", already_initialized: true });
+    return success({
+      data,
+      human: "TwinHarness already initialized; not re-initializing (use the CLI `th init --force` to reset)."
+    });
+  }
+  return runInit(paths, { force: false, brownfield: opts.brownfield });
+}
 
 // src/commands/artifact.ts
 var fs25 = __toESM(require("node:fs"));
@@ -21975,7 +22016,12 @@ var EXPECTED_TOOL_ALLOWLIST = [
   // --- 3 appended proof tools (read/coordination-only; never gate-mutating) ---
   "th_proof_run",
   "th_proof_component",
-  "th_proof_report"
+  "th_proof_report",
+  // --- 4 new interview/init tools (store-only / idempotent; never gate-mutating) ---
+  "th_interview_start",
+  "th_interview_record",
+  "th_interview_status",
+  "th_init"
 ];
 var FORBIDDEN_MCP_TOOL = "th_decision_approve";
 var DEFAULT_HOSTILE_PATHS = [
@@ -22927,6 +22973,154 @@ async function runProofReport(paths, opts = {}) {
   return reportResult(report);
 }
 
+// src/commands/interview.ts
+var fs38 = __toESM(require("node:fs"));
+var DEFAULT_INTERVIEW_THRESHOLD = 0.2;
+function isUnit(n) {
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
+}
+function isInterviewState(v) {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v;
+  if (typeof o.idea !== "string") return false;
+  if (!isUnit(o.threshold)) return false;
+  if (!Array.isArray(o.rounds)) return false;
+  if (!(o.ambiguity === null || isUnit(o.ambiguity))) return false;
+  return true;
+}
+function readInterview(paths) {
+  try {
+    if (!fs38.existsSync(paths.interviewFile)) return null;
+    const parsed = JSON.parse(fs38.readFileSync(paths.interviewFile, "utf8"));
+    return isInterviewState(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function writeInterview(paths, state) {
+  fs38.mkdirSync(paths.stateDir, { recursive: true });
+  fs38.writeFileSync(paths.interviewFile, JSON.stringify(state, null, 2) + "\n", "utf8");
+}
+function computeReady(ambiguity, threshold) {
+  return ambiguity !== null && ambiguity <= threshold;
+}
+function runInterviewStart(paths, opts = {}) {
+  const idea = opts.idea?.trim();
+  if (!idea) {
+    structuredLog({ cmd: "interview start", error: "missing_field", field: "idea" });
+    return failure({ human: "Missing required `idea`.", data: { error: "missing_field", field: "idea" } });
+  }
+  const threshold = opts.threshold ?? DEFAULT_INTERVIEW_THRESHOLD;
+  if (!isUnit(threshold)) {
+    structuredLog({ cmd: "interview start", error: "invalid_threshold" });
+    return failure({
+      human: "`threshold` must be a finite number in [0,1].",
+      data: { error: "invalid_threshold", threshold }
+    });
+  }
+  const state = { idea, threshold, rounds: [], ambiguity: null, status: "in-progress" };
+  writeInterview(paths, state);
+  structuredLog({ cmd: "interview start", threshold });
+  return success({
+    data: { idea, threshold, rounds: 0, ready: false },
+    human: `Interview started (threshold ${threshold}).`
+  });
+}
+function runInterviewRecord(paths, opts = {}) {
+  const existing = readInterview(paths);
+  if (!existing) {
+    structuredLog({ cmd: "interview record", error: "not_started" });
+    return failure({
+      human: "No interview in progress. Run `th interview start` first.",
+      data: { error: "not_started" }
+    });
+  }
+  const question = opts.question?.trim();
+  const answer = opts.answer?.trim();
+  if (!question) {
+    structuredLog({ cmd: "interview record", error: "missing_field", field: "question" });
+    return failure({ human: "Missing required `question`.", data: { error: "missing_field", field: "question" } });
+  }
+  if (!answer) {
+    structuredLog({ cmd: "interview record", error: "missing_field", field: "answer" });
+    return failure({ human: "Missing required `answer`.", data: { error: "missing_field", field: "answer" } });
+  }
+  const s = opts.scores;
+  if (typeof s !== "object" || s === null || typeof s.goal !== "number" || typeof s.constraints !== "number" || typeof s.criteria !== "number") {
+    structuredLog({ cmd: "interview record", error: "invalid_scores" });
+    return failure({
+      human: "`scores` must be an object { goal, constraints, criteria } of numbers.",
+      data: { error: "invalid_scores" }
+    });
+  }
+  const scoreRec = s;
+  const scores = {
+    goal: scoreRec.goal,
+    constraints: scoreRec.constraints,
+    criteria: scoreRec.criteria
+  };
+  const ambiguity = opts.ambiguity;
+  if (!isUnit(ambiguity)) {
+    structuredLog({ cmd: "interview record", error: "invalid_ambiguity" });
+    return failure({
+      human: "`ambiguity` must be a finite number in [0,1].",
+      data: { error: "invalid_ambiguity", ambiguity }
+    });
+  }
+  let entities = [];
+  if (opts.entities !== void 0) {
+    if (!Array.isArray(opts.entities) || opts.entities.some((e) => typeof e !== "string")) {
+      structuredLog({ cmd: "interview record", error: "invalid_entities" });
+      return failure({
+        human: "`entities` must be an array of strings.",
+        data: { error: "invalid_entities" }
+      });
+    }
+    entities = opts.entities;
+  }
+  const round = { question, answer, scores, ambiguity, entities };
+  const next = {
+    ...existing,
+    rounds: [...existing.rounds, round],
+    ambiguity
+  };
+  writeInterview(paths, next);
+  const ready = computeReady(ambiguity, next.threshold);
+  structuredLog({ cmd: "interview record", rounds: next.rounds.length });
+  return success({
+    data: { rounds: next.rounds.length, ambiguity, threshold: next.threshold, ready },
+    human: `Recorded round ${next.rounds.length} (ambiguity ${ambiguity}, ready ${ready}).`
+  });
+}
+function runInterviewStatus(paths) {
+  const existing = readInterview(paths);
+  if (!existing) {
+    structuredLog({ cmd: "interview status", started: false });
+    return success({
+      data: {
+        started: false,
+        rounds: 0,
+        ambiguity: null,
+        threshold: DEFAULT_INTERVIEW_THRESHOLD,
+        ready: false
+      },
+      human: "No interview in progress."
+    });
+  }
+  const ready = computeReady(existing.ambiguity, existing.threshold);
+  structuredLog({ cmd: "interview status", rounds: existing.rounds.length });
+  return success({
+    data: {
+      started: true,
+      rounds: existing.rounds.length,
+      ambiguity: existing.ambiguity,
+      threshold: existing.threshold,
+      ready
+    },
+    human: `Interview: ${existing.rounds.length} round(s), ambiguity ${existing.ambiguity ?? "n/a"}, threshold ${existing.threshold}, ready ${ready}.`
+  });
+}
+
 // src/mcp-server.ts
 function resolvePathsForCall() {
   return resolveProjectPaths(process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
@@ -23540,6 +23734,82 @@ var TOOL_DEFS = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: () => asyncToolGuard("th_proof_report"),
     runAsync: (paths) => runProofReport(paths, { registry: proofRegistry() })
+  },
+  // ---- Interview + init tools (tail-appended 38→42) ----
+  // Store-only/deterministic: the interview tools RECORD agent-supplied scores and
+  // PERSIST .twinharness/interview.json (no LLM in the deterministic layer); th_init
+  // is idempotent and never gate-mutating. All four are containment-safe and join the
+  // EXPECTED_TOOL_ALLOWLIST. th_init deliberately exposes NO `force` (R17).
+  {
+    name: "th_interview_start",
+    description: "Start a scored Socratic interview: create .twinharness/interview.json with the idea + resolved ambiguity threshold (default 0.20). Store-only; overwrites any prior interview. `idea` is required.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        idea: stringProp("The initial idea/brief to interview against (required)."),
+        threshold: numberProp("Ambiguity-gate threshold in [0,1] (default 0.20).")
+      },
+      required: ["idea"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runInterviewStart(paths, { idea: optString(args, "idea"), threshold: optNumber(args, "threshold") })
+  },
+  {
+    name: "th_interview_record",
+    description: "Append one agent-supplied round to the interview store and update the latest ambiguity. Store-only \u2014 the agent supplies ALL judgment; the tool COMPUTES nothing but `ready = ambiguity <= threshold`. `scores` is a JSON object {goal,constraints,criteria}; `entities` is a JSON array of strings (both parsed in-handler). `question`, `answer`, `scores`, and `ambiguity` are required.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        question: stringProp("The question asked this round (required)."),
+        answer: stringProp("The answer captured this round (required)."),
+        scores: stringProp('JSON object of per-dimension scores, e.g. {"goal":0.2,"constraints":0.3,"criteria":0.1} (required).'),
+        ambiguity: numberProp("Agent-computed ambiguity for this round, a number in [0,1] (required)."),
+        entities: stringProp('JSON array of entity strings captured this round, e.g. ["auth","db"] (optional).')
+      },
+      required: ["question", "answer", "scores", "ambiguity"],
+      additionalProperties: false
+    },
+    run: (paths, args) => {
+      const scoresRaw = optString(args, "scores");
+      let scores;
+      try {
+        scores = scoresRaw === void 0 ? void 0 : JSON.parse(scoresRaw);
+      } catch {
+        return failure({ human: "`scores` must be valid JSON for { goal, constraints, criteria }.", data: { error: "invalid_scores_json" } });
+      }
+      const entitiesRaw = optString(args, "entities");
+      let entities;
+      try {
+        entities = entitiesRaw === void 0 ? void 0 : JSON.parse(entitiesRaw);
+      } catch {
+        return failure({ human: "`entities` must be a valid JSON array of strings.", data: { error: "invalid_entities_json" } });
+      }
+      return runInterviewRecord(paths, {
+        question: optString(args, "question"),
+        answer: optString(args, "answer"),
+        scores,
+        ambiguity: optNumber(args, "ambiguity"),
+        entities
+      });
+    }
+  },
+  {
+    name: "th_interview_status",
+    description: "Report the interview gate state: { started, rounds, ambiguity, threshold, ready }. A missing/corrupt store reports started:false, ready:false. Read-only; COMPUTES only `ready`.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runInterviewStatus(paths)
+  },
+  {
+    name: "th_init",
+    description: "Initialize TwinHarness scaffolding (docs/, state.json, drift-log.md). IDEMPOTENT and non-destructive: on an already-initialized project it returns { already_initialized: true, \u2026 } WITHOUT clobbering state.json. `brownfield` records project_mode:brownfield on a fresh init. There is NO force over MCP \u2014 destructive re-init is CLI/human-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        brownfield: boolProp("Record project_mode:brownfield for adopting an existing codebase (fresh init only).")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runInitMcp(paths, { brownfield: optBool(args, "brownfield") })
   }
 ];
 function proofRegistry() {
@@ -23566,8 +23836,8 @@ function readServerVersion() {
   ];
   for (const candidate of candidates) {
     try {
-      if (fs38.existsSync(candidate)) {
-        const json = JSON.parse(fs38.readFileSync(candidate, "utf8"));
+      if (fs39.existsSync(candidate)) {
+        const json = JSON.parse(fs39.readFileSync(candidate, "utf8"));
         if (typeof json === "object" && json !== null && "version" in json) {
           const v = json.version;
           if (typeof v === "string") return v;
@@ -23618,7 +23888,7 @@ function validateToolArgs(name, args) {
 function appendProofCall(paths, tool, ok) {
   try {
     const line = JSON.stringify({ tool, ts: (/* @__PURE__ */ new Date()).toISOString(), ok }) + "\n";
-    fs38.appendFileSync(path35.join(paths.stateDir, "proof-calls.jsonl"), line);
+    fs39.appendFileSync(path35.join(paths.stateDir, "proof-calls.jsonl"), line);
   } catch {
   }
 }
