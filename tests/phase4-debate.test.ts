@@ -13,6 +13,10 @@ import * as path from "node:path";
  * source tests.
  */
 
+// DOC-LINT: tests in this file assert keyword/prose presence in .md agent and playbook files.
+// They verify documentation completeness, not behavioral dispatch — a broken
+// runtime that kept the words in the prompt would still pass.
+
 const ROOT = path.resolve(__dirname, "..");
 const read = (rel: string) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 
@@ -28,14 +32,14 @@ function frontmatter(md: string): Record<string, string> {
   return out;
 }
 
-describe("REQ-PCO-043: debate/reconcile prompt wiring", () => {
-  it("REQ-PCO-043: reconciler.md exists with name + description frontmatter", () => {
+describe("DOC-LINT: REQ-PCO-043: debate/reconcile prompt wiring", () => {
+  it("DOC-LINT: REQ-PCO-043: reconciler.md exists with name + description frontmatter", () => {
     const fm = frontmatter(read("agents/reconciler.md"));
     expect(fm.name).toBe("reconciler");
     expect(fm.description).toBeTruthy();
   });
 
-  it("REQ-PCO-043: reconciler.md uses disallowedTools (no restrictive `tools:` key)", () => {
+  it("DOC-LINT: REQ-PCO-043: reconciler.md uses disallowedTools (no restrictive `tools:` key)", () => {
     const fm = frontmatter(read("agents/reconciler.md"));
     // A `tools:` allowlist would hard-exclude the MCP tools (see REQ-PCO-002);
     // isolation is expressed via disallowedTools instead.
@@ -43,13 +47,13 @@ describe("REQ-PCO-043: debate/reconcile prompt wiring", () => {
     expect(fm.disallowedTools).toBeTruthy();
   });
 
-  it("REQ-PCO-043: reconciler.md references th collab and th debate", () => {
+  it("DOC-LINT: REQ-PCO-043: reconciler.md references th collab and th debate", () => {
     const reconciler = read("agents/reconciler.md");
     expect(reconciler).toContain("th collab");
     expect(reconciler).toContain("th debate");
   });
 
-  it("REQ-PCO-043: spec.md documents a debate mode (competing producers / Pattern B)", () => {
+  it("DOC-LINT: REQ-PCO-043: spec.md documents a debate mode (competing producers / Pattern B)", () => {
     const spec = read("agents/spec.md");
     expect(spec.toLowerCase()).toContain("debate");
     expect(spec).toContain("Pattern B");
@@ -57,14 +61,14 @@ describe("REQ-PCO-043: debate/reconcile prompt wiring", () => {
     expect(spec).toContain("th collab fragment");
   });
 
-  it("REQ-PCO-043: critic.md documents a `debate-reconcile` mode", () => {
+  it("DOC-LINT: REQ-PCO-043: critic.md documents a `debate-reconcile` mode", () => {
     const critic = read("agents/critic.md");
     expect(critic).toContain("debate-reconcile");
     expect(critic).toContain("REQ-PCO-043");
   });
 
-  it("REQ-PCO-043: pipeline-stages.md wires the debate flow (reconciler + th debate)", () => {
-    const pipeline = read("skills/twinharness/reference/pipeline-stages.md");
+  it("DOC-LINT: REQ-PCO-043: pipeline-stages.md wires the debate flow (reconciler + th debate)", () => {
+    const pipeline = read("skills/twinharness/reference/pipeline-stages-part2.md");
     expect(pipeline.toLowerCase()).toContain("reconciler");
     expect(pipeline).toContain("th debate");
     expect(pipeline).toContain("REQ-PCO-043");

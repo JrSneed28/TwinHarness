@@ -56,6 +56,7 @@ exports.canonicalText = canonicalText;
 exports.computeRecordHash = computeRecordHash;
 exports.computeKeyedHash = computeKeyedHash;
 exports.readDecisionEvents = readDecisionEvents;
+exports.readLastDecisionRecordHash = readLastDecisionRecordHash;
 exports.formatDecisionId = formatDecisionId;
 exports.mintNextId = mintNextId;
 exports.appendDecisionEvent = appendDecisionEvent;
@@ -63,7 +64,6 @@ exports.verifyChain = verifyChain;
 exports.verifyApprovalSeals = verifyApprovalSeals;
 exports.reduceDecisions = reduceDecisions;
 exports.sortDecisions = sortDecisions;
-exports.findDecision = findDecision;
 exports.canonicalStageLink = canonicalStageLink;
 exports.canonicalizeLink = canonicalizeLink;
 exports.gatingObligations = gatingObligations;
@@ -71,9 +71,9 @@ const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const node_crypto_1 = require("node:crypto");
 const hash_1 = require("./hash");
+Object.defineProperty(exports, "GENESIS_PREV_HASH", { enumerable: true, get: function () { return hash_1.GENESIS_PREV_HASH; } });
+const jsonl_1 = require("./jsonl");
 const stages_1 = require("./stages");
-/** `prevHash` of the very first event line — 64 hex zeros (DS-001). */
-exports.GENESIS_PREV_HASH = "0".repeat(64);
 /** Lifecycle transitions that carry an optional keyed seal (the human-gate events). */
 const APPROVAL_TRANSITIONS = new Set(["approved", "rejected", "superseded"]);
 /** `<stateDir>/decisions.jsonl` — the decision ledger's location. */
@@ -140,7 +140,6 @@ function computeKeyedHash(event, key) {
 // ---------------------------------------------------------------------------
 // Tolerant reader (mirrors readLeaseEvents) — never throws
 // ---------------------------------------------------------------------------
-const HEX64 = /^[0-9a-f]{64}$/;
 const ID_RE = /^DECISION-\d{3,}$/;
 const EVENT_TYPES = new Set(["proposed", "approved", "rejected", "superseded"]);
 /** Validate the shape of a parsed line; malformed lines are skipped (DS-001). */
@@ -152,9 +151,9 @@ function isValidEvent(parsed) {
         return false;
     if (typeof e.event !== "string" || !EVENT_TYPES.has(e.event))
         return false;
-    if (typeof e.prevHash !== "string" || !HEX64.test(e.prevHash))
+    if (typeof e.prevHash !== "string" || !hash_1.HEX64.test(e.prevHash))
         return false;
-    if (typeof e.recordHash !== "string" || !HEX64.test(e.recordHash))
+    if (typeof e.recordHash !== "string" || !hash_1.HEX64.test(e.recordHash))
         return false;
     if (e.links !== undefined && !Array.isArray(e.links))
         return false;
@@ -169,24 +168,29 @@ function isValidEvent(parsed) {
  * `verifyChain`, not here.
  */
 function readDecisionEvents(paths) {
-    const file = decisionsPath(paths);
-    if (!fs.existsSync(file))
-        return [];
-    const out = [];
-    for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (!trimmed)
-            continue;
-        try {
-            const parsed = JSON.parse(trimmed);
-            if (isValidEvent(parsed))
-                out.push(parsed);
-        }
-        catch {
-            // Tolerant: skip malformed / partial-tail lines.
-        }
-    }
-    return out;
+    // Tolerant full forward read via the shared `readJsonlValues` (#11): every line
+    // that parses AND passes `isValidEvent`, in file order; bad lines skipped.
+    return (0, jsonl_1.readJsonlValues)(decisionsPath(paths), isValidEvent);
+}
+/**
+ * The `recordHash` of the ledger's last VALID event — the only thing
+ * `appendDecisionEvent` needs to seal the next link (PERF-009). Reads the file
+ * once but parses only the TAIL: it walks lines from the end and `JSON.parse`s
+ * just enough to find the last non-empty line that is a valid event, returning
+ * its `recordHash`. Missing/empty file, or no valid tail line, → `GENESIS_PREV_HASH`.
+ *
+ * This is byte-identical to the old `readDecisionEvents(...).at(-1)?.recordHash`
+ * derivation: the previous code took the last element of the SAME tolerant,
+ * skip-invalid filter, so the last valid event is exactly what this returns — but
+ * without the O(N) parse-and-validate of the whole ledger on every append (which
+ * made N appends O(N²)). Tolerant by the same contract: a malformed/partial tail
+ * line is skipped, so a torn last write never corrupts the next `prevHash`.
+ */
+function readLastDecisionRecordHash(paths) {
+    // Tolerant tail scan via the shared `scanTailValid` (#11): the last line that
+    // passes `isValidEvent`; missing file / no valid tail line → GENESIS.
+    const last = (0, jsonl_1.scanTailValid)(decisionsPath(paths), isValidEvent);
+    return last ? last.recordHash : hash_1.GENESIS_PREV_HASH;
 }
 // ---------------------------------------------------------------------------
 // Id minting (DS-001 / TD §Id-Minting) — monotonic; never reused
@@ -223,17 +227,22 @@ function mintNextId(events) {
 /**
  * Append one decision event, sealing the hash chain. The caller MUST already
  * hold the `withStateLock` span (read-modify-append is serialized there). Reads
- * the current tail to derive `prevHash` (the last line's `recordHash`, or GENESIS
- * when empty/absent), sets `prevHash`, computes `recordHash`, then atomically
- * appends `JSON.stringify(sealed) + "\n"` (the lease-ledger pattern).
+ * ONLY the current tail to derive `prevHash` (the last valid line's `recordHash`,
+ * or GENESIS when empty/absent), sets `prevHash`, computes `recordHash`, then
+ * atomically appends `JSON.stringify(sealed) + "\n"` (the lease-ledger pattern).
+ *
+ * PERF-009: `prevHash` comes from {@link readLastDecisionRecordHash} (tail parse
+ * of one line), NOT a full `readDecisionEvents` parse+validate of the whole
+ * ledger — so N appends are O(N) total, not O(N²). The sealed line and resulting
+ * chain are byte-identical to the prior full-read derivation (the tail helper
+ * returns the same last-valid-event `recordHash`).
  *
  * The serialized line stores every field INCLUDING `recordHash`; the hash itself
  * is over the canonical text WITHOUT `recordHash`. Returns the sealed event.
  */
 function appendDecisionEvent(paths, event, key) {
     fs.mkdirSync(paths.stateDir, { recursive: true });
-    const existing = readDecisionEvents(paths);
-    const prevHash = existing.length > 0 ? existing[existing.length - 1].recordHash : exports.GENESIS_PREV_HASH;
+    const prevHash = readLastDecisionRecordHash(paths);
     const withPrev = { ...event, prevHash };
     const recordHash = computeRecordHash(withPrev);
     const sealed = { ...withPrev, recordHash };
@@ -258,7 +267,7 @@ function appendDecisionEvent(paths, event, key) {
  * subsequent `prevHash`, so one linear pass detects tampering (ADR-001).
  */
 function verifyChain(events) {
-    let expectedPrev = exports.GENESIS_PREV_HASH;
+    let expectedPrev = hash_1.GENESIS_PREV_HASH;
     for (let i = 0; i < events.length; i++) {
         const e = events[i];
         const { recordHash, ...rest } = e;
@@ -353,10 +362,6 @@ function reduceDecisions(events) {
 /** Sort decisions by numeric `DECISION-NNN` suffix (deterministic — REQ-NFR-002). */
 function sortDecisions(decisions) {
     return [...decisions].sort((a, b) => (numericSuffix(a.id) ?? 0) - (numericSuffix(b.id) ?? 0));
-}
-/** Look up a single reduced decision by id (convenience for the handlers). */
-function findDecision(events, id) {
-    return reduceDecisions(events).find((d) => d.id === id);
 }
 // ---------------------------------------------------------------------------
 // gatingObligations — THE single governance predicate (RULE-007)

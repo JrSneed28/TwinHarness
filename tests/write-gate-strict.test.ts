@@ -253,3 +253,102 @@ describe("REQ-WGATE-013: default modes do not gate Phase-B Bash writes (backward
     expect(permissionDecision(out)).toBe("ask");
   });
 });
+
+// ---------------------------------------------------------------------------
+// REQ-WGATE-014 (GOV-3): strict fails CLOSED on invalid state; default modes
+// keep the historical fail-OPEN behaviour (stand down + warning). Closes the
+// mid-session corruption bypass for operators who opt into strict, with zero
+// behaviour change for everyone else.
+// ---------------------------------------------------------------------------
+
+/** Read a systemMessage from the hook output, or undefined when absent. */
+function systemMessage(out: { stdout: string; exitCode: number }): string | undefined {
+  const j = parseOut(out);
+  return j["systemMessage"] as string | undefined;
+}
+
+/**
+ * Write a state.json that fails schema validation but is still valid JSON, while
+ * carrying an explicit top-level `write_gate` value. `tier: 123` is a type error
+ * the schema rejects, so readState() returns issues (no validated `state`) yet the
+ * raw bytes remain parseable — exactly the "present-but-invalid" mid-session case.
+ */
+function writeInvalidStateWithMode(
+  paths: ReturnType<typeof resolveProjectPaths>,
+  writeGate: string,
+): void {
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  fs.writeFileSync(
+    paths.stateFile,
+    JSON.stringify({ write_gate: writeGate, tier: 123 }),
+    "utf8",
+  );
+}
+
+describe("REQ-WGATE-014 (GOV-3): strict fails closed on invalid state; defaults fail open", () => {
+  const codeWriteInput: PreToolHookInput = {
+    tool_name: "Write",
+    tool_input: { file_path: "src/index.ts" },
+  };
+
+  it("REQ-WGATE-014: strict + present-but-invalid state → DENY (fail-closed)", () => {
+    tp = makeTempProject();
+    writeInvalidStateWithMode(tp.paths, "strict");
+    const out = runHookPretoolGate(tp.paths, { ...codeWriteInput, cwd: tp.root });
+    expect(out.exitCode).toBe(0);
+    expect(permissionDecision(out)).toBe("deny");
+    expect(permissionReason(out)).toContain("strict");
+    expect(permissionReason(out)).toContain("invalid");
+  });
+
+  it("REQ-WGATE-014: default ask (write_gate absent) + same invalid state → allow + warning (unchanged)", () => {
+    tp = makeTempProject();
+    // Same invalid state, but NO write_gate field → historical fail-open path.
+    fs.mkdirSync(tp.paths.stateDir, { recursive: true });
+    fs.writeFileSync(tp.paths.stateFile, JSON.stringify({ tier: 123 }), "utf8");
+    const out = runHookPretoolGate(tp.paths, { ...codeWriteInput, cwd: tp.root });
+    expect(out.exitCode).toBe(0);
+    expect(isAllow(out)).toBe(false); // carries a systemMessage key
+    expect(systemMessage(out)).toContain("standing down");
+    expect(permissionDecision(out)).toBeUndefined();
+  });
+
+  it.each(["deny", "off", "ask"])(
+    "REQ-WGATE-014: write_gate=%j (non-strict) + invalid state → allow + warning (unchanged)",
+    (mode) => {
+      tp = makeTempProject();
+      writeInvalidStateWithMode(tp.paths, mode);
+      const out = runHookPretoolGate(tp.paths, { ...codeWriteInput, cwd: tp.root });
+      expect(isAllow(out)).toBe(false);
+      expect(systemMessage(out)).toContain("standing down");
+      expect(permissionDecision(out)).toBeUndefined();
+    },
+  );
+
+  it("REQ-WGATE-014: strict opt-in is honoured even for a Bash-mediated write on invalid state", () => {
+    tp = makeTempProject();
+    writeInvalidStateWithMode(tp.paths, "strict");
+    const out = runHookPretoolGate(tp.paths, bashInput("echo hi > src/index.ts", tp.root));
+    expect(permissionDecision(out)).toBe("deny");
+    expect(permissionReason(out)).toContain("strict");
+  });
+
+  it("REQ-WGATE-014: unparseable (non-JSON) state → fail-open even if the text mentions strict (intent unreadable)", () => {
+    tp = makeTempProject();
+    fs.mkdirSync(tp.paths.stateDir, { recursive: true });
+    // Not valid JSON: we cannot read a top-level write_gate opt-in from it, so we
+    // keep the historical fail-open behaviour rather than deny on unprovable intent.
+    fs.writeFileSync(tp.paths.stateFile, '{ write_gate: "strict" not json', "utf8");
+    const out = runHookPretoolGate(tp.paths, { ...codeWriteInput, cwd: tp.root });
+    expect(isAllow(out)).toBe(false);
+    expect(systemMessage(out)).toContain("standing down");
+    expect(permissionDecision(out)).toBeUndefined();
+  });
+
+  it("REQ-WGATE-014: TH_DISABLE_WRITE_GATE=1 overrides strict fail-closed (escape hatch)", () => {
+    tp = makeTempProject();
+    writeInvalidStateWithMode(tp.paths, "strict");
+    const out = runHookPretoolGate(tp.paths, { ...codeWriteInput, cwd: tp.root }, { TH_DISABLE_WRITE_GATE: "1" });
+    expect(isAllow(out)).toBe(true);
+  });
+});

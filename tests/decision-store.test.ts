@@ -11,13 +11,14 @@
  * REQ-NFR-005 tamper/durability store algorithms.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import { makeTempProject, type TempProject } from "./helpers";
 import {
   GENESIS_PREV_HASH,
   appendDecisionEvent,
   readDecisionEvents,
+  readLastDecisionRecordHash,
   verifyChain,
   reduceDecisions,
   mintNextId,
@@ -280,5 +281,116 @@ describe("SLICE-4 — decisions.jsonl store algorithms (hash chain + reduce)", (
     });
     const approved = reduceDecisions(readDecisionEvents(tp.paths));
     expect(gatingObligations(approved, { current_stage: "architecture" })).toEqual([]);
+  });
+});
+
+describe("PERF-009 — appendDecisionEvent tail-read (no full-ledger parse)", () => {
+  /** Append N proposed events; return the temp project with a populated ledger. */
+  function seedLedger(n: number): TempProject {
+    const p = freshProject();
+    for (let i = 1; i <= n; i++) {
+      appendDecisionEvent(p.paths, {
+        id: `DECISION-00${i}`,
+        event: "proposed",
+        title: `t${i}`,
+        rationale: `r${i}`,
+        links: [],
+        proposer: "orchestrator",
+        proposedAt: `2026-06-15T00:0${i}:00.000Z`,
+      });
+    }
+    return p;
+  }
+
+  it("PERF-009: appendDecisionEvent parses AT MOST one ledger line, not the whole file", () => {
+    tp = seedLedger(5);
+    const before = readDecisionEvents(tp.paths);
+    expect(before).toHaveLength(5);
+    expect(verifyChain(before)).toEqual({ ok: true });
+
+    // Instrument JSON.parse: count how many ledger lines the NEXT append parses.
+    // The old O(N²) code parsed every line (readDecisionEvents); the tail-read
+    // must parse at most ONE (the last non-empty line) to derive prevHash.
+    let ledgerParses = 0;
+    const realParse = JSON.parse.bind(JSON);
+    const spy = vi.spyOn(JSON, "parse").mockImplementation((text: string, ...rest: unknown[]) => {
+      // Count only parses of a serialized decision EVENT line (has recordHash),
+      // not unrelated JSON the append path might touch.
+      if (typeof text === "string" && text.includes('"recordHash"')) ledgerParses++;
+      // @ts-expect-error — forwarding the optional reviver positionally.
+      return realParse(text, ...rest);
+    });
+    try {
+      appendDecisionEvent(tp.paths, {
+        id: "DECISION-006",
+        event: "proposed",
+        title: "t6",
+        rationale: "r6",
+        links: [],
+        proposer: "orchestrator",
+        proposedAt: "2026-06-15T00:06:00.000Z",
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    // Tail-read: at most ONE ledger line parsed (the prior tail), regardless of N.
+    expect(ledgerParses).toBeLessThanOrEqual(1);
+  });
+
+  it("PERF-009: the tail-read seals a byte-identical chain (prevHash chains to prior recordHash)", () => {
+    tp = seedLedger(3);
+    const prior = readDecisionEvents(tp.paths);
+    const priorTailHash = prior[prior.length - 1]!.recordHash;
+
+    // The helper returns exactly the last valid event's recordHash.
+    expect(readLastDecisionRecordHash(tp.paths)).toBe(priorTailHash);
+
+    const sealed = appendDecisionEvent(tp.paths, {
+      id: "DECISION-004",
+      event: "proposed",
+      title: "t4",
+      rationale: "r4",
+      links: [],
+      proposer: "orchestrator",
+      proposedAt: "2026-06-15T00:04:00.000Z",
+    });
+    // The new line's prevHash chains to the prior tail's recordHash exactly.
+    expect(sealed.prevHash).toBe(priorTailHash);
+
+    // The whole ledger still verifies after the tail-read append.
+    const after = readDecisionEvents(tp.paths);
+    expect(after).toHaveLength(4);
+    expect(verifyChain(after)).toEqual({ ok: true });
+  });
+
+  it("PERF-009: empty/missing ledger → GENESIS prevHash (unchanged genesis behavior)", () => {
+    tp = freshProject();
+    // No file yet.
+    expect(readLastDecisionRecordHash(tp.paths)).toBe(GENESIS_PREV_HASH);
+    const first = appendDecisionEvent(tp.paths, {
+      id: "DECISION-001",
+      event: "proposed",
+      title: "first",
+      rationale: "r",
+      links: [],
+      proposer: "orchestrator",
+      proposedAt: "2026-06-15T00:00:00.000Z",
+    });
+    expect(first.prevHash).toBe(GENESIS_PREV_HASH);
+  });
+
+  it("PERF-009: tail-read skips a malformed/partial final line (same tolerance as full read)", () => {
+    tp = seedLedger(2);
+    const valid = readDecisionEvents(tp.paths);
+    const lastValidHash = valid[valid.length - 1]!.recordHash;
+    // Append a torn/partial final line (no newline, half a JSON object) — exactly
+    // what a crashed write leaves behind. The tail-read must skip it and fall back
+    // to the last VALID event's recordHash, identical to readDecisionEvents.
+    const file = decisionsPath(tp.paths);
+    fs.appendFileSync(file, '{"id":"DECISION-003","event":"propo', "utf8");
+    expect(readLastDecisionRecordHash(tp.paths)).toBe(lastValidHash);
+    // And readDecisionEvents agrees (the torn tail is skipped there too).
+    const stillTwo = readDecisionEvents(tp.paths);
+    expect(stillTwo[stillTwo.length - 1]!.recordHash).toBe(lastValidHash);
   });
 });

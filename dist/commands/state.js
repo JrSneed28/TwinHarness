@@ -156,6 +156,12 @@ function runStateSetLocked(paths, key, rawValue) {
     // the blocking-drift count changed. Observability only — never blocks.
     if (ledger_1.GATE_LEDGER_KEYS.has(firstSegment)) {
         (0, ledger_1.appendLedger)(paths, { event: "gate-state-change", key, value });
+        // Seal an in-chain high-water anchor after the gate flip (#8): a sealed
+        // {event:"high-water", count} entry whose count is the sealed-entry count before
+        // it. Strengthens edit/reorder/mid-delete evidence for the gate-flip run and
+        // keeps the count out of an unsealed sidecar (ADR-001 precedent). It does NOT
+        // detect tail truncation (documented residual — see appendHighWater). Best-effort.
+        (0, ledger_1.appendHighWater)(paths);
     }
     return (0, output_1.success)({ data: { key, value }, human: `Set ${key} = ${JSON.stringify(value)}` });
 }
@@ -187,5 +193,15 @@ function runStateVerify(paths) {
         return (0, output_1.failure)({ human: "No state.json found.", data: { valid: false, error: "not_initialized" } });
     if (!r.state)
         return (0, output_1.failure)({ human: `state.json INVALID:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { valid: false, issues: r.issues } });
+    // A valid file may still carry non-fatal warnings (ARCH-007) — e.g. an unknown
+    // top-level key. Surface them WITHOUT failing: the file is still valid (exit 0),
+    // the operator just sees the advisory so a typo/forward-compat field is visible.
+    const warnings = r.warnings ?? [];
+    if (warnings.length > 0) {
+        return (0, output_1.success)({
+            data: { valid: true, warnings },
+            human: `state.json is valid (with ${warnings.length} warning(s)):\n${(0, guards_1.formatIssues)(warnings)}`,
+        });
+    }
     return (0, output_1.success)({ data: { valid: true }, human: "state.json is valid." });
 }

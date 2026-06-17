@@ -12,23 +12,27 @@ import * as path from "node:path";
  * deterministic `th build advise` core is covered by sibling source tests.)
  */
 
+// DOC-LINT: tests in this file assert keyword/prose presence in .md agent and playbook files.
+// They verify documentation completeness, not behavioral dispatch — a broken
+// runtime that kept the words in the prompt would still pass.
+
 const ROOT = path.resolve(__dirname, "..");
 const read = (rel: string) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 
-describe("REQ-PCO-030: parallelism-optimizer prompt wiring", () => {
-  it("REQ-PCO-030: critic.md documents a `parallelism` mode referencing th build advise", () => {
+describe("DOC-LINT: REQ-PCO-030: parallelism-optimizer prompt wiring", () => {
+  it("DOC-LINT: REQ-PCO-030: critic.md documents a `parallelism` mode referencing th build advise", () => {
     const critic = read("agents/critic.md");
     expect(critic).toContain("parallelism");
     // The mode must point producers at the advisory command.
     expect(critic).toContain("th build plan --advise");
   });
 
-  it("REQ-PCO-030: critic.md ties the parallelism mode to REQ-PCO-030", () => {
+  it("DOC-LINT: REQ-PCO-030: critic.md ties the parallelism mode to REQ-PCO-030", () => {
     const critic = read("agents/critic.md");
     expect(critic).toContain("REQ-PCO-030");
   });
 
-  it("REQ-PCO-030: vertical-slice.md documents the optimizer handshake", () => {
+  it("DOC-LINT: REQ-PCO-030: vertical-slice.md documents the optimizer handshake", () => {
     const slice = read("agents/vertical-slice.md");
     // Consumes the Critic(parallelism) suggestions...
     expect(slice).toContain("parallelism");
@@ -38,13 +42,13 @@ describe("REQ-PCO-030: parallelism-optimizer prompt wiring", () => {
     expect(slice.toLowerCase()).toContain("optimizer handshake");
   });
 
-  it("REQ-PCO-030: vertical-slice.md keeps the optimizer subordinate to the hard gates", () => {
+  it("DOC-LINT: REQ-PCO-030: vertical-slice.md keeps the optimizer subordinate to the hard gates", () => {
     const slice = read("agents/vertical-slice.md");
     expect(slice).toContain("th coverage check");
   });
 
-  it("REQ-PCO-030: pipeline-stages.md documents the Stage 9 parallelism-optimizer loop", () => {
-    const pipeline = read("skills/twinharness/reference/pipeline-stages.md");
+  it("DOC-LINT: REQ-PCO-030: pipeline-stages.md documents the Stage 9 parallelism-optimizer loop", () => {
+    const pipeline = read("skills/twinharness/reference/pipeline-stages-part3.md");
     expect(pipeline).toContain("REQ-PCO-030");
     expect(pipeline.toLowerCase()).toContain("parallelism");
     expect(pipeline).toContain("th build plan --advise");

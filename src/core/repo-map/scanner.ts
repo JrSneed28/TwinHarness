@@ -6,8 +6,11 @@
  * Discovered build/test commands are recorded as INERT `CandidateCommand` strings
  * — this module NEVER spawns a subprocess. There is no `child_process` import.
  *
- * REUSE (REQ-NFR-003, RULE-010): REQ anchors come from `scanDirForReqIds()` and
- * blast-radius flags from `BLAST_RADIUS_FLAGS` — no parallel mechanism is built.
+ * REUSE (REQ-NFR-003, RULE-010): REQ anchors come from the pure `extractReqIds()`
+ * (the same matcher `scanDirForReqIds` uses) applied to each file's single read in
+ * the main walk, and blast-radius flags from `BLAST_RADIUS_FLAGS` — no parallel
+ * mechanism is built. (P3-1: the former separate anchor re-walk is folded into the
+ * main walk so every file is read at most once.)
  *
  * DETERMINISM (ADR-003): this module does NOT sort or normalize. The serializer
  * (schema.ts `serializeRepoMap`) is the SINGLE determinism point; the scanner may
@@ -21,7 +24,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { scanDirForReqIds } from "../anchors";
+import { extractReqIds } from "../anchors";
 import { BLAST_RADIUS_FLAGS, type BlastRadiusFlag } from "../state-schema";
 import {
   type RepoMap,
@@ -91,8 +94,14 @@ const PRODUCER_DIRS = new Set([".twinharness", ".agentic-sdlc"]);
  */
 const GENERATED_ARTIFACTS = new Set(["docs/00-repo-map.md"]);
 
-/** Largest single file we will read for content-based detection (bytes). */
-const MAX_READ_BYTES = 2 * 1024 * 1024; // 2 MB — oversize files are name-only.
+/**
+ * Largest single file we will read for content-based detection (bytes). The main
+ * walk reads each file at most ONCE and only when `size <= MAX_READ_BYTES`; an
+ * oversize file is name-only — never `readFileSync`-ed — which is what upholds the
+ * BOUNDED-COST guarantee (PERF-001, REQ-NFR-007). The same single read serves both
+ * manifest detection AND REQ-ID anchor extraction (P3-1 single-walk unification).
+ */
+export const MAX_READ_BYTES = 2 * 1024 * 1024; // 2 MB — oversize files are name-only.
 
 /** Extension → language name. */
 const EXT_LANG: Record<string, string> = {
@@ -279,6 +288,12 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
   const files: FileEntry[] = [];
   const blastMatches = new Map<BlastRadiusFlag, { paths: Set<string>; triggers: Set<string> }>();
   const apiHints: { name: string; source: string }[] = [];
+  // REQ-ID anchors collected DURING the main walk (P3-1): reqId → set of POSIX-rel
+  // files. A Set dedups the (reqId, file) pair so a file mentioning the same anchor
+  // twice records one location, matching the old `scanDirForReqIds` semantics. The
+  // serializer sorts both `req_anchors` and each `FileEntry.req_ids`, so insertion
+  // order here is irrelevant to the byte-stable output (ADR-003).
+  const reqIdToFiles = new Map<string, Set<string>>();
 
   const recordLang = (name: string, evidence: string, source: "extension" | "manifest"): void => {
     let e = langs.get(name);
@@ -413,27 +428,56 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
         ownershipHints.set(component, component);
       }
 
-      files.push({
+      const fileEntry: FileEntry = {
         path: rel,
         component,
         language: langName ?? null,
         is_test: isTest,
-        req_ids: [], // filled from scanDirForReqIds below.
-      });
+        req_ids: [], // filled from this file's single read below.
+      };
+      files.push(fileEntry);
 
       // Blast-radius signal detection by path tokens (REQ-RU-013).
       recordBlast(rel);
 
-      // Manifest content detectors (commands, entrypoints, public-api hints) — only
-      // for small manifests; oversize files are name-only (REQ-RU-090).
-      if (nameLower === "package.json" && size <= MAX_READ_BYTES) {
-        let text: string | undefined;
+      // SINGLE READ (P3-1): a file at or under the per-file cap is read ONCE here;
+      // that one buffer serves BOTH REQ-ID anchor extraction AND the manifest
+      // detectors below. An oversize file is never read (name-only) — this is the
+      // BOUNDED-COST guarantee (PERF-001, REQ-NFR-007, REQ-RU-090). The walk's own
+      // exclusions (GENERATED_DIRS/PRODUCER_DIRS skipped before descent,
+      // GENERATED_ARTIFACTS skipped per-file) mean every anchor collected here is
+      // already correctly scoped, so no post-filter is needed (REQ-NFR-001).
+      let content: string | undefined;
+      if (size <= MAX_READ_BYTES) {
         try {
-          text = fs.readFileSync(abs, "utf8");
+          content = fs.readFileSync(abs, "utf8");
         } catch {
-          text = undefined;
+          content = undefined; // unreadable → name-only, like an oversize file.
         }
-        const json = text ? safeParseJson(text) : undefined;
+      }
+
+      // REQ-ID anchors (REQ-RU-011) from the SAME single read — uses the pure
+      // `extractReqIds` matcher that `scanDirForReqIds` uses (REQ-NFR-003).
+      if (content !== undefined) {
+        const ids = extractReqIds(content);
+        if (ids.length > 0) {
+          fileEntry.req_ids = ids;
+          for (const id of ids) {
+            let set = reqIdToFiles.get(id);
+            if (!set) {
+              set = new Set();
+              reqIdToFiles.set(id, set);
+            }
+            set.add(rel);
+          }
+        }
+      }
+
+      // Manifest content detectors (commands, entrypoints, public-api hints) — only
+      // for small manifests; oversize files are name-only (REQ-RU-090). Reuses the
+      // single `content` read above — no second `readFileSync`.
+      if (nameLower === "package.json" && content !== undefined) {
+        const json = safeParseJson(content);
         if (json) {
           // Candidate commands from scripts (RECORDED, NEVER EXECUTED — REQ-RU-004).
           // Anchor: REQ-RU-091 — discovered commands are inert data; no subprocess is ever spawned.
@@ -470,20 +514,13 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
             apiHints.push({ name: path.basename(rel), source: "package.json:exports" });
           }
         }
-      } else if (nameLower === "makefile" && size <= MAX_READ_BYTES) {
-        // Makefile targets → candidate commands (RECORDED, NEVER EXECUTED).
-        let text: string | undefined;
-        try {
-          text = fs.readFileSync(abs, "utf8");
-        } catch {
-          text = undefined;
-        }
-        if (text) {
-          for (const line of text.split(/\r?\n/)) {
-            const m = /^([A-Za-z0-9_.-]+):(?!=)/.exec(line);
-            if (m && m[1] && m[1] !== ".PHONY") {
-              commands.push({ label: m[1], raw: `make ${m[1]}`, source_file: rel, kind: classifyCommand(m[1]) });
-            }
+      } else if (nameLower === "makefile" && content !== undefined) {
+        // Makefile targets → candidate commands (RECORDED, NEVER EXECUTED). Reuses
+        // the single `content` read above — no second `readFileSync`.
+        for (const line of content.split(/\r?\n/)) {
+          const m = /^([A-Za-z0-9_.-]+):(?!=)/.exec(line);
+          if (m && m[1] && m[1] !== ".PHONY") {
+            commands.push({ label: m[1], raw: `make ${m[1]}`, source_file: rel, kind: classifyCommand(m[1]) });
           }
         }
       }
@@ -497,33 +534,28 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
 
   walk(absRoot, 0);
 
-  // --- REQ anchors via the REUSED scanner (REQ-RU-011, REQ-NFR-003) -----------
-  // scanDirForReqIds already skips .git/node_modules/dist, but NOT the TwinHarness
-  // state dirs or the generated artifacts; post-filter so the anchor scan matches
-  // the walk's exclusions (otherwise the producer's own output would re-enter the
-  // map and break idempotency — REQ-NFR-001). Returns POSIX-rel paths.
-  const isExcludedLocation = (loc: string): boolean => {
-    if (GENERATED_ARTIFACTS.has(loc)) return true;
-    const first = loc.split("/")[0];
-    return first !== undefined && (GENERATED_DIRS.has(first) || PRODUCER_DIRS.has(first));
-  };
-  const reqIdToFiles = scanDirForReqIds(absRoot);
+  // --- REQ anchors (REQ-RU-011, REQ-NFR-003) ----------------------------------
+  // Collected DURING the single main walk above (P3-1): each file was read at most
+  // once and `extractReqIds` ran on that same buffer, with `FileEntry.req_ids` set
+  // inline. Because the walk applies the SAME exclusions (GENERATED_DIRS /
+  // PRODUCER_DIRS skipped before descent, GENERATED_ARTIFACTS skipped per-file),
+  // every collected anchor is already correctly scoped — no post-filter is needed,
+  // so the producer's own output can never re-enter the map (REQ-NFR-001).
+  //
+  // SCOPE CONTRACT (finding #2 / ADR-004 — NOT "byte-identical to an uncapped
+  // two-pass"). The anchor set is COMPLETE for in-scope files, but a REQ-ID that
+  // appears ONLY inside an oversize file (> MAX_READ_BYTES — read name-only) or
+  // ONLY under a generated/producer directory is INTENTIONALLY EXCLUDED. That is
+  // the deliberate bounded-cost + scope guarantee (PERF-001 / REQ-RU-006/041), not
+  // an oversight: re-including those anchors would reintroduce the unbounded read
+  // (oversize) or let build output pollute traceability (generated). The boundary
+  // is pinned by golden tests (repo-bounded-cost.test.ts for oversize,
+  // scanner-anchor-scope.test.ts for generated/producer) so any re-inclusion fails
+  // loudly. The serializer sorts `req_anchors` and each `locations` array, so
+  // insertion order is irrelevant to the byte-stable output (ADR-003).
   const reqAnchors: ReqAnchor[] = [];
-  const fileToReqIds = new Map<string, string[]>();
   for (const [reqId, locations] of reqIdToFiles.entries()) {
-    const kept = [...locations].filter((loc) => !isExcludedLocation(loc));
-    if (kept.length === 0) continue;
-    reqAnchors.push({ req_id: reqId, locations: kept });
-    for (const loc of kept) {
-      const existing = fileToReqIds.get(loc);
-      if (existing) existing.push(reqId);
-      else fileToReqIds.set(loc, [reqId]);
-    }
-  }
-  // Attach req_ids to the matching FileEntry (best-effort; serializer sorts them).
-  for (const f of files) {
-    const ids = fileToReqIds.get(f.path);
-    if (ids) f.req_ids = ids;
+    reqAnchors.push({ req_id: reqId, locations: [...locations] });
   }
 
   // --- assemble final accumulators into the in-memory map ----------------------
@@ -578,6 +610,8 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
   map.scanReport = {
     filesScanned: st.filesScanned,
     filesSkipped: st.filesSkipped,
+    // The single main walk is the sole source of the cap signal now (P3-1): a cap
+    // hit makes the map PARTIAL (REQ-NFR-007); a cap is NOT an error (RULE-014).
     capHit: st.capHit,
   };
 

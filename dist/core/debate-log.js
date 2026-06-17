@@ -14,11 +14,26 @@
  *
  * The `— <status>` tail distinguishes an `open` debate (a BLOCKING obligation,
  * exactly like a requirement-layer drift) from a `resolved` one. Pure, no IO.
+ *
+ * The append-only-markdown-ledger mechanics (heading assembly, source-suffix
+ * stripping, the block parser, monotonic id minting) are shared with the drift
+ * log via `md-ledger.ts` (CQ-001/005); only the debate-specific shape (status
+ * tail, the Positions/Resolution/Links fields and their defaults) lives here.
+ * The emitted markdown is byte-identical to the prior standalone implementation.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.formatDebateEntry = formatDebateEntry;
 exports.parseDebateEntries = parseDebateEntries;
 exports.nextDebateId = nextDebateId;
+const md_ledger_1 = require("./md-ledger");
+const DEBATE_LEDGER = {
+    headingTail: (e) => e.status,
+    fields: [
+        { label: "Positions  ", value: (e) => e.positions ?? "" },
+        { label: "Resolution ", value: (e) => e.resolution ?? "(pending)" },
+        { label: "Links      ", value: (e) => e.links ?? "" },
+    ],
+};
 /**
  * Format a debate entry as the canonical markdown block (trailing blank line so
  * blocks are visually separated when appended). Aligns the field labels to match
@@ -28,29 +43,20 @@ exports.nextDebateId = nextDebateId;
  * entries from the Orchestrator or a human are attributed correctly.
  */
 function formatDebateEntry(entry) {
-    const src = entry.source ?? "Builder";
-    const heading = `## ${entry.id}  (${entry.topic}, ${src})  — ${entry.status}`;
-    return [
-        heading,
-        `Positions  : ${entry.positions ?? ""}`,
-        `Resolution : ${entry.resolution ?? "(pending)"}`,
-        `Links      : ${entry.links ?? ""}`,
-        "",
-    ].join("\n");
+    return (0, md_ledger_1.formatLedgerEntry)({
+        id: entry.id,
+        head: entry.topic,
+        source: entry.source ?? "Builder",
+        status: entry.status,
+        positions: entry.positions,
+        resolution: entry.resolution,
+        links: entry.links,
+    }, DEBATE_LEDGER);
 }
 // Heading regex: captures the parenthetical content as a single group so the
 // parser can split off the optional ", <source>" suffix. Backward-compatible
 // with logs lacking a source (or ", Builder") and handles any new source string.
 const HEADING_RE = /^##\s+(DEBATE-\d+)\s*\(([^)]+)\)\s*—\s*(open|resolved)/;
-/** Strip the optional ", <source>" suffix from a parenthetical head string. */
-function extractTopic(paren) {
-    // If the string contains a comma, the part after the last comma is the source
-    // label. Strip it, returning just the topic.
-    const lastComma = paren.lastIndexOf(",");
-    if (lastComma < 0)
-        return paren.trim();
-    return paren.slice(0, lastComma).trim();
-}
 const FIELD_RE = /^(Positions|Resolution|Links)\s*:\s*(.*)$/;
 /**
  * Parse all debate entries from a `debate-log.md` blob. The header and any other
@@ -58,48 +64,21 @@ const FIELD_RE = /^(Positions|Resolution|Links)\s*:\s*(.*)$/;
  * `## DEBATE-NNN (...) — <status>` blocks become entries.
  */
 function parseDebateEntries(text) {
-    const entries = [];
-    const lines = text.split(/\r?\n/);
-    let current;
-    for (const line of lines) {
-        const head = HEADING_RE.exec(line);
-        if (head) {
-            if (current)
-                entries.push(current);
-            current = {
-                id: head[1],
-                topic: extractTopic(head[2]),
-                status: head[3],
-                positions: "",
-                resolution: "",
-                links: "",
-            };
-            continue;
-        }
-        if (line.startsWith("## ")) {
-            // A non-entry heading terminates the current entry.
-            if (current) {
-                entries.push(current);
-                current = undefined;
-            }
-            continue;
-        }
-        if (current) {
-            const field = FIELD_RE.exec(line);
-            if (field) {
-                const value = field[2];
-                if (field[1] === "Positions")
-                    current.positions = value;
-                else if (field[1] === "Resolution")
-                    current.resolution = value;
-                else
-                    current.links = value;
-            }
-        }
-    }
-    if (current)
-        entries.push(current);
-    return entries;
+    return (0, md_ledger_1.parseLedgerEntries)(text, HEADING_RE, FIELD_RE, (h) => ({
+        id: h.id,
+        topic: h.head,
+        status: h.tag,
+        positions: "",
+        resolution: "",
+        links: "",
+    }), (entry, key, value) => {
+        if (key === "Positions")
+            entry.positions = value;
+        else if (key === "Resolution")
+            entry.resolution = value;
+        else
+            entry.links = value;
+    });
 }
 /**
  * Compute the next `DEBATE-NNN` id from a `debate-log.md` blob: scan every
@@ -107,11 +86,5 @@ function parseDebateEntries(text) {
  * take the max, add one, zero-pad to 3. Starts at `DEBATE-001`.
  */
 function nextDebateId(text) {
-    let max = 0;
-    for (const m of text.matchAll(/DEBATE-(\d+)/g)) {
-        const n = Number(m[1]);
-        if (n > max)
-            max = n;
-    }
-    return `DEBATE-${String(max + 1).padStart(3, "0")}`;
+    return (0, md_ledger_1.nextLedgerId)(text, "DEBATE");
 }

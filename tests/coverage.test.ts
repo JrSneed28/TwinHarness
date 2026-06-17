@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runCoverageCheck } from "../src/commands/coverage";
+import { isRecognizedTestFile } from "../src/core/coverage";
 import { extractReqIds } from "../src/core/anchors";
 
 let tp: TempProject | undefined;
@@ -185,6 +186,100 @@ describe("REQ-COVERAGE-SEC-001: path traversal outside project root is rejected"
     expect(res.ok).toBe(false);
     expect(res.exitCode).toBe(1);
     expect(res.data?.error).toBe("path_outside_root");
+  });
+});
+
+describe("REQ-COV-TESTONLY-001 (GOV-1): the TEST dimension counts only RECOGNIZED test files", () => {
+  // Before the fix, `collectDirReqIds(testsDir)` counted a REQ-ID anchored in ANY
+  // file under tests/ — including prose/fixtures — so `th coverage check` was
+  // satisfiable with NO real test. The test dimension must now require the anchor
+  // to live in a recognized test file (*.test.* / *.spec.* / *_test.* /
+  // test_*.* / under a tests dir).
+  it("a REQ anchored ONLY in a prose/non-test file under tests/ is NOT tested → gap, exit 1", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
+    writeFile(tp, "docs/09-implementation-plan.md", "Slice covers REQ-001.\n");
+    // Anchor appears ONLY in a non-test prose file that happens to live under tests/.
+    writeFile(tp, "tests/NOTES.md", "Design notes mentioning REQ-001 in prose.\n");
+
+    const res = runCoverageCheck(tp.paths);
+    expect(res.ok).toBe(false);
+    expect(res.exitCode).toBe(1);
+    // The gap is specifically "no test" (it IS in a slice).
+    expect(res.data?.gaps).toEqual([{ req: "REQ-001", inSlice: true, inTest: false }]);
+  });
+
+  it("the SAME anchor in a real *.test.* file IS counted → covered, exit 0", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
+    writeFile(tp, "docs/09-implementation-plan.md", "Slice covers REQ-001.\n");
+    // Same prose file present (must not help), PLUS a real test file with the anchor.
+    writeFile(tp, "tests/NOTES.md", "Design notes mentioning REQ-001 in prose.\n");
+    writeFile(tp, "tests/feature.test.ts", "// REQ-001 is exercised here\n");
+
+    const res = runCoverageCheck(tp.paths);
+    expect(res.ok).toBe(true);
+    expect(res.exitCode).toBe(0);
+    expect(res.data?.covered).toBe(1);
+    expect(res.data?.gaps).toEqual([]);
+  });
+
+  it("a non-test source-style file (README.md / fixture .json) under tests/ does not count", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeFile(tp, "docs/01-requirements.md", "REQ-100 and REQ-200.\n");
+    writeFile(tp, "docs/09-implementation-plan.md", "Slice covers REQ-100 and REQ-200.\n");
+    writeFile(tp, "tests/README.md", "REQ-100 documented here.\n");
+    writeFile(tp, "tests/fixtures/data.json", "{ \"note\": \"REQ-200 lives in a fixture\" }\n");
+
+    const res = runCoverageCheck(tp.paths);
+    expect(res.ok).toBe(false);
+    // Neither anchor is in a recognized test file → both are test-gaps.
+    expect(res.data?.gaps).toEqual([
+      { req: "REQ-100", inSlice: true, inTest: false },
+      { req: "REQ-200", inSlice: true, inTest: false },
+    ]);
+  });
+});
+
+describe("REQ-COV-TESTONLY-001 (finding #4 / ADR-005): isRecognizedTestFile table — accepted residuals PINNED", () => {
+  // The predicate is the single source of truth for "is this a REAL test file?".
+  // This table pins the CURRENT contract — including the two ACCEPTED GOV-1
+  // residuals — so a future change to either is a deliberate decision, not drift.
+  const recognized: [string, string][] = [
+    ["foo.test.ts", "name rule: *.test.*"],
+    ["a/b/foo.spec.tsx", "name rule: *.spec.* (nested)"],
+    ["pkg/feature.test.py", "name rule: *.test.* (python)"],
+    ["mod/feature_test.go", "name rule: go *_test.*"],
+    ["pkg/test_feature.py", "name rule: python test_*.*"],
+    ["tests/anything.md", "path rule: under a tests/ segment"],
+    ["__tests__/x.json", "path rule: under __tests__/"],
+    // RESIDUAL (a): a prose/fixture file under a NESTED test-named dir still counts.
+    ["helpers/tests/data.json", "RESIDUAL(a): nested test-dir segment counts"],
+    ["src/specs/notes.md", "RESIDUAL(a): nested specs/ segment counts"],
+  ];
+  it.each(recognized)("recognizes %s (%s)", (rel) => {
+    expect(isRecognizedTestFile(rel)).toBe(true);
+  });
+
+  const notRecognized: [string, string][] = [
+    ["src/feature.ts", "plain source"],
+    ["helpers/data.json", "fixture not under a test dir"],
+    ["docs/notes.md", "prose not under a test dir"],
+    ["README.md", "root prose"],
+    // RESIDUAL (b): a *.test.d.ts TYPE-DECLARATION is NOT name-recognized (correct:
+    // a declaration file has no runtime assertions), UNLESS it sits under a test dir.
+    ["types/foo.test.d.ts", "RESIDUAL(b): .test.d.ts declaration is not a test by NAME"],
+    ["types/foo.spec.d.ts", "RESIDUAL(b): .spec.d.ts declaration is not a test by NAME"],
+  ];
+  it.each(notRecognized)("does NOT recognize %s (%s)", (rel) => {
+    expect(isRecognizedTestFile(rel)).toBe(false);
+  });
+
+  it("RESIDUAL(b) corollary: a .test.d.ts UNDER a tests/ dir still counts via the path rule", () => {
+    expect(isRecognizedTestFile("tests/foo.test.d.ts")).toBe(true);
   });
 });
 

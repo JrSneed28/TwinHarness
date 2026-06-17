@@ -2,6 +2,31 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 /**
+ * Thrown when a caller attempts to operate on a path that escapes the project
+ * root (an absolute path, a `..` segment, or a separator-bearing component where
+ * a single component is required). Lives here, beside {@link resolveWithinRoot},
+ * because root-relative containment is the invariant this whole module enforces.
+ *
+ * A DISTINCT, typed error (with a stable `code`) so the single CLI boundary
+ * (cli.ts) can map it to a structured `failure(...)` — and therefore a valid
+ * `--json` envelope plus a sensible exit code — instead of letting a raw Node
+ * stack escape (ARCH-003). The `code` mirrors the convention the state-store
+ * uses for its lock/contention errors so the boundary can switch on it uniformly.
+ */
+export class PathContainmentError extends Error {
+  /** Stable machine token surfaced in the `--json` failure envelope. */
+  readonly code = "path_containment";
+  constructor(
+    message: string,
+    /** The offending path/segment, echoed into the structured failure data. */
+    public readonly segment: string,
+  ) {
+    super(message);
+    this.name = "PathContainmentError";
+  }
+}
+
+/**
  * Resolved filesystem locations for a TwinHarness-governed project.
  *
  * The CLI only ever *records and computes* against these paths; it never decides

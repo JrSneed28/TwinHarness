@@ -2,7 +2,7 @@
 
 **Turns "build me X" into working, tested software** by forcing the idea through requirements, scope, design, and slice-by-slice implementation with verification gates — as a Claude Code plugin.
 
-> **Early development notice.** TwinHarness is at v0.6.x. The pipeline has been exercised end-to-end and ships 1100+ tests, green on CI (6 Windows-only platform skips in `tests/verify.test.ts` and `tests/coverage-report.test.ts`, not failures), but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
+> **Early development notice.** TwinHarness is at v0.6.x. The pipeline has been exercised end-to-end and ships 1100+ tests, green on CI (1 platform-conditional skip in `tests/concurrency.test.ts` — POSIX-only permission-error case, intentionally skipped on Windows/root and covered on Linux/macOS CI), but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
 
 ---
 
@@ -85,7 +85,7 @@ flowchart TD
 
 ## Getting started
 
-**Prerequisites:** Claude Code (≥ 1.0.0; targets the hook + agent manifest schema v1); Node >= 18 on PATH.
+**Prerequisites:** Claude Code (≥ 1.0.0; targets the hook + agent manifest schema v1); Node >= 20 on PATH.
 
 ### Install
 
@@ -202,6 +202,13 @@ The full guide — tiers, stages, the Critic loop, drift, gates, and the complet
 | `th repo check` | Stale-detection: compare `.twinharness/repo-map.json` against the current working tree; exit 0 = fresh, 4 = stale, 5 = no map |
 | `th decision detect\|add\|approve\|check\|list` | Decision governance: surface candidates, record decisions, human-approve via TTY gate, enforce unapproved-decision blocks, list all decisions |
 | `th tier veto-check\|classify` (brownfield) | Now refuses (exit 3, `brownfield_prerequisite_missing`) on a brownfield run missing the repo map or codebase analysis |
+| `th collab init\|fragment\|list\|merge` | Parallel-author blackboard: per-stage scratch space so concurrent producers drop fragments without overwriting each other |
+| `th debate add\|list\|resolve` | Blocking reconciliation ledger: records contested design forks; open debate blocks completion until resolved |
+| `th artifact claim\|release\|leases` | Section-level artifact leases: collision guard for intra-artifact fan-out (multiple agents editing different sections) |
+| `th build sub-claim\|sub-release` | Component sub-leases: carve a bounded subset of a parent slice's components for a scoped sub-Builder |
+| `th build dispatch` | Batch wave dispatch: emits the full parallel wave plus per-slice spawn descriptors in one payload |
+| `th hook subagent-stop` | SubagentStop-hook decision: state-validity guard for sub-agent turns (analogous to the Stop-gate) |
+| `th version` | Print the CLI version from `package.json` |
 
 All commands accept `--json` for machine-readable output. The full reference is in [USAGE.md](./USAGE.md) Part 3.
 
@@ -296,4 +303,4 @@ MIT
 
 ---
 
-[![version](https://img.shields.io/badge/version-0.6.2-blue)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-7c3aed) ![node](https://img.shields.io/badge/node-%E2%89%A5%2018-339933)
+[![version](https://img.shields.io/badge/version-0.6.2-blue)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-7c3aed) ![node](https://img.shields.io/badge/node-%E2%89%A5%2020-339933)

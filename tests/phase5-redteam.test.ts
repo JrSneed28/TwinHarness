@@ -13,6 +13,10 @@ import * as path from "node:path";
  * tests.
  */
 
+// DOC-LINT: tests in this file assert keyword/prose presence in .md agent and playbook files.
+// They verify documentation completeness, not behavioral dispatch — a broken
+// runtime that kept the words in the prompt would still pass.
+
 const ROOT = path.resolve(__dirname, "..");
 const read = (rel: string) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 
@@ -28,14 +32,14 @@ function frontmatter(md: string): Record<string, string> {
   return out;
 }
 
-describe("REQ-PCO-050: red-team prompt wiring", () => {
-  it("REQ-PCO-050: red-team.md exists with name + description frontmatter", () => {
+describe("DOC-LINT: REQ-PCO-050: red-team prompt wiring", () => {
+  it("DOC-LINT: REQ-PCO-050: red-team.md exists with name + description frontmatter", () => {
     const fm = frontmatter(read("agents/red-team.md"));
     expect(fm.name).toBe("red-team");
     expect(fm.description).toBeTruthy();
   });
 
-  it("REQ-PCO-050: red-team.md uses disallowedTools (no restrictive `tools:` key)", () => {
+  it("DOC-LINT: REQ-PCO-050: red-team.md uses disallowedTools (no restrictive `tools:` key)", () => {
     const fm = frontmatter(read("agents/red-team.md"));
     // A `tools:` allowlist would hard-exclude the MCP tools (see REQ-PCO-002);
     // isolation is expressed via disallowedTools instead.
@@ -43,18 +47,18 @@ describe("REQ-PCO-050: red-team prompt wiring", () => {
     expect(fm.disallowedTools).toBeTruthy();
   });
 
-  it("REQ-PCO-050: red-team.md posts attacks to the blackboard via th collab", () => {
+  it("DOC-LINT: REQ-PCO-050: red-team.md posts attacks to the blackboard via th collab", () => {
     const redTeam = read("agents/red-team.md");
     expect(redTeam).toContain("th collab");
   });
 
-  it("REQ-PCO-050: red-team.md notes concurrent operation with downstream stages", () => {
+  it("DOC-LINT: REQ-PCO-050: red-team.md notes concurrent operation with downstream stages", () => {
     const redTeam = read("agents/red-team.md").toLowerCase();
     expect(redTeam).toMatch(/concurrent|parallel|alongside|continuous/);
   });
 
-  it("REQ-PCO-050: pipeline-stages.md wires the red-team (concurrent + blackboard)", () => {
-    const pipeline = read("skills/twinharness/reference/pipeline-stages.md");
+  it("DOC-LINT: REQ-PCO-050: pipeline-stages.md wires the red-team (concurrent + blackboard)", () => {
+    const pipeline = read("skills/twinharness/reference/pipeline-stages-part2.md");
     const lower = pipeline.toLowerCase();
     expect(lower).toContain("red-team");
     expect(lower).toMatch(/concurrent|parallel|alongside|continuous/);

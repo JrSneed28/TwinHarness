@@ -13,6 +13,13 @@ import { runVerifyAdd, runVerifyRun } from "../src/commands/verify";
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
 
+// Portable, cross-platform stand-ins for POSIX `true`/`false` so these tests
+// pass on a bare-Windows runner with no Git Bash on PATH (runCommands uses
+// spawnSync(shell: true) → cmd.exe, which cannot resolve `true`/`false`).
+// (P1-3 / DOC-003≡TEST-002)
+const PASS_CMD = `node -e "process.exit(0)"`;
+const FAIL_CMD = `node -e "process.exit(1)"`;
+
 function writeFile(t: TempProject, rel: string, content: string): void {
   const abs = path.join(t.root, ...rel.split("/"));
   fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -69,7 +76,7 @@ describe("REQ-COVERAGE-REPORT-002: passing is whole-suite, sourced from the veri
     runInit(tp.paths, {});
     writeFile(tp, "docs/01-requirements.md", "REQ-001 and REQ-002.\n");
     writeFile(tp, "tests/a.test.ts", "// REQ-001 tested\n");
-    runVerifyAdd(tp.paths, "true");
+    runVerifyAdd(tp.paths, PASS_CMD);
     runVerifyRun(tp.paths);
 
     const res = runCoverageReport(tp.paths);
@@ -83,7 +90,7 @@ describe("REQ-COVERAGE-REPORT-002: passing is whole-suite, sourced from the veri
     runInit(tp.paths, {});
     writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
     writeFile(tp, "tests/a.test.ts", "// REQ-001\n");
-    runVerifyAdd(tp.paths, "false");
+    runVerifyAdd(tp.paths, FAIL_CMD);
     runVerifyRun(tp.paths);
 
     const res = runCoverageReport(tp.paths);

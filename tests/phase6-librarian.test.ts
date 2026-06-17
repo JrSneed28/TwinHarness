@@ -13,6 +13,10 @@ import * as path from "node:path";
  * deterministic core is covered by sibling source tests.
  */
 
+// DOC-LINT: tests in this file assert keyword/prose presence in .md agent and playbook files.
+// They verify documentation completeness, not behavioral dispatch — a broken
+// runtime that kept the words in the prompt would still pass.
+
 const ROOT = path.resolve(__dirname, "..");
 const read = (rel: string) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 
@@ -28,14 +32,14 @@ function frontmatter(md: string): Record<string, string> {
   return out;
 }
 
-describe("REQ-PCO-060: librarian prompt wiring", () => {
-  it("REQ-PCO-060: librarian.md exists with name + description frontmatter", () => {
+describe("DOC-LINT: REQ-PCO-060: librarian prompt wiring", () => {
+  it("DOC-LINT: REQ-PCO-060: librarian.md exists with name + description frontmatter", () => {
     const fm = frontmatter(read("agents/librarian.md"));
     expect(fm.name).toBe("librarian");
     expect(fm.description).toBeTruthy();
   });
 
-  it("REQ-PCO-060: librarian.md uses disallowedTools (no restrictive `tools:` key)", () => {
+  it("DOC-LINT: REQ-PCO-060: librarian.md uses disallowedTools (no restrictive `tools:` key)", () => {
     const fm = frontmatter(read("agents/librarian.md"));
     // A `tools:` allowlist would hard-exclude the MCP tools (see REQ-PCO-002);
     // isolation is expressed via disallowedTools instead.
@@ -43,13 +47,13 @@ describe("REQ-PCO-060: librarian prompt wiring", () => {
     expect(fm.disallowedTools).toBeTruthy();
   });
 
-  it("REQ-PCO-060: librarian.md references the repo-understanding surface (th repo / th context pack)", () => {
+  it("DOC-LINT: REQ-PCO-060: librarian.md references the repo-understanding surface (th repo / th context pack)", () => {
     const librarian = read("agents/librarian.md");
     expect(librarian).toMatch(/th repo|th context pack/);
   });
 
-  it("REQ-PCO-060: pipeline-stages.md documents the Librarian standing service", () => {
-    const pipeline = read("skills/twinharness/reference/pipeline-stages.md");
+  it("DOC-LINT: REQ-PCO-060: pipeline-stages.md documents the Librarian standing service", () => {
+    const pipeline = read("skills/twinharness/reference/pipeline-stages-part1.md");
     expect(pipeline.toLowerCase()).toContain("librarian");
     expect(pipeline).toContain("REQ-PCO-060");
   });

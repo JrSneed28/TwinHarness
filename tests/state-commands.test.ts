@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
+import * as fs from "node:fs";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runStateGet, runStateSet, runStateVerify, runStateStatus } from "../src/commands/state";
@@ -93,6 +94,40 @@ describe("REQ-STATE-CMD: state get/set/verify/status", () => {
     const empty = makeTempProject();
     expect(runStateVerify(empty.paths).ok).toBe(false);
     empty.cleanup();
+  });
+
+  // finding #12 (CHARACTERIZATION / regression-lock, no behavior change).
+  // `state verify --json` ALREADY surfaces non-fatal ARCH-007 advisories (e.g. an
+  // unknown top-level key) WITHOUT failing: the file stays valid (ok:true / exit 0)
+  // and the warnings are threaded into the JSON payload. Pin that JSON shape so the
+  // warn-but-don't-fail contract can't silently regress.
+  it("finding #12: verify --json surfaces non-fatal warnings while staying valid (exit 0)", () => {
+    tp = init();
+    // `set` refuses unknown keys, so write the raw file to simulate a forward-compat
+    // / typo field that validateState flags as a non-fatal warning (ARCH-007).
+    const parsed = JSON.parse(fs.readFileSync(tp.paths.stateFile, "utf8")) as Record<string, unknown>;
+    parsed.future_field_xyz = "from a newer version";
+    fs.writeFileSync(tp.paths.stateFile, JSON.stringify(parsed, null, 2), "utf8");
+
+    const res = runStateVerify(tp.paths);
+    // Still VALID (warn-only): ok:true, exit 0, valid:true.
+    expect(res.ok).toBe(true);
+    expect(res.exitCode).toBe(0);
+    expect(res.data?.valid).toBe(true);
+    // The warning is present in the JSON payload with the unknown-key text.
+    const warnings = res.data?.warnings as { path: string; message: string }[];
+    expect(Array.isArray(warnings)).toBe(true);
+    expect(warnings.some((w) => w.path === "future_field_xyz")).toBe(true);
+    expect(warnings.some((w) => /unknown top-level key/.test(w.message))).toBe(true);
+  });
+
+  it("finding #12: a clean state carries no warnings key (valid:true only)", () => {
+    tp = init();
+    const res = runStateVerify(tp.paths);
+    expect(res.ok).toBe(true);
+    expect(res.data?.valid).toBe(true);
+    // Clean state → no warnings array per the current contract.
+    expect(res.data?.warnings).toBeUndefined();
   });
 
   it("get on an uninitialized project reports not_initialized", () => {

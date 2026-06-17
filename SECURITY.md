@@ -50,13 +50,31 @@ a security sandbox. The orchestrator can legitimately:
   can still write through an unparsed Bash construct.
 
 The **gate-mutation audit ledger** (`.twinharness/gate-ledger.jsonl`) records
-every gate-relevant state change, making such overrides reviewable after the
-fact. This is the primary accountability mechanism — not prevention.
+every gate-relevant state change, so such overrides can be reviewed after the
+fact. It supports accountability rather than prevention, and it is now
+**tamper-evident**: like the `decisions.jsonl` store, `gate-ledger.jsonl` is a
+SHA-256 hash-chained append-only log — each entry seals a `recordHash` over its
+own canonical content (timestamp included) plus the prior entry's `recordHash`,
+so an actor with write access to `.twinharness/` who edits, backdates, deletes,
+or reorders a sealed entry breaks the chain detectably. `th doctor` verifies the
+chain and reports a break (a warning by default; `th doctor --strict` fails on
+it). Three honest limits remain: (1) ledgers that predate the hash chain begin with
+unsealed legacy lines, which are an unverifiable pre-migration prefix rather than
+a tamper signal — verification covers the sealed run that follows; (2) the
+chain is keyless, so an actor who rewrites the WHOLE sealed run from the first
+sealed entry forward can forge a self-consistent chain; and (3) because the
+pre-migration legacy prefix is tolerated, an actor can also DELETE the entire
+sealed run (reverting the file to legacy-only or empty), which verification cannot
+distinguish from a ledger that was never sealed — detection is per-link, not
+anchored to an expected entry count, so a fully-truncated ledger reports an intact
+(zero-sealed) chain. It is therefore a strong review aid that makes targeted edits
+detectable, not an unforgeable record.
 
 **CLI vs MCP asymmetry for gate fields.** The gate-owned fields
-(`implementation_allowed`, `tier`, `current_stage`, `write_gate`) remain settable
-through the **human-driven CLI** `th state set` (the documented unlock/advance
-path; validated and audit-ledgered). The **MCP `th_state_set` tool refuses them**:
+(`implementation_allowed`, `tier`, `current_stage`, `write_gate`,
+`blast_radius_flags`) remain settable through the **human-driven CLI**
+`th state set` (the documented unlock/advance path; validated and
+audit-ledgered). The **MCP `th_state_set` tool refuses them**:
 an agent acting over the MCP surface cannot flip a gate field, and the MCP server
 additionally validates every tool call against the tool's closed, typed schema
 (extra / wrong-typed / missing-required arguments are rejected before dispatch).
@@ -116,7 +134,7 @@ The following guarantees hold across all three commands and their MCP equivalent
 - **Candidate commands are never executed.** The scanner reads `scripts`, `Makefile` targets, CI workflow steps, and similar build/test declarations and records them as inert strings (`CandidateCommand.raw`). These candidate commands are recorded and surfaced as suggestions, never executed (RULE-004). The no-exec guarantee is verified by a sentinel-file test in `tests/repo.test.ts` (`REQ-RU-091`).
 - **All user-supplied paths are root-contained via `resolveWithinRoot()`.** Every `--file` and path-form `--component` argument is validated by `resolveWithinRoot` before any filesystem read. A path that resolves outside the project root is rejected with `path_outside_root` before any I/O is performed. Containment is re-checked after `realpath` resolution, so a symlink or NTFS junction placed inside the root that points outside it cannot be used to escape — the realpath'd target is compared against the realpath'd root and rejected when it falls outside (REQ-RU-024/032/042/092). This is the same helper used by `th artifact register`, `th coverage`, and `th tier`.
 - **No network I/O anywhere in the layer.** The map build (`th repo map`) and both query commands (`th repo relevant`, `th repo impact`) make no outbound network requests (REQ-NFR-008). The layer is entirely local and read-only with respect to external services.
-- **No PII or credentials are persisted.** The `.twinharness/repo-map.json` schema stores only file paths, detection keywords, and REQ anchor IDs. No file contents, no secrets, and no absolute paths are written to disk.
+- **Verbatim build-script command strings are persisted; treat the map as sensitive-by-content.** Beyond file paths, detection keywords, and REQ anchor IDs, **verbatim candidate-command strings are persisted to the local, gitignored repo-map.json** — the `raw` text of each discovered `package.json` script, `Makefile` target, and CI step is recorded as inert `CandidateCommand.raw` data (never executed; see the no-exec guarantee above). If a build script embeds a secret inline (e.g. a token in a `scripts` entry), that substring is copied verbatim into `repo-map.json`. The file lives under `.twinharness/` (gitignored) and is never committed; the committed `docs/00-repo-map.md` summary emits only a **count** of candidate commands, not their `raw` text. No file *contents* (source bodies) and no absolute paths are written to the map.
 - **Byte-stable, no run-specific data.** The persisted map contains no timestamps, PIDs, absolute paths, or nonces — only POSIX-relative paths and sorted collections. Two runs on an unchanged repo produce byte-identical output (REQ-NFR-001).
 - **Generated directories are excluded before being read.** Directories such as `node_modules`, `dist`, `build`, and `target` are identified and excluded from the file walk before any of their contents are opened (REQ-RU-006/041).
 
@@ -138,6 +156,18 @@ per-project plugin disable switch.
 The hooks **fail open**: if no `.twinharness/state.json` exists in the current
 project, both hooks exit immediately with `allow`, so non-TwinHarness projects
 are unaffected.
+
+The write-gate also fails open on a **present-but-invalid** `state.json`: by
+default a corrupt/unreadable state makes the gate stand down (allow the write
+with a warning) rather than block every write in a project whose state merely
+drifted — and the Stop-gate still blocks completion until state is repaired. An
+operator who needs the stricter posture can **opt into fail-closed** with
+`write_gate: "strict"`: when the (otherwise-invalid) `state.json` still carries a
+top-level `"strict"` value, the write-gate treats invalid state as a stop
+condition and **denies** writes until the file is repaired. This closes the
+mid-session "corrupt state to disarm the gate" bypass for strict operators while
+leaving default behaviour unchanged. The escape hatch `TH_DISABLE_WRITE_GATE=1`
+overrides the gate in all modes.
 
 ---
 

@@ -37,6 +37,7 @@ exports.evaluateStopGate = evaluateStopGate;
 exports.runHookStopGate = runHookStopGate;
 exports.runHookSubagentStop = runHookSubagentStop;
 exports.extractBashWriteTargets = extractBashWriteTargets;
+exports.classifyOwnership = classifyOwnership;
 exports.runHookPretoolGate = runHookPretoolGate;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
@@ -333,6 +334,29 @@ function extractBashWriteTargets(command) {
     return Array.from(seen);
 }
 /**
+ * Best-effort read of a top-level `write_gate: "strict"` opt-in from the RAW
+ * (possibly schema-invalid) state.json bytes — used only on the invalid-state
+ * fail-closed path (GOV-3). The state object failed schema validation, so we
+ * cannot trust `r.state`; we ask the narrower question "did the operator declare
+ * strict mode?" directly against the parsed JSON. Returns true ONLY for an exact
+ * top-level string `"strict"`. Never throws: undefined raw, non-JSON, non-object,
+ * or any non-strict/absent value all return false (→ historical fail-open).
+ */
+function rawWriteGateIsStrict(raw) {
+    if (typeof raw !== "string")
+        return false;
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch {
+        return false; // Unparseable bytes carry no readable opt-in → fail open.
+    }
+    if (typeof parsed !== "object" || parsed === null)
+        return false;
+    return parsed["write_gate"] === "strict";
+}
+/**
  * Helper: convert an absolute path to a root-relative forward-slash string,
  * or null if the path is outside the project root (caller should allow it).
  */
@@ -394,12 +418,147 @@ function findOwningSlices(relFwd, slices, root) {
     return owners;
 }
 /**
+ * Build a gate-firing decision payload (`ask`/`deny`) — the single source for the
+ * `hookSpecificOutput` shape every gate branch emits. The in-handler `fireGate`
+ * closure and the extracted phase-gate helpers all go through this so the bytes
+ * are identical regardless of which branch fired.
+ */
+function fireGateResult(decision, reason) {
+    return {
+        stdout: JSON.stringify({
+            hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: decision,
+                permissionDecisionReason: reason,
+            },
+        }),
+        exitCode: 0,
+    };
+}
+/**
+ * Step c2 (extracted, behavior-identical): Phase A Bash-mediated write
+ * defense-in-depth (fail-open). Only fires during Phase A
+ * (implementation_allowed=false). Heuristically detect shell-mediated writes into
+ * in-root implementation paths; fire the gate on the FIRST offending target.
+ * Returns `null` (fall through → allow) when no offending target is found. Never
+ * fires in Phase B. Conditions, iteration order, reason text, and the fired
+ * `gateMode` decision are identical to the prior inline block.
+ */
+function phaseABashGate(state, bashCommand, input, paths, gateMode) {
+    if (bashCommand && !state.implementation_allowed) {
+        const base0 = input?.cwd ?? paths.root;
+        const targets = extractBashWriteTargets(bashCommand);
+        for (const token of targets) {
+            const absT = path.isAbsolute(token) ? token : path.resolve(base0, token);
+            const rel0 = toRootRelative(absT, paths.root);
+            if (rel0 !== null && !isAllowedDocOrStatePath(rel0)) {
+                const reason = `TwinHarness write-gate (Bash defense-in-depth) blocked this Bash-mediated write ` +
+                    `(Phase A — pre-implementation). ` +
+                    `Target path: ${rel0}. ` +
+                    `Current stage: ${state.current_stage}. ` +
+                    `Bash-mediated writes (e.g. echo/sed/tee redirections) are not permitted during Phase A ` +
+                    `because implementation_allowed is false. ` +
+                    `Legitimate unlock: clear all upstream gates, then set ` +
+                    `implementation_allowed true via \`th state set implementation_allowed true\`. ` +
+                    `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1. ` +
+                    `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision.`;
+                return fireGateResult(gateMode, reason);
+            }
+        }
+        // No offending target found → fall through (fail-open).
+    }
+    return null;
+}
+function classifyOwnership(relFwd, slices, root) {
+    const owners = findOwningSlices(relFwd, slices, root);
+    if (owners.length === 0)
+        return { kind: "unowned" };
+    if (owners.some((o) => o.status === "in-progress"))
+        return { kind: "in-progress" };
+    const ownerSummary = owners.map((o) => `${o.id} (${o.status})`).join(", ");
+    return { kind: "violation", ownerSummary };
+}
+/**
+ * Step c3 (extracted, behavior-identical): Phase B Bash-mediated write
+ * enforcement — strict mode only (G4). Runs BEFORE the file_path step because a
+ * Bash tool call carries `command` but no `file_path`/`notebook_path`. Under
+ * `write_gate: "strict"`, with implementation allowed and a Bash command present,
+ * the same conservative matcher is applied to mid-build Bash writes; fail-open
+ * except a target owned solely by non-in-progress slices fires `deny`. Returns
+ * `null` (fall through) otherwise. Guard condition, iteration order, the
+ * per-target containment checks, reason text, and the `deny` decision are
+ * identical to the prior inline block.
+ */
+function phaseBStrictBashGate(state, bashCommand, input, paths) {
+    if (state.write_gate === "strict" &&
+        state.implementation_allowed &&
+        bashCommand &&
+        state.slices.length > 0) {
+        const baseB = input?.cwd ?? paths.root;
+        const targetsB = extractBashWriteTargets(bashCommand);
+        for (const token of targetsB) {
+            const absT = path.isAbsolute(token) ? token : path.resolve(baseB, token);
+            const relB = toRootRelative(absT, paths.root);
+            if (relB === null || isAllowedDocOrStatePath(relB))
+                continue; // out-of-root / doc → allow.
+            const verdict = classifyOwnership(relB, state.slices, paths.root);
+            if (verdict.kind !== "violation")
+                continue; // unowned in-root path / in-progress owner → allow.
+            // Owned only by slices that are not in-progress → component-boundary violation.
+            const ownerSummary = verdict.ownerSummary;
+            const reason = `TwinHarness write-gate (strict mode — Phase-B Bash enforcement) blocked this Bash-mediated write. ` +
+                `Target path: ${relB}. ` +
+                `This path is owned by slice(s): ${ownerSummary}, none of which are currently in-progress. ` +
+                `Under write_gate=strict, Bash-mediated writes (e.g. echo/sed/tee redirections) are held to the same ` +
+                `§16 component-boundary rule as Write/Edit: another slice owns this path. ` +
+                `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision. ` +
+                `To allow this write, set the owning slice to in-progress: ` +
+                `\`th slice set-status <SLICE-ID> in-progress\`. ` +
+                `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1.`;
+            return fireGateResult("deny", reason);
+        }
+        // No offending target found → fall through (fail-open).
+    }
+    return null;
+}
+/**
+ * Step h (extracted, behavior-identical): Phase B component-boundary enforcement
+ * for a Write/Edit/NotebookEdit `file_path`. Implementation is allowed and slices
+ * exist: a path owned by at least one in-progress slice is allowed (→ `null`); a
+ * path owned ONLY by non-in-progress slices is an `ask` component-boundary
+ * violation; an unowned path is allowed (→ `null`). Owner lookup, the
+ * any/all-in-progress decision, reason text, and the `ask` decision are identical
+ * to the prior inline block.
+ */
+function phaseBFileGate(relFwd, state, paths) {
+    if (state.slices.length > 0) {
+        const verdict = classifyOwnership(relFwd, state.slices, paths.root);
+        if (verdict.kind === "violation") {
+            // Owned only by slices that are not in-progress → component-boundary violation.
+            const ownerSummary = verdict.ownerSummary;
+            const reason = `TwinHarness write-gate blocked this write (Phase B — component-boundary enforcement). ` +
+                `Target path: ${relFwd}. ` +
+                `This path is owned by slice(s): ${ownerSummary}, none of which are currently in-progress. ` +
+                `This looks like a component-boundary violation (§16): another slice owns this path. ` +
+                `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision. ` +
+                `To allow this write, set the owning slice to in-progress: ` +
+                `\`th slice set-status <SLICE-ID> in-progress\`.`;
+            return fireGateResult("ask", reason);
+        }
+        // Unowned path → allow (new files appear constantly during a build).
+    }
+    return null;
+}
+/**
  * `th hook pretool-gate` — emit a Claude Code PreToolUse hook decision on stdout.
  *
  * Implements the decision ladder from spec/write-gate-design.md §Decision ladder:
  * a. No state.json → allow ({}).
  * b. TH_DISABLE_WRITE_GATE=1 or write_gate=off → allow.
- * c. state.json invalid → allow + systemMessage warning.
+ * c. state.json invalid → allow + systemMessage warning (fail-open), UNLESS the
+ *    raw bytes carry a top-level `write_gate: "strict"` opt-in, in which case the
+ *    invalid state is fail-CLOSED: deny the write until state.json is repaired
+ *    (GOV-3). Default/absent/other modes keep the historical fail-open behaviour.
  * c2. Phase A + Bash tool: heuristically detect shell-mediated writes into in-root
  *     implementation paths and fire the gate on the first offending target (fail-open:
  *     if no offending target is found, fall through). NOT applied in Phase B.
@@ -422,16 +581,7 @@ function findOwningSlices(relFwd, slices, root) {
 function runHookPretoolGate(paths, input, env = process.env) {
     const allow = () => ({ stdout: JSON.stringify({}), exitCode: 0 });
     const allowWithWarning = (msg) => ({ stdout: JSON.stringify({ systemMessage: msg }), exitCode: 0 });
-    const fireGate = (decision, reason) => ({
-        stdout: JSON.stringify({
-            hookSpecificOutput: {
-                hookEventName: "PreToolUse",
-                permissionDecision: decision,
-                permissionDecisionReason: reason,
-            },
-        }),
-        exitCode: 0,
-    });
+    const fireGate = (decision, reason) => fireGateResult(decision, reason);
     // Step b (env check): TH_DISABLE_WRITE_GATE=1 → allow immediately, before reading state.
     if (env["TH_DISABLE_WRITE_GATE"] === "1")
         return allow();
@@ -439,8 +589,33 @@ function runHookPretoolGate(paths, input, env = process.env) {
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
         return allow();
-    // Step c: Invalid state → allow + warning.
+    // Step c: Invalid state.
+    //
+    // Default (and historical) behaviour is fail-OPEN: an invalid state.json makes
+    // the write-gate stand down and ALLOW the write (with a warning), because a
+    // false block on every write in a project whose state merely drifted would be
+    // worse than the gate going quiet — the stop-gate still blocks completion.
+    //
+    // GOV-3 opt-in (`write_gate: "strict"`): a strict operator has declared that an
+    // invalid/corrupt state is itself a stop condition — a mid-session corruption
+    // must NOT silently disarm the gate. So when the (otherwise-invalid) state.json
+    // still carries a top-level `write_gate: "strict"`, we fail-CLOSED and DENY the
+    // write instead of allowing it. We read the mode from the raw bytes because
+    // there is no validated `state` object here; only an exact top-level
+    // `"strict"` opt-in trips the fail-closed path. Bytes that do not parse at all,
+    // or that carry any non-strict / absent mode, keep the historical fail-open
+    // behaviour (we cannot read a strict opt-in we cannot see — staying honest
+    // rather than denying on unprovable intent).
     if (!r.state) {
+        if (rawWriteGateIsStrict(r.raw)) {
+            const reason = `TwinHarness write-gate (strict mode — fail-closed) DENIED this write because state.json is invalid. ` +
+                `Under \`write_gate: "strict"\` an unreadable/invalid state is treated as a stop condition, not a stand-down: ` +
+                `the gate refuses writes until state.json is repaired (the default modes fail open here). ` +
+                `Repair state.json to restore normal gating. ` +
+                `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1. ` +
+                `AGENT INSTRUCTION: do NOT retry this write — escalate to the human to repair state.json.`;
+            return fireGate("deny", reason);
+        }
         return allowWithWarning("TwinHarness write-gate is standing down because state.json is invalid (the stop-gate still blocks completion). " +
             "Repair state.json and re-run to restore gating.");
     }
@@ -452,75 +627,21 @@ function runHookPretoolGate(paths, input, env = process.env) {
     // "strict" carries "deny" semantics (and additionally gates Phase-B Bash writes
     // below — G4), so it maps to "deny" here.
     const gateMode = state.write_gate === "deny" || state.write_gate === "strict" ? "deny" : "ask";
-    // Step c2: Phase A Bash-mediated write defense-in-depth (fail-open).
-    // Only fires during Phase A (implementation_allowed=false). Heuristically detect
-    // shell-mediated writes into in-root implementation paths. If no offending target
-    // is found, fall through (allow). Never fires in Phase B to avoid false-positives.
+    // Step c2: Phase A Bash-mediated write defense-in-depth (fail-open). Extracted
+    // to phaseABashGate — fires the gate on the first offending Phase-A Bash target,
+    // or returns null to fall through. Behavior identical to the prior inline block.
     const bashCommand = input?.tool_input?.command;
-    if (bashCommand && !state.implementation_allowed) {
-        const base0 = input?.cwd ?? paths.root;
-        const targets = extractBashWriteTargets(bashCommand);
-        for (const token of targets) {
-            const absT = path.isAbsolute(token) ? token : path.resolve(base0, token);
-            const rel0 = toRootRelative(absT, paths.root);
-            if (rel0 !== null && !isAllowedDocOrStatePath(rel0)) {
-                const reason = `TwinHarness write-gate (Bash defense-in-depth) blocked this Bash-mediated write ` +
-                    `(Phase A — pre-implementation). ` +
-                    `Target path: ${rel0}. ` +
-                    `Current stage: ${state.current_stage}. ` +
-                    `Bash-mediated writes (e.g. echo/sed/tee redirections) are not permitted during Phase A ` +
-                    `because implementation_allowed is false. ` +
-                    `Legitimate unlock: clear all upstream gates, then set ` +
-                    `implementation_allowed true via \`th state set implementation_allowed true\`. ` +
-                    `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1. ` +
-                    `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision.`;
-                return fireGate(gateMode, reason);
-            }
-        }
-        // No offending target found → fall through (fail-open).
-    }
+    const c2 = phaseABashGate(state, bashCommand, input, paths, gateMode);
+    if (c2)
+        return c2;
     // Step c3: Phase B Bash-mediated write enforcement — strict mode only (G4).
-    // Runs BEFORE step d because a Bash tool call carries `command` but no
-    // `file_path`/`notebook_path`, so step d's early allow() would otherwise make
-    // this branch unreachable for Bash writes. Default modes (ask/deny/off) leave
-    // Phase-B Bash writes ungated (the original behaviour: Bash gating was Phase A
-    // only). Under `write_gate: "strict"`, with implementation allowed and a Bash
-    // command present, the same conservative matcher used in Phase A is applied to
-    // mid-build Bash writes so that a Bash redirection cannot sidestep the §16
-    // component-boundary rule. Fail-open: only a target owned solely by slices that
-    // are NOT in-progress fires the gate; anything unparseable, out-of-root,
-    // doc-allowlisted, unowned, or owned by an in-progress slice falls through.
-    if (state.write_gate === "strict" &&
-        state.implementation_allowed &&
-        bashCommand &&
-        state.slices.length > 0) {
-        const baseB = input?.cwd ?? paths.root;
-        const targetsB = extractBashWriteTargets(bashCommand);
-        for (const token of targetsB) {
-            const absT = path.isAbsolute(token) ? token : path.resolve(baseB, token);
-            const relB = toRootRelative(absT, paths.root);
-            if (relB === null || isAllowedDocOrStatePath(relB))
-                continue; // out-of-root / doc → allow.
-            const owners = findOwningSlices(relB, state.slices, paths.root);
-            if (owners.length === 0)
-                continue; // unowned in-root path → allow.
-            if (owners.some((o) => o.status === "in-progress"))
-                continue; // an in-progress owner → allow.
-            // Owned only by slices that are not in-progress → component-boundary violation.
-            const ownerSummary = owners.map((o) => `${o.id} (${o.status})`).join(", ");
-            const reason = `TwinHarness write-gate (strict mode — Phase-B Bash enforcement) blocked this Bash-mediated write. ` +
-                `Target path: ${relB}. ` +
-                `This path is owned by slice(s): ${ownerSummary}, none of which are currently in-progress. ` +
-                `Under write_gate=strict, Bash-mediated writes (e.g. echo/sed/tee redirections) are held to the same ` +
-                `§16 component-boundary rule as Write/Edit: another slice owns this path. ` +
-                `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision. ` +
-                `To allow this write, set the owning slice to in-progress: ` +
-                `\`th slice set-status <SLICE-ID> in-progress\`. ` +
-                `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1.`;
-            return fireGate("deny", reason);
-        }
-        // No offending target found → fall through (fail-open).
-    }
+    // Extracted to phaseBStrictBashGate. Runs BEFORE step d because a Bash tool call
+    // carries `command` but no `file_path`/`notebook_path`, so step d's early allow()
+    // would otherwise make this branch unreachable for Bash writes. Behavior
+    // identical to the prior inline block (fires `deny`, or falls through).
+    const c3 = phaseBStrictBashGate(state, bashCommand, input, paths);
+    if (c3)
+        return c3;
     // Step d: No file_path (or notebook_path for NotebookEdit) → allow.
     const filePath = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path;
     if (!filePath)
@@ -546,28 +667,12 @@ function runHookPretoolGate(paths, input, env = process.env) {
             `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision.`;
         return fireGate(gateMode, reason);
     }
-    // Step h: Phase B — implementation allowed, slices exist.
-    if (state.slices.length > 0) {
-        const owners = findOwningSlices(relFwd, state.slices, paths.root);
-        if (owners.length > 0) {
-            const allInProgress = owners.every((o) => o.status === "in-progress");
-            const anyInProgress = owners.some((o) => o.status === "in-progress");
-            if (anyInProgress || allInProgress) {
-                // At least one in-progress owner → allow.
-                return allow();
-            }
-            // Owned only by slices that are not in-progress → component-boundary violation.
-            const ownerSummary = owners.map((o) => `${o.id} (${o.status})`).join(", ");
-            const reason = `TwinHarness write-gate blocked this write (Phase B — component-boundary enforcement). ` +
-                `Target path: ${relFwd}. ` +
-                `This path is owned by slice(s): ${ownerSummary}, none of which are currently in-progress. ` +
-                `This looks like a component-boundary violation (§16): another slice owns this path. ` +
-                `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision. ` +
-                `To allow this write, set the owning slice to in-progress: ` +
-                `\`th slice set-status <SLICE-ID> in-progress\`.`;
-            return fireGate("ask", reason);
-        }
-        // Unowned path → allow (new files appear constantly during a build).
-    }
+    // Step h: Phase B — implementation allowed, slices exist. Extracted to
+    // phaseBFileGate: fires `ask` on a component-boundary violation, or returns null
+    // (in-progress owner / unowned / no slices) → fall through to the final allow().
+    // Behavior identical to the prior inline block.
+    const h = phaseBFileGate(relFwd, state, paths);
+    if (h)
+        return h;
     return allow();
 }

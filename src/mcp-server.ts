@@ -36,6 +36,8 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 import { resolveProjectPaths, type ProjectPaths } from "./core/paths";
 import type { CommandResult } from "./core/output";
@@ -94,8 +96,11 @@ export interface ToolInputSchema {
  *
  *  - `result.human` (or a JSON-stringified `result.data`, or a terse OK/FAILED)
  *    becomes the single text content block — the human-readable rendering.
- *  - `result.data` (when present) is attached as `structuredContent` so a caller
- *    can consume the machine payload without re-parsing text.
+ *  - `result.data` (when present) plus the numeric `exitCode` are attached as
+ *    `structuredContent` so a caller can consume the machine payload — including
+ *    the exact CLI exit code — without re-parsing text (ARCH-005). The CLI exit
+ *    code carries information `isError` (a coarse ok/not-ok boolean) loses: e.g.
+ *    `th repo check`'s 0-fresh / 4-stale / 5-no-map / 1-parse-fail taxonomy.
  *  - `isError` is the inverse of `result.ok`: a failing command surfaces as a
  *    tool error rather than a silent success.
  *
@@ -115,7 +120,18 @@ export function toToolResult(result: CommandResult): CallToolResult {
     content: [{ type: "text", text }],
     isError: !result.ok,
   };
-  if (result.data !== undefined) out.structuredContent = result.data;
+  // Surface the machine payload + the numeric exit code as structuredContent.
+  // Additive: `exitCode` is always present so callers get the full CLI exit-code
+  // taxonomy (not just isError); `result.data` fields are merged in when present.
+  //
+  // Reserved-key precedence (LATENT guard): `exitCode` is the envelope's
+  // CommandResult.exitCode and is spread LAST, so it deterministically WINS over
+  // any `exitCode` a future command might nest inside `result.data`. No command
+  // does today (the envelope is the single source of the CLI exit code), but
+  // writing the envelope value last keeps `exitCode` an unambiguous reserved key:
+  // a `data.exitCode` can never silently shadow the real process exit code. The
+  // mcp-adapter test pins this precedence so the invariant can't regress.
+  out.structuredContent = { ...(result.data ?? {}), exitCode: result.exitCode };
   return out;
 }
 
@@ -771,8 +787,42 @@ export function listTools(): Tool[] {
  * ------------------------------------------------------------------ */
 
 const SERVER_NAME = "twinharness-th";
-/** Version advertised to clients; kept in sync with the plugin/package version. */
-const SERVER_VERSION = "0.6.2";
+
+/**
+ * Read the server version from package.json at runtime — MIRRORS cli.ts's
+ * `readCliVersion()` exactly so the MCP server and the CLI always advertise the
+ * SAME version (ARCH-006 / CQ-004 / PKG-007: a hardcoded literal silently
+ * desynced on every version bump). Tries `__dirname/../package.json`
+ * (dist/mcp-server.js → root package.json) then `__dirname/../../package.json`
+ * (src/mcp-server.ts in a ts-node/test context). Returns "unknown" if neither is
+ * found or parsing fails. Read via `fs` (NOT `import`): package.json is outside
+ * `src/` (a tsc rootDir error) and importing it would inline the whole file into
+ * the esbuild bundle — keeping the read here preserves the zero-runtime-dep MCP
+ * bundle boundary this file documents above.
+ */
+export function readServerVersion(): string {
+  const candidates = [
+    path.join(__dirname, "..", "package.json"),
+    path.join(__dirname, "..", "..", "package.json"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        const json = JSON.parse(fs.readFileSync(candidate, "utf8")) as unknown;
+        if (typeof json === "object" && json !== null && "version" in json) {
+          const v = (json as Record<string, unknown>).version;
+          if (typeof v === "string") return v;
+        }
+      }
+    } catch {
+      // Try next candidate.
+    }
+  }
+  return "unknown";
+}
+
+/** Version advertised to clients — read from package.json so it never desyncs. */
+export const SERVER_VERSION = readServerVersion();
 
 /* ------------------------------------------------------------------ *
  * Runtime argument validation (H-1)                                   *

@@ -17,21 +17,26 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ProjectPaths } from "./paths";
+import { type ProjectPaths, PathContainmentError } from "./paths";
 import { extractReqIds } from "./anchors";
 
 /**
  * Validate that `segment` is a safe single path component: rejects absolute
- * paths, `..`, and any value containing a path separator (`/` or `\`).  Throws
- * a descriptive `Error` on invalid input so callers get a clear message rather
- * than a silent path traversal.
+ * paths, `..`, and any value containing a path separator (`/` or `\`). Throws a
+ * typed {@link PathContainmentError} (a security-relevant containment violation)
+ * so the CLI boundary maps it to a structured `--json` failure with a stable
+ * `path_containment` code instead of letting a raw Node stack escape (ARCH-003) —
+ * while still preventing the path traversal it always did.
  */
 function validatePathSegment(segment: string, label: string): void {
   if (path.isAbsolute(segment)) {
-    throw new Error(`collab: ${label} must not be an absolute path: "${segment}"`);
+    throw new PathContainmentError(`collab: ${label} must not be an absolute path: "${segment}"`, segment);
   }
   if (segment === ".." || segment.includes("/") || segment.includes("\\")) {
-    throw new Error(`collab: ${label} must be a single path component with no separators or "..": "${segment}"`);
+    throw new PathContainmentError(
+      `collab: ${label} must be a single path component with no separators or "..": "${segment}"`,
+      segment,
+    );
   }
 }
 

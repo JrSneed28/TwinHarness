@@ -30,10 +30,9 @@ let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
 
 describe("REQ-STATE-LOCK-002: writes survive concurrent readers (C-2)", () => {
-  it("N concurrent `drift add` under background `state get` readers → 0 lost writes, no crash", async () => {
-    if (!fs.existsSync(CLI)) {
-      throw new Error(`dist/cli.js missing — run \`npm run build\` before this test (${CLI}).`);
-    }
+  // TEST-008/009: skipIf dist is absent so the suite degrades gracefully instead
+  // of throwing. CI always builds first; local runs without a build simply skip.
+  it.skipIf(!fs.existsSync(CLI))("N concurrent `drift add` under background `state get` readers → 0 lost writes, no crash", async () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
     const root = tp.root;

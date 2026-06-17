@@ -20,6 +20,22 @@ export function shortHash(content: string): string {
   return hashContent(content).slice(0, 12);
 }
 
+// ---------------------------------------------------------------------------
+// Hash-chain shared constants (#14 dedup) — used by BOTH the decision ledger
+// (core/decisions.ts) and the gate ledger (core/ledger.ts). Lifted here so the
+// two chains share one definition instead of each declaring its own; both modules
+// re-export `GENESIS_PREV_HASH` for back-compat with existing importers.
+// ---------------------------------------------------------------------------
+
+/**
+ * `prevHash` of the FIRST sealed entry in a SHA-256 hash chain — 64 hex zeros (the
+ * migration anchor; DS-001 for decisions, the first-seal anchor for the ledger).
+ */
+export const GENESIS_PREV_HASH = "0".repeat(64);
+
+/** A 64-char lowercase-hex string — the shape of every `recordHash` / `prevHash`. */
+export const HEX64 = /^[0-9a-f]{64}$/;
+
 /** Directory names never descended into when hashing a directory artifact. */
 const HASH_SKIP_DIRS = new Set([".git", "node_modules", "dist"]);
 

@@ -29,12 +29,13 @@ let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
 
 describe("REQ-MCP-MAP-001: toToolResult maps ok:true → non-error result with the data", () => {
-  it("ok result with data → isError false, text from human, data as structuredContent", () => {
+  it("ok result with data → isError false, text from human, data + exitCode as structuredContent", () => {
     const r: CommandResult = success({ data: { tier: "T1", count: 3 }, human: "all good" });
     const mapped = toToolResult(r);
     expect(mapped.isError).toBe(false);
     expect(mapped.content).toEqual([{ type: "text", text: "all good" }]);
-    expect(mapped.structuredContent).toEqual({ tier: "T1", count: 3 });
+    // ARCH-005: data fields are merged with the numeric exitCode.
+    expect(mapped.structuredContent).toEqual({ tier: "T1", count: 3, exitCode: 0 });
   });
 
   it("ok result without human → text falls back to JSON-stringified data", () => {
@@ -43,30 +44,84 @@ describe("REQ-MCP-MAP-001: toToolResult maps ok:true → non-error result with t
     expect(mapped.isError).toBe(false);
     expect(mapped.content[0]).toMatchObject({ type: "text" });
     expect((mapped.content[0] as { text: string }).text).toContain("42");
-    expect(mapped.structuredContent).toEqual({ value: 42 });
+    expect(mapped.structuredContent).toEqual({ value: 42, exitCode: 0 });
   });
 
-  it("ok result with neither human nor data → text 'OK', no structuredContent", () => {
+  it("ok result with neither human nor data → text 'OK', structuredContent carries exitCode", () => {
     const mapped = toToolResult({ ok: true, exitCode: 0 });
     expect(mapped.isError).toBe(false);
     expect(mapped.content).toEqual([{ type: "text", text: "OK" }]);
-    expect(mapped.structuredContent).toBeUndefined();
+    // ARCH-005: exitCode is always surfaced, even with no data payload.
+    expect(mapped.structuredContent).toEqual({ exitCode: 0 });
+  });
+});
+
+describe("ARCH-005: toToolResult carries the numeric exitCode in structuredContent", () => {
+  it("preserves a non-zero exit code (e.g. repo check stale=4) alongside the data", () => {
+    // Mirrors `th repo check` on a stale map: ok:false, exitCode:4, shape data.
+    const r: CommandResult = { ok: false, exitCode: 4, data: { ok: false, shape: "stale" } };
+    const mapped = toToolResult(r);
+    expect(mapped.isError).toBe(true);
+    expect((mapped.structuredContent as Record<string, unknown>).exitCode).toBe(4);
+    // The data payload is still present, untouched.
+    expect((mapped.structuredContent as Record<string, unknown>).shape).toBe("stale");
+  });
+
+  it("a real run* handler's exit code reaches structuredContent (th_repo_check no-map → 5)", () => {
+    tp = makeTempProject();
+    const def = TOOL_DEFS.find((t) => t.name === "th_repo_check")!;
+    const mapped = toToolResult(def.run(tp.paths, {}));
+    // No repo-map.json → REPO_NO_MAP_EXIT (5); isError stays true (ok:false).
+    expect(mapped.isError).toBe(true);
+    expect((mapped.structuredContent as Record<string, unknown>).exitCode).toBe(5);
+  });
+
+  // ARCH-005 / finding #6 (build plan exit-7 contract surfaces over MCP). The
+  // build-plan dependency_graph_unsatisfiable failure carries exitCode 7; pin
+  // that the envelope code reaches structuredContent unchanged through the
+  // adapter, so a `--json`/MCP consumer can branch on the full exit-code taxonomy
+  // (not just isError) for the cyclic/dangling-dep case.
+  it("finding #6: a build-plan exit-7 failure surfaces exitCode:7 in structuredContent", () => {
+    const r: CommandResult = failure({ exitCode: 7, data: { error: "dependency_graph_unsatisfiable" } });
+    const mapped = toToolResult(r);
+    expect(mapped.isError).toBe(true);
+    expect((mapped.structuredContent as Record<string, unknown>).exitCode).toBe(7);
+    expect((mapped.structuredContent as Record<string, unknown>).error).toBe("dependency_graph_unsatisfiable");
+  });
+
+  // Finding #5 (LATENT reserved-key guard, characterization). `exitCode` is a
+  // RESERVED key in structuredContent: the envelope's CommandResult.exitCode is
+  // spread LAST, so it deterministically wins over any `exitCode` a (hypothetical)
+  // future command might nest inside `result.data`. No command does this today —
+  // this is a forward-looking guard, not a live clobber — so we synthesize a
+  // `data.exitCode` to PIN the precedence and prevent a silent regression where a
+  // nested data field could shadow the real process exit code.
+  it("finding #5: a nested data.exitCode never shadows the envelope exitCode (reserved-key precedence)", () => {
+    const r: CommandResult = { ok: false, exitCode: 4, data: { exitCode: 99, shape: "stale" } };
+    const mapped = toToolResult(r);
+    const sc = mapped.structuredContent as Record<string, unknown>;
+    // The ENVELOPE code (4) wins — the synthetic data.exitCode (99) is overwritten.
+    expect(sc.exitCode).toBe(4);
+    // Sibling data fields are still merged untouched.
+    expect(sc.shape).toBe("stale");
   });
 });
 
 describe("REQ-MCP-MAP-002: toToolResult maps ok:false → isError:true", () => {
-  it("failure result → isError true, human as text, data still attached", () => {
+  it("failure result → isError true, human as text, data + exitCode still attached", () => {
     const r: CommandResult = failure({ human: "it broke", data: { error: "boom" } });
     const mapped = toToolResult(r);
     expect(mapped.isError).toBe(true);
     expect(mapped.content).toEqual([{ type: "text", text: "it broke" }]);
-    expect(mapped.structuredContent).toEqual({ error: "boom" });
+    // ARCH-005: data + the default failure exit code (1).
+    expect(mapped.structuredContent).toEqual({ error: "boom", exitCode: 1 });
   });
 
   it("failure with neither human nor data → text 'FAILED'", () => {
     const mapped = toToolResult({ ok: false, exitCode: 1 });
     expect(mapped.isError).toBe(true);
     expect(mapped.content).toEqual([{ type: "text", text: "FAILED" }]);
+    expect(mapped.structuredContent).toEqual({ exitCode: 1 });
   });
 });
 

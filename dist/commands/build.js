@@ -22,27 +22,33 @@ const guards_1 = require("../core/guards");
  * are scheduled; `--include-done` schedules all of them.
  */
 function runBuildPlan(paths, opts = {}) {
-    const r = (0, state_store_1.readState)(paths);
-    if (!r.exists)
-        return guards_1.NOT_INIT;
-    if (!r.state) {
-        return (0, output_1.failure)({
-            human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`,
-            data: { error: "invalid_state", issues: r.issues },
-        });
-    }
+    const sr = (0, guards_1.requireState)(paths);
+    if (sr.result)
+        return sr.result;
+    const state = sr.state;
     const selected = opts.includeDone
-        ? r.state.slices
-        : r.state.slices.filter((s) => s.status !== "done");
+        ? state.slices
+        : state.slices.filter((s) => s.status !== "done");
     const waves = (0, schedule_1.scheduleWaves)(selected);
     const conflicts = (0, schedule_1.conflictPairs)(selected);
     const parallelism = waves.reduce((max, w) => Math.max(max, w.length), 0);
+    // Anchor: ARCH-001 — validate the `depends_on` graph alongside the static plan.
+    // `scheduleWaves` orders waves by hard deps but silently tolerates an
+    // unsatisfiable graph (it can't order a cycle, and a dangling ref names a slice
+    // that doesn't exist); surface both here so a structurally-broken plan fails the
+    // command instead of emitting a misleading "schedule" — mirroring how the live
+    // next-wave/dispatch path reports cycles/dangling. Validate the FULL slice set
+    // (not just `selected`): a dangling/cyclic edge is a plan defect regardless of
+    // whether the planner happens to skip a `done` slice this run.
+    const deps = (0, wave_1.validateDeps)(state.slices);
+    const depIssues = (0, wave_1.hasDepIssues)(deps);
     (0, log_1.structuredLog)({
         cmd: "build plan",
         slices: selected.length,
         waves: waves.length,
         conflicts: conflicts.length,
         parallelism,
+        depIssues,
     });
     const waveLines = waves.length
         ? waves.map((w, i) => `Wave ${i + 1} (parallel): ${w.join(", ")}`)
@@ -60,6 +66,15 @@ function runBuildPlan(paths, opts = {}) {
                 `(the coverage hard-gate and vertical-slice integrity stay unchanged).`,
         ]
         : [];
+    // ARCH-001 — surface an unsatisfiable dependency graph in the human view (a
+    // cycle deadlocks the build forever; a dangling ref names a slice that can
+    // never go `done`). Same wording as the live next-wave/dispatch path.
+    const depLines = [];
+    for (const c of deps.cycles)
+        depLines.push(`DEPENDENCY CYCLE: ${c.join(" → ")} → ${c[0]} (unsatisfiable — break the cycle in the plan)`);
+    for (const d of deps.dangling)
+        depLines.push(`DANGLING DEPENDENCY: ${d.slice} depends on unknown slice(s): ${d.missing.join(", ")}`);
+    const depBlock = depIssues ? ["", ...depLines] : [];
     const human = [
         ...waveLines,
         "",
@@ -67,8 +82,17 @@ function runBuildPlan(paths, opts = {}) {
         "",
         "Within a wave Builders may run concurrently (§16); across waves they serialize.",
         ...adviseLines,
+        ...depBlock,
     ].join("\n");
-    return (0, output_1.success)({ data: { waves, conflicts, parallelism, advise: opts.advise === true }, human });
+    const data = { waves, conflicts, parallelism, advise: opts.advise === true, deps, depIssues };
+    // ARCH-001 — a structurally-broken dependency graph fails the command (exit 7):
+    // the emitted wave order can't be honored (a cycle has no valid order; a
+    // dangling dep can never complete), so it must not read as a clean plan. The
+    // full plan data is still returned so `--json` consumers see both at once.
+    if (depIssues) {
+        return (0, output_1.failure)({ exitCode: 7, data: { ...data, error: "dependency_graph_unsatisfiable" }, human });
+    }
+    return (0, output_1.success)({ data, human });
 }
 /* ------------------------------------------------------------------ *
  * Live build coordination: next-wave oracle + dynamic component leases *
@@ -83,13 +107,11 @@ function runBuildPlan(paths, opts = {}) {
  * unblock them — so a deadlock surfaces instead of an empty wave forever.
  */
 function runBuildNextWave(paths) {
-    const r = (0, state_store_1.readState)(paths);
-    if (!r.exists)
-        return guards_1.NOT_INIT;
-    if (!r.state) {
-        return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
-    }
-    const slices = r.state.slices;
+    const sr = (0, guards_1.requireState)(paths);
+    if (sr.result)
+        return sr.result;
+    const state = sr.state;
+    const slices = state.slices;
     const anyInProgress = slices.some((s) => s.status === "in-progress");
     // "occupied" excludes stale leases (a finished/crashed slice never releases) so
     // a stale lease can't wedge the wave — see core/leases.ts occupiedComponents.
@@ -133,13 +155,11 @@ function runBuildNextWave(paths) {
  * so a blast-radius project escalates its Builders; a `note` records that scope.
  */
 function runBuildDispatch(paths) {
-    const r = (0, state_store_1.readState)(paths);
-    if (!r.exists)
-        return guards_1.NOT_INIT;
-    if (!r.state) {
-        return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
-    }
-    const slices = r.state.slices;
+    const sr = (0, guards_1.requireState)(paths);
+    if (sr.result)
+        return sr.result;
+    const state = sr.state;
+    const slices = state.slices;
     const anyInProgress = slices.some((s) => s.status === "in-progress");
     const occupied = (0, leases_1.occupiedComponents)(paths, slices);
     // Anchor: REQ-PCO-001 — reuse the next-wave computation; do NOT duplicate it.
@@ -147,15 +167,15 @@ function runBuildDispatch(paths) {
     const deps = (0, wave_1.validateDeps)(slices);
     // Project-level blast flags drive Builder escalation (slice components are plain
     // names, not blast flags, so this is the readily-available component-blast signal).
-    const componentBlast = r.state.blast_radius_flags.length > 0;
+    const componentBlast = state.blast_radius_flags.length > 0;
     const byId = new Map(slices.map((s) => [s.id, s]));
     const dispatch = wave.map((id) => {
         const slice = byId.get(id);
         const route = (0, routing_1.computeRoute)({
             agent: "builder",
             mode: "slice",
-            tier: r.state.tier,
-            blastFlags: r.state.blast_radius_flags,
+            tier: state.tier,
+            blastFlags: state.blast_radius_flags,
             componentBlast,
         });
         return { sliceId: id, components: slice.components, model: route.model, effort: route.effort };
@@ -204,14 +224,13 @@ function runBuildClaim(paths, sliceId) {
     if (!sliceId)
         return leaseUsage("claim");
     return (0, state_store_1.withStateLock)(paths, () => {
-        const r = (0, state_store_1.readState)(paths);
-        if (!r.exists)
-            return guards_1.NOT_INIT;
-        if (!r.state)
-            return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
-        const slice = r.state.slices.find((s) => s.id === sliceId);
+        const sr = (0, guards_1.requireState)(paths);
+        if (sr.result)
+            return sr.result;
+        const state = sr.state;
+        const slice = state.slices.find((s) => s.id === sliceId);
         if (!slice) {
-            return (0, output_1.failure)({ human: `Slice not found: ${sliceId}. Known: ${r.state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", sliceId } });
+            return (0, output_1.failure)({ human: `Slice not found: ${sliceId}. Known: ${state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", sliceId } });
         }
         // A slice must be in-progress to hold a lease: the documented protocol is
         // "set in-progress, then claim" (mirrors runBuildSubClaim's parent check and
@@ -226,7 +245,7 @@ function runBuildClaim(paths, sliceId) {
         // Only LIVE leases (held by a pending/in-progress slice) block a claim — a
         // stale lease from a done/blocked/crashed slice is ignored, not a permanent wall.
         const owners = new Map();
-        for (const lease of (0, leases_1.liveLeases)(paths, r.state.slices)) {
+        for (const lease of (0, leases_1.liveLeases)(paths, state.slices)) {
             for (const c of lease.components)
                 if (!owners.has(c))
                     owners.set(c, lease.slice);
@@ -250,11 +269,9 @@ function runBuildRelease(paths, sliceId) {
     if (!sliceId)
         return leaseUsage("release");
     return (0, state_store_1.withStateLock)(paths, () => {
-        const r = (0, state_store_1.readState)(paths);
-        if (!r.exists)
-            return guards_1.NOT_INIT;
-        if (!r.state)
-            return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+        const sr = (0, guards_1.requireState)(paths);
+        if (sr.result)
+            return sr.result;
         const held = (0, leases_1.activeLeases)(paths).find((l) => l.slice === sliceId);
         (0, leases_1.appendLeaseEvent)(paths, { event: "release", slice: sliceId, components: held?.components ?? [] });
         (0, log_1.structuredLog)({ cmd: "build release", slice: sliceId });
@@ -289,14 +306,13 @@ function runBuildSubClaim(paths, parentSlice, components) {
         return (0, output_1.failure)({ human: "usage: th build sub-claim <PARENT-SLICE> --components <c1,c2,...>", data: { error: "no_components" } });
     }
     return (0, state_store_1.withStateLock)(paths, () => {
-        const r = (0, state_store_1.readState)(paths);
-        if (!r.exists)
-            return guards_1.NOT_INIT;
-        if (!r.state)
-            return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
-        const parent = r.state.slices.find((s) => s.id === parentSlice);
+        const sr = (0, guards_1.requireState)(paths);
+        if (sr.result)
+            return sr.result;
+        const state = sr.state;
+        const parent = state.slices.find((s) => s.id === parentSlice);
         if (!parent) {
-            return (0, output_1.failure)({ human: `Parent slice not found: ${parentSlice}. Known: ${r.state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", parent: parentSlice } });
+            return (0, output_1.failure)({ human: `Parent slice not found: ${parentSlice}. Known: ${state.slices.map((s) => s.id).join(", ") || "(none)"}`, data: { error: "slice_not_found", parent: parentSlice } });
         }
         if (parent.status !== "in-progress") {
             return (0, output_1.failure)({
@@ -317,7 +333,7 @@ function runBuildSubClaim(paths, parentSlice, components) {
         // A sibling sub-lease is live exactly when the parent is in-progress (which it
         // is here), so the active sibling set is the live set — mirror runBuildClaim.
         const siblings = (0, leases_1.subLeasesOf)(paths, parentSlice);
-        const live = new Set((0, leases_1.liveLeases)(paths, r.state.slices).map((l) => l.slice));
+        const live = new Set((0, leases_1.liveLeases)(paths, state.slices).map((l) => l.slice));
         const owners = new Map();
         for (const sib of siblings) {
             if (!live.has(sib.slice))
@@ -360,11 +376,9 @@ function runBuildSubRelease(paths, subId) {
     if (!subId)
         return (0, output_1.failure)({ human: "usage: th build sub-release <SUB-ID>" });
     return (0, state_store_1.withStateLock)(paths, () => {
-        const r = (0, state_store_1.readState)(paths);
-        if (!r.exists)
-            return guards_1.NOT_INIT;
-        if (!r.state)
-            return (0, output_1.failure)({ human: `state.json is invalid:\n${(0, guards_1.formatIssues)(r.issues)}`, data: { error: "invalid_state", issues: r.issues } });
+        const sr = (0, guards_1.requireState)(paths);
+        if (sr.result)
+            return sr.result;
         const held = (0, leases_1.activeLeases)(paths).find((l) => l.slice === subId && l.parent !== undefined);
         if (!held) {
             return (0, output_1.failure)({

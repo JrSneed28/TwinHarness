@@ -20,11 +20,14 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHmac } from "node:crypto";
 import type { ProjectPaths } from "./paths";
-import { hashContent } from "./hash";
+import { hashContent, GENESIS_PREV_HASH, HEX64 } from "./hash";
+import { readJsonlValues, scanTailValid } from "./jsonl";
 import { canonicalizeStage } from "./stages";
 
-/** `prevHash` of the very first event line — 64 hex zeros (DS-001). */
-export const GENESIS_PREV_HASH = "0".repeat(64);
+// GENESIS_PREV_HASH + HEX64 are shared with the gate ledger and now live in
+// core/hash.ts (#14 dedup). Re-export GENESIS_PREV_HASH so existing importers
+// (`import { GENESIS_PREV_HASH } from "./decisions"`) keep working unchanged.
+export { GENESIS_PREV_HASH };
 
 /** A decision's lifecycle event type. */
 export type DecisionEventType = "proposed" | "approved" | "rejected" | "superseded";
@@ -152,7 +155,6 @@ export function computeKeyedHash(event: Omit<DecisionEvent, "recordHash" | "keye
 // Tolerant reader (mirrors readLeaseEvents) — never throws
 // ---------------------------------------------------------------------------
 
-const HEX64 = /^[0-9a-f]{64}$/;
 const ID_RE = /^DECISION-\d{3,}$/;
 const EVENT_TYPES = new Set<DecisionEventType>(["proposed", "approved", "rejected", "superseded"]);
 
@@ -176,20 +178,30 @@ function isValidEvent(parsed: unknown): parsed is DecisionEvent {
  * `verifyChain`, not here.
  */
 export function readDecisionEvents(paths: ProjectPaths): DecisionEvent[] {
-  const file = decisionsPath(paths);
-  if (!fs.existsSync(file)) return [];
-  const out: DecisionEvent[] = [];
-  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (isValidEvent(parsed)) out.push(parsed);
-    } catch {
-      // Tolerant: skip malformed / partial-tail lines.
-    }
-  }
-  return out;
+  // Tolerant full forward read via the shared `readJsonlValues` (#11): every line
+  // that parses AND passes `isValidEvent`, in file order; bad lines skipped.
+  return readJsonlValues(decisionsPath(paths), isValidEvent);
+}
+
+/**
+ * The `recordHash` of the ledger's last VALID event — the only thing
+ * `appendDecisionEvent` needs to seal the next link (PERF-009). Reads the file
+ * once but parses only the TAIL: it walks lines from the end and `JSON.parse`s
+ * just enough to find the last non-empty line that is a valid event, returning
+ * its `recordHash`. Missing/empty file, or no valid tail line, → `GENESIS_PREV_HASH`.
+ *
+ * This is byte-identical to the old `readDecisionEvents(...).at(-1)?.recordHash`
+ * derivation: the previous code took the last element of the SAME tolerant,
+ * skip-invalid filter, so the last valid event is exactly what this returns — but
+ * without the O(N) parse-and-validate of the whole ledger on every append (which
+ * made N appends O(N²)). Tolerant by the same contract: a malformed/partial tail
+ * line is skipped, so a torn last write never corrupts the next `prevHash`.
+ */
+export function readLastDecisionRecordHash(paths: ProjectPaths): string {
+  // Tolerant tail scan via the shared `scanTailValid` (#11): the last line that
+  // passes `isValidEvent`; missing file / no valid tail line → GENESIS.
+  const last = scanTailValid(decisionsPath(paths), isValidEvent);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,9 +242,15 @@ export function mintNextId(events: DecisionEvent[]): string {
 /**
  * Append one decision event, sealing the hash chain. The caller MUST already
  * hold the `withStateLock` span (read-modify-append is serialized there). Reads
- * the current tail to derive `prevHash` (the last line's `recordHash`, or GENESIS
- * when empty/absent), sets `prevHash`, computes `recordHash`, then atomically
- * appends `JSON.stringify(sealed) + "\n"` (the lease-ledger pattern).
+ * ONLY the current tail to derive `prevHash` (the last valid line's `recordHash`,
+ * or GENESIS when empty/absent), sets `prevHash`, computes `recordHash`, then
+ * atomically appends `JSON.stringify(sealed) + "\n"` (the lease-ledger pattern).
+ *
+ * PERF-009: `prevHash` comes from {@link readLastDecisionRecordHash} (tail parse
+ * of one line), NOT a full `readDecisionEvents` parse+validate of the whole
+ * ledger — so N appends are O(N) total, not O(N²). The sealed line and resulting
+ * chain are byte-identical to the prior full-read derivation (the tail helper
+ * returns the same last-valid-event `recordHash`).
  *
  * The serialized line stores every field INCLUDING `recordHash`; the hash itself
  * is over the canonical text WITHOUT `recordHash`. Returns the sealed event.
@@ -243,8 +261,7 @@ export function appendDecisionEvent(
   key?: string | null,
 ): DecisionEvent {
   fs.mkdirSync(paths.stateDir, { recursive: true });
-  const existing = readDecisionEvents(paths);
-  const prevHash = existing.length > 0 ? existing[existing.length - 1]!.recordHash : GENESIS_PREV_HASH;
+  const prevHash = readLastDecisionRecordHash(paths);
   const withPrev: Omit<DecisionEvent, "recordHash" | "keyedHash"> = { ...event, prevHash };
   const recordHash = computeRecordHash(withPrev);
   const sealed: DecisionEvent = { ...withPrev, recordHash };
@@ -373,11 +390,6 @@ export function reduceDecisions(events: DecisionEvent[]): Decision[] {
 /** Sort decisions by numeric `DECISION-NNN` suffix (deterministic — REQ-NFR-002). */
 export function sortDecisions(decisions: Decision[]): Decision[] {
   return [...decisions].sort((a, b) => (numericSuffix(a.id) ?? 0) - (numericSuffix(b.id) ?? 0));
-}
-
-/** Look up a single reduced decision by id (convenience for the handlers). */
-export function findDecision(events: DecisionEvent[], id: string): Decision | undefined {
-  return reduceDecisions(events).find((d) => d.id === id);
 }
 
 // ---------------------------------------------------------------------------

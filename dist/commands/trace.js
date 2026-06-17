@@ -34,11 +34,11 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runTraceRender = runTraceRender;
-const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const output_1 = require("../core/output");
 const anchors_1 = require("../core/anchors");
 const log_1 = require("../core/log");
+const coverage_1 = require("../core/coverage");
 /**
  * `th trace render` — the RENDERED traceability view (spec §17). Traceability is
  * **generated on demand** by scanning the durable REQ-ID anchors that live next
@@ -58,12 +58,6 @@ const CONTRACTS_FILE = "docs/07-contracts.md";
 const PLAN_FILE = "docs/09-implementation-plan.md";
 /** SLICE-/TASK- token shape surfaced from the plan as a best-effort convenience. */
 const SLICE_TASK_PATTERN = /\b(?:SLICE|TASK)-\d+\b/g;
-/** Read a file as UTF-8, or return undefined if it is absent / not a file. */
-function readFileOrUndefined(abs) {
-    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile())
-        return undefined;
-    return fs.readFileSync(abs, "utf8");
-}
 /**
  * Invert a `REQ-ID → files` scan into a `REQ-ID → Set<files>` lookup, optionally
  * dropping any file path matching `exclude` (used to keep 01-requirements out of
@@ -154,7 +148,7 @@ function cell(items) {
  */
 function runTraceRender(paths) {
     const reqsAbs = path.resolve(paths.root, REQUIREMENTS_FILE);
-    const reqsContent = readFileOrUndefined(reqsAbs);
+    const reqsContent = (0, coverage_1.readFileOrUndefined)(reqsAbs);
     if (reqsContent === undefined) {
         return (0, output_1.failure)({
             human: `no requirements to trace: ${REQUIREMENTS_FILE} not found. Run \`th init\` and author requirements first.`,
@@ -180,7 +174,7 @@ function runTraceRender(paths) {
     ]);
     const designIdx = indexByReq(docsScan, "docs", (rel) => designExcluded.has(rel));
     // Contract = REQ-ID anchors in the contracts file (§17 "Contract").
-    const contractContent = readFileOrUndefined(path.resolve(paths.root, CONTRACTS_FILE));
+    const contractContent = (0, coverage_1.readFileOrUndefined)(path.resolve(paths.root, CONTRACTS_FILE));
     const contractIdx = new Map();
     if (contractContent !== undefined) {
         for (const id of (0, anchors_1.extractReqIds)(contractContent))
@@ -188,7 +182,7 @@ function runTraceRender(paths) {
     }
     // Slice / Task = the REQ-ID appearing in the plan, plus per-REQ SLICE-/TASK-
     // tokens (same line or nearest heading context) surfaced as a convenience (§17).
-    const planContent = readFileOrUndefined(path.resolve(paths.root, PLAN_FILE));
+    const planContent = (0, coverage_1.readFileOrUndefined)(path.resolve(paths.root, PLAN_FILE));
     const planReqs = planContent === undefined ? new Set() : new Set((0, anchors_1.extractReqIds)(planContent));
     const planTokenMap = planContent === undefined ? new Map() : planSliceTaskByReq(planContent);
     // Test = REQ-ID anchors under tests/; Code = REQ-ID anchors under src/ (§17).

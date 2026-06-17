@@ -18,11 +18,15 @@ import * as path from "node:path";
  * test, not duplicated here.
  */
 
+// DOC-LINT: tests in this file assert keyword/prose presence in .md agent and playbook files.
+// They verify documentation completeness, not behavioral dispatch — a broken
+// runtime that kept the words in the prompt would still pass.
+
 const ROOT = path.resolve(__dirname, "..");
 const read = (rel: string) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 
-describe("REQ-PCO-070: speculative-dispatch playbook wiring", () => {
-  it("REQ-PCO-070: build-and-verify.md documents depends_on_soft / speculative dispatch", () => {
+describe("DOC-LINT: REQ-PCO-070: speculative-dispatch playbook wiring", () => {
+  it("DOC-LINT: REQ-PCO-070: build-and-verify.md documents depends_on_soft / speculative dispatch", () => {
     const doc = read("skills/twinharness/reference/build-and-verify.md");
     expect(doc).toContain("depends_on_soft");
     expect(doc.toLowerCase()).toMatch(/speculative|speculation/);
@@ -30,20 +34,20 @@ describe("REQ-PCO-070: speculative-dispatch playbook wiring", () => {
   });
 });
 
-describe("REQ-PCO-071: concurrent cascade re-verify + multi-instance agents", () => {
-  it("REQ-PCO-071: build-and-verify.md documents concurrent cascade re-verify via th stale", () => {
+describe("DOC-LINT: REQ-PCO-071: concurrent cascade re-verify + multi-instance agents", () => {
+  it("DOC-LINT: REQ-PCO-071: build-and-verify.md documents concurrent cascade re-verify via th stale", () => {
     const doc = read("skills/twinharness/reference/build-and-verify.md");
     expect(doc).toContain("th stale");
     expect(doc.toLowerCase()).toMatch(/concurrent|parallel/);
     expect(doc).toContain("REQ-PCO-071");
   });
 
-  it("REQ-PCO-071: debugger.md notes concurrent / parallel multi-instance operation", () => {
+  it("DOC-LINT: REQ-PCO-071: debugger.md notes concurrent / parallel multi-instance operation", () => {
     const doc = read("agents/debugger.md").toLowerCase();
     expect(doc).toMatch(/concurrent|parallel/);
   });
 
-  it("REQ-PCO-071: researcher.md notes concurrent / parallel multi-instance operation", () => {
+  it("DOC-LINT: REQ-PCO-071: researcher.md notes concurrent / parallel multi-instance operation", () => {
     const doc = read("agents/researcher.md").toLowerCase();
     expect(doc).toMatch(/concurrent|parallel/);
   });

@@ -4,7 +4,7 @@ import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState } from "../core/state-store";
 import { CURRENT_SCHEMA_VERSION } from "../core/state-schema";
-import { readLedger } from "../core/ledger";
+import { readLedger, verifyLedgerChain, verifyLedgerSeals, ledgerPath } from "../core/ledger";
 import { artifactIntegrity, sliceProgress, reviseEscalations } from "../core/health";
 import { computeBreakdown } from "../core/coverage";
 import { readVerifyReport } from "../core/verify";
@@ -42,7 +42,78 @@ function nodeMajor(): number {
   return m ? Number(m[1]) : 0;
 }
 
-export function runDoctor(paths: ProjectPaths): CommandResult {
+/**
+ * The gate-ledger audit checks ("audit ledger" count + "ledger chain"
+ * tamper-evidence), computed INDEPENDENTLY of state.json validity (finding #1).
+ *
+ * These previously lived inside the valid-state `else`, so a corrupt state.json
+ * SUPPRESSED the ledger-chain tamper signal — exactly when an attacker who has
+ * also corrupted state would most want it hidden. They are now guarded on the
+ * ledger FILE's existence (not state validity), so the chain is verified whenever
+ * there is a ledger to verify, whether or not state.json parses. Returns `[]` when
+ * no ledger file exists — nothing to audit.
+ *
+ * WARNING by default (the ledger is a best-effort review aid), escalated to FAIL
+ * under `--strict`. Legacy (pre-migration, unsealed) lines are NOT a tamper
+ * signal — `verifyLedgerChain` verifies only the sealed run.
+ */
+function ledgerChecks(paths: ProjectPaths, opts: { strict?: boolean }): Check[] {
+  if (!fs.existsSync(ledgerPath(paths))) return [];
+  const ledgerEntries = readLedger(paths);
+  const ledgerCount = ledgerEntries.length;
+  // Count gate mutations separately from high-water anchors (#8): an anchor is a
+  // sealed bookkeeping line, not a gate mutation, so the "gate-mutation entries"
+  // figure must exclude it to stay accurate.
+  const anchors = ledgerEntries.filter((e) => e.event === "high-water").length;
+  const gateMutations = ledgerCount - anchors;
+  const out: Check[] = [
+    {
+      name: "audit ledger",
+      status: "ok",
+      detail: `${gateMutations} gate-mutation entr${gateMutations === 1 ? "y" : "ies"}${anchors > 0 ? ` (+${anchors} high-water anchor${anchors === 1 ? "" : "s"})` : ""}`,
+    },
+  ];
+  const chain = verifyLedgerChain(ledgerEntries);
+  if (chain.ok) {
+    out.push({ name: "ledger chain", status: "ok", detail: ledgerCount > 0 ? "intact (no tampering detected)" : "no entries to verify" });
+  } else {
+    out.push({
+      name: "ledger chain",
+      status: opts.strict ? "fail" : "warn",
+      detail: `BROKEN at entry ${chain.brokenAt} (${chain.reason}) — a sealed entry was edited, deleted, or reordered${opts.strict ? "" : " (run \`th doctor --strict\` to fail on this)"}`,
+    });
+  }
+
+  // Keyed-seal verification (#8) — ONLY when TH_LEDGER_KEY is set. WARN-ONLY (even
+  // under --strict): a per-environment key difference or the wrong key must never
+  // turn a committed ledger red, so a mismatch informs rather than fails. The
+  // in-chain `high-water` anchor needs NO separate check — it is a sealed entry like
+  // any other, verified by the chain walk above; do NOT add a circular
+  // `count <= sealed-run-length` comparison (it cannot detect truncation — see
+  // appendHighWater / the #8 threat model).
+  const key = process.env.TH_LEDGER_KEY;
+  if (key) {
+    const seals = verifyLedgerSeals(ledgerEntries, key);
+    if (seals.ok) {
+      const sealed = ledgerEntries.filter((e) => typeof e.keyedHash === "string").length;
+      out.push({ name: "ledger seals", status: "ok", detail: sealed > 0 ? `${sealed} keyed seal(s) verified` : "no keyed seals present" });
+    } else {
+      const where = seals.mismatches.map((m) => `entry ${m.index} (${m.event})`).join(", ");
+      out.push({ name: "ledger seals", status: "warn", detail: `keyed-seal MISMATCH at ${where} — wrong TH_LEDGER_KEY or a sealed field was tampered (warn-only)` });
+    }
+  }
+  return out;
+}
+
+/**
+ * @param opts.strict When true, a gate-ledger chain break is escalated from a
+ *   WARNING to a hard FAIL (non-zero exit). Default (false) keeps it a warning —
+ *   the ledger is a best-effort review aid, so a broken chain informs rather than
+ *   fails the run. Mirrors `runAnchorsScan`'s `strict` opt-in (the `--strict`
+ *   flag); wiring `--strict` through `th doctor` at the CLI layer is left to the
+ *   cli.ts owner — this function honors the signal today.
+ */
+export function runDoctor(paths: ProjectPaths, opts: { strict?: boolean } = {}): CommandResult {
   const checks: Check[] = [];
 
   // --- Environment ---
@@ -90,6 +161,10 @@ export function runDoctor(paths: ProjectPaths): CommandResult {
       status: "fail",
       detail: `present but INVALID: ${(r.issues ?? []).map((i) => `${i.path}: ${i.message}`).join("; ") || "schema mismatch"}`,
     });
+    // finding #1: verify the gate-ledger even when state.json is corrupt — the
+    // tamper signal must NOT be suppressed by a (possibly attacker-induced)
+    // invalid state. Guarded on the ledger file's existence, not state validity.
+    checks.push(...ledgerChecks(paths, opts));
   } else {
     const s = r.state;
     checks.push({ name: "state.json", status: "ok", detail: `valid (tier ${s.tier ?? "unclassified"}, stage ${s.current_stage})` });
@@ -126,8 +201,10 @@ export function runDoctor(paths: ProjectPaths): CommandResult {
       });
     }
 
-    const ledgerCount = readLedger(paths).length;
-    checks.push({ name: "audit ledger", status: "ok", detail: `${ledgerCount} gate-mutation entr${ledgerCount === 1 ? "y" : "ies"}` });
+    // Gate-ledger audit (GOV-2) — "audit ledger" count + "ledger chain"
+    // tamper-evidence. Via the shared helper so the SAME checks also run when
+    // state.json is corrupt (finding #1); see ledgerChecks above.
+    checks.push(...ledgerChecks(paths, opts));
 
     // --- Run health (read-only; warnings only) ---
 

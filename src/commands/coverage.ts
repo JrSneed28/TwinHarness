@@ -6,7 +6,7 @@ import { extractReqIds } from "../core/anchors";
 import {
   readFileOrUndefined,
   resolveReqSet,
-  collectDirReqIds,
+  collectTestReqIds,
   computeBreakdown,
 } from "../core/coverage";
 import { readVerifyReport } from "../core/verify";
@@ -87,7 +87,9 @@ export function runCoverageCheck(paths: ProjectPaths, opts: CoverageOptions = {}
 
   const planContent = readFileOrUndefined(planAbs);
   const sliceSet = planContent === undefined ? [] : extractReqIds(planContent);
-  const testSet = collectDirReqIds(testsAbs);
+  // TEST dimension counts only RECOGNIZED test files (GOV-1): an anchor in a
+  // prose/fixture file under tests/ no longer satisfies the gate.
+  const testSet = collectTestReqIds(testsAbs);
 
   const gaps: CoverageGap[] = [];
   for (const req of reqSet) {

@@ -58,8 +58,10 @@ afterEach(() => {
 const NO_LOG = { env: { ...process.env, TH_NO_LOG: "1" } };
 
 describe("SLICE-4 — decisions.jsonl concurrency + durability", () => {
-  it("REQ-NFR-005: test_REQNFR005_concurrent_appends_serialized_no_loss — N parallel `decision add` → all N unique ids, chain intact (non-negotiable)", async () => {
-    requireBuilt(CLI);
+  // TEST-008/009: tests that require the compiled CLI degrade to skip when dist/
+  // is absent, rather than throwing. CI always builds first; local runs without
+  // a build simply skip these subprocess-level tests.
+  it.skipIf(!fs.existsSync(CLI))("REQ-NFR-005: test_REQNFR005_concurrent_appends_serialized_no_loss — N parallel `decision add` → all N unique ids, chain intact (non-negotiable)", async () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
 
@@ -86,9 +88,7 @@ describe("SLICE-4 — decisions.jsonl concurrency + durability", () => {
     expect(verifyChain(events)).toEqual({ ok: true });
   }, 30_000);
 
-  it("REQ-407: test_REQ407_concurrent_double_approve_one_wins_other_illegal — two parallel approves → exactly one approved, other illegal_transition", async () => {
-    requireBuilt(CLI);
-    requireBuilt(DECISION_MOD);
+  it.skipIf(!fs.existsSync(CLI) || !fs.existsSync(DECISION_MOD))("REQ-407: test_REQ407_concurrent_double_approve_one_wins_other_illegal — two parallel approves → exactly one approved, other illegal_transition", async () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
     // Seed one proposed decision.
@@ -124,8 +124,7 @@ describe("SLICE-4 — decisions.jsonl concurrency + durability", () => {
     expect(verifyChain(events)).toEqual({ ok: true });
   }, 30_000);
 
-  it("REQ-NFR-002: test_REQNFR002_read_during_append_sees_consistent_prefix — concurrent reader during writers never sees a partial-line crash", async () => {
-    requireBuilt(CLI);
+  it.skipIf(!fs.existsSync(CLI))("REQ-NFR-002: test_REQNFR002_read_during_append_sees_consistent_prefix — concurrent reader during writers never sees a partial-line crash", async () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
 
@@ -179,8 +178,7 @@ describe("SLICE-4 — decisions.jsonl concurrency + durability", () => {
     expect(readDecisionEvents(tp.paths)).toHaveLength(1);
   });
 
-  it("REQ-NFR-005: test_REQNFR005_crash_before_append_leaves_no_phantom_record — kill before append → no phantom record on next read", async () => {
-    requireBuilt(DECISION_MOD);
+  it.skipIf(!fs.existsSync(CLI) || !fs.existsSync(DECISION_MOD))("REQ-NFR-005: test_REQNFR005_crash_before_append_leaves_no_phantom_record — kill before append → no phantom record on next read", async () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
 
@@ -206,7 +204,13 @@ describe("SLICE-4 — decisions.jsonl concurrency + durability", () => {
         if (buf.includes("LOCKED")) resolve();
       });
       child.on("error", reject);
-      setTimeout(() => resolve(), 5_000); // safety: proceed even if no signal
+      // Fail deterministically if the child never signals readiness: a silent
+      // resolve here would mask a missing-signal bug by letting the test pass
+      // even if the lock was never acquired. The happy path resolves on "LOCKED"
+      // almost immediately; this bound only gates a genuine failure, so keep it
+      // generous (5s) to avoid false failures from slow `node -e` child spawn on a
+      // loaded CI runner (incl. bare-Windows, where process startup is slower).
+      setTimeout(() => reject(new Error("child did not signal LOCKED within 5s — lock was never acquired")), 5_000);
     });
     child.kill("SIGKILL");
 

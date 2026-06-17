@@ -25,20 +25,23 @@ const BUILD_VERIFY = "skills/twinharness/reference/build-and-verify.md";
 const CONCURRENT = /concurrent|parallel|disjoint/i;
 const FANOUT_MODES = ["user-guide", "api-reference", "developer-guide", "changelog"];
 
-describe("REQ-PCO-010: doc-writer advertises the concurrent T2/T3 fan-out", () => {
-  it("REQ-PCO-010: doc-writer.md names all four T2/T3 fan-out modes", () => {
+// DOC-LINT: tests in this file assert keyword/prose presence in .md agent and playbook files.
+// They verify documentation completeness, not behavioral dispatch — a broken
+// runtime that kept the words in the prompt would still pass.
+describe("DOC-LINT: REQ-PCO-010: doc-writer advertises the concurrent T2/T3 fan-out", () => {
+  it("DOC-LINT: REQ-PCO-010: doc-writer.md names all four T2/T3 fan-out modes", () => {
     const content = read(DOC_WRITER);
     for (const mode of FANOUT_MODES) {
       expect(content, `doc-writer.md should mention the ${mode} mode`).toContain(mode);
     }
   });
 
-  it("REQ-PCO-010: doc-writer.md indicates the modes run concurrently / write disjoint files", () => {
+  it("DOC-LINT: REQ-PCO-010: doc-writer.md indicates the modes run concurrently / write disjoint files", () => {
     const content = read(DOC_WRITER);
     expect(content).toMatch(CONCURRENT);
   });
 
-  it("REQ-PCO-010: doc-writer.md ties the concurrency language to the fan-out modes", () => {
+  it("DOC-LINT: REQ-PCO-010: doc-writer.md ties the concurrency language to the fan-out modes", () => {
     const content = read(DOC_WRITER);
     // The concurrency assertion is meaningful only if it co-occurs with the
     // fan-out modes: find a window that contains both a fan-out mode reference
@@ -55,20 +58,20 @@ describe("REQ-PCO-010: doc-writer advertises the concurrent T2/T3 fan-out", () =
   });
 });
 
-describe("REQ-PCO-010: Stage 10.5 playbook dispatches doc modes concurrently", () => {
-  it("REQ-PCO-010: build-and-verify.md has a Stage 10.5 documentation section", () => {
+describe("DOC-LINT: REQ-PCO-010: Stage 10.5 playbook dispatches doc modes concurrently", () => {
+  it("DOC-LINT: REQ-PCO-010: build-and-verify.md has a Stage 10.5 documentation section", () => {
     const content = read(BUILD_VERIFY);
     expect(content).toMatch(/Stage 10\.5/);
   });
 
-  it("REQ-PCO-010: Stage 10.5 instructs concurrent dispatch in one message", () => {
+  it("DOC-LINT: REQ-PCO-010: Stage 10.5 instructs concurrent dispatch in one message", () => {
     const content = read(BUILD_VERIFY);
     expect(content).toMatch(CONCURRENT);
     // "one message" / "single turn" — the dispatch must not be serialized.
     expect(content).toMatch(/one message|single turn/i);
   });
 
-  it("REQ-PCO-010: Stage 10.5 gates each mode with a per-mode Critic in documentation mode", () => {
+  it("DOC-LINT: REQ-PCO-010: Stage 10.5 gates each mode with a per-mode Critic in documentation mode", () => {
     const content = read(BUILD_VERIFY);
     expect(content).toMatch(/documentation/);
     expect(content).toMatch(/Critic/);

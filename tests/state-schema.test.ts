@@ -54,6 +54,43 @@ describe("REQ-STATE-SCHEMA: state.json validation (§18)", () => {
   });
 });
 
+describe("ARCH-007: unknown top-level keys are a NON-fatal warning (not a hard reject)", () => {
+  it("an extra top-level key still validates (ok:true) but surfaces a warning", () => {
+    const withExtra = { ...initialState(), some_future_field: 123 };
+    const r = validateState(withExtra);
+    // Forward-compat / typo: still VALID (does not break existing/forward state files)…
+    expect(r.ok).toBe(true);
+    expect(r.state).toBeDefined();
+    // …but the unknown key is surfaced as a non-fatal warning, NOT an issue.
+    expect(r.issues).toEqual([]);
+    expect(r.warnings).toBeDefined();
+    expect(r.warnings!.some((w) => w.path === "some_future_field")).toBe(true);
+  });
+
+  it("a clean state carries no warnings field (additive — absent when empty)", () => {
+    const r = validateState(initialState());
+    expect(r.ok).toBe(true);
+    expect(r.warnings).toBeUndefined();
+  });
+
+  it("warns on EVERY unknown key, deterministically sorted, while known keys never warn", () => {
+    const r = validateState({ ...initialState(), zeta: 1, alpha: 2 });
+    expect(r.ok).toBe(true);
+    const paths = (r.warnings ?? []).map((w) => w.path);
+    expect(paths).toEqual(["alpha", "zeta"]); // sorted
+  });
+
+  it("the warned state still round-trips via serializeState BYTE-IDENTICALLY (unknown key dropped, no corruption)", () => {
+    // serializeState only emits canonical fields, so an unknown key is simply not
+    // serialized — the output is identical to the same state without the extra key,
+    // proving the warning never perturbs serialization / content-hash stability.
+    const base = { ...initialState(), tier: "T1" as const };
+    const withExtra = { ...base, mystery_key: "x" } as unknown as typeof base;
+    expect(serializeState(withExtra)).toBe(serializeState(base));
+    expect(JSON.parse(serializeState(withExtra))).not.toHaveProperty("mystery_key");
+  });
+});
+
 describe("REQ-STATE-SERIALIZE: deterministic serialization", () => {
   it("serializes in canonical field order with a trailing newline", () => {
     const out = serializeState(initialState());

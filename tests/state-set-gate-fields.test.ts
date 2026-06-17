@@ -4,9 +4,9 @@
  * - current_stage is enum-normalized: near-miss spellings canonicalize and persist;
  *   non-pipeline values are refused (closes the C-1 gate-bypass at the source).
  * - the drift/debate counters stay refused (regression guard #2).
- * - gate-owned fields (implementation_allowed/tier/write_gate) remain settable on
- *   the CLI (the documented unlock path) but are validated; the MCP refusal lives
- *   in F-7 (mcp-schema-enforcement.test.ts).
+ * - gate-owned fields (implementation_allowed/tier/write_gate/blast_radius_flags)
+ *   remain settable on the CLI (the documented unlock path) but are validated; the
+ *   MCP refusal lives in F-7 (mcp-schema-enforcement.test.ts).
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -81,9 +81,9 @@ describe("F-5: gate-owned fields settable on the CLI but validated", () => {
 });
 
 describe("F-5: GATE_OWNED registry surface (consumed by the MCP refusal in F-7)", () => {
-  it("contains exactly the four gate-security fields", () => {
+  it("contains exactly the five gate-security fields", () => {
     expect([...GATE_OWNED].sort()).toEqual(
-      ["current_stage", "implementation_allowed", "tier", "write_gate"].sort(),
+      ["blast_radius_flags", "current_stage", "implementation_allowed", "tier", "write_gate"].sort(),
     );
   });
 });

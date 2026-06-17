@@ -93,7 +93,7 @@ Usage:
   th verify list                    Show configured verify commands
   th verify clear                   Remove all configured verify commands
   th verify run                     Run every configured verify command; writes a report; exit 1 on failure
-  th build plan [--include-done] [--advise]  Schedule slices into conflict-free build waves (§16); --advise emits the parallelism-optimizer advisory (max wave width + serializing conflict pairs)
+  th build plan [--include-done] [--advise]  Schedule slices into dependency-aware, conflict-free build waves (§16; a slice's wave is strictly after its hard depends_on); --advise emits the parallelism-optimizer advisory (max wave width + serializing conflict pairs); exit 7 when the depends_on graph is unsatisfiable (cycle/dangling)
   th build next-wave                Live oracle: slices dispatchable in parallel now (deps done, components free)
   th build dispatch                 Live oracle: full parallel wave + per-slice spawn descriptors in one payload (for single-message batch spawn)
   th build claim|release <SLICE-ID> Take/release a live component lease (collision guard for parallel Builders)
@@ -424,7 +424,7 @@ function dispatch(parsed) {
         case "migrate":
             return (0, migrate_1.runMigrate)(paths);
         case "doctor":
-            return (0, doctor_1.runDoctor)(paths);
+            return (0, doctor_1.runDoctor)(paths, { strict: parsed.flags.strict });
         case "next":
             return (0, next_1.runNext)(paths, { explain: parsed.flags.explain });
         case "preview":
@@ -884,13 +884,24 @@ function main() {
         result = dispatch(parsed);
     }
     catch (e) {
-        // Contention on the state store (lock timeout, or a write that lost the
-        // rename race past its retry budget) surfaces as a typed error. Convert it
-        // to a clean structured failure here — at the single CLI boundary — so every
-        // mutating command gets non-zero exit + valid --json instead of a raw stack
-        // crash (C-2 / M-3). Any other error is a real bug and must propagate.
+        // Map KNOWN typed core errors to a clean structured failure here — at the
+        // single CLI boundary — so every command returns a non-zero exit + a valid
+        // --json envelope instead of a raw Node stack crash. Two families flow here:
+        //   • State-store contention (lock timeout, or a write that lost the rename
+        //     race past its retry budget) — C-2 / M-3.
+        //   • Path-containment violations (an absolute / ".." / separator-bearing
+        //     path segment that escapes the project root) — ARCH-003. Before this,
+        //     e.g. `th collab fragment --name "../x"` threw a raw Error whose stack,
+        //     under --json, was unstructured garbage.
+        // All are switched on by their stable `code` so the mapping stays uniform.
+        // A PathContainmentError is a client/security reject (exit 2), distinct from
+        // a transient-contention exit (1, "retry the command"). Any OTHER error is a
+        // real bug and must propagate.
         const code = e.code;
-        if (code === "state_lock_timeout" || code === "state_write_contended") {
+        if (e instanceof paths_1.PathContainmentError) {
+            result = (0, output_1.failure)({ human: e.message, data: { error: e.code, segment: e.segment }, exitCode: 2 });
+        }
+        else if (code === "state_lock_timeout" || code === "state_write_contended") {
             result = (0, output_1.failure)({ human: e.message, data: { error: code } });
         }
         else {

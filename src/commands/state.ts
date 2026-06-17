@@ -3,7 +3,7 @@ import { type CommandResult, success, failure } from "../core/output";
 import { readState, writeState, withStateLock } from "../core/state-store";
 import { validateState, STATE_FIELD_ORDER } from "../core/state-schema";
 import { structuredLog } from "../core/log";
-import { appendLedger, GATE_LEDGER_KEYS } from "../core/ledger";
+import { appendLedger, appendHighWater, GATE_LEDGER_KEYS } from "../core/ledger";
 import { NOT_INIT, formatIssues } from "../core/guards";
 import { fieldPolicy } from "../core/state-fields";
 import { canonicalizeStage, STAGE_PIPELINE } from "../core/stages";
@@ -156,6 +156,12 @@ function runStateSetLocked(paths: ProjectPaths, key: string, rawValue: string): 
   // the blocking-drift count changed. Observability only — never blocks.
   if (GATE_LEDGER_KEYS.has(firstSegment)) {
     appendLedger(paths, { event: "gate-state-change", key, value });
+    // Seal an in-chain high-water anchor after the gate flip (#8): a sealed
+    // {event:"high-water", count} entry whose count is the sealed-entry count before
+    // it. Strengthens edit/reorder/mid-delete evidence for the gate-flip run and
+    // keeps the count out of an unsealed sidecar (ADR-001 precedent). It does NOT
+    // detect tail truncation (documented residual — see appendHighWater). Best-effort.
+    appendHighWater(paths);
   }
   return success({ data: { key, value }, human: `Set ${key} = ${JSON.stringify(value)}` });
 }
@@ -185,5 +191,15 @@ export function runStateVerify(paths: ProjectPaths): CommandResult {
   const r = readState(paths);
   if (!r.exists) return failure({ human: "No state.json found.", data: { valid: false, error: "not_initialized" } });
   if (!r.state) return failure({ human: `state.json INVALID:\n${formatIssues(r.issues)}`, data: { valid: false, issues: r.issues } });
+  // A valid file may still carry non-fatal warnings (ARCH-007) — e.g. an unknown
+  // top-level key. Surface them WITHOUT failing: the file is still valid (exit 0),
+  // the operator just sees the advisory so a typo/forward-compat field is visible.
+  const warnings = r.warnings ?? [];
+  if (warnings.length > 0) {
+    return success({
+      data: { valid: true, warnings },
+      human: `state.json is valid (with ${warnings.length} warning(s)):\n${formatIssues(warnings)}`,
+    });
+  }
   return success({ data: { valid: true }, human: "state.json is valid." });
 }

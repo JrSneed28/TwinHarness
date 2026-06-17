@@ -7,7 +7,234 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer + self-epic governance + coordination-primitive hardening), not yet cut as a versioned release. **1100+ tests, green on CI** (6 Windows-only platform skips; was 460 at 0.6.2).
+Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer + self-epic governance + coordination-primitive hardening), not yet cut as a versioned release. **1100+ tests, green on CI** (1 platform-conditional skip in `tests/concurrency.test.ts`; was 460 at 0.6.2).
+
+### PR #14 code-review remediation (2026-06-16)
+
+- **`th build plan` exit code `7` is a documented, test-locked contract (finding #6).** When the
+  slice `depends_on` graph is unsatisfiable — a dependency **cycle** (no valid wave order) or a
+  **dangling** reference (a dep on an unknown slice that can never complete) — `runBuildPlan`
+  (`src/commands/build.ts`) returns `failure({ exitCode: 7, error: "dependency_graph_unsatisfiable" })`
+  while still emitting the full plan data so `--json`/MCP consumers see both at once. This exit code
+  is now an explicit part of the CLI contract (alongside `th repo check`'s 0/4/5/1 taxonomy) and is
+  regression-locked by `tests/schedule.test.ts`; the MCP adapter surfaces it verbatim in
+  `structuredContent.exitCode` (`tests/mcp-adapter.test.ts`). No behavior change — documentation +
+  test coverage of already-shipped behavior.
+
+- **`structuredContent.exitCode` is a reserved key with deterministic precedence (finding #5).** In
+  `toToolResult` (`src/mcp-server.ts`) the envelope `CommandResult.exitCode` is spread **last**, so it
+  always wins over any `exitCode` a future command might nest inside `result.data`; a nested
+  `data.exitCode` can never silently shadow the real process exit code. No command nests `exitCode`
+  today (latent/forward-looking guard) — pinned by a characterization test so the precedence can't
+  regress.
+
+- **Repo-scanner anchor scope is a documented, pinned contract (finding #2, ADR-004).** The
+  bounded-cost single walk (`src/core/repo-map/scanner.ts`) collects a REQ-ID anchor only from
+  in-scope files: a REQ-ID present ONLY in an oversize file (`> MAX_READ_BYTES`) or ONLY under a
+  generated/producer directory is INTENTIONALLY excluded. The docstring's implied "byte-identical to
+  an uncapped two-pass" equivalence is corrected to make the exclusion explicit (it upholds PERF-001
+  + REQ-NFR-001). New `tests/scanner-anchor-scope.test.ts` golden pins the generated/producer
+  exclusion (oversize was already pinned by `tests/repo-bounded-cost.test.ts`). Decision recorded in
+  `docs/05-adrs/ADR-004`. No behavior change.
+
+- **`sleepSync` uses a single module-level lock word + a no-throw bounded fallback (finding #7, PERF-007).**
+  `src/core/sleep.ts` previously allocated a fresh `Int32Array(new SharedArrayBuffer(4))` on **every**
+  call — GC churn during the exact contention burst PERF-007/008 keep cheap, since it is called once
+  per failed attempt inside `withStateLock` (`src/core/state-store.ts`) and the atomic-io retry loops.
+  The lock word is never signalled (always `0`), so it is now allocated **exactly once** at module
+  load as a shared singleton. The allocation is also guarded: on a hardened / non-cross-origin-isolated
+  runtime where `SharedArrayBuffer` is absent the constructor THROWS, and because `withStateLock` does
+  not wrap `sleepSync`, that turned a recoverable contention wait into an uncaught raw stack instead of
+  a `LockTimeoutError`. The word is now built in a `try/catch` IIFE (`null` on failure) so **importing
+  the module can never throw**, and `sleepSync` **can never throw**: if the word is `null` or
+  `Atomics.wait` throws at call time it falls through to a bounded `while (Date.now() < until)` spin
+  that still returns after ~`ms`. That fallback reintroduces CPU spin **only** on those hardened
+  runtimes (correctness over a raw throw); the zero-CPU `Atomics.wait` path is **unchanged everywhere
+  it works**, and the behavioral contract is identical (non-finite/≤0 returns immediately; real
+  durations are honored and accumulate). New tests in `tests/sleep.test.ts` pin both guarantees
+  (no-throw when `Atomics.wait` throws, no-throw on the absent-`SharedArrayBuffer` null-word path) and
+  the singleton (the `SharedArrayBuffer` constructor is not invoked per call).
+
+- **Coverage test-file recognition residuals accepted + pinned (finding #4, ADR-005).** Two GOV-1
+  edges in `isRecognizedTestFile` (`src/core/coverage.ts`) are ACCEPTED rather than tightened: (a) the
+  path rule counts a fixture/prose file under a NESTED test-named dir as "tested" (a safe false
+  positive — tightening would under-count legitimately-named tests under `tests/`); (b) a
+  `*.test.d.ts` declaration file is not name-recognized (correct — a declaration has no runtime
+  assertions). Both are documented in the predicate and pinned by a table test in
+  `tests/coverage.test.ts`. Decision recorded in `docs/05-adrs/ADR-005`. No behavior change.
+
+### Added (PR #14 review remediation — GOV-2 ledger hardening, 2026-06-16)
+
+- **Opt-in HMAC keyed seal for the gate ledger (finding #8, SECURITY).** Mirroring the decision
+  ledger, `core/ledger.ts` gains `computeLedgerKeyedHash` + `verifyLedgerSeals` (warn-only) and
+  `appendLedger` now attaches an HMAC `keyedHash` over each entry's canonical text **when
+  `TH_LEDGER_KEY` is set** (a NEW env, a separate trust domain from `TH_DECISION_KEY`; never
+  auto-generated; an unset/empty key seals nothing). `keyedHash` is excluded from the canonical text,
+  so the keyless `recordHash`/chain is **byte-identical** with or without a key — legacy ledgers stay
+  fully back-compatible. The seal catches an attacker who re-hashes the keyless chain after editing a
+  field but cannot forge the HMAC without the key. `th doctor` adds a `ledger seals` check
+  (WARN-only, even under `--strict`, so a wrong/missing key never turns a committed ledger red).
+
+- **Sealed in-chain high-water anchor (finding #8).** `appendHighWater` writes a sealed
+  `{ event:"high-water", count:N }` entry (N = sealed entries before it) into the hash chain itself —
+  re-homed from the rejected UNSEALED `state.json` counter (ADR-001 sidecar precedent). It is emitted
+  after a `gate-state-change` flip. Editing/reordering/mid-deleting it breaks `verifyLedgerChain` like
+  any sealed entry. **Documented residual:** it does NOT detect tail truncation — the chain walk is
+  length-agnostic, so a truncated tail is a valid prefix (`verifyLedgerChain` → `ok`); a negative
+  characterization test pins this so no future reader mistakes the anchor for truncation closure, and
+  the design deliberately avoids a circular `count <= length` "regression" check. `th doctor` counts
+  anchors separately from gate-mutation entries.
+
+### Changed (PR #14 review remediation — dev toolchain, 2026-06-16)
+
+- **vitest 3 → 4; Node floor raised to >= 20 (finding #16).** Bumps `vitest` to `^4`, clearing 5
+  dev-chain CVEs (vite → nested esbuild: RCE via `NPM_CONFIG_REGISTRY`, and the Windows dev-server
+  arbitrary-file-read) that surfaced in `npm audit` — `npm audit` now reports **0 vulnerabilities**.
+  These never shipped: vitest is `devDependencies` only and the runtime bundle is `tsc + esbuild`,
+  so `dist/` is byte-unchanged by this bump. vitest 4 requires Node `>= 20`, so `engines.node` is
+  raised `>=18` → `>=20` (Node 18 is EOL since 2025-04) and the README prerequisite/badge follow.
+  `vitest.config.ts` gains a 15s default `testTimeout`/`hookTimeout`: vitest 4's heavier per-run
+  import phase overlaps with execution, so the first real-subprocess test (`runCLI` spawning a cold
+  `node dist/cli.js`) could exceed the old 5s default under full-suite load — a false-red (it passes
+  in isolation), not a product change. Full suite green ×2 under v4 (1363 pass / 1 skip); rollback is
+  a single-commit revert of `package.json` + `package-lock.json` + `vitest.config.ts`.
+
+### Fixed (audit remediation, 2026-06-16)
+
+- **`th verify`/coverage-report tests are now genuinely cross-platform.** `tests/verify.test.ts`
+  and `tests/coverage-report.test.ts` previously invoked POSIX `true`/`false`/`sleep` via
+  `runCommands` (`spawnSync(shell: true)` → `cmd.exe` on Windows), so they only passed when Git
+  Bash's coreutils happened to be on PATH and *failed* on a bare-Windows runner. The docs
+  previously mis-described them as platform skips — they were never skips at all. The commands are
+  now portable `node -e "…"` stand-ins that resolve on every OS, and the docs (README, this file)
+  are corrected to the real state: **1 platform-conditional skip**.
+
+- **Documented the single intentional test skip.** `tests/concurrency.test.ts:142`
+  (`it.skipIf(win32 || uid === 0)`) is the suite's only skip — a POSIX-only permission-error case
+  that Windows and root cannot reproduce. It is intentional and covered on Linux/macOS CI; a
+  doc-truth guard now asserts the suite has exactly one skip declaration and that the docs no
+  longer claim the stale "N Windows-only platform skips".
+
+- **`th build plan` now emits a dependency-respecting wave order (ARCH-001).** `scheduleWaves`
+  (`src/core/schedule.ts`) was dependency-blind — it serialized slices only on shared-component
+  overlap and ignored `depends_on`, so a slice could be planned in the same or an earlier wave than
+  a slice it hard-depends on. It is now dependency-aware: a slice's wave index is strictly greater
+  than the max wave index of its `depends_on`, in addition to the existing component-conflict rule.
+  `runBuildPlan` (`src/commands/build.ts`) overlays `validateDeps` to surface dependency cycles and
+  dangling references. `scheduleWaves` (static plan) and `computeWave` (live dispatch) remain
+  deliberately distinct. Pure/deterministic; new `tests/schedule.test.ts` coverage.
+
+- **Bounded REQ-anchor scan restores the BOUNDED-COST guarantee (PERF-001).** `scanDirForReqIds`
+  (`src/core/anchors.ts`) previously `readFileSync`-read every regular file with no size, count, or
+  byte cap, defeating the advertised bound on a large repo. It now gates each read behind the
+  scanner's existing per-file byte cap and honors the file-count / total-byte caps and exclusions,
+  so an oversize/binary file is skipped and the scan returns its capped (PARTIAL) result. Guarded by
+  a path-agnostic `tests/repo-bounded-cost.test.ts` asserting "bytes read ≤ cap" at the `scanRepo`
+  boundary.
+
+- **Cross-process state lock no longer CPU-pegs while waiting (PERF-007).** The lock acquisition
+  path (`src/core/state-store.ts`) and the atomic write/read retry path (`src/core/atomic-io.ts`)
+  busy-waited (`while (Date.now() < until) {}`), spinning a full core during contention. Both now
+  use a shared zero-CPU `sleepSync` (`src/core/sleep.ts`) built on `Atomics.wait` over a
+  `SharedArrayBuffer`-backed `Int32Array`. Wait durations and all lock/retry semantics are
+  unchanged; the duplicated busy-wait is retired. New `tests/sleep.test.ts`; concurrency serialization
+  unchanged.
+
+- **`blast_radius_flags` is now gate-owned (GOV-4) — documented behavior change.** The Tier-0 veto
+  floor `blast_radius_flags` was writable by an agent over MCP `th_state_set`, contradicting
+  `SECURITY.md`. It is now in `GATE_OWNED` (`src/core/state-fields.ts`), so MCP `th_state_set
+  blast_radius_flags …` is **refused** with `error:"gate_owned_field"` (was `ok:true`). The CLI
+  `th state set blast_radius_flags …` — the only legitimate write path — is unaffected.
+
+- **MCP server version is single-sourced from `package.json` (ARCH-006 / CQ-004 / PKG-007).**
+  `src/mcp-server.ts` advertised a hardcoded `SERVER_VERSION = "0.6.2"` literal that could silently
+  desync from the dynamic CLI version on a bump. It now reads `package.json` at runtime via
+  `readServerVersion()`, mirroring the CLI's `readCliVersion()` (same candidate resolution, zero
+  runtime deps). `tests/version-sync.test.ts` asserts the served version equals `package.json`.
+
+- **`th coverage check` "tested" dimension now requires a real test file (GOV-1) — behavior change.**
+  `collectDirReqIds` (`src/core/coverage.ts`) counted a REQ-ID as tested if its anchor appeared in
+  *any* file, so a prose/README/fixture anchor under `tests/` could satisfy the gate with no real
+  test. The tested dimension now counts a REQ-ID only when its anchor lives in a recognized test
+  file (`*.test.*` / `*.spec.*` / `*_test.*` / `test_*.*`, or under a `tests/`/`__tests__/`/`spec/`
+  dir); the requirement and implementation dimensions are unchanged. Execution truth remains
+  `th verify run` + the stop-gate. New probe tests in `tests/coverage.test.ts`; USAGE clarified.
+
+- **Opt-in `write_gate: "strict"` fail-closed on invalid state (GOV-3).** The PreToolUse write-gate
+  historically *failed open* on present-but-invalid `state.json` (allow + "standing down" warning),
+  while the stop-gate fails closed. A new opt-in branch (`src/commands/hook.ts`) **denies** the write
+  when state is present-but-invalid **and** the raw bytes carry top-level `write_gate: "strict"`.
+  Default/`ask`/`deny`/`off` modes are **unchanged** (still fail open) — no breaking change. New
+  `tests/write-gate-strict.test.ts`; the ~56-case pretool-gate negative suite stays green.
+
+- **Corrected `SECURITY.md` claims (SEC-001, GOV-2).** Two published claims were inaccurate:
+  (1) the repo-map "no secrets persisted" claim — `.twinharness/repo-map.json` in fact persists
+  **verbatim candidate-command strings** (the committed `docs/00-repo-map.md` emits only a count);
+  the stale "No file contents, no secrets, and no absolute paths are written to disk" clause is
+  removed and replaced with the accurate enumeration. (2) the gate-ledger "primary accountability
+  mechanism" claim — `gate-ledger.jsonl` is a plain append-only log and is **not tamper-evident**
+  (unlike the SHA-256 hash-chained `decisions.jsonl`); the claim is softened to "best-effort review
+  aid." A falsifiable `tests/security-doc-lint.test.ts` pins the corrected text and the absence of
+  the stale claims. *(The gate-ledger hash-chain itself is a post-1.0 follow-up — **now landed, see Phase 3 below**.)*
+
+#### Phase 3 — maintainability / performance dedup + remaining Mediums (2026-06-16)
+
+- **Single capped repo-map walk (PERF-003/004, subsumes PERF-001).** `scanRepo` did two
+  tree walks (a main walk + a separate REQ-anchor re-read of every file); they are now one
+  walk that reads each file at most once (under the per-file byte cap) and derives anchors
+  + manifest data from that single buffer. Verified byte-identical to the prior two-pass
+  output on the real repo (211 702 bytes / 463 files / 359 anchors); new read-once + golden
+  byte-stability tests guard it.
+- **O(N) decision-ledger appends (PERF-009).** `appendDecisionEvent` re-read and re-parsed
+  the entire hash-chained ledger on every append (O(N²)); it now derives `prevHash` from a
+  tail read (last valid line only). `next.ts` reads the decision ledger once per command.
+  Chain bytes/integrity unchanged.
+- **Explicit lease serialization order + canonical byte-stability test (ARCH-004).** The
+  lease ledger's implicit `{ts,…event}` key order is now an explicit `LEASE_FIELD_ORDER`
+  (byte-identical to before); a new round-trip test pins canonical byte-stability across
+  every optional field for the state / decision / lease serializers.
+- **Gate-ledger is now tamper-evident (GOV-2).** `gate-ledger.jsonl` is SHA-256 hash-chained
+  like `decisions.jsonl` (per-entry `recordHash`/`prevHash`, ts sealed). `th doctor` verifies
+  the chain — a warning by default, a hard fail under `th doctor --strict`. Back-compat:
+  pre-migration unsealed lines are an unverifiable prefix, not a tamper signal. `SECURITY.md`
+  is **re-elevated** to "tamper-evident", with three honest limits (legacy prefix; keyless
+  full-rewrite; wholesale deletion of the sealed run); the doc lint is flipped accordingly.
+  *(This supersedes the post-1.0 note above.)*
+- **Dedup cluster (CQ-001/002/003/005/006/007).** Extracted a shared append-only markdown-
+  ledger module behind drift-log/debate-log (byte-identical output); deleted dead
+  `findDecision`; migrated byte-identical `requireState` sites; extracted `loadPersistedMap`;
+  decomposed the 679-line `runHookPretoolGate` write-gate into behavior-identical phase-gate
+  helpers (all gate negative-suites green).
+- **Boundary / coupling fixes (ARCH-002/003/005/007).** Typed `PathContainmentError` mapped
+  to a structured `--json` failure (exit 2) at the CLI boundary (no more raw stacks, e.g.
+  `th collab fragment --name "../x"`); the MCP adapter now carries the numeric `exitCode` in
+  `structuredContent`; the state validator warns on unknown top-level keys (non-fatal); the
+  repo-map freshness/exit-code taxonomy moved into `core/repo-map/freshness.ts`. Also fixed a
+  verify-report flake: `writeVerifyReport` is now atomic and `readVerifyReport` retries
+  transient contention (a present report no longer reads as absent under load).
+- **Lock fairness + oversized docs (PERF-008, PERF-002, DOC-004..007).** The state-lock retry
+  uses full-jitter exponential backoff (≤80 ms) instead of a fixed 20 ms wait (no thundering
+  herd; zero-CPU `Atomics.wait`; lock semantics unchanged). Split `critic-modes.md` (819→index
+  +3 parts) and `pipeline-stages.md` (637→index+4 parts) under the ~500-line budget; added the
+  missing README group rows and USAGE state-field / exit-code / hook-wiring tables.
+- **Test hardening (TEST-004..009).** BYPASS-KNOWN write-gate regression suite; build-artifact
+  guards `skipIf` instead of throwing; bounded polls / deterministic timeouts; coordination
+  prose-grep suites labelled `DOC-LINT`; `STALE_MS` imported rather than hardcoded.
+
+#### Phase 4 — cross-OS CI + dependency posture + batched lows (2026-06-16)
+
+- **Cross-OS CI matrix (TEST-002 follow-through).** GitHub Actions runs build + dist-sync +
+  the suite + a `th version` smoke on Linux / macOS / Windows, all under `shell: pwsh` so the
+  de-POSIX-ified tests are exercised without Git Bash.
+- **Dependency-audit posture (SEC-002/003).** The shipped/production tree is clean
+  (`npm audit --omit=dev` → 0). CI adds an informational full-tree audit that surfaces the 5
+  dev-toolchain highs (vite/vitest → nested esbuild) and the bundled `@modelcontextprotocol/sdk`
+  without failing the build — those advisories do **not** ship, and clearing them requires a
+  breaking vitest 4 migration tracked as a separate follow-up.
+- **Batched low-severity cleanups (TEST-010/011, CQ-010/011/013).** `TH_NO_LOG=1` in vitest
+  global setup (removes ~1200 telemetry log lines from test output); required-doc existence is
+  now asserted (not silently skipped); `readFileOrUndefined` deduped; dead `allInProgress`
+  dropped; stale lock-timeout comment corrected.
 
 ### Added (coordination-primitive hardening, 2026-06-15)
 

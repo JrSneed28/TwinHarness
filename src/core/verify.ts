@@ -23,6 +23,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import type { ProjectPaths } from "./paths";
+import { atomicWriteFile, readFileWithRetry } from "./atomic-io";
 
 export interface VerifyConfig {
   commands: string[];
@@ -82,12 +83,30 @@ export function writeVerifyConfig(paths: ProjectPaths, config: VerifyConfig): vo
   fs.writeFileSync(verifyConfigPath(paths), JSON.stringify(config, null, 2) + "\n", "utf8");
 }
 
-/** Read the last verify report, or null when none has been written. */
+/**
+ * Read the last verify report, or null when none has been written.
+ *
+ * The read goes through {@link readFileWithRetry} so a transient contention error
+ * (a reader colliding with a concurrent atomic rename of the report — see
+ * {@link writeVerifyReport}) is retried rather than swallowed as "absent". Without
+ * this, a present-but-momentarily-contended report read null and made callers like
+ * `th next` re-emit a spurious `run-verify` obligation (the REQ-NEXT-011 flake):
+ * a settled run was intermittently judged un-verified. A genuinely missing or
+ * corrupt report still returns null — the real staleness signal is unchanged.
+ */
 export function readVerifyReport(paths: ProjectPaths): VerifyReport | null {
   const file = verifyReportPath(paths);
   if (!fs.existsSync(file)) return null;
+  let raw: string;
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
+    raw = readFileWithRetry(file);
+  } catch {
+    // The file existed a moment ago but the read still failed after the retry
+    // budget (e.g. it was removed mid-read) → treat as absent.
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === "object" && typeof (parsed as VerifyReport).ok === "boolean") {
       return parsed as VerifyReport;
     }
@@ -97,9 +116,16 @@ export function readVerifyReport(paths: ProjectPaths): VerifyReport | null {
   return null;
 }
 
+/**
+ * Write the verify report atomically (write temp, then rename over the target) so
+ * a concurrent {@link readVerifyReport} can never observe a torn/partial file —
+ * it sees either the old report or the new one, never a half-written blob. This
+ * pairs with the retrying reader to keep a freshly-written report from reading as
+ * absent (the REQ-NEXT-011 flake).
+ */
 export function writeVerifyReport(paths: ProjectPaths, report: VerifyReport): void {
   fs.mkdirSync(paths.stateDir, { recursive: true });
-  fs.writeFileSync(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n", "utf8");
+  atomicWriteFile(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n");
 }
 
 /**
