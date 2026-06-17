@@ -15824,21 +15824,30 @@ function readLockOwner(ownerFile) {
   }
 }
 var STALE_MS = 15e3;
-function withStateLock(paths, fn) {
+var realLockOps = {
+  now: Date.now,
+  sleep: sleepSync,
+  acquire: (lockDir) => fs3.mkdirSync(lockDir),
+  mtimeMs: (lockDir) => fs3.statSync(lockDir).mtimeMs,
+  remove: (lockDir) => fs3.rmSync(lockDir, { recursive: true, force: true }),
+  readOwner: readLockOwner,
+  writeOwner: (ownerFile, token) => fs3.writeFileSync(ownerFile, token, "utf8")
+};
+function withStateLock(paths, fn, ops = realLockOps) {
   if (!fs3.existsSync(paths.stateDir)) return fn();
   const lockDir = path3.join(paths.stateDir, ".state.lock");
   const ownerFile = path3.join(lockDir, "owner");
   const myToken = `${process.pid}-${Math.random().toString(36).slice(2)}`;
   const TIMEOUT_MS = 25e3;
-  const deadline = Date.now() + TIMEOUT_MS;
+  const deadline = ops.now() + TIMEOUT_MS;
   const BACKOFF_BASE_MS = 5;
   const BACKOFF_CAP_MS = 80;
   let attempt = 0;
   for (; ; ) {
     try {
-      fs3.mkdirSync(lockDir);
+      ops.acquire(lockDir);
       try {
-        fs3.writeFileSync(ownerFile, myToken, "utf8");
+        ops.writeOwner(ownerFile, myToken);
       } catch {
       }
       break;
@@ -15846,11 +15855,11 @@ function withStateLock(paths, fn) {
       const code = e.code;
       if (!isLockHeldError(code)) throw e;
       try {
-        const ownerBefore = readLockOwner(ownerFile);
-        const age = Date.now() - fs3.statSync(lockDir).mtimeMs;
+        const ownerBefore = ops.readOwner(ownerFile);
+        const age = ops.now() - ops.mtimeMs(lockDir);
         if (age > STALE_MS) {
-          if (readLockOwner(ownerFile) === ownerBefore) {
-            fs3.rmSync(lockDir, { recursive: true, force: true });
+          if (ops.readOwner(ownerFile) === ownerBefore) {
+            ops.remove(lockDir);
           }
           continue;
         }
@@ -15858,19 +15867,19 @@ function withStateLock(paths, fn) {
         if (code === "EPERM" || code === "EACCES") throw e;
         continue;
       }
-      if (Date.now() > deadline) {
+      if (ops.now() > deadline) {
         throw new LockTimeoutError(lockDir);
       }
       const backoffCeil = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempt);
       attempt++;
-      sleepSync(Math.random() * backoffCeil);
+      ops.sleep(Math.random() * backoffCeil);
     }
   }
   try {
     return fn();
   } finally {
     try {
-      fs3.rmSync(lockDir, { recursive: true, force: true });
+      ops.remove(lockDir);
     } catch {
     }
   }

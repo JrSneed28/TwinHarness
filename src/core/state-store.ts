@@ -138,7 +138,46 @@ function readLockOwner(ownerFile: string): string | null {
  */
 export const STALE_MS = 15_000;
 
-export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
+/**
+ * Injectable seam for the lock loop's non-deterministic operations — the wall
+ * clock, the inter-attempt sleep, and the filesystem test-and-set / steal
+ * primitives. Mirrors the `rename`/`read` injection in `atomic-io.ts`: production
+ * callers omit it (the real ops run against `Date.now` / `sleepSync` / `node:fs`),
+ * and ONLY tests pass a seam, so the contention / steal / timeout / backoff loop
+ * is deterministically unit-testable WITHOUT mocking the (non-configurable)
+ * `node:fs` module or the real clock. The {@link realLockOps} default is
+ * byte-for-byte the original behavior (proven inert by the seam characterization
+ * tests); no production path changes (PERF-009 precursor for the #3 contention fix).
+ */
+export interface LockOps {
+  /** Wall clock in ms (deadline + stale-age). Real: `Date.now`. */
+  now: () => number;
+  /** Zero-CPU inter-attempt wait. Real: `sleepSync`. */
+  sleep: (ms: number) => void;
+  /** Atomic test-and-set acquire; throws ErrnoException (EEXIST/EPERM/EACCES) when held. Real: `fs.mkdirSync`. */
+  acquire: (lockDir: string) => void;
+  /** The lock dir's mtime (ms); throws like `statSync` when the dir vanished/denied. Real: `fs.statSync(d).mtimeMs`. */
+  mtimeMs: (lockDir: string) => number;
+  /** Steal: remove the lock dir. Real: `fs.rmSync(recursive, force)`. */
+  remove: (lockDir: string) => void;
+  /** Read the lock's owner token, or null if absent/unreadable. Real: `readLockOwner`. */
+  readOwner: (ownerFile: string) => string | null;
+  /** Stamp the owner token (best-effort). Real: `fs.writeFileSync`. */
+  writeOwner: (ownerFile: string, token: string) => void;
+}
+
+/** Production lock ops — the real clock + sleep + `node:fs` primitives. */
+export const realLockOps: LockOps = {
+  now: Date.now,
+  sleep: sleepSync,
+  acquire: (lockDir) => fs.mkdirSync(lockDir),
+  mtimeMs: (lockDir) => fs.statSync(lockDir).mtimeMs,
+  remove: (lockDir) => fs.rmSync(lockDir, { recursive: true, force: true }),
+  readOwner: readLockOwner,
+  writeOwner: (ownerFile, token) => fs.writeFileSync(ownerFile, token, "utf8"),
+};
+
+export function withStateLock<T>(paths: ProjectPaths, fn: () => T, ops: LockOps = realLockOps): T {
   if (!fs.existsSync(paths.stateDir)) return fn();
 
   const lockDir = path.join(paths.stateDir, ".state.lock");
@@ -150,7 +189,7 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
   // above for the full rationale. Referenced here by name so tests can import
   // it and use STALE_MS + N instead of hardcoding the magic literal (TEST-006).
   const TIMEOUT_MS = 25_000;
-  const deadline = Date.now() + TIMEOUT_MS;
+  const deadline = ops.now() + TIMEOUT_MS;
 
   // Backoff-with-jitter for the inter-attempt wait (PERF-008). A FIXED cadence
   // made N contending writers wake in lock-step (thundering herd) and collide on
@@ -175,9 +214,9 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
 
   for (;;) {
     try {
-      fs.mkdirSync(lockDir); // atomic test-and-set: throws EEXIST (POSIX) / EPERM|EACCES (Windows) if held
+      ops.acquire(lockDir); // atomic test-and-set: throws EEXIST (POSIX) / EPERM|EACCES (Windows) if held
       try {
-        fs.writeFileSync(ownerFile, myToken, "utf8");
+        ops.writeOwner(ownerFile, myToken);
       } catch {
         /* best-effort owner stamp; absence just means a steal can't TOCTOU-verify */
       }
@@ -192,15 +231,15 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
       // permission error (not contention) so we rethrow the original; for EEXIST
       // the dir just vanished and we retry.
       try {
-        const ownerBefore = readLockOwner(ownerFile);
-        const age = Date.now() - fs.statSync(lockDir).mtimeMs;
+        const ownerBefore = ops.readOwner(ownerFile);
+        const age = ops.now() - ops.mtimeMs(lockDir);
         if (age > STALE_MS) {
           // TOCTOU guard: only steal if the owner token is unchanged since we
           // observed the stale lock. If another waiter already stole and
           // re-acquired (fresh token, or a fresh mtime), we must NOT clobber its
           // live lock — fall through and retry/wait instead.
-          if (readLockOwner(ownerFile) === ownerBefore) {
-            fs.rmSync(lockDir, { recursive: true, force: true });
+          if (ops.readOwner(ownerFile) === ownerBefore) {
+            ops.remove(lockDir);
           }
           continue;
         }
@@ -208,7 +247,7 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
         if (code === "EPERM" || code === "EACCES") throw e; // genuine permission error
         continue; // EEXIST: lock vanished between mkdir and stat — retry
       }
-      if (Date.now() > deadline) {
+      if (ops.now() > deadline) {
         throw new LockTimeoutError(lockDir);
       }
       // Zero-CPU wait (PERF-007): the CLI has no event loop to yield to, and the
@@ -220,7 +259,7 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
       // instead of waking in lock-step. sleepSync is still the zero-CPU primitive.
       const backoffCeil = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempt);
       attempt++;
-      sleepSync(Math.random() * backoffCeil);
+      ops.sleep(Math.random() * backoffCeil);
     }
   }
 
@@ -228,7 +267,7 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T): T {
     return fn();
   } finally {
     try {
-      fs.rmSync(lockDir, { recursive: true, force: true });
+      ops.remove(lockDir);
     } catch {
       // Best-effort release; a stale lock is reclaimed by the next caller.
     }

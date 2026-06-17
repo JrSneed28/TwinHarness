@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.STALE_MS = exports.LockTimeoutError = void 0;
+exports.realLockOps = exports.STALE_MS = exports.LockTimeoutError = void 0;
 exports.readState = readState;
 exports.writeState = writeState;
 exports.isLockHeldError = isLockHeldError;
@@ -153,7 +153,17 @@ function readLockOwner(ownerFile) {
  * before a healthy waiter times out.
  */
 exports.STALE_MS = 15_000;
-function withStateLock(paths, fn) {
+/** Production lock ops — the real clock + sleep + `node:fs` primitives. */
+exports.realLockOps = {
+    now: Date.now,
+    sleep: sleep_1.sleepSync,
+    acquire: (lockDir) => fs.mkdirSync(lockDir),
+    mtimeMs: (lockDir) => fs.statSync(lockDir).mtimeMs,
+    remove: (lockDir) => fs.rmSync(lockDir, { recursive: true, force: true }),
+    readOwner: readLockOwner,
+    writeOwner: (ownerFile, token) => fs.writeFileSync(ownerFile, token, "utf8"),
+};
+function withStateLock(paths, fn, ops = exports.realLockOps) {
     if (!fs.existsSync(paths.stateDir))
         return fn();
     const lockDir = path.join(paths.stateDir, ".state.lock");
@@ -165,7 +175,7 @@ function withStateLock(paths, fn) {
     // above for the full rationale. Referenced here by name so tests can import
     // it and use STALE_MS + N instead of hardcoding the magic literal (TEST-006).
     const TIMEOUT_MS = 25_000;
-    const deadline = Date.now() + TIMEOUT_MS;
+    const deadline = ops.now() + TIMEOUT_MS;
     // Backoff-with-jitter for the inter-attempt wait (PERF-008). A FIXED cadence
     // made N contending writers wake in lock-step (thundering herd) and collide on
     // the same mkdir over and over. Instead, grow the wait per failed attempt
@@ -188,9 +198,9 @@ function withStateLock(paths, fn) {
     let attempt = 0;
     for (;;) {
         try {
-            fs.mkdirSync(lockDir); // atomic test-and-set: throws EEXIST (POSIX) / EPERM|EACCES (Windows) if held
+            ops.acquire(lockDir); // atomic test-and-set: throws EEXIST (POSIX) / EPERM|EACCES (Windows) if held
             try {
-                fs.writeFileSync(ownerFile, myToken, "utf8");
+                ops.writeOwner(ownerFile, myToken);
             }
             catch {
                 /* best-effort owner stamp; absence just means a steal can't TOCTOU-verify */
@@ -208,15 +218,15 @@ function withStateLock(paths, fn) {
             // permission error (not contention) so we rethrow the original; for EEXIST
             // the dir just vanished and we retry.
             try {
-                const ownerBefore = readLockOwner(ownerFile);
-                const age = Date.now() - fs.statSync(lockDir).mtimeMs;
+                const ownerBefore = ops.readOwner(ownerFile);
+                const age = ops.now() - ops.mtimeMs(lockDir);
                 if (age > exports.STALE_MS) {
                     // TOCTOU guard: only steal if the owner token is unchanged since we
                     // observed the stale lock. If another waiter already stole and
                     // re-acquired (fresh token, or a fresh mtime), we must NOT clobber its
                     // live lock — fall through and retry/wait instead.
-                    if (readLockOwner(ownerFile) === ownerBefore) {
-                        fs.rmSync(lockDir, { recursive: true, force: true });
+                    if (ops.readOwner(ownerFile) === ownerBefore) {
+                        ops.remove(lockDir);
                     }
                     continue;
                 }
@@ -226,7 +236,7 @@ function withStateLock(paths, fn) {
                     throw e; // genuine permission error
                 continue; // EEXIST: lock vanished between mkdir and stat — retry
             }
-            if (Date.now() > deadline) {
+            if (ops.now() > deadline) {
                 throw new LockTimeoutError(lockDir);
             }
             // Zero-CPU wait (PERF-007): the CLI has no event loop to yield to, and the
@@ -238,7 +248,7 @@ function withStateLock(paths, fn) {
             // instead of waking in lock-step. sleepSync is still the zero-CPU primitive.
             const backoffCeil = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempt);
             attempt++;
-            (0, sleep_1.sleepSync)(Math.random() * backoffCeil);
+            ops.sleep(Math.random() * backoffCeil);
         }
     }
     try {
@@ -246,7 +256,7 @@ function withStateLock(paths, fn) {
     }
     finally {
         try {
-            fs.rmSync(lockDir, { recursive: true, force: true });
+            ops.remove(lockDir);
         }
         catch {
             // Best-effort release; a stale lock is reclaimed by the next caller.
