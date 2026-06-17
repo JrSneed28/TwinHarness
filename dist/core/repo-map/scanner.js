@@ -527,9 +527,19 @@ function scanRepo(root, opts = {}) {
     // inline. Because the walk applies the SAME exclusions (GENERATED_DIRS /
     // PRODUCER_DIRS skipped before descent, GENERATED_ARTIFACTS skipped per-file),
     // every collected anchor is already correctly scoped — no post-filter is needed,
-    // so the producer's own output can never re-enter the map (REQ-NFR-001). The
-    // serializer sorts `req_anchors` and each `locations` array, so insertion order
-    // is irrelevant to the byte-stable output (ADR-003).
+    // so the producer's own output can never re-enter the map (REQ-NFR-001).
+    //
+    // SCOPE CONTRACT (finding #2 / ADR-004 — NOT "byte-identical to an uncapped
+    // two-pass"). The anchor set is COMPLETE for in-scope files, but a REQ-ID that
+    // appears ONLY inside an oversize file (> MAX_READ_BYTES — read name-only) or
+    // ONLY under a generated/producer directory is INTENTIONALLY EXCLUDED. That is
+    // the deliberate bounded-cost + scope guarantee (PERF-001 / REQ-RU-006/041), not
+    // an oversight: re-including those anchors would reintroduce the unbounded read
+    // (oversize) or let build output pollute traceability (generated). The boundary
+    // is pinned by golden tests (repo-bounded-cost.test.ts for oversize,
+    // scanner-anchor-scope.test.ts for generated/producer) so any re-inclusion fails
+    // loudly. The serializer sorts `req_anchors` and each `locations` array, so
+    // insertion order is irrelevant to the byte-stable output (ADR-003).
     const reqAnchors = [];
     for (const [reqId, locations] of reqIdToFiles.entries()) {
         reqAnchors.push({ req_id: reqId, locations: [...locations] });

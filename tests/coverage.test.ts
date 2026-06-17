@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runCoverageCheck } from "../src/commands/coverage";
+import { isRecognizedTestFile } from "../src/core/coverage";
 import { extractReqIds } from "../src/core/anchors";
 
 let tp: TempProject | undefined;
@@ -240,6 +241,45 @@ describe("REQ-COV-TESTONLY-001 (GOV-1): the TEST dimension counts only RECOGNIZE
       { req: "REQ-100", inSlice: true, inTest: false },
       { req: "REQ-200", inSlice: true, inTest: false },
     ]);
+  });
+});
+
+describe("REQ-COV-TESTONLY-001 (finding #4 / ADR-005): isRecognizedTestFile table — accepted residuals PINNED", () => {
+  // The predicate is the single source of truth for "is this a REAL test file?".
+  // This table pins the CURRENT contract — including the two ACCEPTED GOV-1
+  // residuals — so a future change to either is a deliberate decision, not drift.
+  const recognized: [string, string][] = [
+    ["foo.test.ts", "name rule: *.test.*"],
+    ["a/b/foo.spec.tsx", "name rule: *.spec.* (nested)"],
+    ["pkg/feature.test.py", "name rule: *.test.* (python)"],
+    ["mod/feature_test.go", "name rule: go *_test.*"],
+    ["pkg/test_feature.py", "name rule: python test_*.*"],
+    ["tests/anything.md", "path rule: under a tests/ segment"],
+    ["__tests__/x.json", "path rule: under __tests__/"],
+    // RESIDUAL (a): a prose/fixture file under a NESTED test-named dir still counts.
+    ["helpers/tests/data.json", "RESIDUAL(a): nested test-dir segment counts"],
+    ["src/specs/notes.md", "RESIDUAL(a): nested specs/ segment counts"],
+  ];
+  it.each(recognized)("recognizes %s (%s)", (rel) => {
+    expect(isRecognizedTestFile(rel)).toBe(true);
+  });
+
+  const notRecognized: [string, string][] = [
+    ["src/feature.ts", "plain source"],
+    ["helpers/data.json", "fixture not under a test dir"],
+    ["docs/notes.md", "prose not under a test dir"],
+    ["README.md", "root prose"],
+    // RESIDUAL (b): a *.test.d.ts TYPE-DECLARATION is NOT name-recognized (correct:
+    // a declaration file has no runtime assertions), UNLESS it sits under a test dir.
+    ["types/foo.test.d.ts", "RESIDUAL(b): .test.d.ts declaration is not a test by NAME"],
+    ["types/foo.spec.d.ts", "RESIDUAL(b): .spec.d.ts declaration is not a test by NAME"],
+  ];
+  it.each(notRecognized)("does NOT recognize %s (%s)", (rel) => {
+    expect(isRecognizedTestFile(rel)).toBe(false);
+  });
+
+  it("RESIDUAL(b) corollary: a .test.d.ts UNDER a tests/ dir still counts via the path rule", () => {
+    expect(isRecognizedTestFile("tests/foo.test.d.ts")).toBe(true);
   });
 });
 

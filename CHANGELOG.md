@@ -28,7 +28,26 @@ Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding lay
   today (latent/forward-looking guard) — pinned by a characterization test so the precedence can't
   regress.
 
- `tests/verify.test.ts`
+- **Repo-scanner anchor scope is a documented, pinned contract (finding #2, ADR-004).** The
+  bounded-cost single walk (`src/core/repo-map/scanner.ts`) collects a REQ-ID anchor only from
+  in-scope files: a REQ-ID present ONLY in an oversize file (`> MAX_READ_BYTES`) or ONLY under a
+  generated/producer directory is INTENTIONALLY excluded. The docstring's implied "byte-identical to
+  an uncapped two-pass" equivalence is corrected to make the exclusion explicit (it upholds PERF-001
+  + REQ-NFR-001). New `tests/scanner-anchor-scope.test.ts` golden pins the generated/producer
+  exclusion (oversize was already pinned by `tests/repo-bounded-cost.test.ts`). Decision recorded in
+  `docs/05-adrs/ADR-004`. No behavior change.
+
+- **Coverage test-file recognition residuals accepted + pinned (finding #4, ADR-005).** Two GOV-1
+  edges in `isRecognizedTestFile` (`src/core/coverage.ts`) are ACCEPTED rather than tightened: (a) the
+  path rule counts a fixture/prose file under a NESTED test-named dir as "tested" (a safe false
+  positive — tightening would under-count legitimately-named tests under `tests/`); (b) a
+  `*.test.d.ts` declaration file is not name-recognized (correct — a declaration has no runtime
+  assertions). Both are documented in the predicate and pinned by a table test in
+  `tests/coverage.test.ts`. Decision recorded in `docs/05-adrs/ADR-005`. No behavior change.
+
+### Fixed (audit remediation, 2026-06-16)
+
+- **`th verify`/coverage-report tests are now genuinely cross-platform.** `tests/verify.test.ts`
   and `tests/coverage-report.test.ts` previously invoked POSIX `true`/`false`/`sleep` via
   `runCommands` (`spawnSync(shell: true)` → `cmd.exe` on Windows), so they only passed when Git
   Bash's coreutils happened to be on PATH and *failed* on a bare-Windows runner. The docs

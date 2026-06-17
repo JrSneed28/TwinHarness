@@ -76,6 +76,22 @@ export function collectDirReqIds(dir: string): string[] {
  * relative to the tests root, so a bare `foo.test.ts` (rel = `foo.test.ts`) is
  * recognized by name and a `helpers/data.json` (rel = `helpers/data.json`) is
  * NOT — unless its segment is itself a test dir.
+ *
+ * ACCEPTED GOV-1 RESIDUALS (finding #4 / ADR-005 — documented, not tightened):
+ *   (a) The path rule matches a test-dir SEGMENT at ANY depth, so a prose/fixture
+ *       file under a NESTED test-named subdir (e.g. `helpers/tests/data.json`)
+ *       still counts as "tested". Tightening to require a test-NAME match would
+ *       UNDER-count legitimate tests that live under `tests/` without a `.test.`
+ *       name, so the path rule is kept deliberately (a false-positive is the safe
+ *       direction here — it never HIDES a real gap, it only over-credits a fixture
+ *       that already sits in a test dir the author chose).
+ *   (b) A `*.test.d.ts` / `*.spec.d.ts` TYPE-DECLARATION file is NOT recognized by
+ *       NAME (the trailing `.d.ts` defeats `\.(test|spec)\.[^./]+$`). That is
+ *       CORRECT, not a gap: a declaration file carries no runtime assertions, so it
+ *       cannot evidence a REQ. (It still counts via the path rule if it lives under
+ *       a test dir — same residual as (a).)
+ * Both are PINNED by a table test (coverage.test.ts) so any future change is a
+ * deliberate decision, not an accidental drift.
  */
 export function isRecognizedTestFile(relPosixPath: string): boolean {
   const lower = relPosixPath.toLowerCase();
