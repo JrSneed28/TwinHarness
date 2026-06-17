@@ -218,3 +218,55 @@ describe("#3-pre: injected seam reproduces acquire / steal / timeout / rethrow i
     }
   });
 });
+
+describe("#3: the deadline is enforced at the LOOP HEAD — no retry path can busy-loop", () => {
+  it("a CHURNING stale lock (owner token changes each read → never actually stolen) still times out, BOUNDED", () => {
+    const tp = lockableProject();
+    try {
+      let oc = 0;
+      const { state, ops } = makeFakeOps({
+        acquire: () => "EEXIST", // always held
+        age: STALE_MS + 5_000, // always stale → the steal branch
+        owners: () => `tok-${oc++}`, // token churns → TOCTOU guard fails → never steals
+      });
+      // Fail-before: the post-steal `continue` jumped PAST the (then post-block)
+      // deadline check WITHOUT backing off → an infinite tight loop that never
+      // advanced the clock (the bug). Pass-after: deadline at the loop head + backoff
+      // on the steal-retry path bounds it to ~TIMEOUT_MS and a finite attempt count.
+      expect(() => withStateLock(tp.paths, () => 1, ops)).toThrow(LockTimeoutError);
+      expect(state.removes).toBe(0); // never stole (token always changed)
+      expect(state.sleeps.length).toBeGreaterThan(0); // backed off on the steal-retry path
+      expect(state.attempts).toBeLessThan(5_000); // bounded — no infinite spin
+    } finally {
+      tp.cleanup();
+    }
+  });
+
+  it("a lock that keeps VANISHING/reappearing (EEXIST + stat-throw each time) still times out, BOUNDED", () => {
+    const tp = lockableProject();
+    try {
+      const { state, ops } = makeFakeOps({
+        acquire: () => "EEXIST", // always held
+        mtimeThrows: "ENOENT", // stat always throws → the EEXIST-vanished `continue`
+      });
+      // Fail-before: the vanished `continue` also jumped past the deadline + backoff →
+      // infinite tight loop. Pass-after: bounded by the head deadline + backoff.
+      expect(() => withStateLock(tp.paths, () => 1, ops)).toThrow(LockTimeoutError);
+      expect(state.sleeps.length).toBeGreaterThan(0); // backed off on the vanished-retry path
+      expect(state.attempts).toBeLessThan(5_000); // bounded
+    } finally {
+      tp.cleanup();
+    }
+  });
+
+  it("the FRESH-held wait path still times out (deadline-at-head regression guard), bounded", () => {
+    const tp = lockableProject();
+    try {
+      const { state, ops } = makeFakeOps({ acquire: () => "EACCES", age: 0 });
+      expect(() => withStateLock(tp.paths, () => 1, ops)).toThrow(LockTimeoutError);
+      expect(state.attempts).toBeLessThan(5_000);
+    } finally {
+      tp.cleanup();
+    }
+  });
+});

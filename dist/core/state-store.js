@@ -196,7 +196,27 @@ function withStateLock(paths, fn, ops = exports.realLockOps) {
     const BACKOFF_BASE_MS = 5;
     const BACKOFF_CAP_MS = 80;
     let attempt = 0;
+    // Zero-CPU backoff-with-jitter for THIS failed attempt (PERF-007 / PERF-008): the
+    // ceiling is BACKOFF_BASE_MS * 2^attempt clamped to BACKOFF_CAP_MS, and we sleep a
+    // uniform [0, ceiling) ("full jitter") so N contenders desynchronize instead of
+    // waking in lock-step. Applied on EVERY non-acquiring retry path below — the plain
+    // wait, the post-steal retry, AND the EEXIST-vanished retry — so none can busy-loop
+    // or overrun TIMEOUT_MS (#3).
+    const backoff = () => {
+        const backoffCeil = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempt);
+        attempt++;
+        ops.sleep(Math.random() * backoffCeil);
+    };
     for (;;) {
+        // Deadline at the LOOP HEAD (#3): checked before EVERY acquire/steal/stat attempt
+        // so no retry path can overrun TIMEOUT_MS. Previously this lived AFTER the
+        // steal/stat block, so the post-steal and EEXIST-vanished `continue`s jumped past
+        // it: a churning stale lock (owner token changes each read → never actually
+        // stolen) or a lock that keeps vanishing/reappearing would `continue` forever,
+        // bypassing both the deadline AND the backoff and pegging the loop.
+        if (ops.now() > deadline) {
+            throw new LockTimeoutError(lockDir);
+        }
         try {
             ops.acquire(lockDir); // atomic test-and-set: throws EEXIST (POSIX) / EPERM|EACCES (Windows) if held
             try {
@@ -211,12 +231,10 @@ function withStateLock(paths, fn, ops = exports.realLockOps) {
             const code = e.code;
             if (!isLockHeldError(code))
                 throw e;
-            // Held: steal if stale, else wait until the deadline.
-            // statSync doubles as the existence check and mtime fetch in one call,
-            // avoiding a redundant existsSync + statSync pair. If it throws, the lock
-            // dir is absent or inaccessible: for EPERM/EACCES that means a genuine
-            // permission error (not contention) so we rethrow the original; for EEXIST
-            // the dir just vanished and we retry.
+            // Held: steal if stale, else wait. statSync doubles as the existence check and
+            // mtime fetch in one call. If it throws, the lock dir is absent or inaccessible:
+            // for EPERM/EACCES that means a genuine permission error (not contention) so we
+            // rethrow the original; for EEXIST the dir just vanished and we back off + retry.
             try {
                 const ownerBefore = ops.readOwner(ownerFile);
                 const age = ops.now() - ops.mtimeMs(lockDir);
@@ -228,27 +246,19 @@ function withStateLock(paths, fn, ops = exports.realLockOps) {
                     if (ops.readOwner(ownerFile) === ownerBefore) {
                         ops.remove(lockDir);
                     }
+                    backoff(); // bound the post-steal retry — re-checks the deadline at the head (#3)
                     continue;
                 }
             }
             catch (statErr) {
                 if (code === "EPERM" || code === "EACCES")
                     throw e; // genuine permission error
+                backoff(); // bound the EEXIST-vanished retry (#3)
                 continue; // EEXIST: lock vanished between mkdir and stat — retry
             }
-            if (ops.now() > deadline) {
-                throw new LockTimeoutError(lockDir);
-            }
-            // Zero-CPU wait (PERF-007): the CLI has no event loop to yield to, and the
-            // old `while`-spin pegged a core while waiting on a held lock.
-            //
-            // Backoff-with-jitter (PERF-008): the backoff ceiling for THIS attempt is
-            // BACKOFF_BASE_MS * 2^attempt, clamped to BACKOFF_CAP_MS; we then sleep a
-            // uniformly random duration in [0, ceiling) so N contenders desynchronize
-            // instead of waking in lock-step. sleepSync is still the zero-CPU primitive.
-            const backoffCeil = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempt);
-            attempt++;
-            ops.sleep(Math.random() * backoffCeil);
+            // Plain wait path (held + not stale): back off, then retry from the loop head
+            // (which enforces the deadline). The old `while`-spin pegged a core here.
+            backoff();
         }
     }
     try {

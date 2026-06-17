@@ -15843,7 +15843,15 @@ function withStateLock(paths, fn, ops = realLockOps) {
   const BACKOFF_BASE_MS = 5;
   const BACKOFF_CAP_MS = 80;
   let attempt = 0;
+  const backoff = () => {
+    const backoffCeil = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempt);
+    attempt++;
+    ops.sleep(Math.random() * backoffCeil);
+  };
   for (; ; ) {
+    if (ops.now() > deadline) {
+      throw new LockTimeoutError(lockDir);
+    }
     try {
       ops.acquire(lockDir);
       try {
@@ -15861,18 +15869,15 @@ function withStateLock(paths, fn, ops = realLockOps) {
           if (ops.readOwner(ownerFile) === ownerBefore) {
             ops.remove(lockDir);
           }
+          backoff();
           continue;
         }
       } catch (statErr) {
         if (code === "EPERM" || code === "EACCES") throw e;
+        backoff();
         continue;
       }
-      if (ops.now() > deadline) {
-        throw new LockTimeoutError(lockDir);
-      }
-      const backoffCeil = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempt);
-      attempt++;
-      ops.sleep(Math.random() * backoffCeil);
+      backoff();
     }
   }
   try {
