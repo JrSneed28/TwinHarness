@@ -129,19 +129,20 @@ describe("REQ-MCP-MAP-002: toToolResult maps ok:false → isError:true", () => {
 });
 
 describe("REQ-MCP-TOOLS-001: the exposed tool set is the intended minimal subset", () => {
-  // The first 9 registered tools, in order. th_build_dispatch and th_build_plan
-  // were inserted into the build group (after th_build_release), shifting th_route
-  // et al. down — this legacy prefix pin tracks that order.
+  // The first 9 registered tools, in order. The MCP-tool-expansion inserted the 5
+  // typed gate-transition tools (th_tier_record..th_blast_radius_record) right after
+  // th_state_set and th_drift_list right after th_drift_add, shifting the build group
+  // down — this legacy prefix pin tracks the current canonical order.
   const expected = [
     "th_state_get",
     "th_state_set",
+    "th_tier_record",
+    "th_stage_advance",
+    "th_implementation_unlock",
+    "th_write_gate_set",
+    "th_blast_radius_record",
     "th_drift_add",
-    "th_build_next_wave",
-    "th_build_claim",
-    "th_build_release",
-    "th_build_dispatch",
-    "th_build_plan",
-    "th_route",
+    "th_drift_list",
   ];
 
   it("TOOL_DEFS exposes the intended core tools in order (pre-SLICE-4 legacy prefix pin — superseded by the full registry pin below)", () => {
@@ -341,17 +342,28 @@ describe("SLICE-4 / TASK-010 — MCP adapter: repo-map tool wiring (REQ-RU-044..
 // SLICE-4 / TASK-011 — REQ-RU-094 + REQ-RU-040 (MCP half)
 // ===========================================================================
 
-describe("SLICE-4 / TASK-011 — MCP tool-count 42 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
+describe("SLICE-4 / TASK-011 — MCP tool-count 63 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
   // Full registry, in registration order. The original 23-tool battery (REQ-RU-094)
-  // is extended by the 12 coordination tools added after it: th_build_dispatch and
-  // th_build_plan slot into the build group (after th_build_release), and the
-  // artifact-lease / collab / debate trios append at the tail — then the
-  // th_proof_* trio (run/component/report) appends (35→38, PS-Q4), and finally the
-  // th_interview_*/th_init tools append at the very tail (38→42).
+  // is extended by the 12 coordination tools added after it (th_build_dispatch/plan,
+  // artifact-lease / collab / debate trios), then the th_proof_* trio (35→38), then
+  // the th_interview_*/th_init tools (38→42) — and finally the MCP-tool-expansion
+  // adds 21 more (42→63): 5 typed gate-transition tools (th_tier_record,
+  // th_stage_advance, th_implementation_unlock, th_write_gate_set,
+  // th_blast_radius_record) interleaved after th_state_set, plus 16 wired handlers
+  // (th_drift_list/resolve, th_coverage_report, th_artifact_register/list,
+  // th_verify_add/list/clear/run, th_stage_current/describe/list, th_doctor,
+  // th_scorecard, th_slices_sync, th_slice_set_status) slotted beside their families.
   const expectedAll = [
     "th_state_get",
     "th_state_set",
+    "th_tier_record",
+    "th_stage_advance",
+    "th_implementation_unlock",
+    "th_write_gate_set",
+    "th_blast_radius_record",
     "th_drift_add",
+    "th_drift_list",
+    "th_drift_resolve",
     "th_build_next_wave",
     "th_build_claim",
     "th_build_release",
@@ -359,6 +371,7 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 42 + schema/no-exec battery (REQ
     "th_build_plan",
     "th_route",
     "th_coverage_check",
+    "th_coverage_report",
     "th_next",
     "th_delegate_plan",
     "th_delegate_pack",
@@ -374,6 +387,8 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 42 + schema/no-exec battery (REQ
     "th_decision_add",
     "th_decision_check",
     "th_decision_list",
+    "th_artifact_register",
+    "th_artifact_list",
     "th_artifact_claim",
     "th_artifact_release",
     "th_artifact_leases",
@@ -384,6 +399,17 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 42 + schema/no-exec battery (REQ
     "th_debate_add",
     "th_debate_list",
     "th_debate_resolve",
+    "th_verify_add",
+    "th_verify_list",
+    "th_verify_clear",
+    "th_verify_run",
+    "th_stage_current",
+    "th_stage_describe",
+    "th_stage_list",
+    "th_doctor",
+    "th_scorecard",
+    "th_slices_sync",
+    "th_slice_set_status",
     "th_proof_run",
     "th_proof_component",
     "th_proof_report",
@@ -393,8 +419,8 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 42 + schema/no-exec battery (REQ
     "th_init",
   ];
 
-  // ---- REQ-RU-094: full registry, in order (originally 23; now 42 with the coordination + proof + interview/init tools) ----
-  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_42 — TOOL_DEFS exposes exactly 42 tools in order", () => {
+  // ---- REQ-RU-094: full registry, in order (originally 23; now 63 with the coordination + proof + interview/init + gate-transition + wired-handler tools) ----
+  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_63 — TOOL_DEFS exposes exactly 63 tools in order", () => {
     expect(TOOL_DEFS.map((t) => t.name)).toEqual(expectedAll);
   });
 

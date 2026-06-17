@@ -16,10 +16,10 @@
  *
  * NOTE: we do NOT assert against the LIVE `TOOL_DEFS` here — this module never
  * imports the MCP server (R7 — no bundle cycle), so callers inject the live
- * tool-name list. Live-registry equality (now 42 tools: 35 base + 3 proof + 4
- * interview/init) is owned by the frozen MCP parity/manifest tests. Callers pass
- * {@link EXPECTED_TOOL_ALLOWLIST} (42) as `toolNames` to prove the allowlist's own
- * integrity.
+ * tool-name list. Live-registry equality (now 63 tools: 42 prior + 21 new — 5
+ * typed gate-transition tools + 16 wired handlers) is owned by the frozen MCP
+ * parity/manifest tests. Callers pass {@link EXPECTED_TOOL_ALLOWLIST} (63) as
+ * `toolNames` to prove the allowlist's own integrity.
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -63,16 +63,27 @@ const path = __importStar(require("node:path"));
 const paths_1 = require("../paths");
 const state_fields_1 = require("../state-fields");
 /**
- * The 35 base MCP tool names (verified against `TOOL_DEFS`, plan Step 7) PLUS the 3
- * appended proof tools PLUS the 4 new interview/init tools — 42 total
- * (35 base + 3 proof + 4 new). `th_decision_approve` is INTENTIONALLY excluded
- * (RULE-011/INV-005: a human-only TTY gate is never exposed over MCP).
+ * The full MCP tool-name allowlist — 63 total (42 prior + 21 new: 5 typed
+ * gate-transition tools + 16 wired handlers), verified against `TOOL_DEFS` in
+ * canonical order (plan Step 7 / Deliverable 0). `th_decision_approve` is
+ * INTENTIONALLY excluded (RULE-011/INV-005: a human-only TTY gate is never
+ * exposed over MCP).
  */
 exports.EXPECTED_TOOL_ALLOWLIST = [
-    // --- 35 base tools ---
+    // Canonical TOOL_DEFS order (63). Copied verbatim from the Deliverable-0 list
+    // (.omc/research/canonical-tool-names.md). Order MUST match TOOL_DEFS,
+    // EXPECTED_TOOL_NAMES (repo.test.ts) and expectedAll (mcp-adapter.test.ts).
     "th_state_get",
     "th_state_set",
+    // 5 typed gate-transition tools (precondition-gated GATE_OWNED mutators):
+    "th_tier_record",
+    "th_stage_advance",
+    "th_implementation_unlock",
+    "th_write_gate_set",
+    "th_blast_radius_record",
     "th_drift_add",
+    "th_drift_list",
+    "th_drift_resolve",
     "th_build_next_wave",
     "th_build_claim",
     "th_build_release",
@@ -80,6 +91,7 @@ exports.EXPECTED_TOOL_ALLOWLIST = [
     "th_build_plan",
     "th_route",
     "th_coverage_check",
+    "th_coverage_report",
     "th_next",
     "th_delegate_plan",
     "th_delegate_pack",
@@ -95,6 +107,8 @@ exports.EXPECTED_TOOL_ALLOWLIST = [
     "th_decision_add",
     "th_decision_check",
     "th_decision_list",
+    "th_artifact_register",
+    "th_artifact_list",
     "th_artifact_claim",
     "th_artifact_release",
     "th_artifact_leases",
@@ -105,11 +119,22 @@ exports.EXPECTED_TOOL_ALLOWLIST = [
     "th_debate_add",
     "th_debate_list",
     "th_debate_resolve",
+    "th_verify_add",
+    "th_verify_list",
+    "th_verify_clear",
+    "th_verify_run",
+    "th_stage_current",
+    "th_stage_describe",
+    "th_stage_list",
+    "th_doctor",
+    "th_scorecard",
+    "th_slices_sync",
+    "th_slice_set_status",
     // --- 3 appended proof tools (read/coordination-only; never gate-mutating) ---
     "th_proof_run",
     "th_proof_component",
     "th_proof_report",
-    // --- 4 new interview/init tools (store-only / idempotent; never gate-mutating) ---
+    // --- 4 interview/init tools (store-only / idempotent; never gate-mutating) ---
     "th_interview_start",
     "th_interview_record",
     "th_interview_status",

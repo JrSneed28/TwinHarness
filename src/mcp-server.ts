@@ -42,10 +42,10 @@ import * as path from "node:path";
 import { resolveProjectPaths, type ProjectPaths } from "./core/paths";
 import { type CommandResult, failure } from "./core/output";
 
-import { runStateGet, runStateSet } from "./commands/state";
-import { runDriftAdd } from "./commands/drift";
+import { runStateGet, runStateSet, applyGateMutation } from "./commands/state";
+import { runDriftAdd, runDriftList, runDriftResolve } from "./commands/drift";
 import { runBuildNextWave, runBuildClaim, runBuildRelease, runBuildSubClaim, runBuildSubRelease, runBuildDispatch, runBuildPlan } from "./commands/build";
-import { runCoverageCheck } from "./commands/coverage";
+import { runCoverageCheck, runCoverageReport } from "./commands/coverage";
 import { runRoute } from "./commands/route";
 import { runNext } from "./commands/next";
 import { runDelegatePlan, runDelegatePack, runDelegateCheck } from "./commands/delegate";
@@ -60,6 +60,61 @@ import { runProofRun, runProofComponent, runProofReport } from "./commands/proof
 import { runInterviewStart, runInterviewRecord, runInterviewStatus } from "./commands/interview";
 import { runInitMcp } from "./commands/init";
 import type { ProofToolRegistry } from "./core/proof/runner";
+
+// --- Component A wiring tool handlers (16 existing handlers exposed as ToolDefs) ---
+import { runArtifactRegister, runArtifactList } from "./commands/artifact";
+import { runVerifyAdd, runVerifyList, runVerifyClear, runVerifyRun } from "./commands/verify";
+import { runStageCurrent, runStageDescribe, runStageList } from "./commands/stage";
+import { runDoctor } from "./commands/doctor";
+import { runScorecard } from "./commands/scorecard";
+import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
+
+// --- Component B: typed gate-transition tooling (precondition helpers + locked setter) ---
+import { readState } from "./core/state-store";
+import { nextStageAfter, canonicalizeStage } from "./core/stages";
+import {
+  TIERS,
+  WRITE_GATE_VALUES,
+  BLAST_RADIUS_FLAGS,
+  SLICE_STATUSES,
+  type TwinHarnessState,
+} from "./core/state-schema";
+import {
+  type GateResult,
+  canAdvanceStage,
+  canUnlockImplementation,
+  validateTierTransition,
+} from "./core/gate-preconditions";
+
+/**
+ * Strictness rank for the write-gate (tighten-only enforcement, AC-B-write-gate):
+ * off=0 < ask=1 < deny=2 < strict=3 (verified vs hook.ts:715,720-721,735 — `strict`
+ * adds the Phase-B Bash gate + fail-closed, so it outranks `deny`). An ABSENT
+ * `write_gate` is treated as `ask` (the documented default), so loosening below the
+ * current effective level is refused.
+ */
+const WRITE_GATE_RANK: Record<string, number> = { off: 0, ask: 1, deny: 2, strict: 3 };
+
+/**
+ * Read state for a typed gate tool, returning either the validated state or a
+ * structured failure (not-initialized / invalid). The 5 gate tools must inspect
+ * state to run their precondition helper BEFORE calling {@link applyGateMutation}.
+ */
+function gateState(paths: ProjectPaths): { state: TwinHarnessState } | { error: CommandResult } {
+  const r = readState(paths);
+  if (!r.exists) {
+    return { error: failure({ human: "No TwinHarness run here. Run `th init` first.", data: { error: "not_initialized" } }) };
+  }
+  if (!r.state) {
+    return { error: failure({ human: "state.json is invalid (`th state verify` for details).", data: { error: "invalid_state", issues: r.issues } }) };
+  }
+  return { state: r.state };
+}
+
+/** Map a failed {@link GateResult} to a structured tool refusal (stable data.error + detail). */
+function gateRefusal(check: GateResult): CommandResult {
+  return failure({ human: `Gate refused: ${check.error}`, data: { error: check.error ?? "gate_refused", ...(check.detail ?? {}) } });
+}
 
 /* ------------------------------------------------------------------ *
  * Project-paths resolution                                            *
@@ -154,10 +209,11 @@ export interface ToolDef {
   /** Build paths + call the matching `run*` handler, returning its CommandResult. */
   run: (paths: ProjectPaths, args: ToolArgs) => CommandResult;
   /**
-   * Async handler for tools that spawn real OS processes (the th_proof_* suite).
-   * When present, the CallTool path AWAITS this instead of {@link ToolDef.run}; the
-   * synchronous `run` then serves only as the sync-contract guard (never reached
-   * for these tools), so the 35 existing sync tools keep their exact contract.
+   * Async handler for tools that spawn real OS processes (the th_proof_* suite and
+   * th_verify_run). When present, the CallTool path AWAITS this instead of
+   * {@link ToolDef.run}; the synchronous `run` then serves only as the sync-contract
+   * guard (never reached for these tools), so every synchronous tool keeps its exact
+   * synchronous contract.
    */
   runAsync?: (paths: ProjectPaths, args: ToolArgs) => Promise<CommandResult>;
 }
@@ -187,9 +243,19 @@ function optNumber(args: ToolArgs, key: string): number | undefined {
 }
 
 /**
- * The exposed tools. Each mirrors one `th` subcommand's flags as a JSON-Schema
- * input and delegates to that subcommand's existing handler. Ordered to match
- * the CLI's own grouping (state, drift, build, route, coverage, next).
+ * The exposed tools (63 total). Each mirrors one `th` subcommand's flags as a
+ * JSON-Schema input and delegates to that subcommand's existing handler, EXCEPT the
+ * 5 typed gate-transition tools (th_tier_record, th_stage_advance,
+ * th_implementation_unlock, th_write_gate_set, th_blast_radius_record) which enforce
+ * a shared gate-precondition ladder then route through the locked+ledgered
+ * `applyGateMutation`. Breakdown: 21 prior coordination/observability tools + the 5
+ * typed gate tools + 16 newly-wired existing handlers (artifact register/list, drift
+ * list/resolve, verify add/list/clear/run, coverage report, stage current/describe/
+ * list, doctor, scorecard, slices sync, slice set-status) + 3 proof + 4
+ * interview/init = 63. Ordered by domain grouping (state+gates, drift, build, route,
+ * coverage, next, delegate, repo, decision, artifact, collab, debate, verify, stage,
+ * health, slices, proof, interview/init). This order is the canonical source the
+ * four order-sensitive name mirrors copy (see .omc/research/canonical-tool-names.md).
  */
 export const TOOL_DEFS: readonly ToolDef[] = [
   {
@@ -244,6 +310,140 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       return runStateSet(paths, key, rawValue);
     },
   },
+  // ---- Typed gate-transition tools (Component B) ----
+  // Each enforces a precondition via the shared gate-precondition helpers (the SAME
+  // single source of truth `th next` uses), then routes the write through the
+  // locked+ledgered `applyGateMutation` with a HARD-CODED `source` = the tool name
+  // (never read from args — an agent cannot spoof provenance, AC-B16). These are the
+  // FIRST machine-enforced gate ladder; `th_state_set`'s H-2 refusal stays intact.
+  {
+    name: "th_tier_record",
+    description:
+      "Record (classify or re-classify) the run's tier. Calls validateTierTransition: refuses t0_blast_radius_veto (T0 with blast-radius flags), tier_locked_after_unlock (once implementation_allowed===true), and tier_downgrade_human_only (a downward re-tier over MCP — a review-dodge vector). Set-from-unclassified and upgrades are allowed. Writes via the locked+ledgered setter (source=th_tier_record).",
+    inputSchema: {
+      type: "object",
+      properties: { tier: { type: "string", description: "Target tier.", enum: TIERS } },
+      required: ["tier"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      const tier = optString(args, "tier");
+      if (tier === undefined) return failure({ human: "th_tier_record requires `tier`.", data: { error: "missing_tier" } });
+      const gs = gateState(paths);
+      if ("error" in gs) return gs.error;
+      const check = validateTierTransition(gs.state, tier);
+      if (!check.ok) return gateRefusal(check);
+      return applyGateMutation(paths, { tier }, "th_tier_record");
+    },
+  },
+  {
+    name: "th_stage_advance",
+    description:
+      "Advance to the next engaged stage for the current tier. Calls canAdvanceStage (the full mechanical ladder: blocking drift, revise caps, failing verify, artifact drift, tier set, brownfield repo-map, decision obligations, open debates, the current stage's governing artifact, coverage at implementation-planning, all slices settled at implementation). Refuses with the first failing rung's stable error, or no_next_stage at the terminal stage. Writes current_stage via the locked+ledgered setter (source=th_stage_advance).",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => {
+      const gs = gateState(paths);
+      if ("error" in gs) return gs.error;
+      const state = gs.state;
+      const adv = canAdvanceStage(paths, state);
+      if (!adv.ok) return gateRefusal(adv);
+      const current = canonicalizeStage(state.current_stage);
+      const next = nextStageAfter(current, state.tier);
+      if (!next) {
+        return failure({
+          human: "Already at the terminal engaged stage for this tier; there is no next stage to advance to.",
+          data: { error: "no_next_stage", current_stage: current },
+        });
+      }
+      return applyGateMutation(paths, { current_stage: next.stage }, "th_stage_advance");
+    },
+  },
+  {
+    name: "th_implementation_unlock",
+    description:
+      "Set implementation_allowed. allowed:true requires the FULL canUnlockImplementation ladder (canAdvanceStage's complete ladder + tail: coverage passes AND current_stage ≥ implementation-planning) and refuses with the first failing rung's stable error. allowed:false (re-lock/tighten) is always permitted. Writes via the locked+ledgered setter (source=th_implementation_unlock).",
+    inputSchema: {
+      type: "object",
+      properties: { allowed: boolProp("true to unlock implementation (full gate ladder); false to re-lock (always allowed).") },
+      required: ["allowed"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      const allowed = optBool(args, "allowed");
+      if (allowed === undefined) return failure({ human: "th_implementation_unlock requires boolean `allowed`.", data: { error: "missing_allowed" } });
+      const gs = gateState(paths);
+      if ("error" in gs) return gs.error;
+      if (allowed) {
+        const check = canUnlockImplementation(paths, gs.state);
+        if (!check.ok) return gateRefusal(check);
+      }
+      return applyGateMutation(paths, { implementation_allowed: allowed }, "th_implementation_unlock");
+    },
+  },
+  {
+    name: "th_write_gate_set",
+    description:
+      "Set the PreToolUse write-gate level. TIGHTEN-ONLY over MCP: rank off < ask < deny < strict; any change to a strictly LOWER rank is refused (would_loosen_write_gate). An absent write_gate is treated as the default (ask). Writes via the locked+ledgered setter (source=th_write_gate_set).",
+    inputSchema: {
+      type: "object",
+      properties: { value: { type: "string", description: "Target write-gate level.", enum: WRITE_GATE_VALUES } },
+      required: ["value"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      const value = optString(args, "value");
+      if (value === undefined || !(WRITE_GATE_VALUES as readonly string[]).includes(value)) {
+        return failure({ human: `th_write_gate_set requires \`value\` one of ${WRITE_GATE_VALUES.join(", ")}.`, data: { error: "invalid_write_gate" } });
+      }
+      const gs = gateState(paths);
+      if ("error" in gs) return gs.error;
+      const current = gs.state.write_gate ?? "ask"; // absent ⇒ ask semantics (documented default)
+      if (WRITE_GATE_RANK[value]! < WRITE_GATE_RANK[current]!) {
+        return failure({
+          human: `Refusing to loosen write_gate from "${current}" to "${value}" over MCP (tighten-only).`,
+          data: { error: "would_loosen_write_gate", from: current, to: value },
+        });
+      }
+      return applyGateMutation(paths, { write_gate: value }, "th_write_gate_set");
+    },
+  },
+  {
+    name: "th_blast_radius_record",
+    description:
+      "Add or remove a §5 blast-radius flag (idempotent merge). present:true adds the flag, present:false removes it. Refuses t0_blast_radius_veto when the current tier is T0 and the result would carry any flag (re-tier above T0 first). Writes the merged, canonically-ordered blast_radius_flags via the locked+ledgered setter (source=th_blast_radius_record).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        flag: { type: "string", description: "Blast-radius flag.", enum: BLAST_RADIUS_FLAGS },
+        present: boolProp("true to add the flag, false to remove it."),
+      },
+      required: ["flag", "present"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      const flag = optString(args, "flag");
+      const present = optBool(args, "present");
+      if (flag === undefined || !(BLAST_RADIUS_FLAGS as readonly string[]).includes(flag)) {
+        return failure({ human: `th_blast_radius_record requires \`flag\` one of ${BLAST_RADIUS_FLAGS.join(", ")}.`, data: { error: "invalid_flag" } });
+      }
+      if (present === undefined) return failure({ human: "th_blast_radius_record requires boolean `present`.", data: { error: "missing_present" } });
+      const gs = gateState(paths);
+      if ("error" in gs) return gs.error;
+      const state = gs.state;
+      const cur = new Set<string>(state.blast_radius_flags);
+      if (present) cur.add(flag);
+      else cur.delete(flag);
+      // Canonical schema order so the stored array is deterministic (idempotent merge).
+      const merged = (BLAST_RADIUS_FLAGS as readonly string[]).filter((f) => cur.has(f));
+      if (state.tier === "T0" && merged.length > 0) {
+        return failure({
+          human: `Refusing: Tier 0 forbids blast-radius flags (§5). Re-tier above T0 (th_tier_record) before recording "${flag}".`,
+          data: { error: "t0_blast_radius_veto", flags: merged },
+        });
+      }
+      return applyGateMutation(paths, { blast_radius_flags: merged }, "th_blast_radius_record");
+    },
+  },
   {
     name: "th_drift_add",
     description:
@@ -270,6 +470,25 @@ export const TOOL_DEFS: readonly ToolDef[] = [
         escalation: optString(args, "escalation"),
         source: optString(args, "source"),
       }),
+  },
+  {
+    name: "th_drift_list",
+    description:
+      "List recorded §10 drift entries plus the open-blocking count the stop-gate reads. Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runDriftList(paths),
+  },
+  {
+    name: "th_drift_resolve",
+    description:
+      "Resolve an open drift entry by id; decrements the open-blocking counter when it was a requirement-layer (blocking) entry. Errors if the id is unknown or already resolved. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: { id: stringProp("The DRIFT-NNN id to resolve.") },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runDriftResolve(paths, optString(args, "id")),
   },
   {
     name: "th_build_next_wave",
@@ -365,6 +584,30 @@ export const TOOL_DEFS: readonly ToolDef[] = [
         planFile: optString(args, "planFile"),
         testsDir: optString(args, "testsDir"),
         scopeFile: optString(args, "scopeFile"),
+      }),
+  },
+  {
+    name: "th_coverage_report",
+    description:
+      "Full planned/implemented/tested traceability breakdown for every checked REQ-ID (structured payload). Optional reqs/plan/tests/scope/code path overrides mirror the CLI flags. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        reqsFile: stringProp("Requirements file (default docs/01-requirements.md)."),
+        planFile: stringProp("Implementation-plan file (default docs/09-implementation-plan.md)."),
+        testsDir: stringProp("Tests directory (default tests)."),
+        scopeFile: stringProp("Scope file for MVP filtering (default docs/02-scope.md)."),
+        codeDir: stringProp("Code directory scanned for the implemented dimension (default src)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runCoverageReport(paths, {
+        reqsFile: optString(args, "reqsFile"),
+        planFile: optString(args, "planFile"),
+        testsDir: optString(args, "testsDir"),
+        scopeFile: optString(args, "scopeFile"),
+        codeDir: optString(args, "codeDir"),
       }),
   },
   {
@@ -631,6 +874,38 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     },
     run: (paths, _args) => runDecisionList(paths),
   },
+  // Artifact governance — content-hash + register/list approved versioned artifacts.
+  {
+    name: "th_artifact_register",
+    description:
+      "Content-hash a file or directory (project-root-relative) and upsert it into approved_artifacts at the given version (re-registering replaces the entry). Rejects absolute paths and `..`/outside-root escapes; surfaces artifact_too_large when the hash byte-budget is exceeded. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: stringProp("Project-root-relative path to the file or directory to register."),
+        version: numberProp("Positive integer version to record."),
+      },
+      required: ["path", "version"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      const file = optString(args, "path");
+      const version = optNumber(args, "version");
+      if (file === undefined) return failure({ human: "th_artifact_register requires `path`.", data: { error: "missing_path" } });
+      // AC-A6: reject absolute or parent-escaping paths BEFORE the handler
+      // (defense-in-depth; runArtifactRegister also re-checks via resolveWithinRoot).
+      if (path.isAbsolute(file) || file.split(/[\\/]/).includes("..")) {
+        return failure({ human: `Refusing a path that is absolute or escapes the project root: ${file}`, data: { error: "path_escape", path: file } });
+      }
+      return runArtifactRegister(paths, file, version);
+    },
+  },
+  {
+    name: "th_artifact_list",
+    description: "List every recorded approved artifact ({file, version, hash}). Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runArtifactList(paths),
+  },
   // Section leases — fine-grained artifact-section coordination (mirrors build leases).
   {
     name: "th_artifact_claim",
@@ -779,7 +1054,119 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     },
     run: (paths, args) => runDebateResolve(paths, { id: optString(args, "id"), resolution: optString(args, "resolution") }),
   },
-  // ---- Proof suite (PS-Q4: th_proof_run/component/report, tail-appended 35→38) ----
+  // ---- Verify suite config + run (verify.json + verify-report.json) ----
+  {
+    name: "th_verify_add",
+    description:
+      'Append a project verify command (e.g. "npm test") to verify.json. Commands are operator-authored and executed by th_verify_run.',
+    inputSchema: {
+      type: "object",
+      properties: { command: stringProp("The shell command to add (required).") },
+      required: ["command"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runVerifyAdd(paths, optString(args, "command")),
+  },
+  {
+    name: "th_verify_list",
+    description: "List the configured verify commands. Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runVerifyList(paths),
+  },
+  {
+    name: "th_verify_clear",
+    description: "Remove all configured verify commands.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runVerifyClear(paths),
+  },
+  {
+    name: "th_verify_run",
+    description:
+      "Execute every configured verify command in the project root and record the report — the one command that runs project tests. Commands run OUTSIDE the state lock; only the report write is persisted (AC-B11). ASYNC: spawns real OS processes (dispatched via runAsync; `run` is the sync-contract guard).",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: () => asyncToolGuard("th_verify_run"),
+    runAsync: async (paths) => runVerifyRun(paths),
+  },
+  // ---- Stage contract introspection (read-only) ----
+  {
+    name: "th_stage_current",
+    description: "The stage contract for state.current_stage (or a plain note for a pre-pipeline stage). Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runStageCurrent(paths),
+  },
+  {
+    name: "th_stage_describe",
+    description: "Describe one pipeline stage's contract (produces / critic mode / human gate / tiers). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: { stage: stringProp("The stage id to describe (e.g. architecture).") },
+      required: ["stage"],
+      additionalProperties: false,
+    },
+    run: (_paths, args) => runStageDescribe(optString(args, "stage")),
+  },
+  {
+    name: "th_stage_list",
+    description: "List every pipeline stage with its tiers, human-gate flag, and produced artifact. Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: () => runStageList(),
+  },
+  // ---- Run-health audit + scorecard (structured payloads) ----
+  {
+    name: "th_doctor",
+    description:
+      "Run-health audit: a structured report of artifact drift, slice progress, revise escalations, coverage, and gate posture. Optional strict raises advisories to failures. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: { strict: boolProp("Treat advisories as failures (default false).") },
+      additionalProperties: false,
+    },
+    run: (paths, args) => runDoctor(paths, { strict: optBool(args, "strict") }),
+  },
+  {
+    name: "th_scorecard",
+    description:
+      "One-glance run scorecard: tier, stage, implementation gate, coverage, slice progress, suite status, drift, revise escalations, artifact integrity, and routing summary (structured payload). Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runScorecard(paths, {}),
+  },
+  // ---- Implementation-plan slice sync + status ----
+  {
+    name: "th_slices_sync",
+    description:
+      "Upsert implementation-plan slices into state.slices (existing ids keep their status; new ids start pending). planFile overrides the plan path; dryRun computes without writing; removeMissing drops state slices no longer in the plan. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        planFile: stringProp("Implementation-plan file (default docs/09-implementation-plan.md)."),
+        dryRun: boolProp("Compute and report without writing state."),
+        removeMissing: boolProp("Remove state slices no longer present in the plan."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runSlicesSync(paths, {
+        planFile: optString(args, "planFile"),
+        dryRun: optBool(args, "dryRun"),
+        removeMissing: optBool(args, "removeMissing"),
+      }),
+  },
+  {
+    name: "th_slice_set_status",
+    description:
+      "Set a slice's status (pending|in-progress|done|blocked). Errors on an unknown slice id or invalid status. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sliceId: stringProp("The SLICE-ID to update (e.g. SLICE-3)."),
+        status: { type: "string", description: "New status.", enum: SLICE_STATUSES },
+      },
+      required: ["sliceId", "status"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runSliceSetStatus(paths, optString(args, "sliceId"), optString(args, "status")),
+  },
+  // ---- Proof suite (PS-Q4: th_proof_run/component/report; read/coordination-only) ----
   // Read/coordination-only — NEVER gate-mutating (containment invariant). These run
   // the full suite (real OS-process spawns) so they are ASYNC: dispatched via
   // `runAsync`; `run` is the unreachable sync-contract guard. The injected registry
@@ -829,7 +1216,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     run: () => asyncToolGuard("th_proof_report"),
     runAsync: (paths) => runProofReport(paths, { registry: proofRegistry() }),
   },
-  // ---- Interview + init tools (tail-appended 38→42) ----
+  // ---- Interview + init tools ----
   // Store-only/deterministic: the interview tools RECORD agent-supplied scores and
   // PERSIST .twinharness/interview.json (no LLM in the deterministic layer); th_init
   // is idempotent and never gate-mutating. All four are containment-safe and join the
@@ -925,10 +1312,10 @@ function proofRegistry(): ProofToolRegistry {
 }
 
 /**
- * The sync-contract guard for the async-only th_proof_* tools. The CallTool path
- * dispatches them via {@link ToolDef.runAsync}, so this is never reached in
- * practice; it exists only to satisfy the required synchronous `run` contract that
- * the 35 existing tools rely on.
+ * The sync-contract guard for the async-only tools (th_proof_* + th_verify_run).
+ * The CallTool path dispatches them via {@link ToolDef.runAsync}, so this is never
+ * reached in practice; it exists only to satisfy the required synchronous `run`
+ * contract that the synchronous tools rely on.
  */
 function asyncToolGuard(name: string): CommandResult {
   return failure({ human: `${name} runs asynchronously; dispatch via the awaiting CallTool path.`, data: { error: "async_tool" } });

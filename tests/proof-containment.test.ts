@@ -1,6 +1,6 @@
 /**
  * Component 7 (Security & containment) — plan §11; AC #12. The allowlist is the
- * exact NAME-SET (42 entries) and `th_decision_approve` is absent. A matching
+ * exact NAME-SET (63 entries) and `th_decision_approve` is absent. A matching
  * tool-name list PASSES; an extra/missing name or `th_decision_approve` FAILS with
  * an AI-actionable diagnostic naming it. Also proves GATE_OWNED 5-field refusal and
  * telemetry no-network. Containment is DEPENDENCY-INJECTED — `toolNames` is passed
@@ -20,10 +20,10 @@ const find = (
 ) => report.assertions.find((a) => a.name === name)!;
 
 describe("proof/containment — exact NAME-SET + GATE_OWNED + telemetry (AC #12)", () => {
-  it("allowlist has 42 entries and excludes th_decision_approve", () => {
-    expect(EXPECTED_TOOL_ALLOWLIST.length).toBe(42);
+  it("allowlist has 63 entries and excludes th_decision_approve", () => {
+    expect(EXPECTED_TOOL_ALLOWLIST.length).toBe(63);
     expect(EXPECTED_TOOL_ALLOWLIST).not.toContain(FORBIDDEN_MCP_TOOL);
-    // 35 base + 3 proof + 4 new interview/init tools.
+    // 42 prior + 21 new (5 typed gate-transition tools + 16 wired handlers).
     expect(EXPECTED_TOOL_ALLOWLIST).toContain("th_proof_run");
     expect(EXPECTED_TOOL_ALLOWLIST).toContain("th_proof_component");
     expect(EXPECTED_TOOL_ALLOWLIST).toContain("th_proof_report");

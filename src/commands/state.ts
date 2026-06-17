@@ -166,6 +166,83 @@ function runStateSetLocked(paths: ProjectPaths, key: string, rawValue: string): 
   return success({ data: { key, value }, human: `Set ${key} = ${JSON.stringify(value)}` });
 }
 
+/**
+ * Shared locked + ledgered gate-mutation writer (plan Phase 2 Step 6, AC-B16).
+ *
+ * The single write path for the typed MCP gate-transition tools (`th_tier_record`,
+ * `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`,
+ * `th_blast_radius_record`). It mirrors `runStateSetLocked`'s persist tail
+ * (`withStateLock` → clone → mutate → `validateState` → `writeState` +
+ * `appendLedger` + `appendHighWater`) but is GENERIC over the set of gate fields
+ * to change, so one call can flip several gate-owned fields atomically under a
+ * single lock.
+ *
+ * SECURITY (AC-B16):
+ *  - `source` is supplied by the CALLING TOOL as a hard-coded literal (the tool
+ *    name) and is **never** read from tool `args` — an agent cannot spoof
+ *    `source="th state set"`. Per `src/core/ledger.ts:5-10` this is observability,
+ *    not provenance: it records which entry point fired, not who authorized it.
+ *  - One FLAT scalar ledger entry per changed field (`{ event, key, value, source }`),
+ *    shaped exactly like the existing `gate-state-change` entries above.
+ *    `ledgerCanonicalText` does NOT key-normalize nested objects
+ *    (`src/core/ledger.ts:103-105`), so a nested patch blob would break the hash
+ *    chain; `blast_radius_flags` is a flat `string[]` and is an acceptable single
+ *    value.
+ *
+ * Preconditions are enforced by the CALLER (the gate-precondition helpers) BEFORE
+ * this runs; `applyGateMutation` itself enforces no gate ladder, but it still calls
+ * `validateState` and refuses `would_be_invalid`, so an out-of-schema write can
+ * never persist through this path.
+ */
+export function applyGateMutation(
+  paths: ProjectPaths,
+  fields: Record<string, unknown>,
+  source: string,
+): CommandResult {
+  return withStateLock(paths, () => {
+    const r = readState(paths);
+    if (!r.exists) return NOT_INIT;
+    if (!r.state) {
+      return failure({
+        human: `Existing state.json is invalid; fix it before mutating gates:\n${formatIssues(r.issues)}`,
+        data: { error: "invalid_state", issues: r.issues },
+      });
+    }
+
+    const next = JSON.parse(JSON.stringify(r.state)) as Record<string, unknown>;
+    for (const [key, value] of Object.entries(fields)) {
+      next[key] = value;
+    }
+
+    const validation = validateState(next);
+    if (!validation.ok) {
+      return failure({
+        human: `Refusing to write: result would be invalid:\n${formatIssues(validation.issues)}`,
+        data: { error: "would_be_invalid", issues: validation.issues },
+      });
+    }
+    writeState(paths, validation.state!);
+    structuredLog({ cmd: "gate mutation", source, keys: Object.keys(fields) });
+    // Audit ledger (F5 / AC-B16): ONE flat scalar entry per changed gate field,
+    // tagged with the hard-coded `source` so a human can see which entry point
+    // fired. Flat key/value keeps `ledgerCanonicalText` deterministic (no nested
+    // blob). Every field passed here is a deliberate gate mutation, so each is
+    // audited (no GATE_LEDGER_KEYS filter — the filter on the CLI path screens
+    // arbitrary sets; here the caller passes only gate fields). Best-effort:
+    // `appendLedger` never throws.
+    for (const [key, value] of Object.entries(fields)) {
+      appendLedger(paths, { event: "gate-state-change", key, value, source });
+    }
+    // One in-chain high-water anchor after the batch of gate flips (mirrors
+    // `runStateSetLocked`'s post-flip seal).
+    appendHighWater(paths);
+    return success({
+      data: { source, fields },
+      human: `Applied gate mutation (${source}): ${Object.keys(fields).join(", ")}`,
+    });
+  });
+}
+
 /** `th state status` — human-readable snapshot of tier/stage/gates. */
 export function runStateStatus(paths: ProjectPaths): CommandResult {
   const r = readState(paths);
