@@ -15907,7 +15907,8 @@ function withStateLock(paths, fn, ops = realLockOps) {
           continue;
         }
       } catch (statErr) {
-        if (code === "EPERM" || code === "EACCES") throw e;
+        const statCode = statErr.code;
+        if (statCode === "EPERM" || statCode === "EACCES") throw e;
         backoff();
         continue;
       }

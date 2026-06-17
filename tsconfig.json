@@ -15,7 +15,8 @@
     "declaration": false,
     "sourceMap": false,
     "resolveJsonModule": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "ignoreDeprecations": "5.0"
   },
   "include": ["src/**/*.ts"],
   "//": "M-1: src/mcp-server.ts is EXCLUDED from tsc EMIT so a bare `tsc` can never overwrite the esbuild bundle (dist/mcp-server.js) with un-shippable CJS that fails the bundle-purity guard and ships an MCP server that crashes ERR_MODULE_NOT_FOUND. esbuild (`npm run build:mcp`) is the SOLE producer of that file. Typecheck still covers mcp-server.ts via tsconfig.typecheck.json.",

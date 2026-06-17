@@ -251,10 +251,23 @@ function withStateLock(paths, fn, ops = exports.realLockOps) {
                 }
             }
             catch (statErr) {
-                if (code === "EPERM" || code === "EACCES")
+                // The lock was HELD (acquire threw a contention code) but the follow-up
+                // stat failed. WHY the STAT failed — not which code the acquire threw —
+                // decides recover-vs-rethrow:
+                //   • stat ENOENT → the holder released the lock between our mkdir and the
+                //     stat (the textbook vanish race) → back off and retry. This is the
+                //     dominant Windows path: a *contention* EPERM from mkdir (see
+                //     isLockHeldError) immediately followed by the holder's release. The
+                //     old code keyed this branch off the ACQUIRE code, so a contention
+                //     EPERM + a vanished lock rethrew a raw EPERM and crashed the caller
+                //     (windows-latest flake, REQ-STATE-LOCK-002 — N writers under readers).
+                //   • stat EPERM/EACCES → the lock dir is genuinely inaccessible (a real
+                //     permission fault, not contention) → rethrow the original error.
+                const statCode = statErr.code;
+                if (statCode === "EPERM" || statCode === "EACCES")
                     throw e; // genuine permission error
-                backoff(); // bound the EEXIST-vanished retry (#3)
-                continue; // EEXIST: lock vanished between mkdir and stat — retry
+                backoff(); // bound the vanished-lock retry (#3)
+                continue; // lock vanished between mkdir and stat — retry
             }
             // Plain wait path (held + not stale): back off, then retry from the loop head
             // (which enforces the deadline). The old `while`-spin pegged a core here.
