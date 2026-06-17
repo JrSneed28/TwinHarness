@@ -54,6 +54,42 @@ function nodeMajor() {
     return m ? Number(m[1]) : 0;
 }
 /**
+ * The gate-ledger audit checks ("audit ledger" count + "ledger chain"
+ * tamper-evidence), computed INDEPENDENTLY of state.json validity (finding #1).
+ *
+ * These previously lived inside the valid-state `else`, so a corrupt state.json
+ * SUPPRESSED the ledger-chain tamper signal — exactly when an attacker who has
+ * also corrupted state would most want it hidden. They are now guarded on the
+ * ledger FILE's existence (not state validity), so the chain is verified whenever
+ * there is a ledger to verify, whether or not state.json parses. Returns `[]` when
+ * no ledger file exists — nothing to audit.
+ *
+ * WARNING by default (the ledger is a best-effort review aid), escalated to FAIL
+ * under `--strict`. Legacy (pre-migration, unsealed) lines are NOT a tamper
+ * signal — `verifyLedgerChain` verifies only the sealed run.
+ */
+function ledgerChecks(paths, opts) {
+    if (!fs.existsSync((0, ledger_1.ledgerPath)(paths)))
+        return [];
+    const ledgerEntries = (0, ledger_1.readLedger)(paths);
+    const ledgerCount = ledgerEntries.length;
+    const out = [
+        { name: "audit ledger", status: "ok", detail: `${ledgerCount} gate-mutation entr${ledgerCount === 1 ? "y" : "ies"}` },
+    ];
+    const chain = (0, ledger_1.verifyLedgerChain)(ledgerEntries);
+    if (chain.ok) {
+        out.push({ name: "ledger chain", status: "ok", detail: ledgerCount > 0 ? "intact (no tampering detected)" : "no entries to verify" });
+    }
+    else {
+        out.push({
+            name: "ledger chain",
+            status: opts.strict ? "fail" : "warn",
+            detail: `BROKEN at entry ${chain.brokenAt} (${chain.reason}) — a sealed entry was edited, deleted, or reordered${opts.strict ? "" : " (run \`th doctor --strict\` to fail on this)"}`,
+        });
+    }
+    return out;
+}
+/**
  * @param opts.strict When true, a gate-ledger chain break is escalated from a
  *   WARNING to a hard FAIL (non-zero exit). Default (false) keeps it a warning —
  *   the ledger is a best-effort review aid, so a broken chain informs rather than
@@ -107,6 +143,10 @@ function runDoctor(paths, opts = {}) {
             status: "fail",
             detail: `present but INVALID: ${(r.issues ?? []).map((i) => `${i.path}: ${i.message}`).join("; ") || "schema mismatch"}`,
         });
+        // finding #1: verify the gate-ledger even when state.json is corrupt — the
+        // tamper signal must NOT be suppressed by a (possibly attacker-induced)
+        // invalid state. Guarded on the ledger file's existence, not state validity.
+        checks.push(...ledgerChecks(paths, opts));
     }
     else {
         const s = r.state;
@@ -140,25 +180,10 @@ function runDoctor(paths, opts = {}) {
                 detail: `${lockDir} present (${Math.round(age / 1000)}s old) — remove it if no \`th\` process is running`,
             });
         }
-        const ledgerEntries = (0, ledger_1.readLedger)(paths);
-        const ledgerCount = ledgerEntries.length;
-        checks.push({ name: "audit ledger", status: "ok", detail: `${ledgerCount} gate-mutation entr${ledgerCount === 1 ? "y" : "ies"}` });
-        // Tamper-evidence (GOV-2): verify the gate-ledger's hash chain. A break means
-        // a sealed entry was edited/backdated, deleted, or reordered. WARNING by
-        // default (the ledger is a best-effort review aid), escalated to FAIL under
-        // strict. Legacy (pre-migration, unsealed) lines are NOT a tamper signal —
-        // `verifyLedgerChain` verifies only the sealed run.
-        const chain = (0, ledger_1.verifyLedgerChain)(ledgerEntries);
-        if (chain.ok) {
-            checks.push({ name: "ledger chain", status: "ok", detail: ledgerCount > 0 ? "intact (no tampering detected)" : "no entries to verify" });
-        }
-        else {
-            checks.push({
-                name: "ledger chain",
-                status: opts.strict ? "fail" : "warn",
-                detail: `BROKEN at entry ${chain.brokenAt} (${chain.reason}) — a sealed entry was edited, deleted, or reordered${opts.strict ? "" : " (run \`th doctor --strict\` to fail on this)"}`,
-            });
-        }
+        // Gate-ledger audit (GOV-2) — "audit ledger" count + "ledger chain"
+        // tamper-evidence. Via the shared helper so the SAME checks also run when
+        // state.json is corrupt (finding #1); see ledgerChecks above.
+        checks.push(...ledgerChecks(paths, opts));
         // --- Run health (read-only; warnings only) ---
         // Artifact integrity: on-disk hash vs the recorded approved hash.
         const integrity = (0, health_1.artifactIntegrity)(paths, s);

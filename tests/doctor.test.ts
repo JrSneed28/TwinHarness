@@ -168,3 +168,72 @@ describe("REQ-DOCTOR-003 (GOV-2): gate-ledger hash-chain verification", () => {
     expect(byName(strict.data, "ledger chain")?.status).toBe("fail");
   });
 });
+
+describe("finding #1 (GOV-2): a corrupt state.json must NOT suppress ledger-chain verification", () => {
+  // Before the fix, readLedger + verifyLedgerChain lived inside the valid-state
+  // `else`, so a corrupt state.json SKIPPED them entirely — the `ledger chain`
+  // tamper signal disappeared exactly when an attacker who also corrupted state
+  // would want it hidden. The assertion is on the PRESENCE/ABSENCE + status of the
+  // `ledger chain` check, NOT on the exit code (which is non-zero either way via
+  // the `state.json: fail`).
+  it("corrupt state.json + TAMPERED ledger → `ledger chain` is STILL emitted (BROKEN), not hidden", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    appendLedger(tp.paths, { event: "gate-state-change", key: "write_gate", value: "deny" });
+    appendLedger(tp.paths, { event: "gate-state-change", key: "write_gate", value: "off" });
+    // Forge a sealed field without re-hashing → chain "edited" at entry 0.
+    const entries = readLedger(tp.paths);
+    entries[0]!.value = "strict";
+    fs.writeFileSync(ledgerPath(tp.paths), entries.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
+    // Now corrupt state.json itself.
+    fs.writeFileSync(tp.paths.stateFile, "{ not valid json");
+
+    const res = runDoctor(tp.paths);
+    expect(byName(res.data, "state.json")?.status).toBe("fail");
+    // Fail-before: this check was UNDEFINED (suppressed). Pass-after: it is emitted.
+    const chain = byName(res.data, "ledger chain");
+    expect(chain).toBeDefined();
+    expect(chain?.status).toBe("warn"); // default (non-strict) → warn, still surfaced
+    expect(chain?.detail).toMatch(/BROKEN at entry 0 \(edited\)/);
+  });
+
+  it("corrupt state.json + TAMPERED ledger under --strict → `ledger chain` is a hard fail", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    appendLedger(tp.paths, { event: "e1" });
+    appendLedger(tp.paths, { event: "e2" });
+    const entries = readLedger(tp.paths);
+    // Drop the middle line → the survivor's prevHash no longer matches → prev_mismatch.
+    fs.writeFileSync(ledgerPath(tp.paths), JSON.stringify(entries[1]) + "\n", "utf8");
+    fs.writeFileSync(tp.paths.stateFile, "{ not valid json");
+
+    const res = runDoctor(tp.paths, { strict: true });
+    expect(res.ok).toBe(false);
+    expect(byName(res.data, "ledger chain")?.status).toBe("fail");
+  });
+
+  it("corrupt state.json + INTACT ledger → `ledger chain: ok` emitted (clean control)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    appendLedger(tp.paths, { event: "gate-state-change", key: "write_gate", value: "deny" });
+    fs.writeFileSync(tp.paths.stateFile, "{ not valid json");
+
+    const res = runDoctor(tp.paths);
+    expect(byName(res.data, "state.json")?.status).toBe("fail");
+    expect(byName(res.data, "ledger chain")?.status).toBe("ok");
+    expect(byName(res.data, "audit ledger")?.detail).toMatch(/1 gate-mutation entry/);
+  });
+
+  it("corrupt state.json + NO ledger file → no ledger checks (nothing to audit)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    // No appendLedger → no gate-ledger.jsonl on disk.
+    fs.writeFileSync(tp.paths.stateFile, "{ not valid json");
+
+    const res = runDoctor(tp.paths);
+    expect(byName(res.data, "state.json")?.status).toBe("fail");
+    // The file-existence guard means a ledger-less project shows no audit checks.
+    expect(byName(res.data, "ledger chain")).toBeUndefined();
+    expect(byName(res.data, "audit ledger")).toBeUndefined();
+  });
+});
