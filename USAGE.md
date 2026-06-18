@@ -398,7 +398,7 @@ violation. Writes to in-progress slices' paths and to paths owned by no slice ar
 | `ask` (default) | Claude Code presents an allow/deny prompt. Human sessions proceed with one click; headless agents are effectively blocked. |
 | `deny` | Writes are hard-blocked. Use for strict runs where no slip-through is acceptable. |
 | `off` | Gate disabled. Equivalent to setting `TH_DISABLE_WRITE_GATE=1`. |
-| `strict` | `deny` semantics plus Phase-B Bash-mediated-write enforcement of the §16 component-boundary rule — a backward-compatible superset of `deny` (see the 0.6.2 notes below). |
+| `strict` | `deny` semantics plus Phase-B Bash-mediated-write enforcement of the §16 component-boundary rule — a backward-compatible superset of `deny`. |
 
 Set it with `th state set write_gate deny` (or `ask`, `off`, `strict`). The field is absent by default (behaves as `ask`).
 
@@ -1164,7 +1164,7 @@ stdout, not in the process exit code.
 
 ### Repo-understanding layer (`th repo`)
 
-SLICE-0..5 adds a deterministic repo-understanding layer — three CLI commands and four MCP tools — that gives TwinHarness a mechanical spine for understanding an existing codebase before it plans or builds into it (REQ-RU-001..096). The layer treats all repository content as **untrusted data**: it records build/test commands as inert strings but never executes them.
+The repo-understanding layer gives TwinHarness a mechanical spine for understanding an existing codebase before it plans or builds into it. The layer treats all repository content as **untrusted data**: it records build/test commands as inert strings but never executes them.
 
 #### `th repo map`
 
@@ -1258,7 +1258,7 @@ Pre-edit blast-radius analysis over the persisted `repo-map.json`. Reads no stat
 
 #### MCP tools (registered count 62)
 
-62 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin (REQ-RU-051 — identical code path). The four repo-understanding tools are shown below; the interview/init layer registers the store-only `th_interview_start`, `th_interview_record`, `th_interview_status` plus the idempotent (no-force) `th_init`. The MCP-tool-expansion then adds 21 more (39 → 60): 5 typed, precondition-gated gate-transition tools (`th_tier_record`, `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`, `th_blast_radius_record`) that safely mutate `GATE_OWNED` fields, plus 16 wired handlers (`th_drift_list`, `th_drift_resolve`, `th_coverage_report`, `th_artifact_register`, `th_artifact_list`, `th_verify_add`, `th_verify_list`, `th_verify_clear`, `th_verify_run`, `th_stage_current`, `th_stage_describe`, `th_stage_list`, `th_doctor`, `th_scorecard`, `th_slices_sync`, `th_slice_set_status`). Finally Track A-2's context-budget layer adds 2 more (60 → 62): `th_budget_check` (deterministic budget estimate) and `th_handoff_write` (assemble `.twinharness/HANDOFF.md`):
+62 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin. The interview/init surface exposes `th_interview_start`, `th_interview_record`, `th_interview_status`, and `th_init`. Five precondition-gated gate-transition tools safely mutate gate-owned fields: `th_tier_record`, `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`, `th_blast_radius_record`. Additional wired handlers: `th_drift_list`, `th_drift_resolve`, `th_coverage_report`, `th_artifact_register`, `th_artifact_list`, `th_verify_add`, `th_verify_list`, `th_verify_clear`, `th_verify_run`, `th_stage_current`, `th_stage_describe`, `th_stage_list`, `th_doctor`, `th_scorecard`, `th_slices_sync`, `th_slice_set_status`. Notable tools highlighted below:
 
 | Tool name | CLI equivalent | Notes |
 |---|---|---|
@@ -1426,57 +1426,6 @@ SECURITY.md       threat model (gate scope, Bash bypass, global hook, prompt inj
 CI (`npm ci` → `npm run typecheck` → `npm test` → `npm run build` → `git diff --exit-code dist/`)
 runs on every push and pull request, enforcing the committed-`dist/` invariant. See
 `CONTRIBUTING.md` for the full developer setup and plugin-packaging rules.
-
-### New in 0.6.2 — preview · scorecard · telemetry · brownfield · strict gate
-
-- **`th preview [--tier T<n>]`** — a pre-run view of the pipeline shape: the engaged stages for
-  a tier, which carry a human gate, and each stage's Critic mode, plus a stages/gates/reviews
-  summary line. Tier resolves from `--tier`, else the recorded `state.tier`, else T2 (and says so).
-  Read-only.
-- **`th scorecard [--json] [--hotspots]`** — a read-only one-screen post-run summary: tier/stage, coverage
-  (planned/implemented/tested), slice progress, suite status (from the last `th verify run`, `—` if
-  none), drift (entries + open blocking), revise escalations, and a **Routing** line summarizing
-  recorded `th route` telemetry (`—` when none). If telemetry is on, each call also appends a
-  timestamped snapshot. **`--hotspots`** instead emits a per-stage cost table — token (estimate/proxy)
-  and wall-clock totals aggregated from the local `telemetry.jsonl` log by stage; when telemetry is
-  off/empty it prints a clear "no data" message and still exits 0 (never crashes).
-- **`th telemetry on|off|status`** — opt-in, **local-only** run telemetry stored next to `state.json`
-  (`telemetry.json` + `telemetry.jsonl`), off by default. Nothing is ever transmitted; `on` starts
-  recording `th scorecard` snapshots, `off` stops, `status` shows the flag and record count.
-- **Brownfield (`th init --brownfield`)** — stamps `project_mode: "brownfield"` and shifts the
-  pipeline to overlay reality: the Orchestrator invokes the Codebase-Inspector to map the existing
-  repo before tiering, Slice 0 becomes a characterization test around the adoption seam, and the
-  Builder reuses existing code that already satisfies a requirement. Existing auth/money/migrations in
-  touched code remain blast-radius (never Tier 0).
-- **`write_gate: "strict"`** (`th state set write_gate strict`) — a backward-compatible superset of
-  `deny`: it additionally holds mid-build (Phase B) **Bash-mediated** writes to the §16
-  component-boundary rule (`echo x > src/api.ts`, `sed -i`, `tee`, `dd of=` into a path owned by a
-  slice that is not `in-progress` is denied). Fail-open and conservative — it narrows, but does not
-  close, the Bash bypass (here-docs, subshells, variable indirection, and globbing are not parsed;
-  see `SECURITY.md`). Default modes leave Phase-B Bash writes ungated, exactly as before.
-
-### New in Phase 5 — component sub-leases · worktree merge protocol · nested sub-agents
-
-- **`th build sub-claim` / `sub-release`** — a Builder or Debugger may carve a **subset** of its own
-  in-progress slice's components into a **sub-lease** (`<PARENT>#sub-<n>`) for a single scoped
-  sub-Builder, validated as a disjoint subset of the parent's components; `th build leases` lists
-  sub-leases. A parent settling to `done`/`blocked` makes its sub-leases stale automatically. See
-  *Sub-leases & nested sub-agents* above.
-- **Nested sub-agents (bounded).** Builders and Debuggers carry the `Agent` tool and may spawn either
-  a read-only advisory child (Researcher / fresh-context Critic / Debugger, run in the foreground) or
-  one scoped sub-Builder under a sub-lease — never a top-level Builder, never `th build next-wave` or
-  a top-level claim. Nesting is capped at one level. The Orchestrator remains the sole **top-level**
-  coordinator. Guardrails live in `agents/builder.md` / `agents/debugger.md`.
-- **Worktree isolation + merge-back.** Parallel Builders run in isolated git worktrees
-  (`isolation: worktree`) while `.twinharness/` stays a **shared** coordination plane (state/lease/
-  drift commands from a worktree target the main root via `--cwd` or the `mcp__plugin_twinharness_th__*`
-  tools). On Critic PASS the Orchestrator merges each worktree branch back in wave order; a non-clean
-  merge between plan-disjoint slices opens **blocking** drift. See *Worktrees & the merge-back
-  protocol* above.
-- **`th next --explain`** — the next-action oracle gains a `--explain` flag that adds a short WHY
-  string explaining why the reported obligation is the highest-priority one right now.
-- **`th scorecard` Routing line** — the scorecard now shows a read-only **Routing** summary of
-  recorded `th route` telemetry (per-model tally of route calls), or `—` when none.
 
 ### Templates
 

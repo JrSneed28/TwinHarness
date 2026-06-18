@@ -9,7 +9,7 @@ npm test           # run the full Vitest suite
 npm run typecheck  # type-check without emitting
 ```
 
-Node ≥ 18 is required (see `engines` in `package.json`).
+Node ≥ 20 is required (see `engines` in `package.json`).
 
 `npm install` also wires a **pre-commit hook** (zero-dependency — no husky): its
 `prepare` script runs `git config core.hooksPath .githooks`, pointing Git at the
@@ -59,7 +59,7 @@ contract. These facts must remain true:
 | Invariant | Value |
 |-----------|-------|
 | Agent count | 16 (files in `agents/*.md`) |
-| Command count | 4 (files in `commands/*.md`) |
+| Command count | 16 (files in `commands/*.md`) |
 | Skill count | 1 (`skills/twinharness/SKILL.md`) |
 | CLI invocation in every component | `"${CLAUDE_PLUGIN_ROOT}/dist/cli.js"` |
 | `plugin.json` version | must equal `package.json` version |
@@ -106,7 +106,7 @@ GitHub auto-populates these from [`.github/`](.github/):
 | `dist/` | Compiled CLI output — committed, do not gitignore |
 | `skills/` | Prompt files for Claude Code skills |
 | `agents/` | Agent prompt files (16 total) |
-| `commands/` | Slash-command prompt files (4 total) |
+| `commands/` | Slash-command prompt files (16 total) |
 | `templates/` | Artifact skeleton templates |
 | `hooks/` | Gate wiring (`hooks.json`, Stop and PreToolUse hooks) |
 | `.claude-plugin/` | `plugin.json` and `marketplace.json` manifests |
