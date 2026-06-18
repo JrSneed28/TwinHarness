@@ -41,6 +41,7 @@ const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
+const atomic_io_1 = require("../core/atomic-io");
 const log_1 = require("../core/log");
 const hash_1 = require("../core/hash");
 const next_1 = require("./next");
@@ -141,7 +142,9 @@ function runHandoffWrite(paths) {
         "",
     ].join("\n");
     fs.mkdirSync(paths.stateDir, { recursive: true });
-    fs.writeFileSync(handoffPath(paths), md, "utf8");
+    // Atomic write (temp + rename) — same durability guarantee as state.json /
+    // interview.json, so a crash mid-write never leaves a corrupt HANDOFF.md.
+    (0, atomic_io_1.atomicWriteFile)(handoffPath(paths), md);
     const relPath = path.relative(paths.root, handoffPath(paths)).split(path.sep).join("/");
     (0, log_1.structuredLog)({ cmd: "handoff write", path: relPath, slices: slices.length, artifacts: s.approved_artifacts.length });
     return (0, output_1.success)({

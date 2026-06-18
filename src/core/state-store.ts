@@ -55,9 +55,26 @@ export function readState(paths: ProjectPaths): ReadStateResult {
   if (!result.ok) {
     return { exists: true, raw, issues: result.issues, warnings: result.warnings };
   }
+  // Self-heal a legacy (pre-v2) `interview_threshold` into `interview_cutoff` on
+  // read so a mutating read-modify-write that happens BEFORE `th migrate` does not
+  // silently DROP the (un-inverted) value: `interview_threshold` is now an unknown
+  // key, so `serializeState` would omit it on the next write and the later migrate
+  // would fall back to the default cutoff — a silent gate change. Mirrors the
+  // state.json v1→v2 migration and the interview.json lazy upgrade
+  // (cutoff = 1 − threshold). Idempotent; does not stamp schema_version, so a
+  // subsequent `th migrate` still runs the version step.
+  const state = result.state as
+    | (TwinHarnessState & { interview_threshold?: number })
+    | undefined;
+  if (state) {
+    if (state.interview_cutoff === undefined && typeof state.interview_threshold === "number") {
+      state.interview_cutoff = 1 - state.interview_threshold;
+    }
+    delete state.interview_threshold;
+  }
   // A valid file may still carry non-fatal warnings (e.g. an unknown top-level
   // key); thread them through so callers like `th state verify` can surface them.
-  return { exists: true, raw, state: result.state, warnings: result.warnings };
+  return { exists: true, raw, state, warnings: result.warnings };
 }
 
 /**

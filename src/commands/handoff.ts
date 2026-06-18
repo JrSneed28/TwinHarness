@@ -3,6 +3,7 @@ import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState } from "../core/state-store";
+import { atomicWriteFile } from "../core/atomic-io";
 import { structuredLog } from "../core/log";
 import { shortHashPath } from "../core/hash";
 import { runNext } from "./next";
@@ -123,7 +124,9 @@ export function runHandoffWrite(paths: ProjectPaths): CommandResult {
   ].join("\n");
 
   fs.mkdirSync(paths.stateDir, { recursive: true });
-  fs.writeFileSync(handoffPath(paths), md, "utf8");
+  // Atomic write (temp + rename) — same durability guarantee as state.json /
+  // interview.json, so a crash mid-write never leaves a corrupt HANDOFF.md.
+  atomicWriteFile(handoffPath(paths), md);
 
   const relPath = path.relative(paths.root, handoffPath(paths)).split(path.sep).join("/");
   structuredLog({ cmd: "handoff write", path: relPath, slices: slices.length, artifacts: s.approved_artifacts.length });

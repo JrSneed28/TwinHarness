@@ -15868,7 +15868,14 @@ function readState(paths) {
   if (!result.ok) {
     return { exists: true, raw, issues: result.issues, warnings: result.warnings };
   }
-  return { exists: true, raw, state: result.state, warnings: result.warnings };
+  const state = result.state;
+  if (state) {
+    if (state.interview_cutoff === void 0 && typeof state.interview_threshold === "number") {
+      state.interview_cutoff = 1 - state.interview_threshold;
+    }
+    delete state.interview_threshold;
+  }
+  return { exists: true, raw, state, warnings: result.warnings };
 }
 function writeState(paths, state) {
   atomicWriteFile(paths.stateFile, serializeState(state));
@@ -20000,7 +20007,7 @@ function runNext(paths, opts = {}) {
       {
         kind: "complete-interview",
         action: "A clarity interview is required before `requirements` \u2014 run the `th:run --interview` loop until the interview reaches `ready` (the `th_interview_status` MCP tool reports it), then advance.",
-        why: "This run requires a clarity interview (interview_required, or tier T2/T3) and it has not yet reached readiness; the soft gate refuses advancement past requirements until the ambiguity threshold is met, so completing the interview outranks stage work.",
+        why: "This run requires a clarity interview (interview_required, or tier T2/T3) and it has not yet reached readiness; the soft gate refuses advancement past requirements until the confidence cutoff is met, so completing the interview outranks stage work.",
         data: { current_stage: interviewR.detail.current_stage }
       },
       explain
@@ -20780,7 +20787,7 @@ function runHandoffWrite(paths) {
     ""
   ].join("\n");
   fs22.mkdirSync(paths.stateDir, { recursive: true });
-  fs22.writeFileSync(handoffPath(paths), md, "utf8");
+  atomicWriteFile(handoffPath(paths), md);
   const relPath = path18.relative(paths.root, handoffPath(paths)).split(path18.sep).join("/");
   structuredLog({ cmd: "handoff write", path: relPath, slices: slices.length, artifacts: s.approved_artifacts.length });
   return success({
