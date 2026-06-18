@@ -234,12 +234,22 @@ each slice; bidirectional drift loop throughout; parallel waves via `th slices s
 
 **Full detail:** read `${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference/build-and-verify.md`.
 
-### 10.5. Documentation & 11. Final Verification
+### 10.5. Documentation-Phase Gate & 11. Final Verification
 
-Documentation (Doc-Writer agent, tier-appropriate modes) runs after all slices pass code-review
-Critic and before Final Verification. Final Verification: `th trace render` + `th coverage check`
-+ verification report + Critic `final-verification` mode (T2/T3) + human correctness gate.
-Cascade re-verification (§18) covers upstream artifact changes.
+After all slices pass the code-review Critic loop, present a **repeatable menu** (human gate via
+`AskUserQuestion`) before advancing to Final Verification:
+
+- **[1] Write documentation** — delegate to the Doc-Writer agent (tier-appropriate modes), run
+  the per-mode Critic loops, advance `current_stage documentation`, then return to the menu.
+- **[2] Run qa-tester** — delegate to the Tester agent (`agents/tester.md`) for a live QA pass
+  against the built project, receive the Delegation Capsule, then return to the menu.
+- **[3] Skip → Final Verification** — advance to Stage 11 immediately.
+
+Documentation is **never generated automatically** — it is produced only when the user picks
+**[1]**. Options **[1]** and **[2]** loop back to the menu; only **[3]** advances. Final
+Verification: `th trace render` + `th coverage check` + verification report + Critic
+`final-verification` mode (T2/T3) + human correctness gate. Cascade re-verification (§18)
+covers upstream artifact changes.
 
 **Full detail:** read `${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference/build-and-verify.md`.
 

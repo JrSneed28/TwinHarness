@@ -69,6 +69,16 @@ Follow the `twinharness` skill (the Orchestrator playbook). In brief:
    (or flip any gate-owned field) — it never touches the gate-owned `implementation_allowed` field;
    the Stop-gate hook and the existing prerequisite gate own that. The build-phase gate only decides
    *where* (this session vs. a fresh one) you begin, never *whether* the gate is satisfied.
+5.5. **Documentation-phase gate (after all slices pass code-review Critic).** Do **not** automatically
+   generate documentation. Instead, present a **repeatable menu** via `AskUserQuestion`:
+   - **[1] Write documentation** — delegate to the Doc-Writer agent (tier-appropriate modes), run the
+     per-mode Critic loops, then **return to this menu**.
+   - **[2] Run qa-tester** — delegate to the Tester agent (`agents/tester.md`) for a live QA pass,
+     then **return to this menu**.
+   - **[3] Skip → Final Verification** — advance to Stage 11 now.
+
+   Options **[1]** and **[2]** loop; only **[3]** advances. Full detail in
+   `reference/build-and-verify.md` (Stage 10.5).
 6. Keep `state.json` authoritative via the `th` CLI; the Stop-gate hook enforces a valid state before
    any "stage complete" claim.
 

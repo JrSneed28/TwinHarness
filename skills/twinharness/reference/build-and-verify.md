@@ -261,10 +261,27 @@ th state set current_stage implementation
 
 ---
 
-## Stage 10.5 — Documentation
+## Stage 10.5 — Documentation-Phase Gate (menu)
 
-After all slices have passed the code-review Critic loop and before Final Verification, run the
-Documentation stage. Documentation at this position describes drift-corrected reality.
+After all slices have passed the code-review Critic loop and before Final Verification, present
+the following **repeatable menu** via `AskUserQuestion`. Do **not** automatically generate
+documentation — wait for the user to choose.
+
+```
+Documentation phase — what would you like to do?
+
+[1] Write documentation      — run the Doc-Writer (tier-appropriate modes), then return here.
+[2] Run qa-tester            — run a live QA pass against the built project, then return here.
+[3] Skip → Final Verification — advance to Stage 11 now.
+```
+
+Only **[3]** advances the pipeline. **[1]** and **[2]** execute the requested work, then
+**return to this menu** so the user may pick again (e.g., write docs → run QA → skip, or run
+QA first, then write docs). No documentation is generated unless the user picks **[1]**.
+
+---
+
+### Option [1] — Write documentation
 
 Delegate to the **Doc-Writer agent (`agents/doc-writer.md`)** with the tier-appropriate mode
 set:
@@ -293,16 +310,46 @@ Critic in `documentation` mode** — one producer→Critic loop per mode, not a 
 
 - Check `th revise status documentation --json` → if `escalate: true`, surface open grounded
   issues to the human and stop (cap reached, default 3 rounds).
-- Critic **PASS** → proceed to the next mode or to Final Verification. Zero issues is a valid
-  terminal state.
+- Critic **PASS** → proceed to the next mode. Zero issues is a valid terminal state.
 - Critic **FAIL** → run `th revise bump documentation`, route grounded defects back to the
   Doc-Writer agent, re-run. Repeat until PASS or escalation.
 
-**No human gate** (Critic gates). Advance state after all modes pass:
+After all modes complete their Critic loops, advance state:
 
 ```
 th state set current_stage documentation
 ```
+
+Then **return to the documentation-phase menu**.
+
+---
+
+### Option [2] — Run qa-tester
+
+Delegate to the **Tester agent (`agents/tester.md`)** — the broad-QA, live-app driver. It
+launches and drives the real built project (CLI/service/web/TUI), classifies findings as
+PASS/FAIL/REGRESSION/FLAKY, and routes them to `th drift add` / the blackboard. It does not
+write `docs/` files and does not self-certify pass.
+
+Delegation flow:
+
+1. `th delegate plan --intent review` → determines whether a capsule is needed and suggests the
+   model/effort for the Tester's tier.
+2. `th delegate pack --agent tester` → produces a bounded child handoff with project context
+   (tier, built artifacts, `current_stage`).
+3. Spawn the Tester agent with the handoff. The Tester selects the right driver per project type
+   (direct process/stdio for CLI/services; `claude-in-chrome` for web; tmux optional and never
+   required).
+4. Receive the Delegation Capsule and validate with `th delegate check --capsule <path>`.
+
+After the Tester returns its capsule, **return to the documentation-phase menu**.
+
+---
+
+### Option [3] — Skip → Final Verification
+
+Advance directly to Stage 11. No documentation is generated unless the user previously chose
+**[1]** in this menu session.
 
 ---
 
