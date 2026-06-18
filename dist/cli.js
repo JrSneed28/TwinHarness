@@ -134,7 +134,7 @@ Usage:
   th doctor                         Self-diagnostic + run-health audit (env, state, artifacts, coverage, slices, revise loops)
   th next [--explain]               The next mechanical obligation the run owes (next-action oracle); --explain adds a WHY
   th preview [--tier T<n>]          Pre-run view: engaged stages, human gates, and Critic modes for a tier
-  th scorecard                      Post-run one-screen summary (tier/coverage/slices/suite/drift/revise)
+  th scorecard [--hotspots]         Post-run one-screen summary (tier/coverage/slices/suite/drift/revise); --hotspots emits a per-stage token (estimate/proxy) + wall-clock table from the local telemetry log (empty/exit-0 when no telemetry)
   th route [--agent A] [--mode M] [--tier T] [--component-blast] [--summarization]
                                     Advisory model+effort for an agent spawn (computes; the Orchestrator applies)
   th telemetry on|off|status        Toggle/report opt-in, LOCAL-ONLY run telemetry (never sent off-machine)
@@ -205,6 +205,7 @@ Global flags:
   --dry-run         (slices sync) Compute without writing state
   --remove-missing  (slices sync) Remove slices absent from the plan
   --explain         (next) Include a WHY string: why this obligation is the highest-priority one
+  --hotspots        (scorecard) Emit the per-stage token + wall-clock table from local telemetry
   --intent <i>      (delegate) read|write|debug|review|artifact|repo-analysis
   --files <n>       (delegate plan) Expected file reads (delegate when > 3)
   --writes          (delegate plan) The task modifies source code
@@ -249,6 +250,7 @@ const BOOLEAN_FLAGS = {
     "--component-blast": "componentBlast",
     "--summarization": "summarization",
     "--explain": "explain",
+    "--hotspots": "hotspots",
     "--writes": "writes",
     "--noisy": "noisy",
     "--write": "write",
@@ -349,6 +351,7 @@ function parseArgs(argv) {
         componentBlast: false,
         summarization: false,
         explain: false,
+        hotspots: false,
         writes: false,
         noisy: false,
         write: false,
@@ -485,7 +488,7 @@ function dispatch(parsed) {
         case "preview":
             return (0, preview_1.runPreview)(paths, { tier: parsed.flags.tier });
         case "scorecard":
-            return (0, scorecard_1.runScorecard)(paths, { json: parsed.flags.json });
+            return (0, scorecard_1.runScorecard)(paths, { json: parsed.flags.json, hotspots: parsed.flags.hotspots });
         case "route":
             return (0, route_1.runRoute)(paths, {
                 agent: parsed.flags.agent,

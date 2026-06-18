@@ -67,7 +67,108 @@ function summarizeRouting(paths: ProjectPaths): RoutingSummary {
   return { events, models };
 }
 
-export function runScorecard(paths: ProjectPaths, opts: { json?: boolean }): CommandResult {
+/**
+ * One stage's aggregated cost, summed across every telemetry record that names
+ * that stage. `tokens` is the estimate/proxy total (whatever a stage emitter
+ * recorded as `tokens` / `estTokens` / `tokensProxy`); `wallMs` is the
+ * wall-clock total (`wallMs` / `durationMs`). Both are best-effort: a record
+ * that names a stage but carries no number simply contributes an event with a
+ * zero amount, so the table never crashes on partial telemetry.
+ */
+interface StageHotspot {
+  stage: string;
+  events: number;
+  tokens: number;
+  wallMs: number;
+}
+
+/** First finite numeric field among `keys` on `rec`, else 0. */
+function pickNumber(rec: Record<string, unknown>, keys: string[]): number {
+  for (const k of keys) {
+    const v = rec[k];
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+  }
+  return 0;
+}
+
+/**
+ * Aggregate the LOCAL telemetry log into a per-stage cost table: token
+ * (estimate/proxy) + wall-clock totals, grouped by the `stage` field every
+ * snapshot already carries. Read-only — it consults the same `telemetry.jsonl`
+ * the scorecard appends to, never the network. Records without a string `stage`
+ * are ignored (route events, etc.); a missing/disabled/empty log yields an empty
+ * table (handled by the caller as a graceful, exit-0 "no data" message).
+ */
+function summarizeHotspots(paths: ProjectPaths): { stages: StageHotspot[]; recordsScanned: number } {
+  const byStage = new Map<string, StageHotspot>();
+  let recordsScanned = 0;
+  for (const raw of readTelemetryLog(paths)) {
+    recordsScanned++;
+    const rec = raw as Record<string, unknown>;
+    const stage = rec.stage;
+    if (typeof stage !== "string" || stage.length === 0) continue;
+    const tokens = pickNumber(rec, ["tokens", "estTokens", "tokensProxy"]);
+    const wallMs = pickNumber(rec, ["wallMs", "durationMs"]);
+    const cur = byStage.get(stage) ?? { stage, events: 0, tokens: 0, wallMs: 0 };
+    cur.events++;
+    cur.tokens += tokens;
+    cur.wallMs += wallMs;
+    byStage.set(stage, cur);
+  }
+  const stages = [...byStage.values()].sort((a, b) => b.tokens - a.tokens || a.stage.localeCompare(b.stage));
+  return { stages, recordsScanned };
+}
+
+/**
+ * `th scorecard --hotspots` — a per-stage cost table (token estimate/proxy +
+ * wall-clock) computed from the LOCAL telemetry log. Read-only and crash-proof:
+ * when telemetry is off/empty (no stage-bearing records) it returns an empty,
+ * zeroed table with a clear message and exit 0 — it never throws. Like the rest
+ * of the scorecard it emits both a `--json` payload and a human table.
+ */
+export function runScorecardHotspots(paths: ProjectPaths): CommandResult {
+  const { stages, recordsScanned } = summarizeHotspots(paths);
+  const totalEvents = stages.reduce((n, s) => n + s.events, 0);
+  const totalTokens = stages.reduce((n, s) => n + s.tokens, 0);
+  const totalWallMs = stages.reduce((n, s) => n + s.wallMs, 0);
+
+  const data = {
+    hotspots: stages,
+    totalEvents,
+    totalTokens,
+    totalWallMs,
+    recordsScanned,
+  };
+
+  let human: string;
+  if (stages.length === 0) {
+    human = [
+      "Per-stage hotspots: no stage telemetry recorded yet.",
+      recordsScanned === 0
+        ? "Telemetry log is empty — enable it with `th telemetry on`; hotspots populate as stages emit token/wall-clock snapshots."
+        : `Scanned ${recordsScanned} telemetry record(s), none carried a stage. Hotspots populate as stages emit token/wall-clock snapshots.`,
+    ].join("\n");
+  } else {
+    const header = `${"STAGE".padEnd(20)} ${"EVENTS".padStart(7)} ${"~TOKENS".padStart(9)} ${"WALL(ms)".padStart(9)}`;
+    const rows = stages.map(
+      (s) =>
+        `${s.stage.padEnd(20)} ${String(s.events).padStart(7)} ${String(s.tokens).padStart(9)} ${String(s.wallMs).padStart(9)}`,
+    );
+    const total = `${"TOTAL".padEnd(20)} ${String(totalEvents).padStart(7)} ${String(totalTokens).padStart(9)} ${String(totalWallMs).padStart(9)}`;
+    human = [
+      `Per-stage hotspots (from ${recordsScanned} telemetry record(s), ${stages.length} stage(s)):`,
+      header,
+      ...rows,
+      total,
+    ].join("\n");
+  }
+
+  return success({ data, human });
+}
+
+export function runScorecard(paths: ProjectPaths, opts: { json?: boolean; hotspots?: boolean }): CommandResult {
+  if (opts.hotspots) return runScorecardHotspots(paths);
+
   const r = readState(paths);
   if (!r.exists) {
     return failure({ human: "No TwinHarness run here. Run `th init` first.", data: { error: "not_initialized" } });

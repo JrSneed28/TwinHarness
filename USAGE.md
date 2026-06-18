@@ -1029,11 +1029,13 @@ runs on every push and pull request, enforcing the committed-`dist/` invariant. 
   a tier, which carry a human gate, and each stage's Critic mode, plus a stages/gates/reviews
   summary line. Tier resolves from `--tier`, else the recorded `state.tier`, else T2 (and says so).
   Read-only.
-- **`th scorecard [--json]`** — a read-only one-screen post-run summary: tier/stage, coverage
+- **`th scorecard [--json] [--hotspots]`** — a read-only one-screen post-run summary: tier/stage, coverage
   (planned/implemented/tested), slice progress, suite status (from the last `th verify run`, `—` if
   none), drift (entries + open blocking), revise escalations, and a **Routing** line summarizing
   recorded `th route` telemetry (`—` when none). If telemetry is on, each call also appends a
-  timestamped snapshot.
+  timestamped snapshot. **`--hotspots`** instead emits a per-stage cost table — token (estimate/proxy)
+  and wall-clock totals aggregated from the local `telemetry.jsonl` log by stage; when telemetry is
+  off/empty it prints a clear "no data" message and still exits 0 (never crashes).
 - **`th telemetry on|off|status`** — opt-in, **local-only** run telemetry stored next to `state.json`
   (`telemetry.json` + `telemetry.jsonl`), off by default. Nothing is ever transmitted; `on` starts
   recording `th scorecard` snapshots, `off` stops, `status` shows the flag and record count.

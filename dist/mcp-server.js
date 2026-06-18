@@ -21797,7 +21797,67 @@ function summarizeRouting(paths) {
   }
   return { events, models };
 }
+function pickNumber(rec, keys) {
+  for (const k of keys) {
+    const v = rec[k];
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+  }
+  return 0;
+}
+function summarizeHotspots(paths) {
+  const byStage = /* @__PURE__ */ new Map();
+  let recordsScanned = 0;
+  for (const raw of readTelemetryLog(paths)) {
+    recordsScanned++;
+    const rec = raw;
+    const stage = rec.stage;
+    if (typeof stage !== "string" || stage.length === 0) continue;
+    const tokens = pickNumber(rec, ["tokens", "estTokens", "tokensProxy"]);
+    const wallMs = pickNumber(rec, ["wallMs", "durationMs"]);
+    const cur = byStage.get(stage) ?? { stage, events: 0, tokens: 0, wallMs: 0 };
+    cur.events++;
+    cur.tokens += tokens;
+    cur.wallMs += wallMs;
+    byStage.set(stage, cur);
+  }
+  const stages = [...byStage.values()].sort((a, b) => b.tokens - a.tokens || a.stage.localeCompare(b.stage));
+  return { stages, recordsScanned };
+}
+function runScorecardHotspots(paths) {
+  const { stages, recordsScanned } = summarizeHotspots(paths);
+  const totalEvents = stages.reduce((n, s) => n + s.events, 0);
+  const totalTokens = stages.reduce((n, s) => n + s.tokens, 0);
+  const totalWallMs = stages.reduce((n, s) => n + s.wallMs, 0);
+  const data = {
+    hotspots: stages,
+    totalEvents,
+    totalTokens,
+    totalWallMs,
+    recordsScanned
+  };
+  let human;
+  if (stages.length === 0) {
+    human = [
+      "Per-stage hotspots: no stage telemetry recorded yet.",
+      recordsScanned === 0 ? "Telemetry log is empty \u2014 enable it with `th telemetry on`; hotspots populate as stages emit token/wall-clock snapshots." : `Scanned ${recordsScanned} telemetry record(s), none carried a stage. Hotspots populate as stages emit token/wall-clock snapshots.`
+    ].join("\n");
+  } else {
+    const header = `${"STAGE".padEnd(20)} ${"EVENTS".padStart(7)} ${"~TOKENS".padStart(9)} ${"WALL(ms)".padStart(9)}`;
+    const rows = stages.map(
+      (s) => `${s.stage.padEnd(20)} ${String(s.events).padStart(7)} ${String(s.tokens).padStart(9)} ${String(s.wallMs).padStart(9)}`
+    );
+    const total = `${"TOTAL".padEnd(20)} ${String(totalEvents).padStart(7)} ${String(totalTokens).padStart(9)} ${String(totalWallMs).padStart(9)}`;
+    human = [
+      `Per-stage hotspots (from ${recordsScanned} telemetry record(s), ${stages.length} stage(s)):`,
+      header,
+      ...rows,
+      total
+    ].join("\n");
+  }
+  return success({ data, human });
+}
 function runScorecard(paths, opts) {
+  if (opts.hotspots) return runScorecardHotspots(paths);
   const r = readState(paths);
   if (!r.exists) {
     return failure({ human: "No TwinHarness run here. Run `th init` first.", data: { error: "not_initialized" } });
