@@ -17,12 +17,24 @@ import { structuredLog } from "../core/log";
 
 /**
  * Per-version migration steps. The key is the version being migrated FROM; each
- * step returns the state shape at the next version. Currently the only step is
- * the implicit legacy→v1 stamp (no field changes). Add steps here when the
- * schema changes (e.g. a `1: (s) => ({ ...s, new_field: default })`).
+ * step returns the state shape at the next version. Add steps here when the schema
+ * changes.
+ *
+ * v1 → v2 (interview confidence/cutoff flip): rename `interview_threshold` →
+ * `interview_cutoff`, inverting the value to preserve the gate exactly. The old
+ * gate fired when `ambiguity <= threshold`; the new one when `confidence >= cutoff`,
+ * and `confidence = 1 − ambiguity`, so the equivalent cutoff is `1 − threshold`
+ * (threshold 0.2 → cutoff 0.8). A pure key rename WITHOUT the inversion would
+ * silently loosen the gate, so the value MUST be flipped here. An un-migrated stale
+ * `interview_threshold` only hits the warn-only unknown-key path (it is no longer a
+ * known field), so this version step is the mandatory migration path for state.json.
  */
 const MIGRATIONS: Record<number, (s: TwinHarnessState) => TwinHarnessState> = {
-  // 1: (s) => ({ ...s, /* v1 → v2 field changes */ }),
+  1: (s) => {
+    const { interview_threshold, ...rest } = s as TwinHarnessState & { interview_threshold?: number };
+    if (interview_threshold === undefined) return { ...rest };
+    return { ...rest, interview_cutoff: 1 - interview_threshold };
+  },
 };
 
 export function runMigrate(paths: ProjectPaths): CommandResult {

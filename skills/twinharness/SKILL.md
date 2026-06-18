@@ -113,20 +113,20 @@ than reimplementing it. Existing auth/money/migrations in touched code are §5 b
 
 ### 1.5. Interview gate (`--interview`)
 
-When `/twinharness:th-run` is invoked with **`--interview`**, run a full **ambiguity-scored Socratic
+When `/twinharness:th-run` is invoked with **`--interview`**, run a full **confidence-scored Socratic
 loop** immediately **after `th init`** and **before** tier classification. This **replaces the §14.1
 vague-narrow step** for that run (without `--interview`, the lightweight §14.1 narrowing still applies).
 
 The deterministic `th` layer cannot call an LLM, so **the Orchestrator (you) performs the scoring**;
 the `th_interview_*` MCP tools only persist state (store-only, under `.twinharness/interview.json`):
 
-- `th_interview_start { idea, threshold? }` → creates `.twinharness/interview.json`. Resolve the
-  threshold as `--threshold` flag → state field `interview_threshold` → **0.20** default.
+- `th_interview_start { idea, cutoff? }` → creates `.twinharness/interview.json`. Resolve the
+  cutoff as `--cutoff` flag → state field `interview_cutoff` → **0.80** default.
 - Each round: ask one sharp clarifying question, **score it yourself**, then
-  `th_interview_record { question, answer, scores{goal,constraints,criteria}, ambiguity, entities[] }`
-  (pass `scores`/`entities` as JSON-encoded strings). **Show the ambiguity score each round.**
-- `th_interview_status {}` → `{ rounds, ambiguity, threshold, ready }`. Stop when `ready`
-  (ambiguity ≤ threshold).
+  `th_interview_record { question, answer, scores{goal,constraints,criteria}, confidence, entities[] }`
+  (pass `scores`/`entities` as JSON-encoded strings). **Show the confidence score each round.**
+- `th_interview_status {}` → `{ rounds, confidence, cutoff, ready }`. Stop when `ready`
+  (confidence ≥ cutoff).
 - **Early-exit** allowed from **round 3** with a recorded warning; **hard cap 20 rounds**.
 - Then proceed to tiering + requirements, **seeding from `.twinharness/interview.json`**.
 

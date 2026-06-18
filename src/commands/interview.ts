@@ -1,12 +1,12 @@
 /**
  * `th interview …` — the deterministic, STORE-ONLY interview handlers.
  *
- * The Orchestrator runs an ambiguity-scored Socratic loop (`th:run --interview`).
- * All JUDGMENT — the per-dimension scores, the ambiguity number, the captured
+ * The Orchestrator runs a confidence-scored Socratic loop (`th:run --interview`).
+ * All JUDGMENT — the per-dimension scores, the confidence number, the captured
  * entities — is produced by the AGENT; the deterministic layer cannot call an LLM
  * (plan Principle 1). These handlers therefore only RECORD what the agent supplies
  * and PERSIST it to `.twinharness/interview.json`. The ONLY value they COMPUTE is
- * `ready = ambiguity <= threshold` (the resolved gate). Everything else is verbatim
+ * `ready = confidence >= cutoff` (the resolved gate). Everything else is verbatim
  * storage + read-back.
  *
  * Each handler is a convention-conformant `CommandResult` handler (Critical
@@ -15,6 +15,15 @@
  *
  * A missing OR corrupt `interview.json` is treated as "not started": `status`
  * reports `started:false`; `record` refuses with `not_started`.
+ *
+ * MIGRATION (semantic flip): the surface was historically `ambiguity` (lower =
+ * better) gated by a `threshold` (ready when `ambiguity <= threshold`). It is now
+ * `confidence` (higher = better) gated by a `cutoff` (ready when
+ * `confidence >= cutoff`). `readInterview` performs a LAZY on-read upgrade of a
+ * legacy `{ threshold, ambiguity }` file to the new `{ cutoff, confidence }` shape
+ * (`confidence = 1 − ambiguity`, `cutoff = 1 − threshold`), snapshots the legacy
+ * file once to `interview.json.bak`, then rewrites it. interview.json carries NO
+ * schema_version, so this lazy upgrade is its only migration path.
  */
 
 import * as fs from "node:fs";
@@ -23,8 +32,8 @@ import { atomicWriteFile } from "../core/atomic-io";
 import { type CommandResult, success, failure } from "../core/output";
 import { structuredLog } from "../core/log";
 
-/** Default ambiguity-gate threshold (spec R15): the run gates once ambiguity ≤ 0.20. */
-export const DEFAULT_INTERVIEW_THRESHOLD = 0.2;
+/** Default confidence-gate cutoff (spec R15): the run gates once confidence ≥ 0.80. */
+export const DEFAULT_INTERVIEW_CUTOFF = 0.8;
 
 /** Per-dimension scores the agent supplies for a round (verbatim — never computed here). */
 export interface InterviewScores {
@@ -38,17 +47,17 @@ export interface InterviewRound {
   question: string;
   answer: string;
   scores: InterviewScores;
-  ambiguity: number;
+  confidence: number;
   entities: string[];
 }
 
 /** The persisted interview document (`.twinharness/interview.json`). */
 export interface InterviewState {
   idea: string;
-  threshold: number;
+  cutoff: number;
   rounds: InterviewRound[];
-  /** The latest round's ambiguity (null until the first round is recorded). */
-  ambiguity: number | null;
+  /** The latest round's confidence (null until the first round is recorded). */
+  confidence: number | null;
   status: "in-progress";
 }
 
@@ -57,26 +66,98 @@ function isUnit(n: unknown): n is number {
   return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
 }
 
-/** Validate a parsed value as a well-formed InterviewState (corrupt ⇒ "not started"). */
+/**
+ * Validate a parsed value as a well-formed InterviewState. Accepts BOTH the NEW
+ * `{ cutoff, confidence }` shape and the LEGACY `{ threshold, ambiguity }` shape
+ * during the transition — a legacy file must survive validation so `readInterview`
+ * can upgrade it in place (otherwise it would be silently dropped as "not started").
+ * The round-level confidence/ambiguity field is intentionally NOT validated here
+ * (verbatim store; `record` validates new rounds on the way in). Corrupt ⇒ "not started".
+ */
 function isInterviewState(v: unknown): v is InterviewState {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
   if (typeof o.idea !== "string") return false;
-  if (!isUnit(o.threshold)) return false;
+  // Accept either the new `cutoff` or the legacy `threshold` gate value.
+  const gate = o.cutoff ?? o.threshold;
+  if (!isUnit(gate)) return false;
   if (!Array.isArray(o.rounds)) return false;
-  if (!(o.ambiguity === null || isUnit(o.ambiguity))) return false;
+  // Latest-gate value: new `confidence` or legacy `ambiguity`; null/absent allowed.
+  const latest = o.confidence ?? o.ambiguity;
+  if (!(latest === null || latest === undefined || isUnit(latest))) return false;
   return true;
+}
+
+/** True iff a parsed object is in the LEGACY `{ threshold, ambiguity }` shape. */
+function isLegacyShape(o: Record<string, unknown>): boolean {
+  return o.cutoff === undefined && o.threshold !== undefined;
+}
+
+/**
+ * Upgrade a legacy `{ threshold, ambiguity }` document to the new
+ * `{ cutoff, confidence }` shape. The flip preserves the gate exactly:
+ * `confidence = 1 − ambiguity`, `cutoff = 1 − threshold` (so threshold 0.2 → cutoff 0.8).
+ */
+function upgradeLegacy(o: Record<string, unknown>): InterviewState {
+  const threshold = o.threshold as number;
+  const rawRounds = Array.isArray(o.rounds) ? o.rounds : [];
+  const rounds: InterviewRound[] = rawRounds.map((r) => {
+    const rr = r as Record<string, unknown>;
+    const amb = rr.ambiguity;
+    const conf =
+      typeof rr.confidence === "number"
+        ? rr.confidence
+        : typeof amb === "number"
+          ? 1 - amb
+          : 0;
+    return {
+      question: String(rr.question ?? ""),
+      answer: String(rr.answer ?? ""),
+      scores: rr.scores as InterviewScores,
+      confidence: conf,
+      entities: Array.isArray(rr.entities) ? (rr.entities as string[]) : [],
+    };
+  });
+  const latestAmb = o.ambiguity;
+  const confidence =
+    typeof latestAmb === "number" ? 1 - latestAmb : null;
+  return {
+    idea: String(o.idea ?? ""),
+    cutoff: 1 - threshold,
+    rounds,
+    confidence,
+    status: "in-progress",
+  };
 }
 
 /**
  * Read + validate the interview store. Returns null for a MISSING or CORRUPT file
  * (both mean "not started") — never throws.
+ *
+ * LAZY UPGRADE: a legacy `{ threshold, ambiguity }` file is snapshotted once to
+ * `interview.json.bak`, upgraded to the `{ cutoff, confidence }` shape, and
+ * rewritten in place — so every later read sees the new shape.
  */
 function readInterview(paths: ProjectPaths): InterviewState | null {
   try {
     if (!fs.existsSync(paths.interviewFile)) return null;
-    const parsed = JSON.parse(fs.readFileSync(paths.interviewFile, "utf8")) as unknown;
-    return isInterviewState(parsed) ? parsed : null;
+    const raw = fs.readFileSync(paths.interviewFile, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isInterviewState(parsed)) return null;
+    const o = parsed as unknown as Record<string, unknown>;
+    if (isLegacyShape(o)) {
+      // Snapshot the legacy file ONCE (pre-mortem #3) before rewriting in the new shape.
+      const bak = paths.interviewFile + ".bak";
+      try {
+        if (!fs.existsSync(bak)) fs.writeFileSync(bak, raw, "utf8");
+      } catch {
+        // A failed snapshot must not block the upgrade — the read still succeeds.
+      }
+      const upgraded = upgradeLegacy(o);
+      writeInterview(paths, upgraded);
+      return upgraded;
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -92,19 +173,19 @@ function writeInterview(paths: ProjectPaths, state: InterviewState): void {
   atomicWriteFile(paths.interviewFile, JSON.stringify(state, null, 2) + "\n");
 }
 
-/** `ready` is the ONLY computed value: the resolved ambiguity gate. */
-function computeReady(ambiguity: number | null, threshold: number): boolean {
-  return ambiguity !== null && ambiguity <= threshold;
+/** `ready` is the ONLY computed value: the resolved confidence gate. */
+function computeReady(confidence: number | null, cutoff: number): boolean {
+  return confidence !== null && confidence >= cutoff;
 }
 
 export interface InterviewStartOptions {
   idea?: string;
-  threshold?: number;
+  cutoff?: number;
 }
 
 /**
  * `th interview start` — create `.twinharness/interview.json` for a new interview.
- * Store-only: records the idea + resolved threshold; no rounds yet. Overwrites any
+ * Store-only: records the idea + resolved cutoff; no rounds yet. Overwrites any
  * prior interview (a fresh `th:run --interview` starts a clean loop).
  */
 export function runInterviewStart(paths: ProjectPaths, opts: InterviewStartOptions = {}): CommandResult {
@@ -113,22 +194,22 @@ export function runInterviewStart(paths: ProjectPaths, opts: InterviewStartOptio
     structuredLog({ cmd: "interview start", error: "missing_field", field: "idea" });
     return failure({ human: "Missing required `idea`.", data: { error: "missing_field", field: "idea" } });
   }
-  const threshold = opts.threshold ?? DEFAULT_INTERVIEW_THRESHOLD;
-  if (!isUnit(threshold)) {
-    structuredLog({ cmd: "interview start", error: "invalid_threshold" });
+  const cutoff = opts.cutoff ?? DEFAULT_INTERVIEW_CUTOFF;
+  if (!isUnit(cutoff)) {
+    structuredLog({ cmd: "interview start", error: "invalid_cutoff" });
     return failure({
-      human: "`threshold` must be a finite number in [0,1].",
-      data: { error: "invalid_threshold", threshold },
+      human: "`cutoff` must be a finite number in [0,1].",
+      data: { error: "invalid_cutoff", cutoff },
     });
   }
 
-  const state: InterviewState = { idea, threshold, rounds: [], ambiguity: null, status: "in-progress" };
+  const state: InterviewState = { idea, cutoff, rounds: [], confidence: null, status: "in-progress" };
   writeInterview(paths, state);
 
-  structuredLog({ cmd: "interview start", threshold });
+  structuredLog({ cmd: "interview start", cutoff });
   return success({
-    data: { idea, threshold, rounds: 0, ready: false },
-    human: `Interview started (threshold ${threshold}).`,
+    data: { idea, cutoff, rounds: 0, ready: false },
+    human: `Interview started (cutoff ${cutoff}).`,
   });
 }
 
@@ -137,14 +218,14 @@ export interface InterviewRecordOptions {
   answer?: string;
   /** Agent-supplied per-dimension scores (validated for shape only — never computed). */
   scores?: unknown;
-  ambiguity?: number;
+  confidence?: number;
   /** Agent-supplied entity list (validated for shape only). */
   entities?: unknown;
 }
 
 /**
  * `th interview record` — append one agent-supplied round to the interview store
- * and update the latest ambiguity. Store-only: every field is taken verbatim; the
+ * and update the latest confidence. Store-only: every field is taken verbatim; the
  * handler validates shape but COMPUTES nothing except `ready` in the result echo.
  */
 export function runInterviewRecord(paths: ProjectPaths, opts: InterviewRecordOptions = {}): CommandResult {
@@ -193,12 +274,12 @@ export function runInterviewRecord(paths: ProjectPaths, opts: InterviewRecordOpt
     criteria: scoreRec.criteria,
   };
 
-  const ambiguity = opts.ambiguity;
-  if (!isUnit(ambiguity)) {
-    structuredLog({ cmd: "interview record", error: "invalid_ambiguity" });
+  const confidence = opts.confidence;
+  if (!isUnit(confidence)) {
+    structuredLog({ cmd: "interview record", error: "invalid_confidence" });
     return failure({
-      human: "`ambiguity` must be a finite number in [0,1].",
-      data: { error: "invalid_ambiguity", ambiguity },
+      human: "`confidence` must be a finite number in [0,1].",
+      data: { error: "invalid_confidence", confidence },
     });
   }
 
@@ -215,25 +296,25 @@ export function runInterviewRecord(paths: ProjectPaths, opts: InterviewRecordOpt
     entities = opts.entities as string[];
   }
 
-  const round: InterviewRound = { question, answer, scores, ambiguity, entities };
+  const round: InterviewRound = { question, answer, scores, confidence, entities };
   const next: InterviewState = {
     ...existing,
     rounds: [...existing.rounds, round],
-    ambiguity,
+    confidence,
   };
   writeInterview(paths, next);
 
-  const ready = computeReady(ambiguity, next.threshold);
+  const ready = computeReady(confidence, next.cutoff);
   structuredLog({ cmd: "interview record", rounds: next.rounds.length });
   return success({
-    data: { rounds: next.rounds.length, ambiguity, threshold: next.threshold, ready },
-    human: `Recorded round ${next.rounds.length} (ambiguity ${ambiguity}, ready ${ready}).`,
+    data: { rounds: next.rounds.length, confidence, cutoff: next.cutoff, ready },
+    human: `Recorded round ${next.rounds.length} (confidence ${confidence}, ready ${ready}).`,
   });
 }
 
 /**
- * `th interview status` — report `{ rounds, ambiguity, threshold, ready }`. A
- * missing/corrupt store reports `started:false` with a default threshold and
+ * `th interview status` — report `{ rounds, confidence, cutoff, ready }`. A
+ * missing/corrupt store reports `started:false` with a default cutoff and
  * `ready:false`. Read-only; COMPUTES only `ready`.
  */
 export function runInterviewStatus(paths: ProjectPaths): CommandResult {
@@ -244,24 +325,24 @@ export function runInterviewStatus(paths: ProjectPaths): CommandResult {
       data: {
         started: false,
         rounds: 0,
-        ambiguity: null,
-        threshold: DEFAULT_INTERVIEW_THRESHOLD,
+        confidence: null,
+        cutoff: DEFAULT_INTERVIEW_CUTOFF,
         ready: false,
       },
       human: "No interview in progress.",
     });
   }
 
-  const ready = computeReady(existing.ambiguity, existing.threshold);
+  const ready = computeReady(existing.confidence, existing.cutoff);
   structuredLog({ cmd: "interview status", rounds: existing.rounds.length });
   return success({
     data: {
       started: true,
       rounds: existing.rounds.length,
-      ambiguity: existing.ambiguity,
-      threshold: existing.threshold,
+      confidence: existing.confidence,
+      cutoff: existing.cutoff,
       ready,
     },
-    human: `Interview: ${existing.rounds.length} round(s), ambiguity ${existing.ambiguity ?? "n/a"}, threshold ${existing.threshold}, ready ${ready}.`,
+    human: `Interview: ${existing.rounds.length} round(s), confidence ${existing.confidence ?? "n/a"}, cutoff ${existing.cutoff}, ready ${ready}.`,
   });
 }

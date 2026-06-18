@@ -1,6 +1,6 @@
 ---
 description: Start or resume a TwinHarness Agentic SDLC run — drive an idea through tier-scaled stages to slice-by-slice build.
-argument-hint: [--interview] [--no-interview] [--threshold 0.20] <your idea, e.g. "build a CLI todo app">
+argument-hint: [--interview] [--no-interview] [--cutoff 0.80] <your idea, e.g. "build a CLI todo app">
 allowed-tools: Bash(node:*), Bash(true), mcp__plugin_twinharness_th__*, Task, Agent, AskUserQuestion
 ---
 
@@ -22,13 +22,13 @@ user.** Use it to decide **resume vs. fresh init**:
 
 ### Flags
 
-- `--interview` — after `th init`, run a full **ambiguity-scored Socratic loop** (below) before
+- `--interview` — after `th init`, run a full **confidence-scored Socratic loop** (below) before
   tiering. This **replaces** the lightweight §14.1 vague-narrowing for this run.
 - `--no-interview` *(default)* — skip the scored loop; if the brief is a vague mega-request, apply the
   lightweight §14.1 narrowing instead.
-- `--threshold <0..1>` — override the interview gate threshold for this run (default **0.20**). Also
-  overridable via the `state.json` field `interview_threshold` (read it with `th_state_get`); a
-  `--threshold` flag wins over the state field, which wins over the 0.20 default.
+- `--cutoff <0..1>` — override the interview gate cutoff for this run (default **0.80**). Also
+  overridable via the `state.json` field `interview_cutoff` (read it with `th_state_get`); a
+  `--cutoff` flag wins over the state field, which wins over the 0.80 default.
 
 Follow the `twinharness` skill (the Orchestrator playbook). In brief:
 
@@ -38,15 +38,15 @@ Follow the `twinharness` skill (the Orchestrator playbook). In brief:
    exists, run `th state status` and **resume** from `current_stage`.
 2. **Interview gate (only when `--interview`).** Immediately **after `th init`** and **before** tier
    classification, run the scored Socratic loop:
-   - `th_interview_start { idea: "$ARGUMENTS", threshold? }` → creates `.twinharness/interview.json`.
-     Resolve the threshold as flag → state `interview_threshold` → 0.20.
+   - `th_interview_start { idea: "$ARGUMENTS", cutoff? }` → creates `.twinharness/interview.json`.
+     Resolve the cutoff as flag → state `interview_cutoff` → 0.80.
    - Each round: ask the user one sharp clarifying question, then **you (the model) score it** — the
      deterministic `th` layer cannot call an LLM, so YOU supply the scores. Record the round with
-     `th_interview_record { question, answer, scores{goal,constraints,criteria}, ambiguity, entities[] }`
-     (pass `scores` and `entities` as JSON-encoded strings). **Show the ambiguity score to the user
+     `th_interview_record { question, answer, scores{goal,constraints,criteria}, confidence, entities[] }`
+     (pass `scores` and `entities` as JSON-encoded strings). **Show the confidence score to the user
      each round.**
-   - After each round call `th_interview_status {}` → `{ rounds, ambiguity, threshold, ready }`. Stop
-     when `ready` (ambiguity ≤ resolved threshold).
+   - After each round call `th_interview_status {}` → `{ rounds, confidence, cutoff, ready }`. Stop
+     when `ready` (confidence ≥ resolved cutoff).
    - **Early-exit** is allowed **from round 3 onward** if the user says "good enough" — record a
      warning round noting the early exit. **Hard cap: 20 rounds** — stop and proceed even if not
      `ready`.

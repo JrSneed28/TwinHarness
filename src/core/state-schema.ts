@@ -12,7 +12,7 @@
  * be upgraded with `th migrate`. Bump this (and add a migration step) whenever a
  * breaking state-shape change ships.
  */
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 export const TIERS = ["T0", "T1", "T2", "T3"] as const;
 export type Tier = (typeof TIERS)[number];
@@ -108,14 +108,15 @@ export interface TwinHarnessState {
    */
   project_mode?: ProjectMode;
   /**
-   * Resolved ambiguity-gate threshold for `th:run --interview` (spec R15). Absent ⇒
-   * the default (0.20) is applied by the interview loop. Persisted so a `--threshold`
+   * Resolved confidence-gate cutoff for `th:run --interview` (spec R15). Absent ⇒
+   * the default (0.80) is applied by the interview loop. Persisted so a `--cutoff`
    * override survives across the run and the requirements stage / build gate can read
    * it. When present it must be a finite number in [0,1]. NOT gate-owned (a free policy
    * value, not a security gate) so `th_state_set` may set it over MCP. Omitted from
-   * serialization when absent so existing state files hash identically.
+   * serialization when absent so existing state files hash identically. (Renamed from
+   * the legacy `interview_threshold` in schema v2 — the confidence/cutoff semantic flip.)
    */
-  interview_threshold?: number;
+  interview_cutoff?: number;
 }
 
 export interface ValidationIssue {
@@ -155,7 +156,7 @@ export const STATE_FIELD_ORDER: (keyof TwinHarnessState)[] = [
   "revise_loop_counts",
   "write_gate",
   "project_mode",
-  "interview_threshold",
+  "interview_cutoff",
 ];
 
 /** Fresh state written by `th init` — unclassified, implementation not yet allowed. */
@@ -332,15 +333,15 @@ export function validateState(value: unknown): ValidationResult {
     }
   }
 
-  // Optional interview_threshold field (spec R15) — when present, a finite number in [0,1].
-  if (v.interview_threshold !== undefined) {
+  // Optional interview_cutoff field (spec R15) — when present, a finite number in [0,1].
+  if (v.interview_cutoff !== undefined) {
     if (
-      typeof v.interview_threshold !== "number" ||
-      !Number.isFinite(v.interview_threshold) ||
-      v.interview_threshold < 0 ||
-      v.interview_threshold > 1
+      typeof v.interview_cutoff !== "number" ||
+      !Number.isFinite(v.interview_cutoff) ||
+      v.interview_cutoff < 0 ||
+      v.interview_cutoff > 1
     ) {
-      issues.push({ path: "interview_threshold", message: "must be a finite number in [0,1] or absent" });
+      issues.push({ path: "interview_cutoff", message: "must be a finite number in [0,1] or absent" });
     }
   }
 

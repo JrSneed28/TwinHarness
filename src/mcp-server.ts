@@ -1172,33 +1172,33 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_interview_start",
     description:
-      "Start a scored Socratic interview: create .twinharness/interview.json with the idea + resolved ambiguity threshold (default 0.20). Store-only; overwrites any prior interview. `idea` is required.",
+      "Start a scored Socratic interview: create .twinharness/interview.json with the idea + resolved confidence cutoff (default 0.80). Store-only; overwrites any prior interview. `idea` is required. (Ready when confidence ≥ cutoff.)",
     inputSchema: {
       type: "object",
       properties: {
         idea: stringProp("The initial idea/brief to interview against (required)."),
-        threshold: numberProp("Ambiguity-gate threshold in [0,1] (default 0.20)."),
+        cutoff: numberProp("Confidence-gate cutoff in [0,1] (default 0.80); ready when confidence ≥ cutoff."),
       },
       required: ["idea"],
       additionalProperties: false,
     },
     run: (paths, args) =>
-      runInterviewStart(paths, { idea: optString(args, "idea"), threshold: optNumber(args, "threshold") }),
+      runInterviewStart(paths, { idea: optString(args, "idea"), cutoff: optNumber(args, "cutoff") }),
   },
   {
     name: "th_interview_record",
     description:
-      "Append one agent-supplied round to the interview store and update the latest ambiguity. Store-only — the agent supplies ALL judgment; the tool COMPUTES nothing but `ready = ambiguity <= threshold`. `scores` is a JSON object {goal,constraints,criteria}; `entities` is a JSON array of strings (both parsed in-handler). `question`, `answer`, `scores`, and `ambiguity` are required.",
+      "Append one agent-supplied round to the interview store and update the latest confidence. Store-only — the agent supplies ALL judgment; the tool COMPUTES nothing but `ready = confidence >= cutoff`. `scores` is a JSON object {goal,constraints,criteria}; `entities` is a JSON array of strings (both parsed in-handler). `question`, `answer`, `scores`, and `confidence` are required.",
     inputSchema: {
       type: "object",
       properties: {
         question: stringProp("The question asked this round (required)."),
         answer: stringProp("The answer captured this round (required)."),
         scores: stringProp('JSON object of per-dimension scores, e.g. {"goal":0.2,"constraints":0.3,"criteria":0.1} (required).'),
-        ambiguity: numberProp("Agent-computed ambiguity for this round, a number in [0,1] (required)."),
+        confidence: numberProp("Agent-computed confidence for this round, a number in [0,1] (required); ready when confidence ≥ cutoff."),
         entities: stringProp('JSON array of entity strings captured this round, e.g. ["auth","db"] (optional).'),
       },
-      required: ["question", "answer", "scores", "ambiguity"],
+      required: ["question", "answer", "scores", "confidence"],
       additionalProperties: false,
     },
     run: (paths, args) => {
@@ -1223,7 +1223,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
         question: optString(args, "question"),
         answer: optString(args, "answer"),
         scores,
-        ambiguity: optNumber(args, "ambiguity"),
+        confidence: optNumber(args, "confidence"),
         entities,
       });
     },
@@ -1231,7 +1231,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_interview_status",
     description:
-      "Report the interview gate state: { started, rounds, ambiguity, threshold, ready }. A missing/corrupt store reports started:false, ready:false. Read-only; COMPUTES only `ready`.",
+      "Report the interview gate state: { started, rounds, confidence, cutoff, ready }. Ready when confidence ≥ cutoff. A missing/corrupt store reports started:false, ready:false. Read-only; COMPUTES only `ready`.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runInterviewStatus(paths),
   },

@@ -785,30 +785,30 @@ describe("Interview/init MCP tools: th_interview_* + th_init (store-only, idempo
     return d;
   }
 
-  it("th_interview_start → record → status round-trips and flips ready once ambiguity ≤ threshold", () => {
+  it("th_interview_start → record → status round-trips and flips ready once confidence ≥ cutoff", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
 
-    const start = defFor("th_interview_start").run(tp.paths, { idea: "build a CLI", threshold: 0.2 });
+    const start = defFor("th_interview_start").run(tp.paths, { idea: "build a CLI", cutoff: 0.8 });
     expect(start.ok).toBe(true);
 
-    // A high-ambiguity round: not yet ready.
+    // A low-confidence round: not yet ready.
     const r1 = defFor("th_interview_record").run(tp.paths, {
       question: "What is the goal?",
       answer: "Ship a deterministic CLI.",
       scores: JSON.stringify({ goal: 0.5, constraints: 0.4, criteria: 0.3 }),
-      ambiguity: 0.5,
+      confidence: 0.5,
       entities: JSON.stringify(["cli", "harness"]),
     });
     expect(r1.ok).toBe(true);
     expect(r1.data?.ready).toBe(false);
 
-    // A low-ambiguity round at/below the threshold: ready flips true.
+    // A high-confidence round at/above the cutoff: ready flips true.
     const r2 = defFor("th_interview_record").run(tp.paths, {
       question: "Any constraints?",
       answer: "Zero runtime deps.",
-      scores: JSON.stringify({ goal: 0.1, constraints: 0.1, criteria: 0.1 }),
-      ambiguity: 0.1,
+      scores: JSON.stringify({ goal: 0.9, constraints: 0.9, criteria: 0.9 }),
+      confidence: 0.9,
     });
     expect(r2.ok).toBe(true);
     expect(r2.data?.ready).toBe(true);
@@ -816,8 +816,8 @@ describe("Interview/init MCP tools: th_interview_* + th_init (store-only, idempo
     const status = defFor("th_interview_status").run(tp.paths, {});
     expect(status.ok).toBe(true);
     expect(status.data?.rounds).toBe(2);
-    expect(status.data?.ambiguity).toBe(0.1);
-    expect(status.data?.threshold).toBe(0.2);
+    expect(status.data?.confidence).toBe(0.9);
+    expect(status.data?.cutoff).toBe(0.8);
     expect(status.data?.ready).toBe(true);
   });
 
@@ -852,19 +852,19 @@ describe("Interview/init MCP tools: th_interview_* + th_init (store-only, idempo
     if (!res.ok) expect(res.errors).toContain("idea");
   });
 
-  // INVERSE of the GATE_OWNED refusal battery: interview_threshold is NOT gate-owned,
+  // INVERSE of the GATE_OWNED refusal battery: interview_cutoff is NOT gate-owned,
   // so runStateSet / th_state_set ALLOWS it (it is a free policy value, not a gate).
-  it("runStateSet ALLOWS interview_threshold (not gate-owned) and th_state_set does not refuse it", () => {
+  it("runStateSet ALLOWS interview_cutoff (not gate-owned) and th_state_set does not refuse it", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
 
-    const res = runStateSet(tp.paths, "interview_threshold", "0.3");
+    const res = runStateSet(tp.paths, "interview_cutoff", "0.7");
     expect(res.ok).toBe(true);
-    expect(readState(tp.paths).state?.interview_threshold).toBe(0.3);
+    expect(readState(tp.paths).state?.interview_cutoff).toBe(0.7);
 
     // Via the MCP th_state_set wrapper too: not a gate_owned_field refusal.
-    const viaMcp = defFor("th_state_set").run(tp.paths, { key: "interview_threshold", value: "0.15" });
+    const viaMcp = defFor("th_state_set").run(tp.paths, { key: "interview_cutoff", value: "0.85" });
     expect(viaMcp.ok).toBe(true);
-    expect(readState(tp.paths).state?.interview_threshold).toBe(0.15);
+    expect(readState(tp.paths).state?.interview_cutoff).toBe(0.85);
   });
 });

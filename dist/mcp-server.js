@@ -15639,7 +15639,7 @@ function readFileWithRetry(absPath, read = (p) => fs2.readFileSync(p, "utf8")) {
 }
 
 // src/core/state-schema.ts
-var CURRENT_SCHEMA_VERSION = 1;
+var CURRENT_SCHEMA_VERSION = 2;
 var TIERS = ["T0", "T1", "T2", "T3"];
 var BLAST_RADIUS_FLAGS = [
   "authentication",
@@ -15667,7 +15667,7 @@ var STATE_FIELD_ORDER = [
   "revise_loop_counts",
   "write_gate",
   "project_mode",
-  "interview_threshold"
+  "interview_cutoff"
 ];
 function initialState() {
   return {
@@ -15803,9 +15803,9 @@ function validateState(value) {
       issues.push({ path: "project_mode", message: `must be one of ${PROJECT_MODES.join(", ")} or absent` });
     }
   }
-  if (v.interview_threshold !== void 0) {
-    if (typeof v.interview_threshold !== "number" || !Number.isFinite(v.interview_threshold) || v.interview_threshold < 0 || v.interview_threshold > 1) {
-      issues.push({ path: "interview_threshold", message: "must be a finite number in [0,1] or absent" });
+  if (v.interview_cutoff !== void 0) {
+    if (typeof v.interview_cutoff !== "number" || !Number.isFinite(v.interview_cutoff) || v.interview_cutoff < 0 || v.interview_cutoff > 1) {
+      issues.push({ path: "interview_cutoff", message: "must be a finite number in [0,1] or absent" });
     }
   }
   if (v.tier === "T0" && Array.isArray(v.blast_radius_flags) && v.blast_radius_flags.length > 0) {
@@ -20979,7 +20979,7 @@ ${formatIssues(r.issues)}`,
 
 // src/commands/interview.ts
 var fs24 = __toESM(require("node:fs"));
-var DEFAULT_INTERVIEW_THRESHOLD = 0.2;
+var DEFAULT_INTERVIEW_CUTOFF = 0.8;
 function isUnit(n) {
   return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
 }
@@ -20987,16 +20987,59 @@ function isInterviewState(v) {
   if (typeof v !== "object" || v === null) return false;
   const o = v;
   if (typeof o.idea !== "string") return false;
-  if (!isUnit(o.threshold)) return false;
+  const gate = o.cutoff ?? o.threshold;
+  if (!isUnit(gate)) return false;
   if (!Array.isArray(o.rounds)) return false;
-  if (!(o.ambiguity === null || isUnit(o.ambiguity))) return false;
+  const latest = o.confidence ?? o.ambiguity;
+  if (!(latest === null || latest === void 0 || isUnit(latest))) return false;
   return true;
+}
+function isLegacyShape(o) {
+  return o.cutoff === void 0 && o.threshold !== void 0;
+}
+function upgradeLegacy(o) {
+  const threshold = o.threshold;
+  const rawRounds = Array.isArray(o.rounds) ? o.rounds : [];
+  const rounds = rawRounds.map((r) => {
+    const rr = r;
+    const amb = rr.ambiguity;
+    const conf = typeof rr.confidence === "number" ? rr.confidence : typeof amb === "number" ? 1 - amb : 0;
+    return {
+      question: String(rr.question ?? ""),
+      answer: String(rr.answer ?? ""),
+      scores: rr.scores,
+      confidence: conf,
+      entities: Array.isArray(rr.entities) ? rr.entities : []
+    };
+  });
+  const latestAmb = o.ambiguity;
+  const confidence = typeof latestAmb === "number" ? 1 - latestAmb : null;
+  return {
+    idea: String(o.idea ?? ""),
+    cutoff: 1 - threshold,
+    rounds,
+    confidence,
+    status: "in-progress"
+  };
 }
 function readInterview(paths) {
   try {
     if (!fs24.existsSync(paths.interviewFile)) return null;
-    const parsed = JSON.parse(fs24.readFileSync(paths.interviewFile, "utf8"));
-    return isInterviewState(parsed) ? parsed : null;
+    const raw = fs24.readFileSync(paths.interviewFile, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!isInterviewState(parsed)) return null;
+    const o = parsed;
+    if (isLegacyShape(o)) {
+      const bak = paths.interviewFile + ".bak";
+      try {
+        if (!fs24.existsSync(bak)) fs24.writeFileSync(bak, raw, "utf8");
+      } catch {
+      }
+      const upgraded = upgradeLegacy(o);
+      writeInterview(paths, upgraded);
+      return upgraded;
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -21004,8 +21047,8 @@ function readInterview(paths) {
 function writeInterview(paths, state) {
   atomicWriteFile(paths.interviewFile, JSON.stringify(state, null, 2) + "\n");
 }
-function computeReady(ambiguity, threshold) {
-  return ambiguity !== null && ambiguity <= threshold;
+function computeReady(confidence, cutoff) {
+  return confidence !== null && confidence >= cutoff;
 }
 function runInterviewStart(paths, opts = {}) {
   const idea = opts.idea?.trim();
@@ -21013,20 +21056,20 @@ function runInterviewStart(paths, opts = {}) {
     structuredLog({ cmd: "interview start", error: "missing_field", field: "idea" });
     return failure({ human: "Missing required `idea`.", data: { error: "missing_field", field: "idea" } });
   }
-  const threshold = opts.threshold ?? DEFAULT_INTERVIEW_THRESHOLD;
-  if (!isUnit(threshold)) {
-    structuredLog({ cmd: "interview start", error: "invalid_threshold" });
+  const cutoff = opts.cutoff ?? DEFAULT_INTERVIEW_CUTOFF;
+  if (!isUnit(cutoff)) {
+    structuredLog({ cmd: "interview start", error: "invalid_cutoff" });
     return failure({
-      human: "`threshold` must be a finite number in [0,1].",
-      data: { error: "invalid_threshold", threshold }
+      human: "`cutoff` must be a finite number in [0,1].",
+      data: { error: "invalid_cutoff", cutoff }
     });
   }
-  const state = { idea, threshold, rounds: [], ambiguity: null, status: "in-progress" };
+  const state = { idea, cutoff, rounds: [], confidence: null, status: "in-progress" };
   writeInterview(paths, state);
-  structuredLog({ cmd: "interview start", threshold });
+  structuredLog({ cmd: "interview start", cutoff });
   return success({
-    data: { idea, threshold, rounds: 0, ready: false },
-    human: `Interview started (threshold ${threshold}).`
+    data: { idea, cutoff, rounds: 0, ready: false },
+    human: `Interview started (cutoff ${cutoff}).`
   });
 }
 function runInterviewRecord(paths, opts = {}) {
@@ -21062,12 +21105,12 @@ function runInterviewRecord(paths, opts = {}) {
     constraints: scoreRec.constraints,
     criteria: scoreRec.criteria
   };
-  const ambiguity = opts.ambiguity;
-  if (!isUnit(ambiguity)) {
-    structuredLog({ cmd: "interview record", error: "invalid_ambiguity" });
+  const confidence = opts.confidence;
+  if (!isUnit(confidence)) {
+    structuredLog({ cmd: "interview record", error: "invalid_confidence" });
     return failure({
-      human: "`ambiguity` must be a finite number in [0,1].",
-      data: { error: "invalid_ambiguity", ambiguity }
+      human: "`confidence` must be a finite number in [0,1].",
+      data: { error: "invalid_confidence", confidence }
     });
   }
   let entities = [];
@@ -21081,18 +21124,18 @@ function runInterviewRecord(paths, opts = {}) {
     }
     entities = opts.entities;
   }
-  const round = { question, answer, scores, ambiguity, entities };
+  const round = { question, answer, scores, confidence, entities };
   const next = {
     ...existing,
     rounds: [...existing.rounds, round],
-    ambiguity
+    confidence
   };
   writeInterview(paths, next);
-  const ready = computeReady(ambiguity, next.threshold);
+  const ready = computeReady(confidence, next.cutoff);
   structuredLog({ cmd: "interview record", rounds: next.rounds.length });
   return success({
-    data: { rounds: next.rounds.length, ambiguity, threshold: next.threshold, ready },
-    human: `Recorded round ${next.rounds.length} (ambiguity ${ambiguity}, ready ${ready}).`
+    data: { rounds: next.rounds.length, confidence, cutoff: next.cutoff, ready },
+    human: `Recorded round ${next.rounds.length} (confidence ${confidence}, ready ${ready}).`
   });
 }
 function runInterviewStatus(paths) {
@@ -21103,24 +21146,24 @@ function runInterviewStatus(paths) {
       data: {
         started: false,
         rounds: 0,
-        ambiguity: null,
-        threshold: DEFAULT_INTERVIEW_THRESHOLD,
+        confidence: null,
+        cutoff: DEFAULT_INTERVIEW_CUTOFF,
         ready: false
       },
       human: "No interview in progress."
     });
   }
-  const ready = computeReady(existing.ambiguity, existing.threshold);
+  const ready = computeReady(existing.confidence, existing.cutoff);
   structuredLog({ cmd: "interview status", rounds: existing.rounds.length });
   return success({
     data: {
       started: true,
       rounds: existing.rounds.length,
-      ambiguity: existing.ambiguity,
-      threshold: existing.threshold,
+      confidence: existing.confidence,
+      cutoff: existing.cutoff,
       ready
     },
-    human: `Interview: ${existing.rounds.length} round(s), ambiguity ${existing.ambiguity ?? "n/a"}, threshold ${existing.threshold}, ready ${ready}.`
+    human: `Interview: ${existing.rounds.length} round(s), confidence ${existing.confidence ?? "n/a"}, cutoff ${existing.cutoff}, ready ${ready}.`
   });
 }
 
@@ -22709,31 +22752,31 @@ var TOOL_DEFS = [
   // EXPECTED_TOOL_ALLOWLIST. th_init deliberately exposes NO `force` (R17).
   {
     name: "th_interview_start",
-    description: "Start a scored Socratic interview: create .twinharness/interview.json with the idea + resolved ambiguity threshold (default 0.20). Store-only; overwrites any prior interview. `idea` is required.",
+    description: "Start a scored Socratic interview: create .twinharness/interview.json with the idea + resolved confidence cutoff (default 0.80). Store-only; overwrites any prior interview. `idea` is required. (Ready when confidence \u2265 cutoff.)",
     inputSchema: {
       type: "object",
       properties: {
         idea: stringProp("The initial idea/brief to interview against (required)."),
-        threshold: numberProp("Ambiguity-gate threshold in [0,1] (default 0.20).")
+        cutoff: numberProp("Confidence-gate cutoff in [0,1] (default 0.80); ready when confidence \u2265 cutoff.")
       },
       required: ["idea"],
       additionalProperties: false
     },
-    run: (paths, args) => runInterviewStart(paths, { idea: optString(args, "idea"), threshold: optNumber(args, "threshold") })
+    run: (paths, args) => runInterviewStart(paths, { idea: optString(args, "idea"), cutoff: optNumber(args, "cutoff") })
   },
   {
     name: "th_interview_record",
-    description: "Append one agent-supplied round to the interview store and update the latest ambiguity. Store-only \u2014 the agent supplies ALL judgment; the tool COMPUTES nothing but `ready = ambiguity <= threshold`. `scores` is a JSON object {goal,constraints,criteria}; `entities` is a JSON array of strings (both parsed in-handler). `question`, `answer`, `scores`, and `ambiguity` are required.",
+    description: "Append one agent-supplied round to the interview store and update the latest confidence. Store-only \u2014 the agent supplies ALL judgment; the tool COMPUTES nothing but `ready = confidence >= cutoff`. `scores` is a JSON object {goal,constraints,criteria}; `entities` is a JSON array of strings (both parsed in-handler). `question`, `answer`, `scores`, and `confidence` are required.",
     inputSchema: {
       type: "object",
       properties: {
         question: stringProp("The question asked this round (required)."),
         answer: stringProp("The answer captured this round (required)."),
         scores: stringProp('JSON object of per-dimension scores, e.g. {"goal":0.2,"constraints":0.3,"criteria":0.1} (required).'),
-        ambiguity: numberProp("Agent-computed ambiguity for this round, a number in [0,1] (required)."),
+        confidence: numberProp("Agent-computed confidence for this round, a number in [0,1] (required); ready when confidence \u2265 cutoff."),
         entities: stringProp('JSON array of entity strings captured this round, e.g. ["auth","db"] (optional).')
       },
-      required: ["question", "answer", "scores", "ambiguity"],
+      required: ["question", "answer", "scores", "confidence"],
       additionalProperties: false
     },
     run: (paths, args) => {
@@ -22755,14 +22798,14 @@ var TOOL_DEFS = [
         question: optString(args, "question"),
         answer: optString(args, "answer"),
         scores,
-        ambiguity: optNumber(args, "ambiguity"),
+        confidence: optNumber(args, "confidence"),
         entities
       });
     }
   },
   {
     name: "th_interview_status",
-    description: "Report the interview gate state: { started, rounds, ambiguity, threshold, ready }. A missing/corrupt store reports started:false, ready:false. Read-only; COMPUTES only `ready`.",
+    description: "Report the interview gate state: { started, rounds, confidence, cutoff, ready }. Ready when confidence \u2265 cutoff. A missing/corrupt store reports started:false, ready:false. Read-only; COMPUTES only `ready`.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runInterviewStatus(paths)
   },
