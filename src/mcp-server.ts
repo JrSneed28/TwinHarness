@@ -1449,7 +1449,9 @@ export function validateToolArgs(name: string, args: unknown): { ok: true } | { 
  *   - unknown-tool guard  → `ok:false, reason:"unknown_tool"` (#5)
  *   - invalid-args guard  → `ok:false, reason:"invalid_args"` (#5)
  *   - BEFORE dispatch     → `ok:true` (so th_proof_report sees its own call — #4)
- *   - catch (handler threw)→ `ok:false, reason:"threw"` (corrects the pre-dispatch record)
+ *   - catch (handler threw)→ `ok:false, reason:"threw"` (APPENDED after the pre-dispatch
+ *       `ok:true` — both rows persist; the consumer keys the coverage touched-set on
+ *       `tool` and ignores `ok`, so the pair does not double-count)
  * The consumer is `readProofCalls`/`harvestScenario` in `src/core/proof/harvest.ts`.
  */
 function appendProofCall(paths: ProjectPaths, tool: string, ok: boolean, reason?: string): void {
@@ -1522,9 +1524,9 @@ export async function callTool(name: string, args: ToolArgs = {}): Promise<CallT
     const cmd = def.runAsync ? await def.runAsync(paths, args) : def.run(paths, args);
     return toToolResult(cmd);
   } catch (err) {
-    // The handler threw unexpectedly: append a corrective ok:false record so the
-    // trail tells the truth about the crash. Fully guarded so a path-resolution or
-    // logging error here can never escape the catch.
+    // The handler threw unexpectedly: append an ok:false record (in addition to the
+    // pre-dispatch ok:true) so the trail tells the truth about the crash. Fully
+    // guarded so a path-resolution or logging error here can never escape the catch.
     try {
       appendProofCall(resolvePathsForCall(), def.name, false, "threw");
     } catch {

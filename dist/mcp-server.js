@@ -16198,19 +16198,19 @@ var STATE_FIELD_POLICY = {
   implementation_allowed: {
     managed: true,
     gateOwned: true,
-    owner: "orchestrator unlock flow (`th state set implementation_allowed true` on the CLI)",
+    owner: "typed gate command `th implementation unlock` (raw `th state set` requires --emergency)",
     refusedByStateSet: false
   },
   tier: {
     managed: true,
     gateOwned: true,
-    owner: "`th tier classify`",
+    owner: "`th tier classify` then `th tier record` (raw `th state set` requires --emergency)",
     refusedByStateSet: false
   },
   current_stage: {
     managed: true,
     gateOwned: true,
-    owner: "`th next` / stage advance",
+    owner: "typed gate command `th stage advance` (raw `th state set` requires --emergency)",
     refusedByStateSet: false
   },
   write_gate: {

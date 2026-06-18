@@ -106,9 +106,10 @@ function runStateSetLocked(paths, key, rawValue, opts = {}) {
     }
     // Managed-field guard (H-2): refuse writes to fields whose owning command keeps
     // an invariant a raw set would corrupt (the drift/debate counters). Gate-owned
-    // fields (implementation_allowed/tier/current_stage/write_gate) are NOT refused
-    // here — setting them on the CLI is the documented unlock/advance path — but the
-    // MCP raw setter refuses them (F-7) and current_stage is enum-normalized below.
+    // fields (implementation_allowed/tier/current_stage/write_gate) are NOT refused by
+    // THIS block — they are gated separately just below, behind --emergency (#11), with
+    // the typed gate commands as their normal path; the MCP raw setter refuses them
+    // outright (F-7) and current_stage is enum-normalized below.
     const policy = (0, state_fields_1.fieldPolicy)(firstSegment);
     if (policy?.refusedByStateSet) {
         return (0, output_1.failure)({
