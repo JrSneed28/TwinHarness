@@ -136,7 +136,7 @@ describe("ARCH-003: a path-escape attempt throws a TYPED PathContainmentError th
   it("the CLI boundary mapping turns that throw into a STRUCTURED failure envelope (typed code, sane exit, no stack)", () => {
     tp = makeTempProject();
     // Reproduce the cli.ts top-level boundary mapping exactly: catch the throw and
-    // map a PathContainmentError to a structured `failure(...)`. The proof is that
+    // map a PathContainmentError to a structured `failure(...)`. The evidence is that
     // the result is a well-formed --json envelope keyed by the typed error code —
     // never a raw Node stack — with a non-zero, client-reject exit code (2).
     let result: ReturnType<typeof failure> | undefined;

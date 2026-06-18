@@ -56,10 +56,8 @@ import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./comma
 import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from "./commands/collab";
 import { runDebateAdd, runDebateList, runDebateResolve } from "./commands/debate";
 import { GATE_OWNED } from "./core/state-fields";
-import { runProofRun, runProofComponent, runProofReport } from "./commands/proof";
 import { runInterviewStart, runInterviewRecord, runInterviewStatus } from "./commands/interview";
 import { runInitMcp } from "./commands/init";
-import type { ProofToolRegistry } from "./core/proof/runner";
 
 // --- Component A wiring tool handlers (16 existing handlers exposed as ToolDefs) ---
 import { runArtifactRegister, runArtifactList } from "./commands/artifact";
@@ -209,8 +207,8 @@ export interface ToolDef {
   /** Build paths + call the matching `run*` handler, returning its CommandResult. */
   run: (paths: ProjectPaths, args: ToolArgs) => CommandResult;
   /**
-   * Async handler for tools that spawn real OS processes (the th_proof_* suite and
-   * th_verify_run). When present, the CallTool path AWAITS this instead of
+   * Async handler for tools that spawn real OS processes (th_verify_run).
+   * When present, the CallTool path AWAITS this instead of
    * {@link ToolDef.run}; the synchronous `run` then serves only as the sync-contract
    * guard (never reached for these tools), so every synchronous tool keeps its exact
    * synchronous contract.
@@ -243,7 +241,7 @@ function optNumber(args: ToolArgs, key: string): number | undefined {
 }
 
 /**
- * The exposed tools (63 total). Each mirrors one `th` subcommand's flags as a
+ * The exposed tools (60 total). Each mirrors one `th` subcommand's flags as a
  * JSON-Schema input and delegates to that subcommand's existing handler, EXCEPT the
  * 5 typed gate-transition tools (th_tier_record, th_stage_advance,
  * th_implementation_unlock, th_write_gate_set, th_blast_radius_record) which enforce
@@ -251,10 +249,10 @@ function optNumber(args: ToolArgs, key: string): number | undefined {
  * `applyGateMutation`. Breakdown: 21 prior coordination/observability tools + the 5
  * typed gate tools + 16 newly-wired existing handlers (artifact register/list, drift
  * list/resolve, verify add/list/clear/run, coverage report, stage current/describe/
- * list, doctor, scorecard, slices sync, slice set-status) + 3 proof + 4
- * interview/init = 63. Ordered by domain grouping (state+gates, drift, build, route,
+ * list, doctor, scorecard, slices sync, slice set-status) + 4
+ * interview/init = 60. Ordered by domain grouping (state+gates, drift, build, route,
  * coverage, next, delegate, repo, decision, artifact, collab, debate, verify, stage,
- * health, slices, proof, interview/init). This order is the canonical source the
+ * health, slices, interview/init). This order is the canonical source the
  * four order-sensitive name mirrors copy (see .omc/research/canonical-tool-names.md).
  */
 export const TOOL_DEFS: readonly ToolDef[] = [
@@ -1166,56 +1164,6 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     },
     run: (paths, args) => runSliceSetStatus(paths, optString(args, "sliceId"), optString(args, "status")),
   },
-  // ---- Proof suite (PS-Q4: th_proof_run/component/report; read/coordination-only) ----
-  // Read/coordination-only — NEVER gate-mutating (containment invariant). These run
-  // the full suite (real OS-process spawns) so they are ASYNC: dispatched via
-  // `runAsync`; `run` is the unreachable sync-contract guard. The injected registry
-  // gives the coverage matrix its known MCP-tool set (self-derived from TOOL_DEFS).
-  {
-    name: "th_proof_run",
-    description:
-      "Run the full TwinHarness operational proof suite (all nine components) and emit the dual-format report + enforced coverage matrix + split-gated regression verdict. Read/coordination-only — never gate-mutating. `selfTest` runs the deterministic mechanical-reachability mode (no live LLM; never a live verdict for components 1/2/5).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        selfTest: boolProp("Deterministic mechanical-reachability mode (no live LLM)."),
-      },
-      additionalProperties: false,
-    },
-    run: () => asyncToolGuard("th_proof_run"),
-    runAsync: (paths, args) => runProofRun(paths, { registry: proofRegistry(), selfTest: optBool(args, "selfTest") }),
-  },
-  {
-    name: "th_proof_component",
-    description:
-      "Run a single proof component (1–9) and emit its report card. Read/coordination-only. Components 1/2/5 derive verdicts only from harvested live artifacts; 3/4/6/7/8/9 are LLM-free mechanical sub-proofs.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        component: numberProp("Component number to run (1–9)."),
-        selfTest: boolProp("Deterministic mechanical-reachability mode (no live LLM)."),
-      },
-      required: ["component"],
-      additionalProperties: false,
-    },
-    run: () => asyncToolGuard("th_proof_component"),
-    runAsync: (paths, args) => {
-      const n = optNumber(args, "component");
-      return runProofComponent(paths, {
-        registry: proofRegistry(),
-        component: n === undefined ? undefined : String(n),
-        selfTest: optBool(args, "selfTest"),
-      });
-    },
-  },
-  {
-    name: "th_proof_report",
-    description:
-      "Harvest the finished live proof scenarios and emit the consolidated dual-format report (the final consolidation step of the in-session workflow). Read/coordination-only.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    run: () => asyncToolGuard("th_proof_report"),
-    runAsync: (paths) => runProofReport(paths, { registry: proofRegistry() }),
-  },
   // ---- Interview + init tools ----
   // Store-only/deterministic: the interview tools RECORD agent-supplied scores and
   // PERSIST .twinharness/interview.json (no LLM in the deterministic layer); th_init
@@ -1303,16 +1251,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
 ] as const;
 
 /**
- * The live MCP tool registry the proof engine consumes. The known MCP-tool set
- * SELF-DERIVES from `TOOL_DEFS` (never a hand-maintained list) so the coverage
- * matrix's MCP-tool dimension can never silently drift from what is registered.
- */
-function proofRegistry(): ProofToolRegistry {
-  return { names: TOOL_DEFS.map((t) => t.name) };
-}
-
-/**
- * The sync-contract guard for the async-only tools (th_proof_* + th_verify_run).
+ * The sync-contract guard for the async-only tools (th_verify_run).
  * The CallTool path dispatches them via {@link ToolDef.runAsync}, so this is never
  * reached in practice; it exists only to satisfy the required synchronous `run`
  * contract that the synchronous tools rely on.
@@ -1434,38 +1373,13 @@ export function validateToolArgs(name: string, args: unknown): { ok: true } | { 
 }
 
 /**
- * C1/A1 — append one `{tool,ts,ok}` record to the DEDICATED producer-side MCP
- * call trail at `<stateDir>/proof-calls.jsonl`.
- *
- * This is the ONLY artifact that records WHICH MCP tools a live run actually
- * invoked, so the proof coverage-matrix can compute the MCP-tool dimension from
- * real evidence. It is deliberately a dedicated file — NOT `telemetry.jsonl`, and
- * NOT gated by the telemetry opt-in switch — so the coverage evidence cannot be
- * silently emptied by the M3 opt-in, log-rotation, or route/scorecard co-mingling.
- *
- * Best-effort by contract (A2): the append is written at BOTH the success and the
- * catch sites of the CallTool handler, and a logging failure must NEVER break or
- * alter a tool call — every error is swallowed. The consumer is `readProofCalls`/
- * `harvestScenario` in `src/core/proof/harvest.ts`.
- */
-function appendProofCall(paths: ProjectPaths, tool: string, ok: boolean): void {
-  try {
-    const line = JSON.stringify({ tool, ts: new Date().toISOString(), ok }) + "\n";
-    fs.appendFileSync(path.join(paths.stateDir, "proof-calls.jsonl"), line);
-  } catch {
-    // best-effort: trail logging must never affect the tool call.
-  }
-}
-
-/**
  * Execute a single MCP tool call end-to-end: look up the tool, enforce the closed
- * typed inputSchema, dispatch to the pure `run*` handler, map the CommandResult to
- * an MCP result, and record the call in the dedicated proof-calls trail (C1/A1/A2).
+ * typed inputSchema, dispatch to the pure `run*` handler, and map the CommandResult
+ * to an MCP result.
  *
- * Exported so the adapter — INCLUDING the trail instrumentation — is unit-testable
- * directly, without a socket or a live transport (the same testability boundary as
- * the exported `toToolResult`/`TOOL_DEFS`). The CallTool request handler is a thin
- * wrapper over this.
+ * Exported so the adapter is unit-testable directly, without a socket or a live
+ * transport (the same testability boundary as the exported `toToolResult`/
+ * `TOOL_DEFS`). The CallTool request handler is a thin wrapper over this.
  */
 export async function callTool(name: string, args: ToolArgs = {}): Promise<CallToolResult> {
   const def = TOOL_DEFS.find((t) => t.name === name);
@@ -1486,21 +1400,11 @@ export async function callTool(name: string, args: ToolArgs = {}): Promise<CallT
   // tool error rather than crashing the server process.
   try {
     const paths = resolvePathsForCall();
-    // Async tools (the th_proof_* suite) spawn real OS processes — await runAsync
+    // Async tools (th_verify_run) spawn real OS processes — await runAsync
     // when present; otherwise call the synchronous handler.
     const cmd = def.runAsync ? await def.runAsync(paths, args) : def.run(paths, args);
-    const result = toToolResult(cmd);
-    // C1/A1/A2: record the successful call in the dedicated proof-calls trail.
-    appendProofCall(paths, def.name, true);
-    return result;
+    return toToolResult(cmd);
   } catch (err) {
-    // C1/A1/A2: record the failed call too (ok:false). Fully guarded so a
-    // path-resolution or logging error here can never escape the catch.
-    try {
-      appendProofCall(resolvePathsForCall(), def.name, false);
-    } catch {
-      // best-effort
-    }
     const message = err instanceof Error ? err.message : String(err);
     return { content: [{ type: "text", text: `Tool ${def.name} failed: ${message}` }], isError: true };
   }

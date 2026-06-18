@@ -60,17 +60,16 @@ describe("SLICE-6 — MCP parity: th_repo_check + four th_decision_* tools (coun
 
   // ---- REQ-408 (non-negotiable tripwire): approve absent; full registry count ----
   it(
-    "REQ-408: test_REQ408_mcp_has_no_decision_approve_tool_count_63 — th_decision_approve absent (non-negotiable); total registered tool count exactly 63 after the coordination + proof + interview/init + gate-transition + wired-handler tools were added",
+    "REQ-408: test_REQ408_mcp_has_no_decision_approve_tool_count_60 — th_decision_approve absent (non-negotiable); total registered tool count exactly 60 after the coordination + interview/init + gate-transition + wired-handler tools were added",
     () => {
       const names = TOOL_DEFS.map((t) => t.name);
       // Tripwire: approve MUST NEVER appear (RULE-011, INV-005)
       expect(names).not.toContain("th_decision_approve");
       // The SLICE-6 baseline was 23; the artifact-lease/collab/debate trios plus
-      // th_build_dispatch/th_build_plan brought it to 35, the th_proof_* trio
-      // (run/component/report) reached 38 (PS-Q4), th_interview_*/th_init → 42, and
+      // th_build_dispatch/th_build_plan brought it to 35, th_interview_*/th_init → 39, and
       // the MCP-tool-expansion added 5 typed gate-transition tools + 16 wired
-      // handlers → 63.
-      expect(TOOL_DEFS.length).toBe(63);
+      // handlers → 60.
+      expect(TOOL_DEFS.length).toBe(60);
     },
   );
 

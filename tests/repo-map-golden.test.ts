@@ -1,5 +1,5 @@
 /**
- * P3-1 — SINGLE-WALK proof for the repo-map scanner.
+ * P3-1 — SINGLE-WALK guarantee for the repo-map scanner.
  *
  * The scanner used to walk the tree TWICE: the main walk stat-ed every file and
  * read manifests, then a SEPARATE `scanDirForReqIdsCapped` re-walked the WHOLE
@@ -99,7 +99,7 @@ function buildGoldenFixture(root: string): void {
 }
 
 describe("P3-1 — single-walk scanner: read-once + byte-stability", () => {
-  // ---- (a) READ-ONCE proof -------------------------------------------------
+  // ---- (a) READ-ONCE guarantee ---------------------------------------------
   it("reads every regular file under the cap EXACTLY once (two-walk collapse)", () => {
     tp = makeTempProject();
     const root = tp.root;

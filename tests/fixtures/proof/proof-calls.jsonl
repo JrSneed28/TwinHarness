@@ -1,6 +1,0 @@
-{"tool":"th_state_get","ts":"2026-06-17T00:00:00.000Z","ok":true}
-{"tool":"th_build_plan","ts":"2026-06-17T00:00:01.000Z","ok":true}
-{"tool":"th_route","ts":"2026-06-17T00:00:02.000Z","ok":true}
-not-json-a-torn-write
-{"tool":"th_coverage_check","ts":"2026-06-17T00:00:03.000Z","ok":false}
-{"tool":"th_next","ts":"2026-06-17T00:00:04.000Z","ok":true}

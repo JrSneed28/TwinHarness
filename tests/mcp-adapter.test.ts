@@ -317,7 +317,7 @@ describe("SLICE-4 / TASK-010 — MCP adapter: repo-map tool wiring (REQ-RU-044..
 
   // ---- REQ-RU-051: adapter holds no orchestration logic ----
   it("REQ-RU-051: mcp_adapter_no_orchestration_logic — each new run is a one-liner delegating to run* handler", () => {
-    // Structural proof: call each new tool without a real project;
+    // Structural check: call each new tool without a real project;
     // each must delegate cleanly (return a CommandResult, never throw).
     tp = makeTempProject();
     for (const name of ["th_repo_map", "th_repo_relevant", "th_repo_impact", "th_context_pack"]) {
@@ -342,12 +342,12 @@ describe("SLICE-4 / TASK-010 — MCP adapter: repo-map tool wiring (REQ-RU-044..
 // SLICE-4 / TASK-011 — REQ-RU-094 + REQ-RU-040 (MCP half)
 // ===========================================================================
 
-describe("SLICE-4 / TASK-011 — MCP tool-count 63 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
+describe("SLICE-4 / TASK-011 — MCP tool-count 60 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
   // Full registry, in registration order. The original 23-tool battery (REQ-RU-094)
   // is extended by the 12 coordination tools added after it (th_build_dispatch/plan,
-  // artifact-lease / collab / debate trios), then the th_proof_* trio (35→38), then
-  // the th_interview_*/th_init tools (38→42) — and finally the MCP-tool-expansion
-  // adds 21 more (42→63): 5 typed gate-transition tools (th_tier_record,
+  // artifact-lease / collab / debate trios), then
+  // the th_interview_*/th_init tools (35→39) — and finally the MCP-tool-expansion
+  // adds 21 more (39→60): 5 typed gate-transition tools (th_tier_record,
   // th_stage_advance, th_implementation_unlock, th_write_gate_set,
   // th_blast_radius_record) interleaved after th_state_set, plus 16 wired handlers
   // (th_drift_list/resolve, th_coverage_report, th_artifact_register/list,
@@ -410,17 +410,14 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 63 + schema/no-exec battery (REQ
     "th_scorecard",
     "th_slices_sync",
     "th_slice_set_status",
-    "th_proof_run",
-    "th_proof_component",
-    "th_proof_report",
     "th_interview_start",
     "th_interview_record",
     "th_interview_status",
     "th_init",
   ];
 
-  // ---- REQ-RU-094: full registry, in order (originally 23; now 63 with the coordination + proof + interview/init + gate-transition + wired-handler tools) ----
-  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_63 — TOOL_DEFS exposes exactly 63 tools in order", () => {
+  // ---- REQ-RU-094: full registry, in order (originally 23; now 60 with the coordination + interview/init + gate-transition + wired-handler tools) ----
+  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_60 — TOOL_DEFS exposes exactly 60 tools in order", () => {
     expect(TOOL_DEFS.map((t) => t.name)).toEqual(expectedAll);
   });
 

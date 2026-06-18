@@ -133,14 +133,13 @@ describe("SLICE-1 — MCP sub-claim / sub-release wrappers", () => {
   );
 
   it(
-    "REQ-105: test_REQ105_tool_count_incremental_path_16_to_63 — TOOL_DEFS.length is 63 after the coordination-primitive layer + proof + interview/init + gate-transition + wired-handler tools; toToolResult round-trips for the sub-lease tools",
+    "REQ-105: test_REQ105_tool_count_incremental_path_16_to_60 — TOOL_DEFS.length is 60 after the coordination-primitive layer + interview/init + gate-transition + wired-handler tools; toToolResult round-trips for the sub-lease tools",
     () => {
       // The coordination-primitive layer advances the count to 35 (th_build_dispatch/plan
       // inserted into the build group + th_artifact_*/collab_*/debate_* appended), the
-      // th_proof_* trio (run/component/report) reaches 38 (PS-Q4), the
-      // th_interview_*/th_init tools append to reach 42, and the MCP-tool-expansion
-      // adds 21 more (5 typed gate-transition tools + 16 wired handlers) → 63.
-      expect(TOOL_DEFS.length).toBe(63);
+      // th_interview_*/th_init tools append to reach 39, and the MCP-tool-expansion
+      // adds 21 more (5 typed gate-transition tools + 16 wired handlers) → 60.
+      expect(TOOL_DEFS.length).toBe(60);
 
       // Both sub-lease tools must be present.
       const names = TOOL_DEFS.map((t) => t.name);

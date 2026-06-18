@@ -49,7 +49,7 @@ by user-visible capability, stop and reframe.
 
 The thinnest end-to-end path that exercises the architecture's spine and proves the boundaries
 integrate — even if it does almost nothing functionally. A walking skeleton is not a prototype and
-not a UI demo; it is proof that the critical integration points wire together correctly.
+not a UI demo; it is evidence that the critical integration points wire together correctly.
 
 Slice 0 requirements:
 - Touches every significant architectural layer the system has (interface → logic → data, or

@@ -464,7 +464,7 @@ describe("ARCH-002 — pure freshness taxonomy (computeFreshness / diffHashes)",
   });
 
   it("runRepoCheck delegates to the pure module: stale map → exit 4 (no behavior change)", () => {
-    // End-to-end parity proof: the command still produces the pure module's taxonomy.
+    // End-to-end parity check: the command still produces the pure module's taxonomy.
     tp = makeTempProject();
     fs.writeFileSync(path.join(tp.root, "alpha.txt"), "v1", "utf8");
     runRepoMap(tp.paths, { write: true });

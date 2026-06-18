@@ -5,6 +5,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.7.0] — 2026-06-18
+
+### Removed — BREAKING
+
+- **The entire `th proof` / operational-proof-suite feature is removed.** This is a
+  breaking change for any caller that depended on the proof surface:
+  - **CLI:** the `th proof run|component|report|baseline update|scenario start|finish|list`
+    command group and its `--self-test`/`--brief`/`--corpus-root`/`--output-root`/`--scenario-root`
+    flags are gone.
+  - **MCP:** the `th_proof_run`, `th_proof_component`, and `th_proof_report` tools are
+    de-registered. The MCP registry now holds exactly **60 tools** (was 63).
+  - **Producer trail:** the MCP adapter no longer writes the dedicated
+    `<stateDir>/proof-calls.jsonl` call trail (the `appendProofCall` instrumentation is removed
+    from `callTool`'s success and error paths).
+  - **Packaging:** the `twinharness-proof` skill, the `th-proof`/`th-proof-component` command
+    files, the bundled `proof/corpus/` fixtures, and `src/core/proof/**` are all deleted.
+- `src/core/telemetry.ts` and `src/core/health.ts` are **retained** — they remain load-bearing
+  for `th next`, `th route`, `th scorecard`, `th doctor`, and `th verify`.
+
+---
+
 ## [Unreleased]
 
 Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer + self-epic governance + coordination-primitive hardening), not yet cut as a versioned release. **1100+ tests, green on CI** (1 platform-conditional skip in `tests/concurrency.test.ts`; was 460 at 0.6.2).
