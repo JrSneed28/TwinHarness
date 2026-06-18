@@ -187,7 +187,7 @@ a run without typing the full CLI path.
 
 | Invocation | When to use it |
 |---|---|
-| `/twinharness:th-run <idea>` | Start a new run — or resume an interrupted one (it picks up from `state.json`) |
+| `/twinharness:th-run [--interview] [--cutoff <0..1>] [--max-tokens <k>] <idea>` | Start a new run — or resume an interrupted one (it picks up from `state.json`) |
 | `/twinharness:th-status` | Where am I? Tier, current stage, gates, slices, open drift |
 | `/twinharness:th-drift` | Review the drift log: skim auto-applied doc updates, decide blocked escalations |
 | `/twinharness:th-escalate` | Show everything currently waiting on a *human* decision |
@@ -211,6 +211,42 @@ a run without typing the full CLI path.
 
 The `twinharness` skill itself (`/twinharness:twinharness`) is the full Orchestrator playbook;
 Claude also invokes it automatically when you ask for spec-driven, stage-gated development in prose.
+
+### `/twinharness:th-run` flags
+
+`th-run` accepts four optional flags before the idea text:
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--interview` | off | Run a full confidence-scored Socratic loop after `th init` and before tier classification. **Replaces** the lightweight vague-narrowing step for this run. |
+| `--no-interview` | *(default)* | Skip the scored loop; if the brief is vague, lightweight narrowing still applies. |
+| `--cutoff <0..1>` | `0.80` | Interview gate cutoff. Precedence: `--cutoff` flag → `state.json` field `interview_cutoff` → 0.80 default. |
+| `--max-tokens <k>` | tier default | Per-session context budget in thousands. Passed through to `th init`; see `th init --max-tokens` and the **Context budget** section in Part 3 for full detail. |
+
+#### Interview gate (`--interview`)
+
+When `--interview` is passed, the Orchestrator runs a **confidence-scored Socratic loop** immediately after `th init` and before tier classification. This replaces the lightweight §14.1 vague-narrowing for that run.
+
+- The Orchestrator calls `th_interview_start` to create `.twinharness/interview.json`. The cutoff resolves as: `--cutoff` flag → `state.json` field `interview_cutoff` → 0.80 default.
+- Each round: the Orchestrator asks you **one sharp clarifying question**, then **scores it itself** across three dimensions (goal / constraints / criteria). The deterministic `th` layer cannot call an LLM, so the model supplies the scores. The round is persisted via `th_interview_record`, and **the running confidence score is shown to you each round**.
+- After each round, `th_interview_status` returns `{ rounds, confidence, cutoff, ready }`. The loop stops when `ready` (confidence ≥ cutoff).
+- **Early exit** is allowed from round 3 onward — you can say "good enough" and the Orchestrator records a warning round and proceeds. **Hard cap: 20 rounds** — the loop stops and proceeds even if `ready` is not reached.
+- On completion, the loop seeds both tier classification and the requirements stage from `.twinharness/interview.json` (the captured idea, rounds, and brief).
+
+Without `--interview`, if the brief is a vague mega-request, the lightweight §14.1 narrowing still applies.
+
+#### Examples
+
+```
+# Start a run with the scored interview loop (default 0.80 cutoff)
+/twinharness:th-run --interview build a budgeting CLI
+
+# Require higher confidence before tiering
+/twinharness:th-run --interview --cutoff 0.9 build a multi-tenant SaaS billing service
+
+# Set a context budget without the interview (no-interview is the default)
+/twinharness:th-run --max-tokens 150 build a CLI tool that tracks my reading list
+```
 
 ### What you will be asked (and what you won't)
 

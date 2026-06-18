@@ -128,10 +128,12 @@ TwinHarness ships **16 slash commands** — 4 you drive a run with, plus 12 thin
 
 | Command | What it does |
 |---|---|
-| `/twinharness:th-run <idea>` | Start a new run, or resume an interrupted one (it picks up from `state.json`) |
+| `/twinharness:th-run [--interview] [--cutoff <0..1>] <idea>` | Start a new run, or resume an interrupted one (it picks up from `state.json`) |
 | `/twinharness:th-status` | Tier, current stage, gates, slices, open drift — at a glance |
 | `/twinharness:th-drift` | Review the drift log: skim auto-applied doc updates, decide blocked escalations |
 | `/twinharness:th-escalate` | Show everything currently waiting on a human decision |
+
+Pass `--interview` to open a confidence-scored Socratic loop that sharpens the brief before tier classification (default cutoff 0.80; see [USAGE.md](./USAGE.md) for the full flag reference and interview gate details).
 
 **Inspection & verb wrappers:** `/twinharness:th-init`, `th-doctor`, `th-next`, `th-scorecard`, `th-stage`, `th-verify`, `th-coverage`, `th-tier`, `th-route`, `th-repo`, `th-test`, and `th-decision-approve` (the human-only decision gate). Each maps to the matching `th` command documented in [USAGE.md](./USAGE.md) Part 3.
 
