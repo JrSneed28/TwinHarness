@@ -1,72 +1,43 @@
 # TwinHarness Critic Modes — Reference Index (part of the TwinHarness orchestrator playbook)
 
-This directory contains the full per-mode grounded-defect checklists for the Critic agent. When you
-are the Critic and need the detailed checklist for your mode, find the mode's section below and
-navigate to the appropriate reference document.
-
-Every rule is verbatim from the original agent definition.
+The full per-mode grounded-defect checklists for the Critic agent live in the three files below. When
+you are the Critic and need your mode's detailed checklist, find the mode here and open the linked file.
 
 > **Running `th`:** wherever this document says `th <args>`, run
 > `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
 
 ---
 
-## Specification & Scope Modes
+## Specification & Scope Modes → [critic-modes-spec.md](critic-modes-spec.md)
 
-The early-stage Critic modes that define the problem space and constraints:
+- **`requirements`** (`docs/01-requirements.md`) — internal consistency, REQ-ID assignment, success measures, bounded goal, users identified.
+- **`scope`** (`docs/02-scope.md`) — MVP pruning, REQ-ID traceability, scope/future distinction, no contradictions, user-confirmed decisions.
+- **`domain-model`** (`docs/03-domain-model.md`) — entity coverage, relationship consistency, domain rules, glossary alignment, REQ-ID anchoring.
+- **`architecture`** (`docs/04-architecture.md`) — grounded coherence (not technology preference): REQ coverage, scope fit, domain reflection, clean responsibilities/boundaries, risks.
 
-- **`requirements`** — Verify internal consistency, REQ-ID assignment, success measures, and bounded goals in `docs/01-requirements.md`. [→ critic-modes-spec.md](critic-modes-spec.md)
-- **`scope`** — Check MVP item pruning, REQ-ID traceability, scope/future-scope distinction, and user-confirmed decisions in `docs/02-scope.md`. [→ critic-modes-spec.md](critic-modes-spec.md)
-- **`domain-model`** — Validate entity coverage, relationship consistency, domain rules, glossary alignment, and REQ-ID anchoring in `docs/03-domain-model.md`. [→ critic-modes-spec.md](critic-modes-spec.md)
-- **`architecture`** — Certify grounded coherence (not technology preference): REQ coverage, scope fit, domain model reflection, clean responsibilities, explicit boundaries, and risk accounting in `docs/04-architecture.md`. [→ critic-modes-spec.md](critic-modes-spec.md)
+## Implementation Planning & Build Modes → [critic-modes-build.md](critic-modes-build.md)
 
----
+- **`slice`** (`docs/09-implementation-plan.md`) — each slice vertical, user-visible, testable, ordered for integration; all MVP REQ-IDs covered; Slice 0 a genuine walking skeleton.
+- **`code-review`** (completed slice code) — contract fidelity, test anchoring, test substance (not tautologies), drift documentation, derived-doc updates, no silent requirement contradictions.
+- **`final-verification`** (`docs/10-verification-report.md`) — coherence-vs-correctness separated, REQ-ID traceability, coverage checks, internal consistency.
 
-## Implementation Planning & Build Modes
+## Design, Risk, Docs & Debug Modes → [critic-modes-design.md](critic-modes-design.md)
 
-The slice-planning and build-time Critic modes:
-
-- **`slice`** — Check that each slice is vertical (end-to-end), user-visible, testable, ordered for integration, covers MVP REQ-IDs, and that Slice 0 is a genuine walking skeleton in `docs/09-implementation-plan.md`. [→ critic-modes-build.md](critic-modes-build.md)
-- **`code-review`** — Verify contract fidelity, test anchoring, test substance (not tautologies), drift documentation, derived-doc updates, and no silent requirement contradictions for completed slice code. [→ critic-modes-build.md](critic-modes-build.md)
-- **`final-verification`** — Certify that the verification report separates coherence (Critic's domain) from correctness (tests + human), with REQ-ID traceability, coverage checks, and internal consistency in `docs/10-verification-report.md`. [→ critic-modes-build.md](critic-modes-build.md)
-
----
-
-## Design Artifact Modes
-
-The detailed-design Critic modes that specify behavior, interfaces, and risk handling:
-
-- **`contracts`** — Validate that every contract has a REQ-ID anchor, error cases are enumerated, domain-model alignment, no producer-consumer conflicts, and versioning expectations in `docs/07-contracts.md`. [→ critic-modes-design.md](critic-modes-design.md)
-- **`test-strategy`** — Ensure no REQ-ID lacks a test, tests assert observable behavior (not tautologies), failure modes have negative tests, slice acceptance tests are end-to-end, and Definition of Done is mechanical in `docs/08-test-strategy.md`. [→ critic-modes-design.md](critic-modes-design.md)
-- **`adr`** — Check that each ADR documents a significant, costly-to-reverse decision with honest consequences, genuinely-considered alternatives, consistency with architecture and requirements, linked REQ-IDs, and current status in `docs/05-adrs/`. [→ critic-modes-design.md](critic-modes-design.md)
-- **`technical-design`** — Validate that component designs support REQ-IDs, respect domain invariants and contracts, specify concurrency/failure handling where implied, avoid over/under-specification, and complete state machines in `docs/06-technical-design.md`. [→ critic-modes-design.md](critic-modes-design.md)
+- **`contracts`** (`docs/07-contracts.md`) — every contract REQ-anchored, error cases enumerated, domain-model alignment, no producer/consumer conflicts, versioning.
+- **`test-strategy`** (`docs/08-test-strategy.md`) — no REQ-ID without a test, behavior not tautologies, failure modes have negative tests, slice acceptance tests end-to-end, mechanical DoD.
+- **`adr`** (`docs/05-adrs/`) — significant costly-to-reverse decisions, honest consequences, genuine alternatives, consistency with architecture/requirements, linked REQ-IDs, current status.
+- **`technical-design`** (`docs/06-technical-design.md`) — designs support REQ-IDs, respect invariants/contracts, concurrency/failure handling where implied, no over/under-specification, complete state machines.
+- **`security`** (`docs/08a-security-threat-model.md`) — ANTI-BOILERPLATE: every threat anchored to a specific component/boundary/flow; mitigation-to-threat mapping; auth consistent with contracts; high-risk flows covered.
+- **`failure-modes`** (`docs/08b-failure-edge-cases.md`) — ANTI-BOILERPLATE: every failure mode names a specific component/flow; behavior consistent with contracts/invariants; critical-flow handling; idempotency; negative tests.
+- **`documentation`** (README/guides/API reference) — ANTI-BOILERPLATE on prose: every feature anchored to a REQ-ID/contract; implementation matches docs; all contracts documented; no generic filler.
+- **`ux-design`** (`docs/04a-ux-design.md`) — every persona/journey/flow serves ≥1 REQ-ID; MVP user-facing REQ-IDs mapped; bounded flows; IA covers requirements; assumptions surfaced; domain vocabulary.
+- **`ui-design`** (`docs/04b-ui-design.md`) — every screen serves ≥1 REQ-ID; MVP coverage; bounded flows; empty/loading/error states; domain vocabulary; no out-of-scope screens; accessibility present; concrete design tokens.
+- **`research`** (`docs/00-research/`) — every claim cited to a real reachable source with date; no fabricated sources; opinion vs. fact; recency noted; findings anchored to REQ-IDs.
+- **`debug-review`** (Debugger Evidence Report + `debug-log.md`) — root cause anchored to file:line/captured evidence; real reproduction command; discriminating experiments; fix in component boundary; requirement contradictions opened as blocking drift.
 
 ---
 
-## Risk & Trust Modes
-
-The security, failure-handling, and threat-modeling Critic modes (apply ANTI-BOILERPLATE enforcement):
-
-- **`security`** — Enforce the ANTI-BOILERPLATE rule: every threat MUST be anchored to a specific component, boundary, or data flow from the architecture; no generic checklist items. Verify mitigation-to-threat mapping, auth model consistency with contracts, and high-risk-flow coverage in `docs/08a-security-threat-model.md`. [→ critic-modes-design.md](critic-modes-design.md)
-- **`failure-modes`** — Enforce the ANTI-BOILERPLATE rule: every failure mode MUST name a specific component or flow; no generic "handle errors gracefully" entries. Verify behavior consistency with contracts and domain invariants, critical-flow handling, idempotency specification, and negative test coverage in `docs/08b-failure-edge-cases.md`. [→ critic-modes-design.md](critic-modes-design.md)
-
----
-
-## Documentation, Analysis & Debug Modes
-
-Post-build and investigatory Critic modes:
-
-- **`documentation`** — Enforce ANTI-BOILERPLATE on prose: every documented feature must anchor to a REQ-ID or contract, implementation must match docs, all contracts must be documented, and no generic filler prose in README, guides, API reference. [→ critic-modes-design.md](critic-modes-design.md)
-- **`ux-design`** — Verify every persona/journey/task-flow serves ≥1 REQ-ID, MVP user-facing REQ-IDs map to journeys/flows, task flows are bounded, the information architecture covers the requirements, assumptions are surfaced, and vocabulary matches the domain model in `docs/04a-ux-design.md`. [→ critic-modes-design.md](critic-modes-design.md)
-- **`ui-design`** — Verify every screen serves ≥1 REQ-ID, MVP user-facing REQ-IDs map to screens, user flows are bounded, screens define empty/loading/error states, vocabulary matches domain model, and no out-of-scope features in `docs/04b-ui-design.md`. [→ critic-modes-design.md](critic-modes-design.md)
-- **`research`** — Demand grounded evidence: every material claim must be cited to a real, reachable source with access date, sources must be verifiable (not hallucinated), opinions separated from fact, version/recency noted on version-sensitive claims, and findings anchored to REQ-IDs in `docs/00-research/`. [→ critic-modes-design.md](critic-modes-design.md)
-- **`debug-review`** — Reject narrative; demand evidence. Root cause must be anchored to file:line or captured evidence, reproduction must be a real command, hypotheses must carry discriminating experiments, fixes must stay in component boundary, and requirement contradictions must be opened as blocking drift. [→ critic-modes-design.md](critic-modes-design.md)
-
----
-
-## File Organization
-
-For fast lookup by phase:
+## File lookup by phase
 
 | Phase | Modes | File |
 |-------|-------|------|
