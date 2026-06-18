@@ -12,13 +12,16 @@
  * Orchestrator still decides whether a stage runs (plan §3 boundary rule).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.STAGE_PIPELINE = void 0;
+exports.UI_STAGES = exports.STAGE_PIPELINE = void 0;
 exports.canonicalizeStage = canonicalizeStage;
 exports.isFinalVerification = isFinalVerification;
 exports.isKnownStage = isKnownStage;
 exports.stageContract = stageContract;
 exports.engagedStages = engagedStages;
+exports.projectHasUi = projectHasUi;
+exports.engagedStagesFor = engagedStagesFor;
 exports.nextStageAfter = nextStageAfter;
+exports.nextStageAfterFor = nextStageAfterFor;
 /** The engaged-tier pipeline in canonical order (spec §5/§13). */
 exports.STAGE_PIPELINE = [
     { stage: "requirements", tiers: ["T1", "T2", "T3"], produces: "docs/01-requirements.md", criticMode: "requirements", humanGate: true, summary: "Turn the idea into REQ-ID'd intent; sticky human sign-off." },
@@ -81,6 +84,31 @@ function engagedStages(tier) {
     return exports.STAGE_PIPELINE.filter((s) => s.tiers.includes(tier));
 }
 /**
+ * Canonical ids of the UI-conditional stages (audit finding #13). These are engaged
+ * by tier for T1/T2/T3 but are only APPLICABLE when the project has a UI surface.
+ */
+exports.UI_STAGES = new Set(["ux-design", "ui-design"]);
+/**
+ * Whether the project has a UI surface (audit finding #13). Absent `has_ui` ⇒ true:
+ * the conservative default that keeps the UX/UI stages engaged for existing flows.
+ */
+function projectHasUi(state) {
+    return state.has_ui !== false;
+}
+/**
+ * The engaged stages for a STATE: `engagedStages(state.tier)` further filtered by UI
+ * applicability (audit finding #13). When `has_ui === false` the `ux-design`/
+ * `ui-design` stages are NOT applicable and are excluded here — mechanically satisfied
+ * as "N/A — no UI surface" rather than silently skipped. `engagedStages(tier)` stays
+ * tier-only and stable (other callers, e.g. the typed gate tools, depend on that).
+ */
+function engagedStagesFor(state) {
+    const engaged = engagedStages(state.tier);
+    if (projectHasUi(state))
+        return engaged;
+    return engaged.filter((s) => !exports.UI_STAGES.has(s.stage));
+}
+/**
  * The next engaged stage strictly after `currentStage` for `tier`. Pre-pipeline
  * stages (e.g. "init") map to the first engaged stage. Returns undefined when
  * the current stage is the last engaged stage, or the tier engages nothing.
@@ -94,4 +122,26 @@ function nextStageAfter(currentStage, tier) {
     if (idx < 0)
         return engaged[0]; // pre-pipeline (init/bypass) → first engaged stage
     return engaged[idx + 1];
+}
+/**
+ * The `has_ui`-aware sibling of {@link nextStageAfter} (audit finding #13): the next
+ * APPLICABLE engaged stage strictly after `currentStage` for `state`, skipping the
+ * UX/UI stages when `state.has_ui === false`. `nextStageAfter` stays tier-only and
+ * stable; this is the variant `th next` consumes so a no-UI project advances straight
+ * past the (not-applicable) UX/UI stages instead of stalling on them.
+ */
+function nextStageAfterFor(currentStage, state) {
+    const engaged = engagedStagesFor(state);
+    if (engaged.length === 0)
+        return undefined;
+    const key = canonicalizeStage(currentStage);
+    // Use the FULL-pipeline ordinal of `current`, not its index in the filtered
+    // `engaged` list: a current stage that is itself filtered out (e.g. a UX/UI stage
+    // on a has_ui:false run) must still resolve to the next APPLICABLE stage, not
+    // rewind to engaged[0]. A current stage that is genuinely pre-pipeline (init,
+    // ordinal -1) maps to the first applicable stage.
+    const pipelineIdx = exports.STAGE_PIPELINE.findIndex((s) => s.stage === key);
+    if (pipelineIdx < 0)
+        return engaged[0]; // pre-pipeline (init/bypass) → first applicable stage
+    return engaged.find((s) => exports.STAGE_PIPELINE.findIndex((p) => p.stage === s.stage) > pipelineIdx);
 }

@@ -11,7 +11,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
-import { runStateSet } from "../src/commands/state";
+import { readState, writeState } from "../src/core/state-store";
 import { engagedStages } from "../src/core/stages";
 import { runPreview } from "../src/commands/preview";
 
@@ -74,7 +74,8 @@ describe("REQ-PREVIEW-002: tier resolution falls back state → T2 default", () 
   it("with no flag, uses the recorded state.tier", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T3");
+    // tier is gate-owned (#11): position it with the ungated low-level writer.
+    writeState(tp.paths, { ...readState(tp.paths).state!, tier: "T3" });
     const res = runPreview(tp.paths, {});
     expect(res.data?.tier).toBe("T3");
     expect(res.data?.tierSource).toBe("state");
@@ -114,7 +115,7 @@ describe("REQ-PREVIEW-003: T0 bypasses the pipeline; read-only", () => {
   it("preview never mutates state.json", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
+    writeState(tp.paths, { ...readState(tp.paths).state!, tier: "T2" });
     const before = fs.readFileSync(tp.paths.stateFile, "utf8");
     runPreview(tp.paths, { tier: "T3" });
     runPreview(tp.paths, {});

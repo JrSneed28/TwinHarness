@@ -2,11 +2,13 @@
  * Phase C0 / AC #15 (C1·A1·A2) — the dedicated producer-side MCP call trail.
  *
  * The CallTool path (`callTool`, exported for exactly this kind of direct,
- * transport-free unit test) must append `{tool,ts,ok}` to the DEDICATED
- * `<stateDir>/proof-calls.jsonl` at BOTH the success site (`ok:true`) and the
- * catch site (`ok:false`), best-effort (a logging failure never breaks the call),
- * and decoupled from the M3 telemetry opt-in (the trail records even with
- * telemetry OFF). The harvest consumer is `readProofCalls`.
+ * transport-free unit test) records `{tool,ts,ok,reason?}` in the DEDICATED
+ * `<stateDir>/proof-calls.jsonl`. Per the #4/#5 fix the call is logged BEFORE
+ * dispatch (`ok:true`, so a tool can count its own call), and a handler that
+ * throws gets a CORRECTIVE catch-site record (`ok:false, reason:"threw"`). All
+ * appends are best-effort (a logging failure never breaks the call) and decoupled
+ * from the M3 telemetry opt-in (the trail records even with telemetry OFF). The
+ * harvest consumer is `readProofCalls`.
  *
  * Note on the catch-branch case: no read-only handler throws deterministically
  * and quickly (a real throw would need a 25 s lock timeout), so the catch site is
@@ -56,7 +58,7 @@ describe("REQ-PROOF-C1: dedicated proof-calls.jsonl producer trail (C1/A1/A2)", 
     expect(hit!.ts.length).toBeGreaterThan(0);
   });
 
-  it("catch site appends {tool,ts,ok:false} when a handler throws", async () => {
+  it("catch site appends a corrective {ok:false, reason:'threw'} record when a handler throws", async () => {
     const target = TOOL_DEFS.find((t) => t.name === "th_repo_map")!;
     const original = target.run;
     // `as const` makes TOOL_DEFS readonly at the type level only — the entries are
@@ -72,9 +74,14 @@ describe("REQ-PROOF-C1: dedicated proof-calls.jsonl producer trail (C1/A1/A2)", 
       (target as { run: ToolDef["run"] }).run = original;
     }
 
-    const hit = readProofCalls(tp.paths).find((c) => c.tool === "th_repo_map");
-    expect(hit).toBeDefined();
-    expect(hit!.ok).toBe(false);
+    // Per the #4/#5 fix the call is logged BEFORE dispatch (ok:true), then the catch
+    // site appends a CORRECTIVE failure record — so a throwing call yields two entries
+    // and the truthful outcome is the ok:false one carrying reason "threw".
+    const repoMapCalls = readProofCalls(tp.paths).filter((c) => c.tool === "th_repo_map");
+    expect(repoMapCalls.length).toBe(2);
+    expect(repoMapCalls[0]).toMatchObject({ ok: true });
+    expect(repoMapCalls[0].reason).toBeUndefined();
+    expect(repoMapCalls[1]).toMatchObject({ ok: false, reason: "threw" });
   });
 
   it("trail is decoupled from the telemetry opt-in (M3): records with telemetry OFF", async () => {

@@ -15,7 +15,7 @@ import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runStateSet } from "../src/commands/state";
 import { runDriftAdd, runDriftResolve } from "../src/commands/drift";
-import { appendLedger, readLedger, ledgerPath, GATE_LEDGER_KEYS } from "../src/core/ledger";
+import { appendLedger, readLedger, GATE_LEDGER_KEYS } from "../src/core/ledger";
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
@@ -48,7 +48,9 @@ describe("REQ-LEDGER-002: gate-relevant state mutations are audited", () => {
   it("records implementation_allowed flips", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "implementation_allowed", "true");
+    // implementation_allowed is gate-owned (#11): the raw set needs --emergency,
+    // which still produces the audit-ledger entry.
+    runStateSet(tp.paths, "implementation_allowed", "true", { emergency: true });
     const entries = readLedger(tp.paths);
     const gate = entries.find((e) => e.event === "gate-state-change" && e.key === "implementation_allowed");
     expect(gate).toBeDefined();
@@ -61,8 +63,8 @@ describe("REQ-LEDGER-002: gate-relevant state mutations are audited", () => {
     // A non-gate field must not produce a ledger entry.
     runStateSet(tp.paths, "complexity_rationale", "just a note");
     expect(readLedger(tp.paths).filter((e) => e.event === "gate-state-change")).toHaveLength(0);
-    // A gate field must.
-    runStateSet(tp.paths, "write_gate", "deny");
+    // A gate field must — write_gate is gate-owned (#11), set via --emergency.
+    runStateSet(tp.paths, "write_gate", "deny", { emergency: true });
     const gateEntries = readLedger(tp.paths).filter((e) => e.event === "gate-state-change");
     expect(gateEntries).toHaveLength(1);
     expect(gateEntries[0]?.key).toBe("write_gate");

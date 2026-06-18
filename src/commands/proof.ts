@@ -91,8 +91,10 @@ function reportResult(report: ProofReport): CommandResult {
 }
 
 /**
- * `th proof run` — run the full operational proof suite (all nine components) and
- * emit the dual-format report. `--self-test` drives the deterministic spine (no LLM).
+ * `th proof run` — mechanical self-test and report runner: evaluates all nine
+ * component cards over harvested proof scenarios and emits the dual-format report.
+ * `--self-test` drives the deterministic self-test spine (real `run*` handlers,
+ * no LLM) to produce harvestable artifacts — NOT a live agent/pipeline driver.
  */
 export async function runProofRun(paths: ProjectPaths, opts: ProofCommandOptions = {}): Promise<CommandResult> {
   const report = await runProof({

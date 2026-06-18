@@ -11,6 +11,8 @@
  * Orchestrator still decides whether a stage runs (plan §3 boundary rule).
  */
 
+import type { TwinHarnessState } from "./state-schema";
+
 export interface StageContract {
   /** Canonical stage id, matching the values written to state.current_stage. */
   stage: string;
@@ -91,6 +93,33 @@ export function engagedStages(tier: string | null): StageContract[] {
 }
 
 /**
+ * Canonical ids of the UI-conditional stages (audit finding #13). These are engaged
+ * by tier for T1/T2/T3 but are only APPLICABLE when the project has a UI surface.
+ */
+export const UI_STAGES: ReadonlySet<string> = new Set(["ux-design", "ui-design"]);
+
+/**
+ * Whether the project has a UI surface (audit finding #13). Absent `has_ui` ⇒ true:
+ * the conservative default that keeps the UX/UI stages engaged for existing flows.
+ */
+export function projectHasUi(state: Pick<TwinHarnessState, "has_ui">): boolean {
+  return state.has_ui !== false;
+}
+
+/**
+ * The engaged stages for a STATE: `engagedStages(state.tier)` further filtered by UI
+ * applicability (audit finding #13). When `has_ui === false` the `ux-design`/
+ * `ui-design` stages are NOT applicable and are excluded here — mechanically satisfied
+ * as "N/A — no UI surface" rather than silently skipped. `engagedStages(tier)` stays
+ * tier-only and stable (other callers, e.g. the typed gate tools, depend on that).
+ */
+export function engagedStagesFor(state: Pick<TwinHarnessState, "tier" | "has_ui">): StageContract[] {
+  const engaged = engagedStages(state.tier);
+  if (projectHasUi(state)) return engaged;
+  return engaged.filter((s) => !UI_STAGES.has(s.stage));
+}
+
+/**
  * The next engaged stage strictly after `currentStage` for `tier`. Pre-pipeline
  * stages (e.g. "init") map to the first engaged stage. Returns undefined when
  * the current stage is the last engaged stage, or the tier engages nothing.
@@ -102,4 +131,28 @@ export function nextStageAfter(currentStage: string, tier: string | null): Stage
   const idx = engaged.findIndex((s) => s.stage === key);
   if (idx < 0) return engaged[0]; // pre-pipeline (init/bypass) → first engaged stage
   return engaged[idx + 1];
+}
+
+/**
+ * The `has_ui`-aware sibling of {@link nextStageAfter} (audit finding #13): the next
+ * APPLICABLE engaged stage strictly after `currentStage` for `state`, skipping the
+ * UX/UI stages when `state.has_ui === false`. `nextStageAfter` stays tier-only and
+ * stable; this is the variant `th next` consumes so a no-UI project advances straight
+ * past the (not-applicable) UX/UI stages instead of stalling on them.
+ */
+export function nextStageAfterFor(
+  currentStage: string,
+  state: Pick<TwinHarnessState, "tier" | "has_ui">,
+): StageContract | undefined {
+  const engaged = engagedStagesFor(state);
+  if (engaged.length === 0) return undefined;
+  const key = canonicalizeStage(currentStage);
+  // Use the FULL-pipeline ordinal of `current`, not its index in the filtered
+  // `engaged` list: a current stage that is itself filtered out (e.g. a UX/UI stage
+  // on a has_ui:false run) must still resolve to the next APPLICABLE stage, not
+  // rewind to engaged[0]. A current stage that is genuinely pre-pipeline (init,
+  // ordinal -1) maps to the first applicable stage.
+  const pipelineIdx = STAGE_PIPELINE.findIndex((s) => s.stage === key);
+  if (pipelineIdx < 0) return engaged[0]; // pre-pipeline (init/bypass) → first applicable stage
+  return engaged.find((s) => STAGE_PIPELINE.findIndex((p) => p.stage === s.stage) > pipelineIdx);
 }

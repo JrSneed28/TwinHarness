@@ -14,10 +14,13 @@ afterEach(() => tp?.cleanup());
 
 function seedRun(t: TempProject): void {
   runInit(t.paths, {});
-  runStateSet(t.paths, "tier", "T2");
-  runStateSet(t.paths, "current_stage", "implementation");
-  runStateSet(t.paths, "blast_radius_flags", '["money","authentication"]');
-  runStateSet(t.paths, "implementation_allowed", "true");
+  // tier/current_stage/blast_radius_flags/implementation_allowed are gate-owned (#11):
+  // the raw sets need --emergency, which still validates + audit-ledgers the mutation
+  // (the ledger content this manifest aggregates).
+  runStateSet(t.paths, "tier", "T2", { emergency: true });
+  runStateSet(t.paths, "current_stage", "implementation", { emergency: true });
+  runStateSet(t.paths, "blast_radius_flags", '["money","authentication"]', { emergency: true });
+  runStateSet(t.paths, "implementation_allowed", "true", { emergency: true });
   runDriftAdd(t.paths, { layer: "requirement", ref: "SLICE-1 / TASK-001", discovery: "x", action: "paused" });
 }
 

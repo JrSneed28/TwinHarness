@@ -52,6 +52,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_INTERVIEW_THRESHOLD = void 0;
+exports.interviewReady = interviewReady;
 exports.runInterviewStart = runInterviewStart;
 exports.runInterviewRecord = runInterviewRecord;
 exports.runInterviewStatus = runInterviewStatus;
@@ -107,6 +108,20 @@ function writeInterview(paths, state) {
 /** `ready` is the ONLY computed value: the resolved ambiguity gate. */
 function computeReady(ambiguity, threshold) {
     return ambiguity !== null && ambiguity <= threshold;
+}
+/**
+ * Interview readiness as a pure predicate (audit finding #14). Reads the interview
+ * store and returns the resolved ambiguity gate (`ambiguity <= threshold`). A missing
+ * or corrupt store ⇒ NOT ready (the interview has not yet reached readiness). This is
+ * the single source of `ready` consumed by the soft interview gate
+ * (`checkInterview` in gate-preconditions.ts) so the gate and `th interview status`
+ * never disagree about readiness.
+ */
+function interviewReady(paths) {
+    const existing = readInterview(paths);
+    if (!existing)
+        return false;
+    return computeReady(existing.ambiguity, existing.threshold);
 }
 /**
  * `th interview start` — create `.twinharness/interview.json` for a new interview.

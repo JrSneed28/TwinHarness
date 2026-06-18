@@ -79,10 +79,11 @@ function runStateGet(paths, dottedPath) {
     });
 }
 /** `th state set <dotted.key> <value>` — refuses to persist an invalid result. */
-function runStateSet(paths, key, rawValue) {
-    return (0, state_store_1.withStateLock)(paths, () => runStateSetLocked(paths, key, rawValue));
+function runStateSet(paths, key, rawValue, opts = {}) {
+    return (0, state_store_1.withStateLock)(paths, () => runStateSetLocked(paths, key, rawValue, opts));
 }
-function runStateSetLocked(paths, key, rawValue) {
+function runStateSetLocked(paths, key, rawValue, opts = {}) {
+    const emergency = opts.emergency === true;
     // Reject paths whose first segment is not a known state field (catches typos
     // like `implementaton_allowed` that would silently write nothing).
     const segments = key.split(".");
@@ -113,6 +114,22 @@ function runStateSetLocked(paths, key, rawValue) {
         return (0, output_1.failure)({
             human: `Refusing to set managed field "${firstSegment}". ${policy.owner}`,
             data: { error: "managed_field", field: firstSegment },
+        });
+    }
+    // Gate-owned demotion (#11): a raw `state set` of a gate-owned field
+    // (tier / current_stage / implementation_allowed / write_gate / blast_radius_flags)
+    // bypasses the typed gate ladder. Refuse it unless the operator passes
+    // `--emergency`; the typed commands (`th tier record`, `th stage advance`,
+    // `th implementation unlock`) are the gate-checked path. When --emergency IS
+    // given, the write proceeds but is flagged LOUDLY in the result and (via the
+    // existing GATE_LEDGER_KEYS tail below) audit-ledgered.
+    const gateOwned = state_fields_1.GATE_OWNED.has(firstSegment);
+    if (gateOwned && !emergency) {
+        return (0, output_1.failure)({
+            human: `Refusing raw 'state set ${firstSegment}': gate-owned field. Use the typed gate command ` +
+                `(\`th tier record <T>\`, \`th stage advance\`, or \`th implementation unlock [--lock]\`), ` +
+                `which enforces the gate ladder. To force a raw write anyway, re-run with --emergency.`,
+            data: { error: "gate_owned_requires_emergency", field: firstSegment },
         });
     }
     const r = (0, state_store_1.readState)(paths);
@@ -164,7 +181,13 @@ function runStateSetLocked(paths, key, rawValue) {
         // detect tail truncation (documented residual — see appendHighWater). Best-effort.
         (0, ledger_1.appendHighWater)(paths);
     }
-    return (0, output_1.success)({ data: { key, value }, human: `Set ${key} = ${JSON.stringify(value)}` });
+    const warning = emergency && gateOwned
+        ? `⚠️  EMERGENCY raw gate write — set gate-owned field "${firstSegment}" directly, bypassing the typed gate ladder (no precondition check). This override is audit-ledgered.\n`
+        : "";
+    return (0, output_1.success)({
+        data: { key, value, ...(emergency && gateOwned ? { emergency: true } : {}) },
+        human: `${warning}Set ${key} = ${JSON.stringify(value)}`,
+    });
 }
 /**
  * Shared locked + ledgered gate-mutation writer (plan Phase 2 Step 6, AC-B16).
@@ -205,8 +228,29 @@ function applyGateMutation(paths, fields, source) {
                 data: { error: "invalid_state", issues: r.issues },
             });
         }
+        // #1 — Tier-upgrade stage backfill. When THIS mutation upgrades the tier, a
+        // stage the NEW tier engages may sit BEFORE the run's current stage in the
+        // pipeline yet was never engaged by the OLD tier — it would be silently
+        // skipped. Rewind current_stage to the EARLIEST such newly-engaged,
+        // already-passed stage so it is backfilled. Computed from the PRE-mutation
+        // state and folded into the SAME atomic write (so it is validated + ledgered
+        // alongside the tier flip). Only applied when the caller did not itself pass
+        // an explicit current_stage.
+        const effective = { ...fields };
+        if (Object.prototype.hasOwnProperty.call(fields, "tier") &&
+            !Object.prototype.hasOwnProperty.call(fields, "current_stage") &&
+            // Defense-in-depth: never rewind the stage once implementation is unlocked.
+            // The guarded callers (runTierRecord / th_tier_record) already refuse a tier
+            // change post-unlock via validateTierTransition's tier_locked_after_unlock, so
+            // a tier mutation should never reach here with implementation_allowed — but if a
+            // direct applyGateMutation caller did, a silent stage rewind would be disruptive.
+            r.state.implementation_allowed !== true) {
+            const backfill = tierUpgradeBackfillStage(r.state.tier, fields.tier, r.state.current_stage);
+            if (backfill !== null)
+                effective.current_stage = backfill;
+        }
         const next = JSON.parse(JSON.stringify(r.state));
-        for (const [key, value] of Object.entries(fields)) {
+        for (const [key, value] of Object.entries(effective)) {
             next[key] = value;
         }
         const validation = (0, state_schema_1.validateState)(next);
@@ -217,7 +261,7 @@ function applyGateMutation(paths, fields, source) {
             });
         }
         (0, state_store_1.writeState)(paths, validation.state);
-        (0, log_1.structuredLog)({ cmd: "gate mutation", source, keys: Object.keys(fields) });
+        (0, log_1.structuredLog)({ cmd: "gate mutation", source, keys: Object.keys(effective) });
         // Audit ledger (F5 / AC-B16): ONE flat scalar entry per changed gate field,
         // tagged with the hard-coded `source` so a human can see which entry point
         // fired. Flat key/value keeps `ledgerCanonicalText` deterministic (no nested
@@ -225,17 +269,56 @@ function applyGateMutation(paths, fields, source) {
         // audited (no GATE_LEDGER_KEYS filter — the filter on the CLI path screens
         // arbitrary sets; here the caller passes only gate fields). Best-effort:
         // `appendLedger` never throws.
-        for (const [key, value] of Object.entries(fields)) {
+        for (const [key, value] of Object.entries(effective)) {
             (0, ledger_1.appendLedger)(paths, { event: "gate-state-change", key, value, source });
         }
         // One in-chain high-water anchor after the batch of gate flips (mirrors
         // `runStateSetLocked`'s post-flip seal).
         (0, ledger_1.appendHighWater)(paths);
         return (0, output_1.success)({
-            data: { source, fields },
-            human: `Applied gate mutation (${source}): ${Object.keys(fields).join(", ")}`,
+            data: { source, fields: effective },
+            human: `Applied gate mutation (${source}): ${Object.keys(effective).join(", ")}`,
         });
     });
+}
+/**
+ * #1 — Compute the tier-upgrade stage backfill.
+ *
+ * When a tier mutation UPGRADES the tier (old tier is null — a from-unclassified
+ * classification — or the new tier is strictly higher by `TIERS` ordinal), some
+ * stages the new tier engages may sit at/before the run's current stage in the
+ * pipeline yet were NEVER engaged by the old tier. Those stages would be silently
+ * skipped. Returns the EARLIEST such "newly-engaged, already-passed" stage id so
+ * the caller can rewind `current_stage` to it; returns null when no backfill is
+ * needed (not an upgrade, unknown/non-string target tier, pre-pipeline current
+ * stage, or nothing was skipped).
+ */
+function tierUpgradeBackfillStage(oldTier, newTierRaw, currentStage) {
+    if (typeof newTierRaw !== "string")
+        return null;
+    const tiers = state_schema_1.TIERS;
+    const newIdx = tiers.indexOf(newTierRaw);
+    if (newIdx < 0)
+        return null; // unknown tier — validateState will reject the write
+    const oldIdx = oldTier === null ? -1 : tiers.indexOf(oldTier);
+    const isUpgrade = oldTier === null || newIdx > oldIdx;
+    if (!isUpgrade)
+        return null;
+    // Where is the run now? A pre-pipeline stage (init/bypass → -1) means nothing
+    // has been passed yet, so nothing can have been skipped.
+    const currentOrdinal = stages_1.STAGE_PIPELINE.findIndex((s) => s.stage === (0, stages_1.canonicalizeStage)(currentStage));
+    if (currentOrdinal < 0)
+        return null;
+    const oldEngaged = new Set((0, stages_1.engagedStages)(oldTier).map((s) => s.stage));
+    const newEngaged = new Set((0, stages_1.engagedStages)(newTierRaw).map((s) => s.stage));
+    // STAGE_PIPELINE is in canonical pipeline order, so the first match at/before
+    // the current stage is the earliest newly-engaged stage.
+    for (let i = 0; i <= currentOrdinal; i++) {
+        const stage = stages_1.STAGE_PIPELINE[i].stage;
+        if (newEngaged.has(stage) && !oldEngaged.has(stage))
+            return stage;
+    }
+    return null;
 }
 /** `th state status` — human-readable snapshot of tier/stage/gates. */
 function runStateStatus(paths) {

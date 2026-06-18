@@ -6,9 +6,11 @@ import { type CommandResult, success, failure } from "../core/output";
 import { type ValidationIssue } from "../core/state-schema";
 import { loadBriefFromFile, type TaskBrief } from "../core/brief";
 import { structuredLog } from "../core/log";
-import { formatIssues } from "../core/guards";
+import { NOT_INIT, formatIssues } from "../core/guards";
 import { readState } from "../core/state-store";
 import { runRepoCheck, REPO_NO_MAP_EXIT } from "./repo";
+import { validateTierTransition } from "../core/gate-preconditions";
+import { applyGateMutation } from "./state";
 
 /**
  * `th tier` — the Tier-0 classifier (spec §5).
@@ -215,4 +217,33 @@ export function runTierVetoCheck(paths: ProjectPaths, briefPath?: string): Comma
     data: { blocked: false, flags: [] },
     human: "OK: no blast-radius flag; Tier 0 not vetoed.",
   });
+}
+
+/**
+ * `th tier record <T>` — typed gate command mirroring the MCP `th_tier_record`
+ * tool (#11). Runs `validateTierTransition` (refuses invalid_tier,
+ * tier_locked_after_unlock, tier_downgrade_human_only, t0_blast_radius_veto) and,
+ * on pass, writes the tier through the shared locked + ledgered `applyGateMutation`
+ * (source "th tier record"), which also performs the #1 tier-upgrade stage
+ * backfill. The gate-checked path operators should prefer over a raw `th state set
+ * tier`.
+ */
+export function runTierRecord(paths: ProjectPaths, tier?: string): CommandResult {
+  if (!tier) return failure({ human: "usage: th tier record <T0|T1|T2|T3>" });
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: `state.json is invalid; fix it before recording a tier:\n${formatIssues(r.issues)}`,
+      data: { error: "invalid_state", issues: r.issues },
+    });
+  }
+  const check = validateTierTransition(r.state, tier);
+  if (!check.ok) {
+    return failure({
+      human: `Refusing tier record (${check.error}).`,
+      data: { error: check.error, ...(check.detail ?? {}) },
+    });
+  }
+  return applyGateMutation(paths, { tier }, "th tier record");
 }

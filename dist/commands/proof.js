@@ -114,8 +114,10 @@ function reportResult(report) {
     return report.summary.verdict === "fail" ? (0, output_1.failure)({ data, human }) : (0, output_1.success)({ data, human });
 }
 /**
- * `th proof run` — run the full operational proof suite (all nine components) and
- * emit the dual-format report. `--self-test` drives the deterministic spine (no LLM).
+ * `th proof run` — mechanical self-test and report runner: evaluates all nine
+ * component cards over harvested proof scenarios and emits the dual-format report.
+ * `--self-test` drives the deterministic self-test spine (real `run*` handlers,
+ * no LLM) to produce harvestable artifacts — NOT a live agent/pipeline driver.
  */
 async function runProofRun(paths, opts = {}) {
     const report = await (0, runner_1.runProof)({

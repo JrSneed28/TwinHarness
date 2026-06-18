@@ -65,8 +65,11 @@ exports.checkDecisionObligations = checkDecisionObligations;
 exports.checkDebate = checkDebate;
 exports.checkGoverningArtifact = checkGoverningArtifact;
 exports.checkCoverage = checkCoverage;
+exports.implementationRequiresSlices = implementationRequiresSlices;
 exports.checkImplementationSettled = checkImplementationSettled;
 exports.checkFinalVerification = checkFinalVerification;
+exports.interviewRequired = interviewRequired;
+exports.checkInterview = checkInterview;
 exports.canAdvanceStage = canAdvanceStage;
 exports.canUnlockImplementation = canUnlockImplementation;
 exports.validateTierTransition = validateTierTransition;
@@ -79,6 +82,7 @@ const coverage_1 = require("./coverage");
 const verify_1 = require("./verify");
 const decisions_1 = require("./decisions");
 const repo_1 = require("../commands/repo");
+const interview_1 = require("../commands/interview");
 const PASS = { ok: true };
 // ---------------------------------------------------------------------------
 // Global rungs (stage-independent) — checked before any stage-specific work, in
@@ -211,6 +215,17 @@ function checkCoverage(paths) {
     return PASS;
 }
 /**
+ * SINGLE shared predicate (audit finding #2): does this project owe implementation
+ * slices? True for a "code" delivery (the default — absent `delivery_mode` ⇒ "code"),
+ * false for "no-code" / "documentation-only". BOTH `checkImplementationSettled` (the
+ * gate) AND `th next` (the oracle, via the `sync-slices` branch) consume THIS one
+ * predicate, so they can never disagree about whether an EMPTY slice set during the
+ * `implementation` stage is valid.
+ */
+function implementationRequiresSlices(state) {
+    return (state.delivery_mode ?? "code") === "code";
+}
+/**
  * Rung k (next.ts:374) — to advance OUT of the `implementation` stage, every slice
  * must be settled (done|blocked). `th next` surfaces a richer within-stage action
  * (dispatch-wave / await-builders / stalled-build / sync-slices) while building;
@@ -218,10 +233,18 @@ function checkCoverage(paths) {
  */
 function checkImplementationSettled(state) {
     const prog = (0, health_1.sliceProgress)(state);
-    // An EMPTY slice set is vacuously settled (mirrors checkFinalVerification's
-    // `prog.total > 0` floor): with no slices there is nothing to finish, so it must
-    // not block the advance with a self-contradictory `slices_unsettled` (total:0).
-    if (prog.total > 0 && !prog.allSettled) {
+    // An EMPTY slice set during `implementation` is INVALID for a CODE project (finding
+    // #2): with `delivery_mode` "code" the stage owes ≥1 slice, so zero slices is an
+    // unsynced plan — NOT a vacuous pass. The gate and `th next` agree here via the
+    // shared `implementationRequiresSlices` predicate. For no-code/documentation-only an
+    // empty set stays vacuously settled (mirrors checkFinalVerification's prog.total>0 floor).
+    if (prog.total === 0) {
+        if (implementationRequiresSlices(state)) {
+            return { ok: false, error: "no_slices_defined", detail: { delivery_mode: state.delivery_mode ?? "code" } };
+        }
+        return PASS;
+    }
+    if (!prog.allSettled) {
         return {
             ok: false,
             error: "slices_unsettled",
@@ -273,6 +296,39 @@ function stageOrdinal(stage) {
 }
 /** Index of the `implementation-planning` stage in the canonical pipeline. */
 const IMPLEMENTATION_PLANNING_ORDINAL = stages_1.STAGE_PIPELINE.findIndex((s) => s.stage === "implementation-planning");
+/** Index of the `requirements` stage — the soft interview gate's boundary (finding #14). */
+const REQUIREMENTS_ORDINAL = stages_1.STAGE_PIPELINE.findIndex((s) => s.stage === "requirements");
+/**
+ * Whether a clarity interview is REQUIRED before advancing past `requirements`
+ * (audit finding #14, soft gate). An explicit `interview_required` boolean wins;
+ * absent ⇒ COMPUTED from tier: required for T2/T3, not for T0/T1/unclassified.
+ */
+function interviewRequired(state) {
+    if (typeof state.interview_required === "boolean")
+        return state.interview_required;
+    return state.tier === "T2" || state.tier === "T3";
+}
+/**
+ * SOFT interview gate (audit finding #14). While an interview is required
+ * (`interviewRequired`) AND not yet ready (`interviewReady`), the run may not advance
+ * PAST `requirements`: it is refused at every stage up to and including `requirements`
+ * (`th next` renders this as a `complete-interview` action). Stages already past
+ * requirements are never blocked — the interview only gates the FRONT of the pipeline,
+ * which keeps it a soft, front-loaded gate rather than a hard stop everywhere.
+ */
+function checkInterview(paths, state) {
+    if (!interviewRequired(state))
+        return PASS;
+    if ((0, interview_1.interviewReady)(paths))
+        return PASS;
+    const ordinal = stageOrdinal(state.current_stage);
+    // Pre-pipeline (ordinal -1, e.g. "init") and `requirements` itself are at/before the
+    // gate point; anything later is already past it and must not be re-blocked.
+    if (ordinal < 0 || ordinal <= REQUIREMENTS_ORDINAL) {
+        return { ok: false, error: "interview_incomplete", detail: { current_stage: (0, stages_1.canonicalizeStage)(state.current_stage) } };
+    }
+    return PASS;
+}
 /**
  * The FULL mechanical ladder that must clear before the run advances OUT of the
  * current stage — the EXHAUSTIVE list (AC-B13 reuses it verbatim): global rungs
@@ -292,6 +348,8 @@ function canAdvanceStage(paths, state) {
     if (!(r = checkArtifactDrift(paths, state)).ok)
         return r;
     if (!(r = checkTierSet(state)).ok)
+        return r;
+    if (!(r = checkInterview(paths, state)).ok)
         return r;
     if (!(r = checkRepoMap(paths, state)).ok)
         return r;

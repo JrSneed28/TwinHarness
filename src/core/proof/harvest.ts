@@ -38,11 +38,13 @@ export function proofCallsPath(paths: ProjectPaths): string {
   return path.join(paths.stateDir, "proof-calls.jsonl");
 }
 
-/** Shape-guard for one `proof-calls.jsonl` line ({tool,ts,ok}); malformed lines are skipped. */
+/** Shape-guard for one `proof-calls.jsonl` line ({tool,ts,ok,reason?}); malformed lines are skipped. */
 function isProofCall(parsed: unknown): parsed is ProofCall {
   if (typeof parsed !== "object" || parsed === null) return false;
   const c = parsed as Record<string, unknown>;
-  return typeof c.tool === "string" && typeof c.ts === "string" && typeof c.ok === "boolean";
+  if (typeof c.tool !== "string" || typeof c.ts !== "string" || typeof c.ok !== "boolean") return false;
+  // `reason` is optional; when present it must be a string (the failure cause for #5).
+  return c.reason === undefined || typeof c.reason === "string";
 }
 
 /**

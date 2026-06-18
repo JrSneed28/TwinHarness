@@ -12,11 +12,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
-import { runStateSet } from "../src/commands/state";
 import { readState, writeState } from "../src/core/state-store";
 import { writeVerifyReport } from "../src/core/verify";
 import { writeTelemetryConfig, readTelemetryLog } from "../src/core/telemetry";
-import type { SliceState } from "../src/core/state-schema";
+import type { SliceState, TwinHarnessState } from "../src/core/state-schema";
 import { runScorecard } from "../src/commands/scorecard";
 import { runRoute } from "../src/commands/route";
 
@@ -35,6 +34,16 @@ function seedSlices(t: TempProject, slices: SliceState[]): void {
   writeState(t.paths, { ...s, slices });
 }
 
+/**
+ * Position gate-owned state (tier, current_stage, blast_radius_flags) for a test.
+ * After the #11 demotion a raw `th state set` refuses those fields, so setup uses
+ * the ungated low-level positioning writer directly (the scorecard is read-only and
+ * never consults the interview soft-gate, so no interview_required is needed here).
+ */
+function position(t: TempProject, patch: Partial<TwinHarnessState>): void {
+  writeState(t.paths, { ...readState(t.paths).state!, ...patch });
+}
+
 interface SliceSummary {
   total: number;
   done: number;
@@ -48,8 +57,8 @@ describe("REQ-SCORECARD-001: composes tier, coverage, slices, suite, drift", () 
   it("reports tier/stage and slice progress (done/total/blocked)", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
-    runStateSet(tp.paths, "current_stage", "implementation");
+    position(tp, { tier: "T2" });
+    position(tp, { current_stage: "implementation" });
     seedSlices(tp, [
       { id: "SLICE-1", status: "done", components: ["a"] },
       { id: "SLICE-2", status: "blocked", components: ["b"] },
@@ -68,7 +77,7 @@ describe("REQ-SCORECARD-001: composes tier, coverage, slices, suite, drift", () 
   it("reports coverage planned/implemented/tested counts from the docs", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2" });
     writeFile(tp, "docs/01-requirements.md", "REQ-001 and REQ-002.\n");
     writeFile(tp, "docs/09-implementation-plan.md", "Plan covers REQ-001 and REQ-002.\n");
     writeFile(tp, "tests/foo.test.ts", "// covers REQ-001\n");
@@ -84,7 +93,7 @@ describe("REQ-SCORECARD-001: composes tier, coverage, slices, suite, drift", () 
   it("suite shows '—' when no verify report, and 'green'/'FAILING' when present", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2" });
 
     expect(runScorecard(tp.paths, {}).data?.suite).toBe("—");
 
@@ -109,7 +118,7 @@ describe("REQ-SCORECARD-001: composes tier, coverage, slices, suite, drift", () 
   it("summarizes drift: open-blocking count from state", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2" });
     // Open blocking drift is a managed field — drive it through the owning flow.
     // Here we assert the scorecard surfaces it once state carries it.
     const s = readState(tp.paths).state!;
@@ -131,7 +140,7 @@ describe("REQ-SCORECARD-002: opt-in telemetry snapshot", () => {
   it("appends one snapshot line when telemetry is enabled", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2" });
     writeTelemetryConfig(tp.paths, { enabled: true });
 
     expect(readTelemetryLog(tp.paths)).toHaveLength(0);
@@ -150,7 +159,7 @@ describe("REQ-SCORECARD-002: opt-in telemetry snapshot", () => {
   it("records nothing when telemetry is disabled (the default)", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2" });
     runScorecard(tp.paths, {});
     runScorecard(tp.paths, {});
     expect(readTelemetryLog(tp.paths)).toHaveLength(0);
@@ -167,7 +176,7 @@ describe("REQ-SCORECARD-003: Routing line summarizes recorded th route telemetry
   it("shows '—' when no route telemetry has been recorded", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2" });
     const res = runScorecard(tp.paths, {});
     const routing = routingData(res.data);
     expect(routing.events).toBe(0);
@@ -179,8 +188,8 @@ describe("REQ-SCORECARD-003: Routing line summarizes recorded th route telemetry
     tp = makeTempProject();
     runInit(tp.paths, {});
     // Blast-radius flags route a blast-component Builder to opus; a plain spec stays sonnet.
-    runStateSet(tp.paths, "tier", "T3");
-    runStateSet(tp.paths, "blast_radius_flags", JSON.stringify(["authentication"]));
+    position(tp, { tier: "T3" });
+    position(tp, { blast_radius_flags: ["authentication"] });
     writeTelemetryConfig(tp.paths, { enabled: true });
 
     // Record three route calls (each appends a "route" telemetry event).

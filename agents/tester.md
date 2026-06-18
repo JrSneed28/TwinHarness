@@ -155,10 +155,10 @@ it precisely.
 **Blackboard fragment (for Orchestrator visibility without blocking):**
 ```
 # Via MCP (preferred):
-mcp__plugin_twinharness_th__th_collab_fragment  { content: "<finding summary>" }
+mcp__plugin_twinharness_th__th_collab_fragment  { stage: "qa", round: "tester", name: "QA-001.md", text: "<finding summary>" }
 
 # Via CLI:
-th collab fragment --content "<finding summary>"
+th collab fragment --stage qa --round tester --name QA-001.md --text "<finding summary>"
 ```
 
 Use the blackboard for PASS confirmations, flaky signals, environmental notes, and

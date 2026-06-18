@@ -7,7 +7,7 @@
  * `th state verify` and the stop-gate can explain *what* is wrong.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.STATE_FIELD_ORDER = exports.PROJECT_MODES = exports.WRITE_GATE_VALUES = exports.SLICE_STATUSES = exports.BLAST_RADIUS_FLAGS = exports.TIERS = exports.CURRENT_SCHEMA_VERSION = void 0;
+exports.STATE_FIELD_ORDER = exports.DELIVERY_MODES = exports.PROJECT_MODES = exports.WRITE_GATE_VALUES = exports.SLICE_STATUSES = exports.BLAST_RADIUS_FLAGS = exports.TIERS = exports.CURRENT_SCHEMA_VERSION = void 0;
 exports.initialState = initialState;
 exports.validateState = validateState;
 exports.serializeState = serializeState;
@@ -35,6 +35,15 @@ exports.SLICE_STATUSES = ["pending", "in-progress", "done", "blocked"];
 exports.WRITE_GATE_VALUES = ["ask", "deny", "off", "strict"];
 /** Project mode: greenfield (default) or brownfield = adopting an existing codebase (G5). */
 exports.PROJECT_MODES = ["greenfield", "brownfield"];
+/**
+ * Delivery mode (audit finding #2). Distinguishes a normal CODE project (which
+ * MUST produce implementation slices) from a no-code / documentation-only project
+ * (where an empty slice set during `implementation` is legitimately settled).
+ * Orthogonal to `project_mode` (greenfield/brownfield), which is why this is a
+ * SEPARATE field rather than reusing that name. Absent ⇒ "code" (the safe default
+ * that keeps the slice obligation in force for existing flows).
+ */
+exports.DELIVERY_MODES = ["code", "no-code", "documentation-only"];
 /** Canonical field order → deterministic serialization → stable content hashes. */
 exports.STATE_FIELD_ORDER = [
     "schema_version",
@@ -53,6 +62,9 @@ exports.STATE_FIELD_ORDER = [
     "write_gate",
     "project_mode",
     "interview_threshold",
+    "delivery_mode",
+    "has_ui",
+    "interview_required",
 ];
 /** Fresh state written by `th init` — unclassified, implementation not yet allowed. */
 function initialState() {
@@ -219,6 +231,20 @@ function validateState(value) {
             v.interview_threshold > 1) {
             issues.push({ path: "interview_threshold", message: "must be a finite number in [0,1] or absent" });
         }
+    }
+    // Optional delivery_mode field (audit finding #2) — when present, one of DELIVERY_MODES.
+    if (v.delivery_mode !== undefined) {
+        if (typeof v.delivery_mode !== "string" || !exports.DELIVERY_MODES.includes(v.delivery_mode)) {
+            issues.push({ path: "delivery_mode", message: `must be one of ${exports.DELIVERY_MODES.join(", ")} or absent` });
+        }
+    }
+    // Optional has_ui field (audit finding #13) — when present, a boolean. Absent ⇒ true.
+    if (v.has_ui !== undefined && typeof v.has_ui !== "boolean") {
+        issues.push({ path: "has_ui", message: "must be a boolean or absent" });
+    }
+    // Optional interview_required field (audit finding #14) — when present, a boolean.
+    if (v.interview_required !== undefined && typeof v.interview_required !== "boolean") {
+        issues.push({ path: "interview_required", message: "must be a boolean or absent" });
     }
     // Cross-field invariant — the veto FLOOR (spec §5): Tier 0 is forbidden when
     // any blast-radius flag is present. This makes `th state set tier T0`

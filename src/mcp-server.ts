@@ -17,9 +17,9 @@
  *    `@modelcontextprotocol/sdk` dependency. The zero-runtime-dependency CLI
  *    guarantee is therefore intact.
  *  - It exposes a MINIMAL set: the coordination/observability commands the
- *    Orchestrator needs. `init`/`migrate` and the hook gates are deliberately
- *    EXCLUDED (scaffolding + the Claude Code hook protocol are not Orchestrator
- *    tools).
+ *    Orchestrator needs. Destructive `init`/`migrate` and hook gates are
+ *    deliberately EXCLUDED; the safe idempotent `th_init` IS exposed (no force
+ *    over MCP — destructive re-init is CLI/human-only); hook gates remain excluded.
  *
  * The project root is taken from `CLAUDE_PROJECT_DIR` (set by Claude Code for an
  * enabled plugin's MCP server) and falls back to `process.cwd()`.
@@ -71,7 +71,7 @@ import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
 
 // --- Component B: typed gate-transition tooling (precondition helpers + locked setter) ---
 import { readState } from "./core/state-store";
-import { nextStageAfter, canonicalizeStage } from "./core/stages";
+import { nextStageAfterFor, canonicalizeStage } from "./core/stages";
 import {
   TIERS,
   WRITE_GATE_VALUES,
@@ -339,7 +339,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_stage_advance",
     description:
-      "Advance to the next engaged stage for the current tier. Calls canAdvanceStage (the full mechanical ladder: blocking drift, revise caps, failing verify, artifact drift, tier set, brownfield repo-map, decision obligations, open debates, the current stage's governing artifact, coverage at implementation-planning, all slices settled at implementation). Refuses with the first failing rung's stable error, or no_next_stage at the terminal stage. Writes current_stage via the locked+ledgered setter (source=th_stage_advance).",
+      "Advance to the next APPLICABLE engaged stage for the run (UX/UI stages are skipped when has_ui===false — #13). Calls canAdvanceStage (the full mechanical ladder: blocking drift, revise caps, failing verify, artifact drift, tier set, brownfield repo-map, decision obligations, open debates, the current stage's governing artifact, coverage at implementation-planning, all slices settled at implementation). Refuses with the first failing rung's stable error, or no_next_stage at the terminal stage. Writes current_stage via the locked+ledgered setter (source=th_stage_advance).",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => {
       const gs = gateState(paths);
@@ -348,10 +348,10 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       const adv = canAdvanceStage(paths, state);
       if (!adv.ok) return gateRefusal(adv);
       const current = canonicalizeStage(state.current_stage);
-      const next = nextStageAfter(current, state.tier);
+      const next = nextStageAfterFor(current, state);
       if (!next) {
         return failure({
-          human: "Already at the terminal engaged stage for this tier; there is no next stage to advance to.",
+          human: "Already at the terminal engaged stage for this run; there is no next stage to advance to.",
           data: { error: "no_next_stage", current_stage: current },
         });
       }
@@ -1174,7 +1174,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_proof_run",
     description:
-      "Run the full TwinHarness operational proof suite (all nine components) and emit the dual-format report + enforced coverage matrix + split-gated regression verdict. Read/coordination-only — never gate-mutating. `selfTest` runs the deterministic mechanical-reachability mode (no live LLM; never a live verdict for components 1/2/5).",
+      "Mechanical self-test and report runner over harvested proof scenarios: evaluates all nine component cards, the enforced coverage matrix, and the split-gated regression verdict. With `selfTest`, drives the deterministic self-test spine via real `run*` handlers (no LLM) to produce harvestable artifacts first — does NOT drive a live agent/sub-process pipeline. Read/coordination-only — never gate-mutating.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1434,8 +1434,8 @@ export function validateToolArgs(name: string, args: unknown): { ok: true } | { 
 }
 
 /**
- * C1/A1 — append one `{tool,ts,ok}` record to the DEDICATED producer-side MCP
- * call trail at `<stateDir>/proof-calls.jsonl`.
+ * C1/A1 — append one `{tool,ts,ok,reason?}` record to the DEDICATED producer-side
+ * MCP call trail at `<stateDir>/proof-calls.jsonl`.
  *
  * This is the ONLY artifact that records WHICH MCP tools a live run actually
  * invoked, so the proof coverage-matrix can compute the MCP-tool dimension from
@@ -1443,14 +1443,24 @@ export function validateToolArgs(name: string, args: unknown): { ok: true } | { 
  * NOT gated by the telemetry opt-in switch — so the coverage evidence cannot be
  * silently emptied by the M3 opt-in, log-rotation, or route/scorecard co-mingling.
  *
- * Best-effort by contract (A2): the append is written at BOTH the success and the
- * catch sites of the CallTool handler, and a logging failure must NEVER break or
- * alter a tool call — every error is swallowed. The consumer is `readProofCalls`/
- * `harvestScenario` in `src/core/proof/harvest.ts`.
+ * Best-effort by contract (A2): a logging failure must NEVER break or alter a tool
+ * call — every error is swallowed. {@link callTool} writes at FOUR sites so the
+ * trail is complete and the report can count its own call:
+ *   - unknown-tool guard  → `ok:false, reason:"unknown_tool"` (#5)
+ *   - invalid-args guard  → `ok:false, reason:"invalid_args"` (#5)
+ *   - BEFORE dispatch     → `ok:true` (so th_proof_report sees its own call — #4)
+ *   - catch (handler threw)→ `ok:false, reason:"threw"` (corrects the pre-dispatch record)
+ * The consumer is `readProofCalls`/`harvestScenario` in `src/core/proof/harvest.ts`.
  */
-function appendProofCall(paths: ProjectPaths, tool: string, ok: boolean): void {
+function appendProofCall(paths: ProjectPaths, tool: string, ok: boolean, reason?: string): void {
   try {
-    const line = JSON.stringify({ tool, ts: new Date().toISOString(), ok }) + "\n";
+    const record: { tool: string; ts: string; ok: boolean; reason?: string } = {
+      tool,
+      ts: new Date().toISOString(),
+      ok,
+    };
+    if (reason !== undefined) record.reason = reason;
+    const line = JSON.stringify(record) + "\n";
     fs.appendFileSync(path.join(paths.stateDir, "proof-calls.jsonl"), line);
   } catch {
     // best-effort: trail logging must never affect the tool call.
@@ -1470,6 +1480,14 @@ function appendProofCall(paths: ProjectPaths, tool: string, ok: boolean): void {
 export async function callTool(name: string, args: ToolArgs = {}): Promise<CallToolResult> {
   const def = TOOL_DEFS.find((t) => t.name === name);
   if (!def) {
+    // #5: record the attempted unknown-tool call (ok:false) BEFORE returning, so
+    // the proof trail reflects what the Orchestrator TRIED to invoke — not only
+    // the calls that resolved to a real tool. Fully guarded (best-effort).
+    try {
+      appendProofCall(resolvePathsForCall(), name, false, "unknown_tool");
+    } catch {
+      // best-effort: trail logging must never affect the tool call.
+    }
     return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
   }
   // Enforce the closed, typed inputSchema BEFORE dispatch (H-1): extra,
@@ -1477,6 +1495,13 @@ export async function callTool(name: string, args: ToolArgs = {}): Promise<CallT
   // instead of being silently passed to the handler.
   const valid = validateToolArgs(def.name, args);
   if (!valid.ok) {
+    // #5: record the rejected-arguments attempt (ok:false) so an invalid call is
+    // auditable in the trail instead of vanishing at the validation boundary.
+    try {
+      appendProofCall(resolvePathsForCall(), def.name, false, "invalid_args");
+    } catch {
+      // best-effort
+    }
     return {
       content: [{ type: "text", text: `Invalid arguments for ${def.name}: ${valid.errors}` }],
       isError: true,
@@ -1486,18 +1511,22 @@ export async function callTool(name: string, args: ToolArgs = {}): Promise<CallT
   // tool error rather than crashing the server process.
   try {
     const paths = resolvePathsForCall();
+    // C1/A1/A2 + #4: record the call BEFORE dispatch so a tool that inspects the
+    // proof-calls trail WHILE it runs — notably th_proof_report, which builds the
+    // coverage matrix from the trail — can count its OWN call. `ok:true` here means
+    // the call passed validation and dispatched; a handler that returns a failure
+    // CommandResult does NOT flip it (only an unexpected throw does — see below).
+    appendProofCall(paths, def.name, true);
     // Async tools (the th_proof_* suite) spawn real OS processes — await runAsync
     // when present; otherwise call the synchronous handler.
     const cmd = def.runAsync ? await def.runAsync(paths, args) : def.run(paths, args);
-    const result = toToolResult(cmd);
-    // C1/A1/A2: record the successful call in the dedicated proof-calls trail.
-    appendProofCall(paths, def.name, true);
-    return result;
+    return toToolResult(cmd);
   } catch (err) {
-    // C1/A1/A2: record the failed call too (ok:false). Fully guarded so a
-    // path-resolution or logging error here can never escape the catch.
+    // The handler threw unexpectedly: append a corrective ok:false record so the
+    // trail tells the truth about the crash. Fully guarded so a path-resolution or
+    // logging error here can never escape the catch.
     try {
-      appendProofCall(resolvePathsForCall(), def.name, false);
+      appendProofCall(resolvePathsForCall(), def.name, false, "threw");
     } catch {
       // best-effort
     }
