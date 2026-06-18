@@ -2,7 +2,7 @@
 
 **Turns "build me X" into working, tested software** by forcing the idea through requirements, scope, design, and slice-by-slice implementation with verification gates — as a Claude Code plugin.
 
-> **Early development notice.** TwinHarness is at v0.6.x. The pipeline has been exercised end-to-end and ships 1100+ tests, green on CI (1 platform-conditional skip in `tests/concurrency.test.ts` — POSIX-only permission-error case, intentionally skipped on Windows/root and covered on Linux/macOS CI), but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
+> **Early development notice.** TwinHarness is at v0.7.0. The pipeline has been exercised end-to-end and ships 1672 tests, green on CI (1 platform-conditional skip in `tests/concurrency.test.ts` — POSIX-only permission-error case, intentionally skipped on Windows/root and covered on Linux/macOS CI), but it has limited real-world mileage and interfaces may change before 1.0. Expect breaking changes. Use it, push its limits, file issues — just don't bet a production release on it yet.
 
 ---
 
@@ -121,12 +121,18 @@ Open Claude Code in the directory where you want the software built (an empty di
 
 ### Slash commands
 
+TwinHarness ships **16 slash commands** — 4 you drive a run with, plus 12 thin wrappers over the most-used `th` verbs (handy for inspecting a run without typing the full CLI path).
+
+**Core run commands:**
+
 | Command | What it does |
 |---|---|
 | `/twinharness:th-run <idea>` | Start a new run, or resume an interrupted one (it picks up from `state.json`) |
 | `/twinharness:th-status` | Tier, current stage, gates, slices, open drift — at a glance |
 | `/twinharness:th-drift` | Review the drift log: skim auto-applied doc updates, decide blocked escalations |
 | `/twinharness:th-escalate` | Show everything currently waiting on a human decision |
+
+**Inspection & verb wrappers:** `/twinharness:th-init`, `th-doctor`, `th-next`, `th-scorecard`, `th-stage`, `th-verify`, `th-coverage`, `th-tier`, `th-route`, `th-repo`, `th-test`, and `th-decision-approve` (the human-only decision gate). Each maps to the matching `th` command documented in [USAGE.md](./USAGE.md) Part 3.
 
 ### Run the test suite (from a clone)
 
@@ -233,7 +239,7 @@ The layer treats all repository content as untrusted data: discovered build/test
 **What works today:**
 
 - Full T0–T3 pipeline, all 16 agents, all stages.
-- `th` CLI with 1100+ tests covering CLI behavior, plugin-packaging integrity, security containment (path traversal, proto-pollution), the deterministic repo-understanding layer (scanner, schema, relevance, impact, MCP tools), decision governance (hash-chain tamper detection, TTY barrier, gating predicate), repo staleness detection, brownfield tiering gate, `th next` decision-obligation rung, and the full 62-tool MCP surface; CI runs typecheck, build, a dist-sync assertion, and the full suite on every push and PR.
+- `th` CLI with 1672 tests (1 platform-conditional skip) covering CLI behavior, plugin-packaging integrity, security containment (path traversal, proto-pollution), the deterministic repo-understanding layer (scanner, schema, relevance, impact, MCP tools), decision governance (hash-chain tamper detection, TTY barrier, gating predicate), repo staleness detection, brownfield tiering gate, `th next` decision-obligation rung, and the full 62-tool MCP surface; CI runs typecheck, build, a dist-sync assertion, and the full suite on every push and PR across Linux/macOS/Windows.
 - Validated Claude Code plugin packaging (`claude plugin validate` + `--plugin-dir` load pass).
 - PreToolUse write-gate: blocks the Write/Edit/NotebookEdit path by default before gates clear and across slice-component boundaries during the build, plus a conservative pre-implementation Bash matcher; Bash writes remain out of scope as a guarantee (v0.3.0+).
 - Gate-mutation audit ledger, managed drift counter, schema-versioned state with `th migrate`, and run inspection via `th doctor` / `th stage` / `th manifest export` / `th context estimate`.
@@ -252,7 +258,7 @@ The layer treats all repository content as untrusted data: discovered build/test
 .claude-plugin/   plugin manifest and marketplace.json
 .github/          CI (typecheck, build, dist-sync assertion, full test suite)
 agents/           16 agent prompt files (lean cores; detail lives in skills/twinharness/reference/)
-commands/         4 slash command definitions
+commands/         16 slash command definitions (4 run commands + 12 th-* verb wrappers)
 dist/             compiled CLI — ships in git (no build step at install time)
 hooks/            hook wiring (hooks.json → th hook stop-gate / pretool-gate)
 schemas/          published JSON Schemas for state.json and brief.json

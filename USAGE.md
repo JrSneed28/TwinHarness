@@ -1,11 +1,19 @@
 # TwinHarness Usage Guide
 
-From first install to advanced CLI surgery. This guide is organized in four parts:
+From first install to advanced CLI surgery. **New here? Read [Key concepts in 60 seconds](#key-concepts-in-60-seconds)
+first**, then Part 1 — you can drive a full run knowing nothing past Part 1.
 
-1. [Getting started](#part-1--getting-started) — install, first run, what you'll be asked
+This guide is organized so you can stop reading as soon as you have what you need:
+
+- [Key concepts in 60 seconds](#key-concepts-in-60-seconds) — the vocabulary, defined plainly (start here)
+1. [Getting started](#part-1--getting-started) — install, first run, **driving it inside Claude Code** (beginner → advanced), what you'll be asked
 2. [Understanding a run](#part-2--understanding-a-run) — tiers, stages, the Critic loop, drift, gates
 3. [The `th` CLI](#part-3--the-th-cli-advanced) — full command reference, state schema, exit codes
 4. [Customization & development](#part-4--customization--development) — templates, dev workflow, troubleshooting
+
+> **Reading paths.** *Just want to use it?* Key concepts → Part 1, and stop. *Want to understand
+> what it's doing while it runs?* Add Part 2. *Scripting, CI, or debugging the harness itself?*
+> Part 3 and Part 4.
 
 ---
 
@@ -35,6 +43,33 @@ The one governing rule that resolves every judgment call:
 
 ---
 
+## Key concepts in 60 seconds
+
+You don't need to memorize these — but every section below assumes them. Skim once; refer back as needed.
+
+| Term | What it means |
+|---|---|
+| **Run** | One pass of TwinHarness over one idea, in one project directory. All its state lives in `.twinharness/` and `docs/`. |
+| **Orchestrator** | The lead agent (a Claude Code *skill*) that drives the whole run — it picks stages, spawns the other agents, and calls the `th` CLI. You mostly talk to it. |
+| **Agent** | A specialized, fresh-context sub-Claude with one job (Spec writes requirements, Builder writes code, Critic reviews, etc.). There are **16**. You don't invoke them directly; the Orchestrator does. |
+| **`th` CLI** | A deterministic TypeScript command-line tool bundled with the plugin. It **records and computes** the mechanical truth (state, hashes, coverage, drift counts) — it never *decides* anything. The agents run it for you. |
+| **Artifact** | A governing document a stage produces (`docs/01-requirements.md`, `docs/04-architecture.md`, …). Artifacts **govern** downstream work — they're checked against, not just written and forgotten. |
+| **Summary block** | The compact header at the top of every artifact. Downstream agents read the Summary, not the whole doc — that's what keeps context small. |
+| **REQ-ID** | A stable label for one requirement (`REQ-001`, `REQ-NFR-002`). Everything downstream — slices, tests, code — **anchors** back to a REQ-ID, which makes traceability and coverage computable. |
+| **Tier (T0–T3)** | How much process the project gets, sized to its complexity. **T0** = trivial, skip everything and just build. **T3** = large/critical, every stage and gate. |
+| **Blast radius** | Five high-risk flags — `authentication`, `authorization`, `data-integrity`, `money`, `migrations`. Any one of them sets a **floor**: the project can never be Tier 0, no matter how small. Enforced by code (`th tier veto-check`). |
+| **Slice** | A thin, end-to-end, demonstrable capability (not a layer). The build proceeds slice-by-slice. **Slice 0** is the *walking skeleton* — the thinnest path that touches every architectural boundary. |
+| **Wave** | A batch of slices safe to build in parallel because their components don't overlap. `th build plan` computes the waves. |
+| **Gate** | A checkpoint. A **human gate** stops and asks *you* (requirements, scope, auth, irreversible architecture, blocking drift, final sign-off). Everything else **streams** past with only an automated check. |
+| **Critic loop** | After any agent drafts something, a **fresh-context Critic** reviews it (capped at 3 rounds). Fresh context on purpose — so the author's rationalizations aren't in the room. |
+| **Drift** | A discovery during the build that contradicts a document. *Derived* drift (design details) auto-applies and is logged. *Requirement* drift (contradicts what you signed off) **stops the build** until you decide. |
+| **Coverage gate** | `th coverage check` mechanically blocks the build from starting until every in-scope REQ-ID maps to ≥ 1 slice **and** ≥ 1 test. |
+| **Stop-gate** | A Claude Code *Stop hook* that refuses to let the session claim "done" while state is invalid, a blocking drift is open, or final slices/tests aren't finished. It's code, not a reminder. |
+| **Write-gate** | A Claude Code *PreToolUse hook* that blocks file writes before the pre-build gates clear, and polices slice boundaries during the build. Fail-open: it never touches non-TwinHarness projects. |
+| **MCP tools** | The same `th` read/compute surface exposed as **62** typed `th_*` tools so agents can call it natively over MCP instead of shelling out. |
+
+---
+
 ## Part 1 — Getting started
 
 ### Install
@@ -50,7 +85,8 @@ From a local clone:
 `claude plugin install twinharness@twinharness`). The plugin installs at **user scope** — it is
 available in every project. For a throwaway test session instead: `claude --plugin-dir <path>`.
 
-Requirements: Node ≥ 18 on PATH (the bundled `th` CLI has zero runtime dependencies).
+Requirements: **Node ≥ 20** on PATH (declared in `engines.node`; the bundled `th` CLI has zero
+runtime dependencies). Claude Code ≥ 1.0.0 (the plugin targets the hook + agent manifest schema v1).
 
 ### Your first run
 
@@ -96,7 +132,56 @@ What happens next:
 9. **Verification.** A final report separates what the Critic can certify (coherence) from what
    only tests and you can certify (correctness), and you sign off.
 
-### The commands
+### Driving TwinHarness inside Claude Code
+
+How you actually use it day-to-day, from your first run to power use.
+
+**Beginner — let it drive.** You only need one command and the ability to answer a question:
+
+1. `cd` into your project (empty is fine) and open Claude Code.
+2. Type `/twinharness:th-run <one sentence about what you want>`.
+3. Answer the gates when it asks. It will *only* stop you for the decisions that are genuinely
+   yours (requirements, scope, an irreversible architecture choice, a UI direction, auth, final
+   sign-off). Everything else streams past — you can just watch.
+4. When it says it's done, it has already passed its own stop-gate (state valid, no blocking drift,
+   slices built, tests green where configured). You give the final correctness sign-off.
+
+You don't have to type any `th` commands or invoke any agent — the Orchestrator does all of that.
+You can also just **ask in prose** ("build me X, spec-driven, with tests") and Claude will invoke
+the `twinharness` skill automatically.
+
+**Intermediate — watch and steer mid-run.** While a run is in progress (or between sessions):
+
+| You want to… | Do this |
+|---|---|
+| See where the run is | `/twinharness:th-status` — tier, current stage, gates, slices, open drift |
+| Review what changed during the build | `/twinharness:th-drift` — skim auto-applied doc updates, decide any blocked escalations |
+| See what's waiting on *you* | `/twinharness:th-escalate` — everything currently blocked on a human decision |
+| Resume after closing the session | `/twinharness:th-run` again — it reads `state.json` and picks up where it left off; it never starts over |
+| Interrupt | Just type. You can interrupt any streaming stage at any time; you don't need a command. |
+
+**Advanced — drive the mechanism directly.** Power users (and CI) can call the `th` CLI and the
+inspection commands themselves:
+
+- **Inspect a run without the full CLI path** via the verb-wrapper slash commands:
+  `/twinharness:th-next` (what does the run owe next?), `/twinharness:th-doctor` (full health audit),
+  `/twinharness:th-scorecard` (one-screen summary), `/twinharness:th-coverage`, `/twinharness:th-stage`,
+  `/twinharness:th-tier`, `/twinharness:th-verify`, `/twinharness:th-repo`, `/twinharness:th-route`,
+  `/twinharness:th-test`, `/twinharness:th-init`, and `/twinharness:th-decision-approve` (the human-only
+  decision gate).
+- **Run `th` straight** for scripting/debugging: `node <plugin-or-clone>/dist/cli.js <command>` — the
+  full surface is in [Part 3](#part-3--the-th-cli-advanced).
+- **Let agents call it over MCP:** the 62 `th_*` MCP tools expose the same read/compute surface to
+  sub-agents natively (no shelling out).
+- **Wire the exit-code gates into CI** so a drifted artifact/test contract fails the build — see
+  [Using `th` in CI](#using-th-in-ci).
+
+### The 16 slash commands
+
+Four commands drive a run; twelve are thin wrappers over the most-used `th` verbs so you can inspect
+a run without typing the full CLI path.
+
+**Run commands (the four you'll actually use):**
 
 | Invocation | When to use it |
 |---|---|
@@ -104,6 +189,23 @@ What happens next:
 | `/twinharness:th-status` | Where am I? Tier, current stage, gates, slices, open drift |
 | `/twinharness:th-drift` | Review the drift log: skim auto-applied doc updates, decide blocked escalations |
 | `/twinharness:th-escalate` | Show everything currently waiting on a *human* decision |
+
+**Verb wrappers (inspection & one-off `th` calls):**
+
+| Invocation | Wraps |
+|---|---|
+| `/twinharness:th-init` | `th init` — scaffold a run (rarely needed by hand; `th-run` does it) |
+| `/twinharness:th-doctor` | `th doctor` — full run-health audit |
+| `/twinharness:th-next` | `th next` — the single mechanical obligation the run owes next |
+| `/twinharness:th-scorecard` | `th scorecard` — one-screen post-run summary |
+| `/twinharness:th-stage` | `th stage` — the current/any stage's contract (produces / Critic mode / gate) |
+| `/twinharness:th-verify` | `th verify` — configure & run the project's own test/check commands |
+| `/twinharness:th-coverage` | `th coverage` — the planned/implemented/tested/passing breakdown |
+| `/twinharness:th-tier` | `th tier` — tier eligibility & blast-radius veto check |
+| `/twinharness:th-route` | `th route` — advisory model/effort routing for an agent spawn |
+| `/twinharness:th-repo` | `th repo` — the repo-understanding layer (map / relevant / impact / check) |
+| `/twinharness:th-test` | `th verify run` — run the configured test suite and record the report |
+| `/twinharness:th-decision-approve` | `th decision approve` — the **human-only** decision gate (interactive TTY) |
 
 The `twinharness` skill itself (`/twinharness:twinharness`) is the full Orchestrator playbook;
 Claude also invokes it automatically when you ask for spec-driven, stage-gated development in prose.
@@ -666,7 +768,8 @@ th doctor
 
 Self-diagnostic **plus a full run-health audit**. Reports:
 
-- **Node version** — fails hard if below 18 (the minimum requirement).
+- **Node version** — checks the running Node major version against the supported floor (Node ≥ 20,
+  set by `engines.node`) and reports it.
 - **Plugin CLI** — whether `dist/cli.js` is present next to the running binary.
 - **Plugin version** — from `package.json`.
 - **state.json validity** — valid + tier/stage summary; or a precise issue list if invalid.
@@ -1097,7 +1200,7 @@ Three invariants are enforced by `tests/plugin-manifest.test.ts` — do not figh
 - **Components never call a bare `th`.** Every skill/command/agent resolves the CLI via
   `${CLAUDE_PLUGIN_ROOT}/dist/cli.js` (substituted by Claude Code at load time), because installed
   users don't have `th` on PATH.
-- **16 agents, 18 commands, 2 skills.** The manifest test verifies these counts automatically via
+- **16 agents, 16 commands, 1 skill.** The manifest test verifies these counts automatically via
   `readdirSync` — adding or removing agents will surface immediately.
 - **Version sync.** `plugin.json` version must equal `package.json` version.
 
