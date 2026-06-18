@@ -414,10 +414,12 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 60 + schema/no-exec battery (REQ
     "th_interview_record",
     "th_interview_status",
     "th_init",
+    "th_budget_check",
+    "th_handoff_write",
   ];
 
   // ---- REQ-RU-094: full registry, in order (originally 23; now 60 with the coordination + interview/init + gate-transition + wired-handler tools) ----
-  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_60 — TOOL_DEFS exposes exactly 60 tools in order", () => {
+  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_62 — TOOL_DEFS exposes exactly 62 tools in order", () => {
     expect(TOOL_DEFS.map((t) => t.name)).toEqual(expectedAll);
   });
 

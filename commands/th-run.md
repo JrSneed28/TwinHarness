@@ -29,6 +29,12 @@ user.** Use it to decide **resume vs. fresh init**:
 - `--cutoff <0..1>` — override the interview gate cutoff for this run (default **0.80**). Also
   overridable via the `state.json` field `interview_cutoff` (read it with `th_state_get`); a
   `--cutoff` flag wins over the state field, which wins over the 0.80 default.
+- `--max-tokens <k>` — set the per-session **context budget** in **thousands** ("k"). Passed to
+  `th init`, it persists as `state.json`'s `max_tokens` after a ×1000 conversion (e.g. `--max-tokens
+  150` → `max_tokens: 150000`) and survives across resume. `th budget check` reads it as the default
+  budget when `--max` is omitted; absent ⇒ a tier-aware default (T0/T1 ≈120k, T2 ≈160k, T3 ≈200k).
+  See the **Context budget & handoff** section of the `twinharness` skill for the per-wave checkpoint
+  and the `over` → Continue/Fresh handoff flow.
 
 Follow the `twinharness` skill (the Orchestrator playbook). In brief:
 

@@ -42,6 +42,8 @@ import { runMigrate } from "./commands/migrate";
 import { runDoctor } from "./commands/doctor";
 import { runContextEstimate, runContextPack } from "./commands/context";
 import { runStageCurrent, runStageDescribe, runStageList } from "./commands/stage";
+import { runBudgetCheck } from "./commands/budget";
+import { runHandoffWrite, runHandoffVerify, runResume } from "./commands/handoff";
 import { runManifestExport } from "./commands/manifest";
 import { runPreview } from "./commands/preview";
 import { runScorecard } from "./commands/scorecard";
@@ -130,6 +132,11 @@ Usage:
   th telemetry on|off|status        Toggle/report opt-in, LOCAL-ONLY run telemetry (never sent off-machine)
   th context estimate               Approximate the prompt-surface token cost (flags oversized files)
   th context pack [--slice <ID>]    Assemble the §9 handoff bundle (artifact Summary blocks + slice framing)
+  th budget check [--max <k>] [--files-read N] [--slices-built N] [--tool-calls N] [--artifacts N]
+                                    Deterministic context-budget estimate from agent-supplied proxy counts → { estTokens, pct, verdict } (--max in thousands; tier-aware default when omitted)
+  th handoff write                  Assemble .twinharness/HANDOFF.md (run state + next action + artifact Summary blocks + open questions + "don't re-read docs/" directive)
+  th handoff verify                 Confirm a resumed run matches HANDOFF (current_stage/slice + approved-artifact hashes still valid); pass/fail
+  th resume                         Detect .twinharness/HANDOFF.md and print the next mechanical action (from th next)
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
   th delegate pack [--agent A] [--slice ID] [--task T] [--intent I]
@@ -199,6 +206,12 @@ Global flags:
   --capsule <path>  (delegate check) Capsule file to validate
   --force           (init) Reset existing state.json; (collab fragment) overwrite an existing fragment
   --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)
+  --max-tokens <k>  (init) Per-session context budget in THOUSANDS; persisted as max_tokens (×1000, e.g. 150 → 150000)
+  --max <k>         (budget check) Budget override in THOUSANDS; default is state.max_tokens, else the tier-aware default
+  --files-read <n>  (budget check) Proxy count: files read so far
+  --slices-built <n> (budget check) Proxy count: slices built so far
+  --tool-calls <n>  (budget check) Proxy count: tool calls so far
+  --artifacts <n>   (budget check) Proxy count: approved artifacts carried
   --write           (repo map) Write the artifacts (default; bare \`th repo map\` writes)
   --no-write        (repo map) Dry/preview: build in memory, write nothing (alias of --dry-run)
   --format <f>      (repo map) Text rendering: summary (default) | json | md
@@ -296,6 +309,12 @@ export interface ParsedArgs {
     corpusRoot?: string;
     outputRoot?: string;
     scenarioRoot?: string;
+    maxTokens?: number;
+    max?: number;
+    filesRead?: number;
+    slicesBuilt?: number;
+    toolCalls?: number;
+    artifacts?: number;
   };
 }
 
@@ -386,6 +405,15 @@ const NUMBER_FLAGS: Record<string, FlagField> = {
   "--version": "version",
   "--files": "files",
   "--maxResults": "maxResults",
+  // Track A-2 — context budget. `--max-tokens` / `--max` are RAW numbers here (in
+  // thousands "k"); the ×1000 conversion happens at the write/compute site
+  // (budget.ts / init), NOT in this parser.
+  "--max-tokens": "maxTokens",
+  "--max": "max",
+  "--files-read": "filesRead",
+  "--slices-built": "slicesBuilt",
+  "--tool-calls": "toolCalls",
+  "--artifacts": "artifacts",
 };
 
 /**
@@ -502,7 +530,35 @@ function dispatch(parsed: ParsedArgs): CommandResult {
       return success({ data: { version: ver }, human: ver });
     }
     case "init":
-      return runInit(paths, { force: parsed.flags.force, brownfield: parsed.flags.brownfield });
+      return runInit(paths, {
+        force: parsed.flags.force,
+        brownfield: parsed.flags.brownfield,
+        maxTokens: parsed.flags.maxTokens,
+      });
+    case "budget":
+      switch (sub) {
+        case "check":
+          return runBudgetCheck(paths, {
+            max: parsed.flags.max,
+            filesRead: parsed.flags.filesRead,
+            slicesBuilt: parsed.flags.slicesBuilt,
+            toolCalls: parsed.flags.toolCalls,
+            artifacts: parsed.flags.artifacts,
+          });
+        default:
+          return failure({ human: `unknown 'budget' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    case "handoff":
+      switch (sub) {
+        case "write":
+          return runHandoffWrite(paths);
+        case "verify":
+          return runHandoffVerify(paths);
+        default:
+          return failure({ human: `unknown 'handoff' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    case "resume":
+      return runResume(paths);
     case "migrate":
       return runMigrate(paths);
     case "doctor":

@@ -65,6 +65,28 @@ fresh context, same producer→critic mechanic:
 - Critic **FAIL** → run `th revise bump code-review`, route grounded defects back to the Builder,
   re-run. Repeat until PASS or escalation.
 
+### Context-budget checkpoint (after each stage and each build wave)
+
+After a stage settles and after **each build wave** completes, check the context budget so the run
+never hits a hard compaction mid-flight:
+
+```
+th budget check --files-read <n> --slices-built <n> --tool-calls <n> --artifacts <n> [--max <k>] --json
+```
+
+You supply the proxy counts; the deterministic layer returns `{ estTokens, pct, verdict }` against
+the budget (`--max`×1000, else persisted `max_tokens`, else the tier-aware default). On the verdict:
+
+- **`ok`** → dispatch the next wave.
+- **`warn`** (pct ≥ 0.75) → finish the current wave, then consider a handoff before the next one.
+- **`over`** (pct ≥ 1.0) → **PAUSE** and surface an `AskUserQuestion`:
+  - **"Continue in this session"** → proceed (accept the compaction risk).
+  - **"Fresh session"** → run **`th handoff write`** (writes `.twinharness/HANDOFF.md` — run state,
+    the `th next` action, artifact Summary blocks, open questions, and a *don't re-read `docs/`*
+    directive), then **STOP** and print the exact `/twinharness:th-run` restart command. The user
+    opens a **new Claude Code conversation**; that session runs `th resume` (then `th handoff verify`
+    to confirm `current_stage`/slice/artifact-hash parity) and continues from `current_stage`.
+
 ### Bidirectional drift loop (§10) — runs continuously during the build
 
 The Builder classifies every discovery against the two-layer rule:

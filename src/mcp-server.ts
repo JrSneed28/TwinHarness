@@ -51,6 +51,8 @@ import { runNext } from "./commands/next";
 import { runDelegatePlan, runDelegatePack, runDelegateCheck } from "./commands/delegate";
 import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck } from "./commands/repo";
 import { runContextPack } from "./commands/context";
+import { runBudgetCheck } from "./commands/budget";
+import { runHandoffWrite } from "./commands/handoff";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
 import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from "./commands/collab";
@@ -241,7 +243,7 @@ function optNumber(args: ToolArgs, key: string): number | undefined {
 }
 
 /**
- * The exposed tools (60 total). Each mirrors one `th` subcommand's flags as a
+ * The exposed tools (62 total). Each mirrors one `th` subcommand's flags as a
  * JSON-Schema input and delegates to that subcommand's existing handler, EXCEPT the
  * 5 typed gate-transition tools (th_tier_record, th_stage_advance,
  * th_implementation_unlock, th_write_gate_set, th_blast_radius_record) which enforce
@@ -250,9 +252,11 @@ function optNumber(args: ToolArgs, key: string): number | undefined {
  * typed gate tools + 16 newly-wired existing handlers (artifact register/list, drift
  * list/resolve, verify add/list/clear/run, coverage report, stage current/describe/
  * list, doctor, scorecard, slices sync, slice set-status) + 4
- * interview/init = 60. Ordered by domain grouping (state+gates, drift, build, route,
+ * interview/init + 2 Track A-2 context-budget tools (th_budget_check,
+ * th_handoff_write) = 62. Ordered by domain grouping (state+gates, drift, build, route,
  * coverage, next, delegate, repo, decision, artifact, collab, debate, verify, stage,
- * health, slices, interview/init). This order is the canonical source the
+ * health, slices, interview/init), with the 2 Track A-2 tools APPENDED LAST so the
+ * existing tool indices/order mirrors are undisturbed. This order is the canonical source the
  * four order-sensitive name mirrors copy (see .omc/research/canonical-tool-names.md).
  */
 export const TOOL_DEFS: readonly ToolDef[] = [
@@ -1247,6 +1251,39 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       additionalProperties: false,
     },
     run: (paths, args) => runInitMcp(paths, { brownfield: optBool(args, "brownfield") }),
+  },
+  // ---- Track A-2 — context budget + handoff (appended at the end of the registry
+  // so existing tool indices/order mirrors are undisturbed) ----
+  {
+    name: "th_budget_check",
+    description:
+      "Deterministic context-budget estimate (Track A-2): from agent-supplied proxy counts (filesRead, slicesBuilt, toolCalls, artifacts) compute { estTokens, pct, verdict } against the budget. The budget is `max`×1000 when given, else the persisted state.max_tokens, else the tier-aware default. verdict = ok | warn (pct≥0.75) | over (pct≥1.0). Read-only; the math is mechanical, the counts are the caller's.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        max: numberProp("Budget override in THOUSANDS (k); omit to use state.max_tokens or the tier default."),
+        filesRead: numberProp("Proxy count: files read so far."),
+        slicesBuilt: numberProp("Proxy count: slices built so far."),
+        toolCalls: numberProp("Proxy count: tool calls so far."),
+        artifacts: numberProp("Proxy count: approved artifacts carried."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runBudgetCheck(paths, {
+        max: optNumber(args, "max"),
+        filesRead: optNumber(args, "filesRead"),
+        slicesBuilt: optNumber(args, "slicesBuilt"),
+        toolCalls: optNumber(args, "toolCalls"),
+        artifacts: optNumber(args, "artifacts"),
+      }),
+  },
+  {
+    name: "th_handoff_write",
+    description:
+      "Assemble .twinharness/HANDOFF.md (Track A-2): the run state (current_stage, slices), the `th next` recommended action, the approved-artifact Summary blocks (reuses th context pack), the open questions, an explicit 'do not re-read docs/, trust the summaries' directive, and a machine-readable resume snapshot consumed by `th handoff verify`. Use on a Fresh-session handoff when the budget verdict is 'over'. Writes one file under the state dir.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runHandoffWrite(paths),
   },
 ] as const;
 

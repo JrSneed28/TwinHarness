@@ -956,9 +956,9 @@ Pre-edit blast-radius analysis over the persisted `repo-map.json`. Reads no stat
 | `map_invalid-json` / `map_schema` / `map_version` | Map file malformed or unknown version | Run `th repo map` to regenerate |
 | `unknown_slice` | `--slice` names no known slice | Check `th state status` for valid slice IDs |
 
-#### MCP tools (registered count 60)
+#### MCP tools (registered count 62)
 
-60 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin (REQ-RU-051 — identical code path). The four repo-understanding tools are shown below; the interview/init layer registers the store-only `th_interview_start`, `th_interview_record`, `th_interview_status` plus the idempotent (no-force) `th_init`. The MCP-tool-expansion then adds 21 more (39 → 60): 5 typed, precondition-gated gate-transition tools (`th_tier_record`, `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`, `th_blast_radius_record`) that safely mutate `GATE_OWNED` fields, plus 16 wired handlers (`th_drift_list`, `th_drift_resolve`, `th_coverage_report`, `th_artifact_register`, `th_artifact_list`, `th_verify_add`, `th_verify_list`, `th_verify_clear`, `th_verify_run`, `th_stage_current`, `th_stage_describe`, `th_stage_list`, `th_doctor`, `th_scorecard`, `th_slices_sync`, `th_slice_set_status`):
+62 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin (REQ-RU-051 — identical code path). The four repo-understanding tools are shown below; the interview/init layer registers the store-only `th_interview_start`, `th_interview_record`, `th_interview_status` plus the idempotent (no-force) `th_init`. The MCP-tool-expansion then adds 21 more (39 → 60): 5 typed, precondition-gated gate-transition tools (`th_tier_record`, `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`, `th_blast_radius_record`) that safely mutate `GATE_OWNED` fields, plus 16 wired handlers (`th_drift_list`, `th_drift_resolve`, `th_coverage_report`, `th_artifact_register`, `th_artifact_list`, `th_verify_add`, `th_verify_list`, `th_verify_clear`, `th_verify_run`, `th_stage_current`, `th_stage_describe`, `th_stage_list`, `th_doctor`, `th_scorecard`, `th_slices_sync`, `th_slice_set_status`). Finally Track A-2's context-budget layer adds 2 more (60 → 62): `th_budget_check` (deterministic budget estimate) and `th_handoff_write` (assemble `.twinharness/HANDOFF.md`):
 
 | Tool name | CLI equivalent | Notes |
 |---|---|---|
@@ -966,6 +966,8 @@ Pre-edit blast-radius analysis over the persisted `repo-map.json`. Reads no stat
 | `th_repo_relevant` | `th repo relevant` | `slice`, `req`, `file`, `query`, `maxResults` inputs |
 | `th_repo_impact` | `th repo impact` | `file`, `component` inputs |
 | `th_context_pack` | `th context pack` | `slice` input; wraps the existing handler |
+| `th_budget_check` | `th budget check` | `max`, `filesRead`, `slicesBuilt`, `toolCalls`, `artifacts` inputs; deterministic estimate |
+| `th_handoff_write` | `th handoff write` | no inputs; writes `.twinharness/HANDOFF.md` |
 
 All MCP tool schemas are strict and closed (`additionalProperties: false`). Output mirrors the CLI structured payload (`result.data`) as `structuredContent` plus the human text block. Compact by default — the full `repo-map.json` is never dumped into a prompt (REQ-NFR-004).
 

@@ -117,6 +117,18 @@ export interface TwinHarnessState {
    * the legacy `interview_threshold` in schema v2 — the confidence/cutoff semantic flip.)
    */
   interview_cutoff?: number;
+  /**
+   * Per-session context-token budget (Track A-2). When present it is the resolved
+   * budget IN TOKENS (e.g. 150000), persisted so a `--max-tokens` override survives
+   * across resume and `th budget check` can read it without re-supplying `--max`.
+   * The CLI flag is given in THOUSANDS ("k"); the ×1000 conversion happens at the
+   * write site (`th init --max-tokens`, see budget.ts `kToTokens`), NOT in the
+   * parser, so the stored value is already absolute tokens. Absent ⇒ the tier-aware
+   * default applies (budget.ts). When present it must be a positive integer. NOT
+   * gate-owned (a free policy value). Omitted from serialization when absent so
+   * existing state files hash identically.
+   */
+  max_tokens?: number;
 }
 
 export interface ValidationIssue {
@@ -157,6 +169,7 @@ export const STATE_FIELD_ORDER: (keyof TwinHarnessState)[] = [
   "write_gate",
   "project_mode",
   "interview_cutoff",
+  "max_tokens",
 ];
 
 /** Fresh state written by `th init` — unclassified, implementation not yet allowed. */
@@ -343,6 +356,12 @@ export function validateState(value: unknown): ValidationResult {
     ) {
       issues.push({ path: "interview_cutoff", message: "must be a finite number in [0,1] or absent" });
     }
+  }
+
+  // Optional max_tokens field (Track A-2) — when present, a positive integer
+  // (absolute tokens; the ×1000 "k" conversion happens at the write site).
+  if (v.max_tokens !== undefined && (!isInteger(v.max_tokens) || (v.max_tokens as number) < 1)) {
+    issues.push({ path: "max_tokens", message: "must be a positive integer or absent" });
   }
 
   // Cross-field invariant — the veto FLOOR (spec §5): Tier 0 is forbidden when

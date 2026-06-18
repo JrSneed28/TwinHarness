@@ -56,6 +56,7 @@ describe("ARCH-004: serializeState byte-stability", () => {
    */
   function fullStateScrambled(): TwinHarnessState {
     return {
+      max_tokens: 150000,
       interview_cutoff: 0.8,
       project_mode: "brownfield",
       write_gate: "deny",
@@ -113,7 +114,8 @@ describe("ARCH-004: serializeState byte-stability", () => {
   },
   "write_gate": "deny",
   "project_mode": "brownfield",
-  "interview_cutoff": 0.8
+  "interview_cutoff": 0.8,
+  "max_tokens": 150000
 }
 `;
 
@@ -149,10 +151,11 @@ describe("ARCH-004: serializeState byte-stability", () => {
     expect(keys).not.toContain("write_gate");
     expect(keys).not.toContain("project_mode");
     expect(keys).not.toContain("interview_cutoff");
+    expect(keys).not.toContain("max_tokens");
     // Required fields, in canonical order, no optionals interleaved.
     expect(keys).toEqual(
       (STATE_FIELD_ORDER as string[]).filter(
-        (k) => !["schema_version", "debate_open_blocking", "write_gate", "project_mode", "interview_cutoff"].includes(k),
+        (k) => !["schema_version", "debate_open_blocking", "write_gate", "project_mode", "interview_cutoff", "max_tokens"].includes(k),
       ),
     );
   });

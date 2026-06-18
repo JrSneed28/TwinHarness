@@ -62,6 +62,8 @@ const migrate_1 = require("./commands/migrate");
 const doctor_1 = require("./commands/doctor");
 const context_1 = require("./commands/context");
 const stage_1 = require("./commands/stage");
+const budget_1 = require("./commands/budget");
+const handoff_1 = require("./commands/handoff");
 const manifest_1 = require("./commands/manifest");
 const preview_1 = require("./commands/preview");
 const scorecard_1 = require("./commands/scorecard");
@@ -138,6 +140,11 @@ Usage:
   th telemetry on|off|status        Toggle/report opt-in, LOCAL-ONLY run telemetry (never sent off-machine)
   th context estimate               Approximate the prompt-surface token cost (flags oversized files)
   th context pack [--slice <ID>]    Assemble the §9 handoff bundle (artifact Summary blocks + slice framing)
+  th budget check [--max <k>] [--files-read N] [--slices-built N] [--tool-calls N] [--artifacts N]
+                                    Deterministic context-budget estimate from agent-supplied proxy counts → { estTokens, pct, verdict } (--max in thousands; tier-aware default when omitted)
+  th handoff write                  Assemble .twinharness/HANDOFF.md (run state + next action + artifact Summary blocks + open questions + "don't re-read docs/" directive)
+  th handoff verify                 Confirm a resumed run matches HANDOFF (current_stage/slice + approved-artifact hashes still valid); pass/fail
+  th resume                         Detect .twinharness/HANDOFF.md and print the next mechanical action (from th next)
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
   th delegate pack [--agent A] [--slice ID] [--task T] [--intent I]
@@ -207,6 +214,12 @@ Global flags:
   --capsule <path>  (delegate check) Capsule file to validate
   --force           (init) Reset existing state.json; (collab fragment) overwrite an existing fragment
   --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)
+  --max-tokens <k>  (init) Per-session context budget in THOUSANDS; persisted as max_tokens (×1000, e.g. 150 → 150000)
+  --max <k>         (budget check) Budget override in THOUSANDS; default is state.max_tokens, else the tier-aware default
+  --files-read <n>  (budget check) Proxy count: files read so far
+  --slices-built <n> (budget check) Proxy count: slices built so far
+  --tool-calls <n>  (budget check) Proxy count: tool calls so far
+  --artifacts <n>   (budget check) Proxy count: approved artifacts carried
   --write           (repo map) Write the artifacts (default; bare \`th repo map\` writes)
   --no-write        (repo map) Dry/preview: build in memory, write nothing (alias of --dry-run)
   --format <f>      (repo map) Text rendering: summary (default) | json | md
@@ -304,6 +317,15 @@ const NUMBER_FLAGS = {
     "--version": "version",
     "--files": "files",
     "--maxResults": "maxResults",
+    // Track A-2 — context budget. `--max-tokens` / `--max` are RAW numbers here (in
+    // thousands "k"); the ×1000 conversion happens at the write/compute site
+    // (budget.ts / init), NOT in this parser.
+    "--max-tokens": "maxTokens",
+    "--max": "max",
+    "--files-read": "filesRead",
+    "--slices-built": "slicesBuilt",
+    "--tool-calls": "toolCalls",
+    "--artifacts": "artifacts",
 };
 /**
  * Table-driven flag parser. Unknown `--flags` and value-less flags are recorded
@@ -425,7 +447,35 @@ function dispatch(parsed) {
             return (0, output_1.success)({ data: { version: ver }, human: ver });
         }
         case "init":
-            return (0, init_1.runInit)(paths, { force: parsed.flags.force, brownfield: parsed.flags.brownfield });
+            return (0, init_1.runInit)(paths, {
+                force: parsed.flags.force,
+                brownfield: parsed.flags.brownfield,
+                maxTokens: parsed.flags.maxTokens,
+            });
+        case "budget":
+            switch (sub) {
+                case "check":
+                    return (0, budget_1.runBudgetCheck)(paths, {
+                        max: parsed.flags.max,
+                        filesRead: parsed.flags.filesRead,
+                        slicesBuilt: parsed.flags.slicesBuilt,
+                        toolCalls: parsed.flags.toolCalls,
+                        artifacts: parsed.flags.artifacts,
+                    });
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'budget' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "handoff":
+            switch (sub) {
+                case "write":
+                    return (0, handoff_1.runHandoffWrite)(paths);
+                case "verify":
+                    return (0, handoff_1.runHandoffVerify)(paths);
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'handoff' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "resume":
+            return (0, handoff_1.runResume)(paths);
         case "migrate":
             return (0, migrate_1.runMigrate)(paths);
         case "doctor":

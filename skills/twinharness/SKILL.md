@@ -317,7 +317,36 @@ spawn (the §3 boundary, exactly like `th tier classify`). If `th route` is unav
 the frontmatter `model:` default. Rationale: effort scales with tier and blast radius — cheap by
 default, expensive where wrong answers are expensive.
 
+## Context budget & handoff (Track A-2)
+
+The main context window is finite. To avoid a hard compaction mid-run, **check the budget after
+each completed stage and after each build wave**:
+
+```
+th budget check --files-read <n> --slices-built <n> --tool-calls <n> --artifacts <n> [--max <k>] --json
+```
+
+You supply the proxy counts (the deterministic `th` layer never calls an LLM); it returns
+`{ estTokens, pct, verdict }`. The budget is `--max`×1000 when given, else the persisted
+`max_tokens` (set once via `th init --max-tokens <k>`, given in thousands → persisted ×1000), else
+a tier-aware default (T0/T1 ≈120k, T2 ≈160k, T3 ≈200k).
+
+On the verdict:
+
+- **`ok`** — keep going.
+- **`warn`** (pct ≥ 0.75) — consider writing a handoff before the next heavy wave.
+- **`over`** (pct ≥ 1.0) — **PAUSE** and surface an `AskUserQuestion` with two choices:
+  - **"Continue in this session"** → proceed (you accept the compaction risk).
+  - **"Fresh session"** → run `th handoff write` (assembles `.twinharness/HANDOFF.md`: run state,
+    the `th next` action, artifact Summary blocks, open questions, and an explicit *don't re-read
+    `docs/`* directive), then **STOP** and print the exact `/twinharness:th-run` restart command.
+    The user opens a **new Claude Code conversation** and runs it; that session calls `th resume`.
+
 ## Resume
 
 If `.twinharness/state.json` already exists, read it (`th state status`) and re-enter at
-`current_stage` instead of starting over (spec §18 idempotent resume).
+`current_stage` instead of starting over (spec §18 idempotent resume). **Check for a handoff first:**
+run `th resume` — if `.twinharness/HANDOFF.md` is present it prints the next mechanical action;
+**trust the artifact Summary blocks in HANDOFF.md rather than re-reading `docs/`**. Confirm the
+snapshot with `th handoff verify` (it checks `current_stage`, slice statuses, and approved-artifact
+hashes still match) before proceeding.

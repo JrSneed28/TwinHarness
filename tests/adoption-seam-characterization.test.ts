@@ -41,7 +41,7 @@ describe("SLICE-0 characterization: MCP tool registry baseline (Seam B)", () => 
     // The coordination-primitive layer advances the baseline from 23 to 35; the
     // interview/init tools (th_interview_*/th_init) append → 39; and the
     // MCP-tool-expansion adds 5 typed gate-transition tools + 16 wired handlers → 60.
-    expect(TOOL_DEFS.length).toBe(60);
+    expect(TOOL_DEFS.length).toBe(62);
   });
 
   /**
@@ -108,7 +108,7 @@ describe("SLICE-0 characterization: th_decision_approve absent from TOOL_DEFS (S
     // MCP-tool-expansion adds 5 typed gate-transition tools + 16 wired handlers → 60.
     // th_decision_approve stays permanently absent (decision approval is a human
     // gate, never an MCP tool).
-    expect(TOOL_DEFS.length).toBe(60);
+    expect(TOOL_DEFS.length).toBe(62);
   });
 });
 

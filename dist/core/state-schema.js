@@ -53,6 +53,7 @@ exports.STATE_FIELD_ORDER = [
     "write_gate",
     "project_mode",
     "interview_cutoff",
+    "max_tokens",
 ];
 /** Fresh state written by `th init` — unclassified, implementation not yet allowed. */
 function initialState() {
@@ -219,6 +220,11 @@ function validateState(value) {
             v.interview_cutoff > 1) {
             issues.push({ path: "interview_cutoff", message: "must be a finite number in [0,1] or absent" });
         }
+    }
+    // Optional max_tokens field (Track A-2) — when present, a positive integer
+    // (absolute tokens; the ×1000 "k" conversion happens at the write site).
+    if (v.max_tokens !== undefined && (!isInteger(v.max_tokens) || v.max_tokens < 1)) {
+        issues.push({ path: "max_tokens", message: "must be a positive integer or absent" });
     }
     // Cross-field invariant — the veto FLOOR (spec §5): Tier 0 is forbidden when
     // any blast-radius flag is present. This makes `th state set tier T0`
