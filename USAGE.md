@@ -119,10 +119,12 @@ What happens next:
 5. **Design stages stream.** Most stages (domain model, architecture, …) do not block on you. You
    can interrupt at any time, but you'll only be *asked* about genuinely irreversible choices
    (e.g. monolith vs. services) and anything blast-radius (e.g. an auth scheme).
-6. **UI design direction** (when your project has a user interface). A fresh-context UI Designer
-   presents 2–3 distinct design directions with ASCII mockup previews and asks you to choose.
-   This is the one taste-driven gate: after you pick a direction, the detailed design streams
-   past you.
+6. **UX then UI design direction** (when your project has a user interface). A fresh-context
+   UX/UI-Designer runs two ordered stages after Architecture: **Stage 4a (UX)** — research,
+   personas/journeys, information architecture, task flows — then **Stage 4b (UI)** — visual
+   direction, screens, wireframes, tokens. Each stage presents 2–3 distinct directions (with ASCII
+   mockup previews for UI) and asks you to choose. These are the taste-driven gates: after you pick
+   a direction, that stage's detail streams past you. UX is gated and approved first; UI builds on it.
 7. **Slice plan, then build.** A fresh-context agent decomposes the design into **vertical slices**
    — each one a thin end-to-end capability you can see working — and Builders implement them
    slice-by-slice, tests included, with a code-review Critic after each slice.
@@ -213,9 +215,9 @@ Claude also invokes it automatically when you ask for spec-driven, stage-gated d
 ### What you will be asked (and what you won't)
 
 You **will** be gated on: requirements sign-off, scope sign-off, the 1–2 genuinely irreversible
-architecture choices, UI design direction (when your project has a UI), any authentication/authorization
-decision, the security model (when one is produced), data-loss tradeoffs, blocking drift resolutions,
-and final correctness sign-off.
+architecture choices, UX design direction and UI design direction (when your project has a UI), any
+authentication/authorization decision, the security model (when one is produced), data-loss
+tradeoffs, blocking drift resolutions, and final correctness sign-off.
 
 You will **not** be gated on: domain models, ADRs, technical design, contracts (minus auth),
 test strategy, the slice plan, each slice's code, or documentation — those stream past you with a
@@ -244,17 +246,28 @@ state schema itself refuses `tier = T0` while any flag is recorded.
 
 | Tier | Pipeline |
 |------|----------|
-| **T1** — simple | Requirements → Scope → Architecture (light; Security + Failure-Modes folded in) → [UI Design if UI] → Slice Plan → Code → Documentation (readme) → Verify |
-| **T2** — medium | Requirements → Scope → Domain Model → Architecture (folded sections) → [UI Design if UI] → Contracts → Test Strategy → Slice Plan → Code → Documentation (readme + user-guide + api-reference) → Verify |
-| **T3** — large/critical | Requirements → Scope → Domain Model → Architecture → [UI Design if UI] → ADRs → Technical Design → Contracts → **Security** (standalone) → **Failure Modes** (standalone) → Test Strategy → Slice Plan → Code → Documentation (full suite) → Final Verification |
+| **T1** — simple | Requirements → Scope → Architecture (light; Security + Failure-Modes folded in) → [UX Design 4a + UI Design 4b if UI] → Slice Plan → Code → Documentation (readme) → Verify |
+| **T2** — medium | Requirements → Scope → Domain Model → Architecture (folded sections) → [UX Design 4a + UI Design 4b if UI] → Contracts → Test Strategy → Slice Plan → Code → Documentation (readme + user-guide + api-reference) → Verify |
+| **T3** — large/critical | Requirements → Scope → Domain Model → Architecture → [UX Design 4a + UI Design 4b if UI] → ADRs → Technical Design → Contracts → **Security** (standalone) → **Failure Modes** (standalone) → Test Strategy → Slice Plan → Code → Documentation (full suite) → Final Verification |
 
-### Stage 4b — UI Design (conditional)
+### Stages 4a & 4b — UX and UI Design (conditional)
 
-For any project with a web UI, mobile UI, desktop UI, or rich TUI, the UI Designer agent runs after
-Architecture is approved. It presents **2–3 distinct design directions** via `AskUserQuestion` with
-ASCII mockups. You pick a direction (taste-driven → gated by §2), then the detailed design streams
-without further gates. The Critic reviews the result in `ui-design` mode. CLIs, background services,
-and pure API libraries skip this stage.
+For any project with a web UI, mobile UI, desktop UI, or rich TUI, one fresh-context **UX/UI-Designer**
+agent runs two ordered stages after Architecture is approved. Fresh context is deliberate — it keeps
+the architecture stage's component/data-flow thinking from contaminating user-centered design.
+
+- **Stage 4a — UX** → `docs/04a-ux-design.md`: who the users are, what they're trying to do, how the
+  product is organized, and the task flows that get them there (UX research, personas, journeys,
+  information architecture, task flows). Critic reviews in `ux-design` mode.
+- **Stage 4b — UI** → `docs/04b-ui-design.md`: the visual/structural realization — screen inventory,
+  wireframes, component hierarchy, design tokens, interaction states, responsive breakpoints,
+  accessibility. Critic reviews in `ui-design` mode.
+
+The ordering is deliberate: UX defines the problem space; UI realizes it; contracts derive from the
+approved user experience, not the reverse. Each stage presents **2–3 distinct directions** via
+`AskUserQuestion` (with ASCII mockups for UI). You pick a direction (taste-driven → gated by §2),
+**4a is approved first**, then 4b builds on it; after each pick the detail streams without further
+gates. CLIs, background services, and pure API libraries skip both stages.
 
 ### Stage 10.5 — Documentation
 
@@ -270,7 +283,7 @@ escalation row matches — pass a model override in the delegation prompt when e
 
 | Situation | Model |
 |---|---|
-| Default (all agents) | frontmatter default (sonnet; opus for orchestrator & vertical-slice) |
+| Default (all agents) | frontmatter default (sonnet; opus for orchestrator, vertical-slice & ux-ui-designer) |
 | Spec in `architecture`, `security`, `failure-modes`, or `technical-design` mode on a T3 or blast-radius project | opus |
 | Critic in `slice` or `code-review` mode on a blast-radius project | opus |
 | Builder on a slice touching a blast-radius component | opus |
@@ -296,7 +309,7 @@ detection (§ cascade re-verification, below) works from.
 
 ### The Critic loop
 
-After every producer (Spec, UI Designer, Vertical-Slice, Builder, Doc-Writer) finishes a draft, a
+After every producer (Spec, UX/UI-Designer, Vertical-Slice, Builder, Doc-Writer) finishes a draft, a
 **Critic agent in fresh context** reviews it — fresh context deliberately, so the author's
 rationalizations aren't in the room. Rules that keep the loop honest:
 
@@ -424,24 +437,48 @@ copy lives under `~/.claude/plugins/cache/twinharness/twinharness/<version>/`), 
 clone to get a global `th`.
 
 Global flags: every command accepts `--json` (machine-readable output) and `--cwd <dir>` (operate
-on another project).
+on another project). Flags accept both `--flag value` and `--flag=value`; a bare `--` ends flag
+parsing so a positional may begin with `--`. Unknown flags and value-less flags are **rejected**
+(exit 1, `bad_args`) rather than silently swallowed — a typo'd flag fails loudly. Every flag, grouped
+and described, is in the [Complete flag reference](#complete-flag-reference) at the end of this part.
 
 ### Lifecycle & state
 
 ```
-th init [--force]                  Scaffold docs/, .twinharness/state.json, drift-log.md
+th init [--force] [--brownfield] [--max-tokens <k>]   Scaffold docs/, .twinharness/state.json, drift-log.md
 th state get [dotted.path]         Print state (or one value: th state get slices[0].status)
-th state set <dotted.key> <value>  Patch one value; REFUSES writes that would invalidate state; REJECTS unknown top-level keys
+th state set <dotted.key> <value> [--emergency]   Patch one value; REFUSES writes that would invalidate state; REJECTS unknown top-level keys
 th state status                    Human-readable tier/stage/gates/slices snapshot
 th state verify                    Exit 0 = valid; non-zero with a precise issue list otherwise
 ```
 
+`th init` flags:
+
+| Flag | Effect |
+|---|---|
+| `--force` | Reset an existing `state.json` and re-scaffold (otherwise `init` refuses to clobber a live run). |
+| `--brownfield` | Scaffold a **brownfield** run — stamps `project_mode: "brownfield"` so the pipeline overlays an existing codebase (Codebase-Inspector + `th repo map` prerequisites, characterization Slice 0). |
+| `--max-tokens <k>` | Per-session context budget in **thousands**; persisted as `max_tokens` (×1000 — e.g. `150` → `150000`). Drives the tier-aware default of `th budget check`. |
+
 `state set` JSON-parses the value (`true` → boolean, `3` → number, `["a"]` → array) and falls back
 to a bare string. Dotted paths support array indices. Because every write is re-validated against
 the schema, illegal states — e.g. `tier T0` while a blast-radius flag is set — are mechanically
-unwritable. Attempts to set an unknown top-level key exit with `unknown_field`. Attempts to set a
-**managed field** (one owned by a dedicated command) exit with `managed_field` — see the
-`drift_open_blocking` row in the schema table below.
+unwritable. Attempts to set an unknown top-level key exit with `unknown_field`.
+
+**Field ownership — what `th state set` will and won't write.** Two classes of field are protected:
+
+- **Unconditionally refused (`managed_field`).** `drift_open_blocking` and `debate_open_blocking`
+  are counters owned by the drift / debate flows; `state set` always refuses them. Use
+  `th drift add`/`th drift resolve` and `th debate add`/`th debate resolve` instead.
+- **Gate-owned (require `--emergency`).** `implementation_allowed`, `tier`, `current_stage`,
+  `write_gate`, and `blast_radius_flags` move the gate ladder. A raw `th state set` on any of them is
+  refused **unless you pass `--emergency`**, which forces the raw write and records it loudly in the
+  audit ledger. The normal path is the **typed gate commands** — `th tier record`, `th stage advance`,
+  `th implementation unlock` (see below) — which validate the gate preconditions before mutating.
+  (The agent-facing MCP raw setter never accepts these fields at all.)
+
+`--emergency` is an escape hatch for repairing a wedged run by hand; prefer the typed gate command
+whenever one exists.
 
 `state.json` schema (canonical field order; spec §18):
 
@@ -468,6 +505,7 @@ unwritable. Attempts to set an unknown top-level key exit with `unknown_field`. 
 ```
 th tier classify <brief.json>      Advisory: Tier-0 eligibility + detected flags
 th tier veto-check <brief.json>    Mechanical: exit 3 + {"blocked":true,"flags":[...]} if any flag
+th tier record <T0-T3>             Typed gate command: validate + record the run's tier
 ```
 
 `brief.json` shape (all four booleans required):
@@ -484,7 +522,34 @@ th tier veto-check <brief.json>    Mechanical: exit 3 + {"blocked":true,"flags":
 ```
 
 `classify` is advisory — it computes the five Tier-0 conditions and never picks the tier (that's
-judgment). `veto-check` is not advisory: it is an exit-code gate.
+judgment). `veto-check` is not advisory: it is an exit-code gate. `th tier record <T0-T3>` is the
+typed gate command that actually **writes** the chosen tier into `state.json` (gate-checked — it
+refuses a tier that the blast-radius veto forbids, and an upgrade backfills any stages a lower tier
+would have skipped). It is the gate-safe alternative to `th state set tier …`, which is refused
+without `--emergency`.
+
+### Typed gate commands (the gate ladder)
+
+Three fields move the run forward through gates: the tier, the current stage, and the
+implementation lock. These are **gate-owned** (raw `th state set` refuses them without `--emergency`),
+so each has a dedicated typed command that validates the gate preconditions before mutating:
+
+```
+th tier record <T0-T3>             Validate + record the tier (refuses a veto-forbidden tier; upgrades backfill skipped stages)
+th stage advance                   Advance current_stage to the next engaged stage — only when the full gate ladder for the current stage clears
+th implementation unlock [--lock]  Set implementation_allowed=true once the slice plan + tier prerequisites clear; --lock re-locks (sets it false)
+```
+
+- `th stage advance` is the only gate-checked way to move `current_stage`. It refuses to advance
+  while the current stage still owes an obligation (an unregistered artifact, an open human gate, an
+  open blocking drift/debate, a capped revise loop) — i.e. it enforces the same ladder `th next`
+  reports. On success it advances to the next stage engaged for the run's tier (skipping stages that
+  tier does not run).
+- `th implementation unlock` flips the Phase-A → Phase-B write-gate boundary. It unlocks only when
+  the **full gate ladder** clears *and* the coverage gate passes *and* `current_stage` is at least
+  `implementation-planning` (the same composition `th next` enforces; for a brownfield run the
+  repo-map must also be fresh). Once unlocked, the tier is frozen. `--lock` reverses it (sets
+  `implementation_allowed=false`) if you need to re-gate writes mid-run.
 
 ### Critic loop bookkeeping
 
@@ -495,7 +560,7 @@ th revise reset <mode>             Zero the counter (stage passed)
 ```
 
 Modes are stage names (`requirements`, `scope`, `architecture`, `slice`, `code-review`,
-`documentation`, `ui-design`, …). Default cap 3. The CLI computes `escalate`; the Orchestrator
+`documentation`, `ux-design`, `ui-design`, …). Default cap 3. The CLI computes `escalate`; the Orchestrator
 decides what to do about it.
 
 ### Artifacts, coverage, traceability
@@ -585,13 +650,21 @@ double-resolves. Only requirement-layer entries decrement the blocking counter.
 ### Build scheduling
 
 ```
-th build plan [--include-done]
+th build plan [--include-done] [--advise]
 ```
 
 Reads `state.slices` (populated by `th slices sync`) and computes the §16 wave schedule: disjoint
 component sets → same wave (safe to run Builders concurrently), shared component → later wave
 (serialized). By default only unfinished slices are scheduled. `th build plan` does NOT read the
 raw plan file — always run `th slices sync` first.
+
+| Flag | Effect |
+|---|---|
+| `--include-done` | Also schedule slices already marked `done` (default: only unfinished slices). |
+| `--advise` | Append a parallelism-optimizer advisory — the maximum achievable wave width plus the slice pairs that serialize because they share a component. |
+
+Exits **7** (`dependency_graph_unsatisfiable`) when the `depends_on` graph has a cycle or a dangling
+reference; the full plan data is still emitted alongside the error so `--json`/MCP consumers see both.
 
 ### Live build coordination — parallel Builders without collisions
 
@@ -763,10 +836,16 @@ Prints the CLI version from `package.json`. Useful for confirming which plugin v
 ### Diagnostics & run inspection
 
 ```
-th doctor
+th doctor [--strict]
 ```
 
-Self-diagnostic **plus a full run-health audit**. Reports:
+Self-diagnostic **plus a full run-health audit**. `--strict` escalates two integrity signals from
+warnings to **hard failures** (non-zero exit) — a **broken gate-ledger hash chain** (a sealed entry
+edited/deleted/reordered) and an **unknown top-level state key** not in the forward-compat allowlist
+(catches typos like `teir`) — making `th doctor --strict` a useful CI gate. The other run-health
+findings (open blocking drift, unfinished slices, a capped revise loop, a changed/missing artifact,
+a stale lock, schema behind) stay informational warnings either way; only hard failures (unsupported
+Node, invalid `state.json`) ever exit non-zero in the default mode. Reports:
 
 - **Node version** — checks the running Node major version against the supported floor (Node ≥ 20,
   set by `engines.node`) and reports it.
@@ -821,6 +900,82 @@ All always-loaded core files are within the guidance.
 `--slice <SLICE-ID>` it adds that slice's record, the components it touches, and the other slices it
 shares components with (§16 conflict awareness — which slices must serialize). It **computes** a
 candidate bundle; deciding what to actually route remains the Orchestrator's call.
+
+### Run preview, scorecard, routing & telemetry
+
+```
+th preview [--tier T<n>]
+th scorecard [--json] [--hotspots]
+th route [--agent A] [--mode M] [--tier T] [--component-blast] [--summarization]
+th telemetry on | off | status
+```
+
+- **`th preview [--tier T<n>]`** — pre-run view of the pipeline shape for a tier: the engaged stages,
+  which carry a human gate, and each stage's Critic mode, plus a stages/gates/reviews summary line.
+  `--tier` resolves the tier to preview; absent, it uses the recorded `state.tier`, else defaults to
+  T2 (and says so). Read-only.
+- **`th scorecard [--json] [--hotspots]`** — one-screen post-run summary: tier/stage, coverage
+  (planned/implemented/tested), slice progress, suite status (from the last `th verify run`, `—` if
+  none), drift (entries + open blocking), revise escalations, and a **Routing** line summarizing
+  recorded `th route` telemetry (`—` when none). `--hotspots` instead emits a per-stage cost table —
+  token (estimate/proxy) and wall-clock totals aggregated from the local `telemetry.jsonl`, by stage;
+  with telemetry off/empty it prints a "no data" message and still exits 0. If telemetry is on, each
+  call also appends a timestamped snapshot.
+
+  | Flag | Effect |
+  |---|---|
+  | `--json` | Emit the structured scorecard payload instead of the text screen. |
+  | `--hotspots` | Per-stage token + wall-clock cost table from the local telemetry log. |
+
+- **`th route`** — advisory model + effort recommendation for one agent spawn. It **computes**; the
+  Orchestrator applies the result. All flags optional:
+
+  | Flag | Effect |
+  |---|---|
+  | `--agent <A>` | The agent being spawned (e.g. `spec`, `critic`, `builder`). |
+  | `--mode <M>` | The stage/Critic mode (e.g. `architecture`, `code-review`). |
+  | `--tier <T>` | The run's tier (escalation scales with tier). |
+  | `--component-blast` | The target slice touches a blast-radius component → escalate the model. |
+  | `--summarization` | Trivial mechanical summarization → route to the cheapest model (haiku). |
+
+- **`th telemetry on|off|status`** — opt-in, **local-only** run telemetry stored next to `state.json`
+  (`telemetry.json` + `telemetry.jsonl`), off by default. Nothing is ever transmitted off-machine.
+  `on` starts recording `th scorecard` snapshots, `off` stops, `status` shows the flag and record count.
+
+### Context budget (`th budget check`)
+
+```
+th budget check [--max <k>] [--files-read <n>] [--slices-built <n>] [--tool-calls <n>] [--artifacts <n>]
+```
+
+A deterministic context-budget estimate from agent-supplied **proxy counts** (TwinHarness has no
+runtime token meter — see SECURITY/known-limits). It returns `{ estTokens, pct, verdict }` where
+`verdict` is a budget-pressure signal the Orchestrator uses to decide when to delegate or write a
+handoff. All flags optional:
+
+| Flag | Effect |
+|---|---|
+| `--max <k>` | Budget override in **thousands**. Default: `state.max_tokens` (from `th init --max-tokens`), else a tier-aware default. |
+| `--files-read <n>` | Proxy: files read so far this session. |
+| `--slices-built <n>` | Proxy: slices built so far. |
+| `--tool-calls <n>` | Proxy: tool calls so far. |
+| `--artifacts <n>` | Proxy: approved artifacts carried in context. |
+
+### Handoff & resume
+
+```
+th handoff write                 Assemble .twinharness/HANDOFF.md for a context handoff
+th handoff verify                Confirm a resumed run still matches HANDOFF (pass/fail)
+th resume                        Detect HANDOFF.md and print the next mechanical action
+```
+
+When a session approaches its context budget, `th handoff write` snapshots the run into
+`.twinharness/HANDOFF.md`: current state + the next mechanical action (from `th next`) + every
+approved artifact's Summary block + open questions + a "don't re-read `docs/`" directive — everything
+a fresh session needs to continue without re-reading the full artifact set. On resume, `th handoff
+verify` confirms the live run still matches the handoff (`current_stage`/slice unchanged and every
+approved-artifact hash still valid) and reports pass/fail; `th resume` detects the handoff file and
+prints the next action so a new session knows where to pick up. None take flags beyond the globals.
 
 ### Context preservation & delegation
 
@@ -891,6 +1046,10 @@ context window.
 - `th stage describe <stage>` — contract for any named stage.
 - `th stage list` — all pipeline stages in order with their tier scope, gate flag, and artifact.
 
+These three only **read** the contract. To actually move `state.current_stage` forward, use the
+gate-checked `th stage advance` (see [Typed gate commands](#typed-gate-commands-the-gate-ladder)) —
+raw `th state set current_stage …` is refused without `--emergency`.
+
 ### Run manifests
 
 ```
@@ -904,6 +1063,44 @@ produces byte-identical output — suitable for golden-fixture assertions in CI 
 Without `--json`, prints a human-readable summary (tier, stage, artifact/slice/drift counts, gate
 ledger size). With `--json`, emits the full manifest. Useful for review, diffing across runs, and
 comparing against archived golden fixtures.
+
+### Decision governance (`th decision`)
+
+Significant run choices are recorded, human-approved, and enforced through a hash-chained,
+tamper-evident decision ledger.
+
+```
+th decision detect                Surface advisory decision candidates (read-only; exit 0)
+th decision add --title <t> --rationale <r> [--links a,b] [--proposer <n>]
+th decision approve <DECISION-ID> [--reject | --supersede <id>] [--as <actor>]
+th decision check                 Exit 6 while an unapproved decision gates the current stage; else 0
+th decision list                  List the decision set (ids/titles/statuses/links/audit)
+```
+
+- **`th decision detect`** — surfaces candidate decisions from ADRs, the drift log, scope, and
+  blast-radius flags. Read-only; always exits 0.
+- **`th decision add`** — records a `proposed` decision and mints `DECISION-NNN`. Never auto-approves.
+
+  | Flag | Effect |
+  |---|---|
+  | `--title <t>` | Decision title (**required**). |
+  | `--rationale <r>` | Why this decision (**required**). |
+  | `--links <a,b>` | Comma-separated REQ-IDs / ADR-ids / stage ids the decision concerns. |
+  | `--proposer <n>` | Proposer attribution (default: `orchestrator`). |
+
+- **`th decision approve <DECISION-ID>`** — the **human-only** transition, behind an interactive-TTY
+  barrier: it aborts in any agent/CI/non-TTY context (REQ-412) and is permanently absent from the MCP
+  tool registry.
+
+  | Flag | Effect |
+  |---|---|
+  | `--reject` | Append a `rejected` event instead of `approved` (mutually exclusive with `--supersede`). |
+  | `--supersede <id>` | Mark this (approved) decision superseded by `<id>` (mutually exclusive with `--reject`). |
+  | `--as <actor>` | Approver attribution only — **not** a barrier (default `TH_APPROVAL_ACTOR`, else `human`). |
+
+- **`th decision check`** — fails (exit **6**) while any unapproved decision is linked to the current
+  stage; otherwise exit 0. `th next` surfaces this as a `resolve-decision-obligation` rung.
+- **`th decision list`** — the sorted decision read model; exits non-zero if the hash chain is broken.
 
 ### Exit codes
 
@@ -1099,6 +1296,110 @@ The exit-code gates compose into CI checks for a TwinHarness-built project:
 Any of them failing means the artifact/code/test contract drifted without going through the
 process.
 
+### Complete flag reference
+
+Every flag the `th` parser recognizes, grouped by kind. The parenthetical names the command(s) the
+flag applies to. (`--json` and `--cwd` are accepted on every command.)
+
+**Global (every command):**
+
+| Flag | Effect |
+|---|---|
+| `--json` | Emit machine-readable JSON on stdout. |
+| `--cwd <dir>` | Operate against `<dir>` instead of the current directory. |
+
+**Boolean flags (presence = true):**
+
+| Flag | Command(s) | Effect |
+|---|---|---|
+| `--force` | `init`; `collab fragment` | Reset an existing `state.json` (`init`); overwrite an existing fragment (`collab fragment`). |
+| `--brownfield` | `init` | Scaffold a brownfield run (`project_mode=brownfield`). |
+| `--include-done` | `build plan` | Schedule slices already `done` (default: only unfinished). |
+| `--advise` | `build plan` | Emit the parallelism-optimizer advisory (max wave width + serializing conflict pairs). |
+| `--scan-reqs` | `anchors scan` | Scan `docs/` for REQ-anchors. |
+| `--scan-tests` | `anchors scan` | Scan `tests/` for REQ-anchors. |
+| `--scan-code` | `anchors scan` | Scan `src/` for REQ-anchors. |
+| `--strict` | `anchors scan`; `doctor` | Exit 1 on orphan anchors (`anchors`); escalate ledger-chain break + unknown state keys to a hard fail (`doctor`). |
+| `--dry-run` | `slices sync`; `repo map` (alias `--no-write`) | Compute without writing. |
+| `--remove-missing` | `slices sync` | Remove slices absent from the plan. |
+| `--explain` | `next` | Add a WHY string explaining why the reported obligation outranks the others. |
+| `--hotspots` | `scorecard` | Per-stage token + wall-clock cost table from local telemetry. |
+| `--writes` | `delegate plan` | The task modifies source code (a delegate signal). |
+| `--noisy` | `delegate plan` | The task runs noisy commands / logs / tests / repo scans (a delegate signal). |
+| `--component-blast` | `route` | Target slice touches a blast-radius component → escalate the model. |
+| `--summarization` | `route` | Trivial mechanical summarization → route to the cheapest model. |
+| `--write` / `--no-write` | `repo map` | Write the artifacts (default) / dry-preview, write nothing. |
+| `--reject` | `decision approve` | Append a `rejected` event (mutually exclusive with `--supersede`). |
+| `--lock` | `implementation unlock` | Re-lock implementation (`implementation_allowed=false`) instead of unlocking. |
+| `--emergency` | `state set` | Force a raw write to a gate-owned field, bypassing the typed gate ladder (loud + audit-ledgered). |
+
+**String-valued flags (`--flag value` or `--flag=value`):**
+
+| Flag | Command(s) | Effect |
+|---|---|---|
+| `--reqs <file>` | `coverage` | Requirements file (default `docs/01-requirements.md`). |
+| `--plan <file>` | `coverage`; `slices sync` | Implementation-plan file (default `docs/09-implementation-plan.md`). |
+| `--tests <dir>` | `coverage` | Tests directory (default `tests`). |
+| `--scope <file>` | `coverage` | Scope file for MVP filtering (default `docs/02-scope.md`). |
+| `--code <dir>` | `coverage report` | Code directory scanned for *implemented* (default `src`). |
+| `--tier <T0-T3>` | `preview`; `route` | Tier whose pipeline to preview / tier for routing. |
+| `--slice <id>` | `context pack`; `debug pack`; `delegate plan`/`pack`; `repo relevant` | Frame the pack/handoff/query for a SLICE-ID. |
+| `--components <c1,c2>` | `build sub-claim` | Comma-separated component subset for the sub-lease. |
+| `--req <REQ-ID>` | `debug pack`; `repo relevant` | Frame the pack / select by a REQ-ID. |
+| `--symptom <s>` | `debug log add` | The observed failure. |
+| `--evidence <s>` | `debug log add` | Anchored evidence (file:line / captured output). |
+| `--root-cause <s>` | `debug log add` | The identified root cause. |
+| `--status <s>` | `debug log add` | `open` \| `resolved` (default `open`). |
+| `--since <hash>` | `stale` | Recorded hash of the upstream artifact to check. |
+| `--artifact <file>` | `stale` | Root-relative file key of the artifact to check. |
+| `--layer <l>` | `drift add` | `derived` \| `requirement` (**required**). |
+| `--ref <s>` | `drift add`; `debug log add` | `SLICE-x / TASK-y` reference. |
+| `--discovery <s>` | `drift add` | What was discovered. |
+| `--action <s>` | `drift add` | Action taken. |
+| `--escalation <s>` | `drift add` | Escalation status. |
+| `--source <s>` | `drift add`; `debate add` | Who logged the entry (default `Builder`). |
+| `--agent <a>` | `route`; `delegate pack` | The agent being spawned / delegated to. |
+| `--mode <M>` | `route` | The stage/Critic mode for routing. |
+| `--brief <s>` | `route` | Free-text brief for routing context. |
+| `--intent <i>` | `delegate plan`/`pack` | `read`\|`write`\|`debug`\|`review`\|`artifact`\|`repo-analysis`. |
+| `--task <s>` | `delegate plan`/`pack` | Free-text task label (echoed; not parsed). |
+| `--capsule <path>` | `delegate check` | Capsule file to validate. |
+| `--format <f>` | `repo map` (`summary`\|`json`\|`md`); `repo relevant` (`slice`\|`req`\|`file`\|`json`); `repo impact` (`file`\|`json`) | Text rendering. |
+| `--query <kw>` | `repo relevant` | Keyword/phrase selector. |
+| `--file <path>` | `repo relevant`; `repo impact` | File-path selector (path guard fires first). |
+| `--component <name\|path>` | `repo impact` | Component selector (path guard fires first). |
+| `--title <t>` | `decision add` | Decision title (**required**). |
+| `--rationale <r>` | `decision add` | Decision rationale (**required**). |
+| `--links <a,b>` | `decision add`; `debate add` | Comma-separated REQ-IDs / ADR-ids / stage ids. |
+| `--proposer <n>` | `decision add` | Proposer attribution (default `orchestrator`). |
+| `--supersede <id>` | `decision approve` | Mark this approved decision superseded by `<id>`. |
+| `--as <actor>` | `decision approve` | Approver attribution only — not a barrier. |
+| `--stage <s>` | `collab init`/`fragment`/`list`/`merge` | The blackboard stage. |
+| `--round <r>` | `collab fragment`/`list`/`merge` | The fan-out round. |
+| `--name <n>` | `collab fragment` | The fragment name (single in-root component). |
+| `--text <t>` | `collab fragment` | The fragment body. |
+| `--section <file#section>` | `artifact claim`/`release` | Section-level artifact lease key (also a positional). |
+| `--holder <id>` | `artifact claim`/`release` | Lease holder id. |
+| `--topic <t>` | `debate add` | Debate topic (also a positional). |
+| `--positions <…>` | `debate add` | The contested positions. |
+| `--id <DEBATE-ID>` | `debate resolve` | Debate to resolve (also a positional). |
+| `--resolution <r>` | `debate resolve` | The resolution note. |
+
+**Number-valued flags:**
+
+| Flag | Command(s) | Effect |
+|---|---|---|
+| `--cap <n>` | `revise bump`/`status` | Override the revise-loop cap (default 3; positive integer). |
+| `--version <n>` | `artifact register` | Artifact version (positive integer). |
+| `--files <n>` | `delegate plan` | Expected file reads (delegate when > 3). |
+| `--maxResults <n>` | `repo relevant` | Cap on combined emitted items (default 20; ≤ 0 = default). |
+| `--max-tokens <k>` | `init` | Per-session context budget in **thousands** (×1000 → `max_tokens`). |
+| `--max <k>` | `budget check` | Budget override in **thousands** (default `state.max_tokens`, else tier default). |
+| `--files-read <n>` | `budget check` | Proxy: files read so far. |
+| `--slices-built <n>` | `budget check` | Proxy: slices built so far. |
+| `--tool-calls <n>` | `budget check` | Proxy: tool calls so far. |
+| `--artifacts <n>` | `budget check` | Proxy: approved artifacts carried. |
+
 ---
 
 ## Part 4 — Customization & development
@@ -1180,7 +1481,7 @@ runs on every push and pull request, enforcing the committed-`dist/` invariant. 
 ### Templates
 
 The artifact skeletons live in the plugin's `templates/` directory (`01-requirements.md` …
-`10-verification-report.md`, plus `task-file.md` and `04b-ui-design.md`). Editing them changes
+`10-verification-report.md`, plus `task-file.md`, `04a-ux-design.md`, and `04b-ui-design.md`). Editing them changes
 what every future stage emits. Keep the **Summary** block at the top of each template — it is the
 handoff currency — and keep REQ-ID anchor patterns intact, or `coverage`/`anchors`/`trace` lose
 their inputs.
