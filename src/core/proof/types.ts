@@ -193,6 +193,12 @@ export interface ProofCall {
   tool: string;
   ts: string;
   ok: boolean;
+  /**
+   * Why a call failed, when it did (`unknown_tool` / `invalid_args` / `threw`).
+   * Absent on successful calls. Recorded so an operator can audit what the
+   * Orchestrator ATTEMPTED to invoke, not only what dispatched cleanly (#5).
+   */
+  reason?: string;
 }
 
 /** Read-only summary of recorded `th route` telemetry events. */

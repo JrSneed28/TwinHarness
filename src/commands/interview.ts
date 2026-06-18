@@ -97,6 +97,20 @@ function computeReady(ambiguity: number | null, threshold: number): boolean {
   return ambiguity !== null && ambiguity <= threshold;
 }
 
+/**
+ * Interview readiness as a pure predicate (audit finding #14). Reads the interview
+ * store and returns the resolved ambiguity gate (`ambiguity <= threshold`). A missing
+ * or corrupt store ⇒ NOT ready (the interview has not yet reached readiness). This is
+ * the single source of `ready` consumed by the soft interview gate
+ * (`checkInterview` in gate-preconditions.ts) so the gate and `th interview status`
+ * never disagree about readiness.
+ */
+export function interviewReady(paths: ProjectPaths): boolean {
+  const existing = readInterview(paths);
+  if (!existing) return false;
+  return computeReady(existing.ambiguity, existing.threshold);
+}
+
 export interface InterviewStartOptions {
   idea?: string;
   threshold?: number;

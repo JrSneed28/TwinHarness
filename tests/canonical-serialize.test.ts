@@ -56,6 +56,9 @@ describe("ARCH-004: serializeState byte-stability", () => {
    */
   function fullStateScrambled(): TwinHarnessState {
     return {
+      interview_required: true,
+      has_ui: false,
+      delivery_mode: "no-code",
       interview_threshold: 0.2,
       project_mode: "brownfield",
       write_gate: "deny",
@@ -113,7 +116,10 @@ describe("ARCH-004: serializeState byte-stability", () => {
   },
   "write_gate": "deny",
   "project_mode": "brownfield",
-  "interview_threshold": 0.2
+  "interview_threshold": 0.2,
+  "delivery_mode": "no-code",
+  "has_ui": false,
+  "interview_required": true
 }
 `;
 
@@ -149,10 +155,23 @@ describe("ARCH-004: serializeState byte-stability", () => {
     expect(keys).not.toContain("write_gate");
     expect(keys).not.toContain("project_mode");
     expect(keys).not.toContain("interview_threshold");
+    expect(keys).not.toContain("delivery_mode");
+    expect(keys).not.toContain("has_ui");
+    expect(keys).not.toContain("interview_required");
     // Required fields, in canonical order, no optionals interleaved.
     expect(keys).toEqual(
       (STATE_FIELD_ORDER as string[]).filter(
-        (k) => !["schema_version", "debate_open_blocking", "write_gate", "project_mode", "interview_threshold"].includes(k),
+        (k) =>
+          ![
+            "schema_version",
+            "debate_open_blocking",
+            "write_gate",
+            "project_mode",
+            "interview_threshold",
+            "delivery_mode",
+            "has_ui",
+            "interview_required",
+          ].includes(k),
       ),
     );
   });

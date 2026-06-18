@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.VETO_EXIT_CODE = void 0;
 exports.runTierClassify = runTierClassify;
 exports.runTierVetoCheck = runTierVetoCheck;
+exports.runTierRecord = runTierRecord;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const paths_1 = require("../core/paths");
@@ -45,6 +46,8 @@ const log_1 = require("../core/log");
 const guards_1 = require("../core/guards");
 const state_store_1 = require("../core/state-store");
 const repo_1 = require("./repo");
+const gate_preconditions_1 = require("../core/gate-preconditions");
+const state_1 = require("./state");
 /**
  * `th tier` — the Tier-0 classifier (spec §5).
  *
@@ -232,4 +235,34 @@ function runTierVetoCheck(paths, briefPath) {
         data: { blocked: false, flags: [] },
         human: "OK: no blast-radius flag; Tier 0 not vetoed.",
     });
+}
+/**
+ * `th tier record <T>` — typed gate command mirroring the MCP `th_tier_record`
+ * tool (#11). Runs `validateTierTransition` (refuses invalid_tier,
+ * tier_locked_after_unlock, tier_downgrade_human_only, t0_blast_radius_veto) and,
+ * on pass, writes the tier through the shared locked + ledgered `applyGateMutation`
+ * (source "th tier record"), which also performs the #1 tier-upgrade stage
+ * backfill. The gate-checked path operators should prefer over a raw `th state set
+ * tier`.
+ */
+function runTierRecord(paths, tier) {
+    if (!tier)
+        return (0, output_1.failure)({ human: "usage: th tier record <T0|T1|T2|T3>" });
+    const r = (0, state_store_1.readState)(paths);
+    if (!r.exists)
+        return guards_1.NOT_INIT;
+    if (!r.state) {
+        return (0, output_1.failure)({
+            human: `state.json is invalid; fix it before recording a tier:\n${(0, guards_1.formatIssues)(r.issues)}`,
+            data: { error: "invalid_state", issues: r.issues },
+        });
+    }
+    const check = (0, gate_preconditions_1.validateTierTransition)(r.state, tier);
+    if (!check.ok) {
+        return (0, output_1.failure)({
+            human: `Refusing tier record (${check.error}).`,
+            data: { error: check.error, ...(check.detail ?? {}) },
+        });
+    }
+    return (0, state_1.applyGateMutation)(paths, { tier }, "th tier record");
 }

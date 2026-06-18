@@ -98,6 +98,19 @@
       "minimum": 0,
       "maximum": 1,
       "description": "Resolved ambiguity-gate threshold for th:run --interview (spec R15). Absent ⇒ default 0.20. Not gate-owned. Omitted from serialization when absent so existing state files hash identically."
+    },
+    "delivery_mode": {
+      "type": "string",
+      "enum": ["code", "no-code", "documentation-only"],
+      "description": "Delivery mode (audit finding #2). Absent ⇒ code: a code project must produce implementation slices, so empty slices during the implementation stage are invalid. no-code/documentation-only keep empty slices vacuously settled."
+    },
+    "has_ui": {
+      "type": "boolean",
+      "description": "Whether the project has a UI surface (audit finding #13). Absent ⇒ true (UX/UI stages engaged). When false the ux-design/ui-design stages are not applicable (mechanically satisfied as N/A — no UI surface)."
+    },
+    "interview_required": {
+      "type": "boolean",
+      "description": "Whether a clarity interview must reach readiness before advancing past requirements (audit finding #14, soft gate). Absent ⇒ computed from tier (true for T2/T3, false otherwise)."
     }
   }
 }

@@ -7,7 +7,7 @@ import { CURRENT_SCHEMA_VERSION } from "../core/state-schema";
 import { readLedger, verifyLedgerChain, verifyLedgerSeals, ledgerPath } from "../core/ledger";
 import { artifactIntegrity, sliceProgress, reviseEscalations } from "../core/health";
 import { computeBreakdown } from "../core/coverage";
-import { readVerifyReport } from "../core/verify";
+import { readVerifyConfig, readVerifyReport } from "../core/verify";
 import { staleLeases } from "../core/leases";
 import { validateDeps, hasDepIssues } from "../core/wave";
 
@@ -31,6 +31,17 @@ interface Check {
   status: CheckStatus;
   detail: string;
 }
+
+/**
+ * Forward-compat top-level state keys that `th doctor --strict` tolerates (#15).
+ *
+ * `validateState` emits a non-fatal WARNING for any top-level key not in the
+ * schema (so a typo like `teir` is visible without rejecting the file). Under
+ * `--strict`, an unknown key is escalated to a hard FAIL — UNLESS it is listed
+ * here, where it is treated as a known forward-compat field. Start minimal: add a
+ * key only when a newer field is intentionally carried by an older binary.
+ */
+const DOCTOR_STRICT_KEY_ALLOWLIST: ReadonlySet<string> = new Set<string>([]);
 
 /** Resolve the plugin root from the compiled location (dist/commands → root). */
 function pluginRoot(): string {
@@ -278,6 +289,18 @@ export function runDoctor(paths: ProjectPaths, opts: { strict?: boolean } = {}):
       });
     }
 
+    // #10 — surface the configured verify commands so an operator / security
+    // review can see exactly which commands `th verify run` will execute. Additive
+    // output; never fails. `th verify run` runs ONLY these pre-configured commands.
+    const verifyCfg = readVerifyConfig(paths);
+    checks.push({
+      name: "verify commands",
+      status: "ok",
+      detail: verifyCfg.commands.length
+        ? `${verifyCfg.commands.length} configured (run by \`th verify run\`): ${verifyCfg.commands.map((c) => `"${c}"`).join(", ")}`
+        : "none configured (add with `th verify add \"<command>\"`)",
+    });
+
     // Revise-loop escalations (cap reached → human owes a decision).
     const escalations = reviseEscalations(s);
     if (escalations.length > 0) {
@@ -288,6 +311,35 @@ export function runDoctor(paths: ProjectPaths, opts: { strict?: boolean } = {}):
       });
     } else {
       checks.push({ name: "revise loops", status: "ok", detail: "none at cap" });
+    }
+  }
+
+  // #15 — unknown top-level state keys. `validateState` surfaces them as non-fatal
+  // warnings (a forward-compat / typo signal). Normal mode keeps that as a WARNING;
+  // `--strict` escalates any key NOT in DOCTOR_STRICT_KEY_ALLOWLIST to a hard FAIL,
+  // catching typos like `teir`. Threaded through readState's `warnings` so it works
+  // whether or not state.json otherwise validates.
+  const unknownKeyWarnings = (r.warnings ?? []).filter((w) => w.message.includes("unknown top-level key"));
+  if (unknownKeyWarnings.length > 0) {
+    const keys = unknownKeyWarnings.map((w) => w.path);
+    const offending = keys.filter((k) => !DOCTOR_STRICT_KEY_ALLOWLIST.has(k));
+    const allowed = keys.filter((k) => DOCTOR_STRICT_KEY_ALLOWLIST.has(k));
+    if (offending.length > 0) {
+      checks.push({
+        name: "state keys",
+        status: opts.strict ? "fail" : "warn",
+        detail:
+          `unknown top-level key(s): ${offending.join(", ")}` +
+          (opts.strict
+            ? " — not in the --strict allowlist (a typo like `teir`?)"
+            : " — run `th doctor --strict` to fail on this"),
+      });
+    } else {
+      checks.push({
+        name: "state keys",
+        status: "ok",
+        detail: `${allowed.length} allowlisted forward-compat key(s): ${allowed.join(", ")}`,
+      });
     }
   }
 
