@@ -48,6 +48,8 @@ import {
   runStageAdvance,
   runImplementationUnlock,
 } from "./commands/stage";
+import { runBudgetCheck } from "./commands/budget";
+import { runHandoffWrite, runHandoffVerify, runResume } from "./commands/handoff";
 import { runManifestExport } from "./commands/manifest";
 import { runPreview } from "./commands/preview";
 import { runScorecard } from "./commands/scorecard";
@@ -67,16 +69,6 @@ import {
   runDecisionApprove,
   runDecisionCheck,
 } from "./commands/decision";
-import {
-  runProofRun,
-  runProofComponent,
-  runProofReport,
-  runProofBaselineUpdate,
-  runProofScenarioStart,
-  runProofScenarioFinish,
-  runProofScenarioList,
-  type ProofCommandOptions,
-} from "./commands/proof";
 
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
@@ -143,12 +135,17 @@ Usage:
   th doctor                         Self-diagnostic + run-health audit (env, state, artifacts, coverage, slices, revise loops)
   th next [--explain]               The next mechanical obligation the run owes (next-action oracle); --explain adds a WHY
   th preview [--tier T<n>]          Pre-run view: engaged stages, human gates, and Critic modes for a tier
-  th scorecard                      Post-run one-screen summary (tier/coverage/slices/suite/drift/revise)
+  th scorecard [--hotspots]         Post-run one-screen summary (tier/coverage/slices/suite/drift/revise); --hotspots emits a per-stage token (estimate/proxy) + wall-clock table from the local telemetry log (empty/exit-0 when no telemetry)
   th route [--agent A] [--mode M] [--tier T] [--component-blast] [--summarization]
                                     Advisory model+effort for an agent spawn (computes; the Orchestrator applies)
   th telemetry on|off|status        Toggle/report opt-in, LOCAL-ONLY run telemetry (never sent off-machine)
   th context estimate               Approximate the prompt-surface token cost (flags oversized files)
   th context pack [--slice <ID>]    Assemble the §9 handoff bundle (artifact Summary blocks + slice framing)
+  th budget check [--max <k>] [--files-read N] [--slices-built N] [--tool-calls N] [--artifacts N]
+                                    Deterministic context-budget estimate from agent-supplied proxy counts → { estTokens, pct, verdict } (--max in thousands; tier-aware default when omitted)
+  th handoff write                  Assemble .twinharness/HANDOFF.md (run state + next action + artifact Summary blocks + open questions + "don't re-read docs/" directive)
+  th handoff verify                 Confirm a resumed run matches HANDOFF (current_stage/slice + approved-artifact hashes still valid); pass/fail
+  th resume                         Detect .twinharness/HANDOFF.md and print the next mechanical action (from th next)
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
   th delegate pack [--agent A] [--slice ID] [--task T] [--intent I]
@@ -172,13 +169,6 @@ Usage:
   th decision list                  List the decision set (ids/titles/statuses/links/audit), sorted (exit 0; non-zero if the hash chain is broken)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
-  th proof run [--self-test]        Run the full operational proof suite (9 components); dual-format report + coverage matrix + regression verdict
-  th proof component <1-9>          Run a single proof component and emit its report card
-  th proof report                   Harvest finished live scenarios and emit the consolidated dual-format report
-  th proof baseline update          Re-measure mechanical perf metrics and persist them as gating baselines (PS-Q2)
-  th proof scenario start --brief <id>  Scaffold an isolated scenario root (OS temp, outside any .twinharness) and print it for CLAUDE_PROJECT_DIR (C2)
-  th proof scenario finish [--scenario-root <dir>]  Mark a scenario finished (artifacts remain for harvest)
-  th proof scenario list            List the prepared/finished proof scenario sandboxes
   th version                        Print the CLI version
   th help                           Show this help
 
@@ -216,6 +206,7 @@ Global flags:
   --dry-run         (slices sync) Compute without writing state
   --remove-missing  (slices sync) Remove slices absent from the plan
   --explain         (next) Include a WHY string: why this obligation is the highest-priority one
+  --hotspots        (scorecard) Emit the per-stage token + wall-clock table from local telemetry
   --intent <i>      (delegate) read|write|debug|review|artifact|repo-analysis
   --files <n>       (delegate plan) Expected file reads (delegate when > 3)
   --writes          (delegate plan) The task modifies source code
@@ -225,6 +216,12 @@ Global flags:
   --capsule <path>  (delegate check) Capsule file to validate
   --force           (init) Reset existing state.json; (collab fragment) overwrite an existing fragment
   --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)
+  --max-tokens <k>  (init) Per-session context budget in THOUSANDS; persisted as max_tokens (×1000, e.g. 150 → 150000)
+  --max <k>         (budget check) Budget override in THOUSANDS; default is state.max_tokens, else the tier-aware default
+  --files-read <n>  (budget check) Proxy count: files read so far
+  --slices-built <n> (budget check) Proxy count: slices built so far
+  --tool-calls <n>  (budget check) Proxy count: tool calls so far
+  --artifacts <n>   (budget check) Proxy count: approved artifacts carried
   --write           (repo map) Write the artifacts (default; bare \`th repo map\` writes)
   --no-write        (repo map) Dry/preview: build in memory, write nothing (alias of --dry-run)
   --format <f>      (repo map) Text rendering: summary (default) | json | md
@@ -239,11 +236,6 @@ Global flags:
   --reject          (decision approve) Append a rejected event instead of approved (mutually exclusive with --supersede)
   --supersede <id>  (decision approve) Mark this (approved) decision superseded by <id> (mutually exclusive with --reject)
   --as <actor>      (decision approve) Approver attribution (attribution only — NOT a barrier; default TH_APPROVAL_ACTOR or "human")
-  --self-test       (proof run/component) Deterministic mechanical-reachability mode (no live LLM); NEVER a live verdict for components 1/2/5
-  --brief <id>      (proof scenario start) Corpus brief id to scaffold (default: first brief)
-  --corpus-root <dir>  (proof) Override the bundled corpus root (default <repo>/proof/corpus)
-  --output-root <dir>  (proof) Override the report output root (default <root>/.twinharness/proof)
-  --scenario-root <dir>  (proof scenario finish) The scenario root to finish (default: the resolved project root)
   --lock            (implementation unlock) Re-lock implementation (set implementation_allowed=false) instead of unlocking
   --emergency       (state set) Force a raw write to a gate-owned field, bypassing the typed gate ladder (loud + audit-ledgered)`;
 
@@ -294,6 +286,7 @@ export interface ParsedArgs {
     removeMissing: boolean;
     brownfield: boolean;
     explain: boolean;
+    hotspots: boolean;
     intent?: string;
     task?: string;
     capsule?: string;
@@ -329,6 +322,12 @@ export interface ParsedArgs {
     corpusRoot?: string;
     outputRoot?: string;
     scenarioRoot?: string;
+    maxTokens?: number;
+    max?: number;
+    filesRead?: number;
+    slicesBuilt?: number;
+    toolCalls?: number;
+    artifacts?: number;
     lock: boolean;
     emergency: boolean;
   };
@@ -351,6 +350,7 @@ const BOOLEAN_FLAGS: Record<string, FlagField> = {
   "--component-blast": "componentBlast",
   "--summarization": "summarization",
   "--explain": "explain",
+  "--hotspots": "hotspots",
   "--writes": "writes",
   "--noisy": "noisy",
   "--write": "write",
@@ -423,6 +423,15 @@ const NUMBER_FLAGS: Record<string, FlagField> = {
   "--version": "version",
   "--files": "files",
   "--maxResults": "maxResults",
+  // Track A-2 — context budget. `--max-tokens` / `--max` are RAW numbers here (in
+  // thousands "k"); the ×1000 conversion happens at the write/compute site
+  // (budget.ts / init), NOT in this parser.
+  "--max-tokens": "maxTokens",
+  "--max": "max",
+  "--files-read": "filesRead",
+  "--slices-built": "slicesBuilt",
+  "--tool-calls": "toolCalls",
+  "--artifacts": "artifacts",
 };
 
 /**
@@ -447,6 +456,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     componentBlast: false,
     summarization: false,
     explain: false,
+    hotspots: false,
     writes: false,
     noisy: false,
     write: false,
@@ -541,7 +551,35 @@ function dispatch(parsed: ParsedArgs): CommandResult {
       return success({ data: { version: ver }, human: ver });
     }
     case "init":
-      return runInit(paths, { force: parsed.flags.force, brownfield: parsed.flags.brownfield });
+      return runInit(paths, {
+        force: parsed.flags.force,
+        brownfield: parsed.flags.brownfield,
+        maxTokens: parsed.flags.maxTokens,
+      });
+    case "budget":
+      switch (sub) {
+        case "check":
+          return runBudgetCheck(paths, {
+            max: parsed.flags.max,
+            filesRead: parsed.flags.filesRead,
+            slicesBuilt: parsed.flags.slicesBuilt,
+            toolCalls: parsed.flags.toolCalls,
+            artifacts: parsed.flags.artifacts,
+          });
+        default:
+          return failure({ human: `unknown 'budget' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    case "handoff":
+      switch (sub) {
+        case "write":
+          return runHandoffWrite(paths);
+        case "verify":
+          return runHandoffVerify(paths);
+        default:
+          return failure({ human: `unknown 'handoff' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    case "resume":
+      return runResume(paths);
     case "migrate":
       return runMigrate(paths);
     case "doctor":
@@ -551,7 +589,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
     case "preview":
       return runPreview(paths, { tier: parsed.flags.tier });
     case "scorecard":
-      return runScorecard(paths, { json: parsed.flags.json });
+      return runScorecard(paths, { json: parsed.flags.json, hotspots: parsed.flags.hotspots });
     case "route":
       return runRoute(paths, {
         agent: parsed.flags.agent,
@@ -950,62 +988,10 @@ function dispatch(parsed: ParsedArgs): CommandResult {
 }
 
 /**
- * `th proof …` dispatch — split out from the synchronous {@link dispatch} because
- * the run/component/report/baseline handlers spawn REAL OS processes and are async
- * (`Promise<CommandResult>`); the scenario-lifecycle handlers are synchronous and
- * resolve immediately.
- *
- * The CLI passes **no MCP registry**: the zero-runtime-dependency CLI must never
- * import the SDK-bearing `mcp-server`, so a CLI-driven proof run reports the
- * MCP-tool coverage dimension as UNVERIFIABLE. The authoritative MCP-tool coverage
- * comes from the `th_proof_*` MCP tools (which inject the registry) plus the
- * dedicated `proof-calls.jsonl` trail.
- */
-async function dispatchProof(parsed: ParsedArgs, paths: ProjectPaths): Promise<CommandResult> {
-  const sub = parsed.positionals[1];
-  const rest = parsed.positionals.slice(2);
-  const opts: ProofCommandOptions = {
-    selfTest: parsed.flags.selfTest,
-    brief: parsed.flags.brief,
-    corpusRoot: parsed.flags.corpusRoot,
-    outputRoot: parsed.flags.outputRoot,
-    scenarioRoot: parsed.flags.scenarioRoot,
-  };
-  switch (sub) {
-    case "run":
-      return runProofRun(paths, opts);
-    case "component":
-      return runProofComponent(paths, { ...opts, component: parsed.flags.component ?? rest[0] });
-    case "report":
-      return runProofReport(paths, opts);
-    case "baseline":
-      switch (rest[0]) {
-        case "update":
-          return runProofBaselineUpdate(paths, opts);
-        default:
-          return failure({ human: `unknown 'proof baseline' subcommand: ${rest[0] ?? "(none)"}\n\n${HELP}` });
-      }
-    case "scenario":
-      switch (rest[0]) {
-        case "start":
-          return runProofScenarioStart(paths, opts);
-        case "finish":
-          return runProofScenarioFinish(paths, opts);
-        case "list":
-          return runProofScenarioList(paths, opts);
-        default:
-          return failure({ human: `unknown 'proof scenario' subcommand: ${rest[0] ?? "(none)"}\n\n${HELP}` });
-      }
-    default:
-      return failure({ human: `unknown 'proof' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
-  }
-}
-
-/**
  * Write `text` to stdout, then exit with `code` ONLY after the bytes have drained.
  * stdout to a pipe is ASYNCHRONOUS on POSIX (macOS/Linux), so a bare `process.exit()`
  * right after a large `write` truncates it mid-flush — the proven failure was
- * `th help` losing its tail (the `proof` command block) on macOS CI while passing on
+ * `th help` losing its tail on macOS CI while passing on
  * Linux/Windows. Exiting from the write callback guarantees the OS accepted the data
  * first; `process.exitCode` is mirrored so a natural drain still carries the code.
  */
@@ -1028,8 +1014,7 @@ function emitAndExit(result: CommandResult, json: boolean): never {
  *     past its retry budget) — exit 1, "retry the command".
  *   • Path-containment violations (an absolute / ".." / separator-bearing segment
  *     that escapes the project root) — a client/security reject, exit 2.
- * Any OTHER error is a real bug and is rethrown. Shared by the synchronous
- * dispatch and the async {@link dispatchProof}.
+ * Any OTHER error is a real bug and is rethrown.
  */
 function mapDispatchError(e: unknown): CommandResult {
   const code = (e as { code?: string }).code;
@@ -1099,17 +1084,6 @@ function main(): void {
       const out = runHookSubagentStop(paths, readHookStdin<SubagentStopHookInput>());
       writeAndExit(out.stdout + "\n", out.exitCode);
     }
-  }
-
-  // `proof` commands include async handlers (real OS-process spawns), so they run
-  // on an async path before the synchronous dispatch — mirroring the hook gates.
-  if (parsed.positionals[0] === "proof") {
-    const paths = resolveProjectPaths(parsed.flags.cwd);
-    void dispatchProof(parsed, paths).then(
-      (result) => emitAndExit(result, parsed.flags.json),
-      (e) => emitAndExit(mapDispatchError(e), parsed.flags.json),
-    );
-    return;
   }
 
   let result: CommandResult;

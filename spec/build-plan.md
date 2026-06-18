@@ -14,7 +14,7 @@ deliverable is a distributable plugin (manifest + skills + agents + templates + 
 that drives a vague idea through tier-scaled SDLC stages, producing governing artifacts and slice-by-slice builds.
 
 The outline is treated as the **frozen spec** for *what* TwinHarness does. This document plans *how* to build it.
-We dogfood TwinHarness's own vertical-slice method to build TwinHarness.
+We self-host TwinHarness's own vertical-slice method to build TwinHarness.
 
 ---
 
@@ -24,7 +24,7 @@ We dogfood TwinHarness's own vertical-slice method to build TwinHarness.
 1. **Mechanical truths get code; judgment gets prompts.** State, anchors, hashing, traceability, coverage,
    cascade-staleness are deterministic CLI operations (testable). Tiering/clarification/critique are prompts. This
    is the outline's §11 "instructions are not enforcement" applied to our own build.
-2. **Dogfood vertical slicing.** Build a walking skeleton first (one stage end-to-end + state spine), then thin
+2. **Self-host vertical slicing.** Build a walking skeleton first (one stage end-to-end + state spine), then thin
    slices. Never "all agents first, then all stages."
 3. **Portability is a feature, not an afterthought** (§19). Pure Claude Code plugin; the only runtime dep is Node
    (already required by the ecosystem); no IDE/cloud lock-in.
@@ -72,9 +72,9 @@ We dogfood TwinHarness's own vertical-slice method to build TwinHarness.
    state writes aren't actually enforced, so the orchestrator skips them under context pressure. → *Mitigation:*
    a Stop/PreToolUse hook that blocks "stage complete" claims unless `th state verify` passes; Slice 0 proves the
    gate fires.
-3. **"Dogfooding stalls — TwinHarness can't build TwinHarness because the spine isn't ready."** We try to use the
+3. **"Self-hosting stalls — TwinHarness can't build TwinHarness because the spine isn't ready."** We try to use the
    process before the skeleton exists. → *Mitigation:* Slice 0 is built **by hand** (not via TwinHarness); only
-   after Slice 0 + state CLI are green do we optionally dogfood later slices. Dogfooding is a validation bonus,
+   after Slice 0 + state CLI are green do we optionally self-host later slices. Self-hosting is a validation bonus,
    never a build dependency.
 4. **"Over-building before the spine is proven."** Because scope is locked to full Tier 0–3 in one milestone, the
    temptation is to build Tier 3 stages (security, failure-modes, parallel builds) before the Tier 0/1/2 spine is
@@ -89,7 +89,7 @@ We dogfood TwinHarness's own vertical-slice method to build TwinHarness.
   append/parse. Test names carry REQ-IDs from the outline (e.g. `test_REQ_state_idempotent_resume`).
 - **Integration:** skill→agent→artifact→state for one stage; Critic revise-loop cap (3 → escalate); tier
   classifier on fixture briefs (Tier 0 classifier all-5-conditions, blast-radius veto cases).
-- **End-to-end (per slice acceptance, dogfooded fixtures):** run a tiny Tier-1 brief ("build a CLI todo") through
+- **End-to-end (per slice acceptance, self-hosted fixtures):** run a tiny Tier-1 brief ("build a CLI todo") through
   requirements→scope→slice→build→verify against a golden artifact set; assert state transitions + traceability view.
   Plus a **Tier-3 golden fixture** (blast-radius brief) that drives the `adr`/`technical-design`/`security`/
   `failure-modes` stages and the parallel-build serialization check (Slice 7 acceptance).
@@ -178,7 +178,7 @@ does not pick a tier, it only forbids Tier 0 when a blast-radius flag is present
 
 ---
 
-## 4. Build sequence — dogfooded vertical slices
+## 4. Build sequence — self-hosted vertical slices
 
 **Slice 0 — Walking skeleton (built by hand).** plugin.json + minimal `twinharness` SKILL that runs a Tier-1 path:
 requirements stage (Spec agent, template) → write `01-requirements.md` → `th init` + `th state set` → human gate via
@@ -266,7 +266,7 @@ slicing, parallel-merge protocol) are tracked as research items, not milestone b
 | Prompt enforcement silently skipped | Mechanical stop-gate hook + `th state verify` |
 | Over-building Tier 3 before spine proven (pre-mortem #4) | Slices 0–6 are hard gates (acceptance-green) before Slice 7 begins; §4 order is binding |
 | Blast-radius prompt override (Principle 1 gap) | `th tier veto-check` exit-code gate in the hook; veto is code, not instruction |
-| Dogfooding deadlock | Slice 0 built by hand; dogfooding optional |
+| Self-hosting deadlock | Slice 0 built by hand; self-hosting optional |
 
 ---
 

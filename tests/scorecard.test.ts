@@ -16,8 +16,9 @@ import { readState, writeState } from "../src/core/state-store";
 import { writeVerifyReport } from "../src/core/verify";
 import { writeTelemetryConfig, readTelemetryLog } from "../src/core/telemetry";
 import type { SliceState, TwinHarnessState } from "../src/core/state-schema";
-import { runScorecard } from "../src/commands/scorecard";
+import { runScorecard, runScorecardHotspots } from "../src/commands/scorecard";
 import { runRoute } from "../src/commands/route";
+import { appendTelemetry } from "../src/core/telemetry";
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
@@ -210,5 +211,60 @@ describe("REQ-SCORECARD-003: Routing line summarizes recorded th route telemetry
     // The scorecard's own snapshot append (telemetry on) must NOT be counted as a route event.
     runScorecard(tp.paths, {});
     expect(routingData(runScorecard(tp.paths, {}).data).events).toBe(3);
+  });
+});
+
+interface Hotspot {
+  stage: string;
+  events: number;
+  tokens: number;
+  wallMs: number;
+}
+
+describe("REQ-SCORECARD-004: --hotspots per-stage token + wall-clock table", () => {
+  it("degrades gracefully (empty table, exit 0, clear message) with no telemetry", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const res = runScorecardHotspots(tp.paths);
+    expect(res.ok).toBe(true);
+    expect(res.exitCode).toBe(0);
+    const data = res.data as { hotspots: Hotspot[]; totalTokens: number; recordsScanned: number };
+    expect(data.hotspots).toEqual([]);
+    expect(data.totalTokens).toBe(0);
+    expect(data.recordsScanned).toBe(0);
+    expect(res.human).toMatch(/no stage telemetry/i);
+  });
+
+  it("aggregates token + wall-clock per stage from the local telemetry log", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeTelemetryConfig(tp.paths, { enabled: true });
+
+    // Stage-bearing cost records (the shape a stage emitter would append).
+    appendTelemetry(tp.paths, { ts: "t1", event: "stage-cost", stage: "implementation", tokens: 1000, wallMs: 4000 });
+    appendTelemetry(tp.paths, { ts: "t2", event: "stage-cost", stage: "implementation", tokens: 500, durationMs: 1000 });
+    appendTelemetry(tp.paths, { ts: "t3", event: "stage-cost", stage: "design", estTokens: 200, wallMs: 800 });
+    // A record without a stage (e.g. a route event) is ignored by the table but still scanned.
+    appendTelemetry(tp.paths, { ts: "t4", event: "route", model: "opus" });
+
+    const res = runScorecardHotspots(tp.paths);
+    expect(res.ok).toBe(true);
+    const data = res.data as { hotspots: Hotspot[]; totalTokens: number; totalWallMs: number; recordsScanned: number };
+    expect(data.recordsScanned).toBe(4);
+    expect(data.totalTokens).toBe(1700);
+    expect(data.totalWallMs).toBe(5800);
+    // Sorted by tokens desc → implementation first.
+    expect(data.hotspots[0]).toMatchObject({ stage: "implementation", events: 2, tokens: 1500, wallMs: 5000 });
+    expect(data.hotspots[1]).toMatchObject({ stage: "design", events: 1, tokens: 200, wallMs: 800 });
+    expect(res.human).toContain("implementation");
+    expect(res.human).toMatch(/TOTAL/);
+  });
+
+  it("is reachable through runScorecard({ hotspots: true })", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const res = runScorecard(tp.paths, { hotspots: true });
+    expect(res.ok).toBe(true);
+    expect((res.data as { hotspots: Hotspot[] }).hotspots).toEqual([]);
   });
 });

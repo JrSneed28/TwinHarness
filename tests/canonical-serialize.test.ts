@@ -56,10 +56,11 @@ describe("ARCH-004: serializeState byte-stability", () => {
    */
   function fullStateScrambled(): TwinHarnessState {
     return {
+      max_tokens: 150000,
       interview_required: true,
       has_ui: false,
       delivery_mode: "no-code",
-      interview_threshold: 0.2,
+      interview_cutoff: 0.8,
       project_mode: "brownfield",
       write_gate: "deny",
       revise_loop_counts: { "STAGE-A": 2 },
@@ -116,10 +117,11 @@ describe("ARCH-004: serializeState byte-stability", () => {
   },
   "write_gate": "deny",
   "project_mode": "brownfield",
-  "interview_threshold": 0.2,
+  "interview_cutoff": 0.8,
   "delivery_mode": "no-code",
   "has_ui": false,
-  "interview_required": true
+  "interview_required": true,
+  "max_tokens": 150000
 }
 `;
 
@@ -154,10 +156,11 @@ describe("ARCH-004: serializeState byte-stability", () => {
     expect(keys).not.toContain("debate_open_blocking");
     expect(keys).not.toContain("write_gate");
     expect(keys).not.toContain("project_mode");
-    expect(keys).not.toContain("interview_threshold");
+    expect(keys).not.toContain("interview_cutoff");
     expect(keys).not.toContain("delivery_mode");
     expect(keys).not.toContain("has_ui");
     expect(keys).not.toContain("interview_required");
+    expect(keys).not.toContain("max_tokens");
     // Required fields, in canonical order, no optionals interleaved.
     expect(keys).toEqual(
       (STATE_FIELD_ORDER as string[]).filter(
@@ -167,10 +170,11 @@ describe("ARCH-004: serializeState byte-stability", () => {
             "debate_open_blocking",
             "write_gate",
             "project_mode",
-            "interview_threshold",
+            "interview_cutoff",
             "delivery_mode",
             "has_ui",
             "interview_required",
+            "max_tokens",
           ].includes(k),
       ),
     );

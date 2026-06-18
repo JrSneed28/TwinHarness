@@ -956,9 +956,9 @@ Pre-edit blast-radius analysis over the persisted `repo-map.json`. Reads no stat
 | `map_invalid-json` / `map_schema` / `map_version` | Map file malformed or unknown version | Run `th repo map` to regenerate |
 | `unknown_slice` | `--slice` names no known slice | Check `th state status` for valid slice IDs |
 
-#### MCP tools (registered count 63)
+#### MCP tools (registered count 62)
 
-63 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin (REQ-RU-051 — identical code path). The four repo-understanding tools are shown below; the operational proof suite also registers the read/coordination-only `th_proof_run`, `th_proof_component`, and `th_proof_report`, and the interview/init layer registers the store-only `th_interview_start`, `th_interview_record`, `th_interview_status` plus the idempotent (no-force) `th_init`. The MCP-tool-expansion then adds 21 more (42 → 63): 5 typed, precondition-gated gate-transition tools (`th_tier_record`, `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`, `th_blast_radius_record`) that safely mutate `GATE_OWNED` fields, plus 16 wired handlers (`th_drift_list`, `th_drift_resolve`, `th_coverage_report`, `th_artifact_register`, `th_artifact_list`, `th_verify_add`, `th_verify_list`, `th_verify_clear`, `th_verify_run`, `th_stage_current`, `th_stage_describe`, `th_stage_list`, `th_doctor`, `th_scorecard`, `th_slices_sync`, `th_slice_set_status`):
+62 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin (REQ-RU-051 — identical code path). The four repo-understanding tools are shown below; the interview/init layer registers the store-only `th_interview_start`, `th_interview_record`, `th_interview_status` plus the idempotent (no-force) `th_init`. The MCP-tool-expansion then adds 21 more (39 → 60): 5 typed, precondition-gated gate-transition tools (`th_tier_record`, `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`, `th_blast_radius_record`) that safely mutate `GATE_OWNED` fields, plus 16 wired handlers (`th_drift_list`, `th_drift_resolve`, `th_coverage_report`, `th_artifact_register`, `th_artifact_list`, `th_verify_add`, `th_verify_list`, `th_verify_clear`, `th_verify_run`, `th_stage_current`, `th_stage_describe`, `th_stage_list`, `th_doctor`, `th_scorecard`, `th_slices_sync`, `th_slice_set_status`). Finally Track A-2's context-budget layer adds 2 more (60 → 62): `th_budget_check` (deterministic budget estimate) and `th_handoff_write` (assemble `.twinharness/HANDOFF.md`):
 
 | Tool name | CLI equivalent | Notes |
 |---|---|---|
@@ -966,6 +966,8 @@ Pre-edit blast-radius analysis over the persisted `repo-map.json`. Reads no stat
 | `th_repo_relevant` | `th repo relevant` | `slice`, `req`, `file`, `query`, `maxResults` inputs |
 | `th_repo_impact` | `th repo impact` | `file`, `component` inputs |
 | `th_context_pack` | `th context pack` | `slice` input; wraps the existing handler |
+| `th_budget_check` | `th budget check` | `max`, `filesRead`, `slicesBuilt`, `toolCalls`, `artifacts` inputs; deterministic estimate |
+| `th_handoff_write` | `th handoff write` | no inputs; writes `.twinharness/HANDOFF.md` |
 
 All MCP tool schemas are strict and closed (`additionalProperties: false`). Output mirrors the CLI structured payload (`result.data`) as `structuredContent` plus the human text block. Compact by default — the full `repo-map.json` is never dumped into a prompt (REQ-NFR-004).
 
@@ -1004,7 +1006,7 @@ process.
 .claude-plugin/   plugin manifest + marketplace.json (installation wiring)
 .github/          CI workflow (ci.yml — typecheck, build, dist-sync, test on every push/PR)
 agents/           16 agent prompt files
-commands/         18 Claude Code command files (4 original + 2 proof + 12 curated th-* verbs)
+commands/         16 Claude Code command files (4 original + 12 curated th-* verbs)
 dist/             compiled CLI — committed on purpose; no build step at install time
 hooks/            Stop hook wiring (hooks.json → th hook stop-gate)
 schemas/          published JSON Schemas for state.json and brief.json (draft-07; editor validation)
@@ -1027,11 +1029,13 @@ runs on every push and pull request, enforcing the committed-`dist/` invariant. 
   a tier, which carry a human gate, and each stage's Critic mode, plus a stages/gates/reviews
   summary line. Tier resolves from `--tier`, else the recorded `state.tier`, else T2 (and says so).
   Read-only.
-- **`th scorecard [--json]`** — a read-only one-screen post-run summary: tier/stage, coverage
+- **`th scorecard [--json] [--hotspots]`** — a read-only one-screen post-run summary: tier/stage, coverage
   (planned/implemented/tested), slice progress, suite status (from the last `th verify run`, `—` if
   none), drift (entries + open blocking), revise escalations, and a **Routing** line summarizing
   recorded `th route` telemetry (`—` when none). If telemetry is on, each call also appends a
-  timestamped snapshot.
+  timestamped snapshot. **`--hotspots`** instead emits a per-stage cost table — token (estimate/proxy)
+  and wall-clock totals aggregated from the local `telemetry.jsonl` log by stage; when telemetry is
+  off/empty it prints a clear "no data" message and still exits 0 (never crashes).
 - **`th telemetry on|off|status`** — opt-in, **local-only** run telemetry stored next to `state.json`
   (`telemetry.json` + `telemetry.jsonl`), off by default. Nothing is ever transmitted; `on` starts
   recording `th scorecard` snapshots, `off` stops, `status` shows the flag and record count.

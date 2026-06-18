@@ -90,7 +90,7 @@ describe("REQ-RU-001: dispatch() attachment point — `repo` group now wired (SL
 // Pinning the exact count + names makes any future change to the surface deliberate.
 // ---------------------------------------------------------------------------
 
-describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 63 tools registered (on top of the prior 42, the MCP-tool-expansion adds 5 typed gate-transition tools — th_tier_record/stage_advance/implementation_unlock/write_gate_set/blast_radius_record — plus 16 wired handlers — th_drift_list/resolve, th_coverage_report, th_artifact_register/list, th_verify_add/list/clear/run, th_stage_current/describe/list, th_doctor, th_scorecard, th_slices_sync, th_slice_set_status)", () => {
+describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 60 tools registered (on top of the prior 39, the MCP-tool-expansion adds 5 typed gate-transition tools — th_tier_record/stage_advance/implementation_unlock/write_gate_set/blast_radius_record — plus 16 wired handlers — th_drift_list/resolve, th_coverage_report, th_artifact_register/list, th_verify_add/list/clear/run, th_stage_current/describe/list, th_doctor, th_scorecard, th_slices_sync, th_slice_set_status)", () => {
   // Anchor: REQ-NFR-002
   const EXPECTED_TOOL_NAMES = [
     "th_state_get",
@@ -149,20 +149,19 @@ describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 63 tools registered (on to
     "th_scorecard",
     "th_slices_sync",
     "th_slice_set_status",
-    "th_proof_run",
-    "th_proof_component",
-    "th_proof_report",
     "th_interview_start",
     "th_interview_record",
     "th_interview_status",
     "th_init",
+    "th_budget_check",
+    "th_handoff_write",
   ] as const;
 
-  it("REQ-NFR-002 — TOOL_DEFS.length === 63 (the MCP-tool-expansion adds 5 typed gate-transition tools + 16 wired handlers on top of the prior 42 → 63)", () => {
-    expect(TOOL_DEFS.length).toBe(63);
+  it("REQ-NFR-002 — TOOL_DEFS.length === 60 (the MCP-tool-expansion adds 5 typed gate-transition tools + 16 wired handlers on top of the prior 39 → 60)", () => {
+    expect(TOOL_DEFS.length).toBe(62);
   });
 
-  it("REQ-NFR-002 — TOOL_DEFS contains exactly the 63 expected tool names", () => {
+  it("REQ-NFR-002 — TOOL_DEFS contains exactly the 60 expected tool names", () => {
     const names = TOOL_DEFS.map((t) => t.name);
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
   });
@@ -772,7 +771,7 @@ describe("SLICE-1 / TASK-003 — runRepoMap handler + CLI dispatch + dual-artifa
 
 // ===========================================================================
 // SLICE-1 / TASK-004 — Acceptance battery: REQ-RU-090 robustness, golden
-// double-run byte-stability, no-exec sentinel, SDK-free + dist-sync proofs.
+// double-run byte-stability, no-exec sentinel, SDK-free + dist-sync checks.
 // ===========================================================================
 
 describe("SLICE-1 / TASK-004 — acceptance battery (robustness, determinism, no-exec, dist-sync)", () => {
@@ -966,7 +965,7 @@ describe("SLICE-1 / TASK-004 — acceptance battery (robustness, determinism, no
     expect(fs.existsSync(sentinel)).toBe(false);
   });
 
-  // ---- SDK-free + dist-sync proofs (REQ-NFR-002 / REQ-NFR-005) -------------
+  // ---- SDK-free + dist-sync checks (REQ-NFR-002 / REQ-NFR-005) -------------
 
   it("REQ-NFR-002 — dist/cli.js contains no @modelcontextprotocol import (SDK-free)", () => {
     const cli = fs.readFileSync(path.join(ROOT, "dist", "cli.js"), "utf8");
@@ -974,7 +973,7 @@ describe("SLICE-1 / TASK-004 — acceptance battery (robustness, determinism, no
   });
 
   it("REQ-NFR-002 — the repo layer imports no child_process (no execution path exists)", () => {
-    // Static proof: the scanner + handler source never IMPORT child_process (an
+    // Static check: the scanner + handler source never IMPORT child_process (an
     // import/require statement — not a mention in a comment).
     const importRe = /(?:import[^;]*from\s*["']node:child_process["']|require\(\s*["']node:child_process["']\s*\)|from\s*["']child_process["'])/;
     const scannerSrc = fs.readFileSync(path.join(ROOT, "src", "core", "repo-map", "scanner.ts"), "utf8");

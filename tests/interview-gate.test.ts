@@ -28,14 +28,14 @@ afterEach(() => {
   tp = undefined;
 });
 
-/** Drive the interview store to a READY state (ambiguity ≤ threshold). */
+/** Drive the interview store to a READY state (confidence ≥ cutoff). */
 function makeInterviewReady(paths: TempProject["paths"]): void {
-  runInterviewStart(paths, { idea: "build a thing", threshold: 0.2 });
+  runInterviewStart(paths, { idea: "build a thing", cutoff: 0.8 });
   runInterviewRecord(paths, {
     question: "q",
     answer: "a",
     scores: { goal: 0.95, constraints: 0.95, criteria: 0.9 },
-    ambiguity: 0.08,
+    confidence: 0.92,
   });
 }
 

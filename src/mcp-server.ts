@@ -51,15 +51,15 @@ import { runNext } from "./commands/next";
 import { runDelegatePlan, runDelegatePack, runDelegateCheck } from "./commands/delegate";
 import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck } from "./commands/repo";
 import { runContextPack } from "./commands/context";
+import { runBudgetCheck } from "./commands/budget";
+import { runHandoffWrite } from "./commands/handoff";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
 import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from "./commands/collab";
 import { runDebateAdd, runDebateList, runDebateResolve } from "./commands/debate";
 import { GATE_OWNED } from "./core/state-fields";
-import { runProofRun, runProofComponent, runProofReport } from "./commands/proof";
 import { runInterviewStart, runInterviewRecord, runInterviewStatus } from "./commands/interview";
 import { runInitMcp } from "./commands/init";
-import type { ProofToolRegistry } from "./core/proof/runner";
 
 // --- Component A wiring tool handlers (16 existing handlers exposed as ToolDefs) ---
 import { runArtifactRegister, runArtifactList } from "./commands/artifact";
@@ -209,8 +209,8 @@ export interface ToolDef {
   /** Build paths + call the matching `run*` handler, returning its CommandResult. */
   run: (paths: ProjectPaths, args: ToolArgs) => CommandResult;
   /**
-   * Async handler for tools that spawn real OS processes (the th_proof_* suite and
-   * th_verify_run). When present, the CallTool path AWAITS this instead of
+   * Async handler for tools that spawn real OS processes (th_verify_run).
+   * When present, the CallTool path AWAITS this instead of
    * {@link ToolDef.run}; the synchronous `run` then serves only as the sync-contract
    * guard (never reached for these tools), so every synchronous tool keeps its exact
    * synchronous contract.
@@ -243,7 +243,7 @@ function optNumber(args: ToolArgs, key: string): number | undefined {
 }
 
 /**
- * The exposed tools (63 total). Each mirrors one `th` subcommand's flags as a
+ * The exposed tools (62 total). Each mirrors one `th` subcommand's flags as a
  * JSON-Schema input and delegates to that subcommand's existing handler, EXCEPT the
  * 5 typed gate-transition tools (th_tier_record, th_stage_advance,
  * th_implementation_unlock, th_write_gate_set, th_blast_radius_record) which enforce
@@ -251,10 +251,12 @@ function optNumber(args: ToolArgs, key: string): number | undefined {
  * `applyGateMutation`. Breakdown: 21 prior coordination/observability tools + the 5
  * typed gate tools + 16 newly-wired existing handlers (artifact register/list, drift
  * list/resolve, verify add/list/clear/run, coverage report, stage current/describe/
- * list, doctor, scorecard, slices sync, slice set-status) + 3 proof + 4
- * interview/init = 63. Ordered by domain grouping (state+gates, drift, build, route,
+ * list, doctor, scorecard, slices sync, slice set-status) + 4
+ * interview/init + 2 Track A-2 context-budget tools (th_budget_check,
+ * th_handoff_write) = 62. Ordered by domain grouping (state+gates, drift, build, route,
  * coverage, next, delegate, repo, decision, artifact, collab, debate, verify, stage,
- * health, slices, proof, interview/init). This order is the canonical source the
+ * health, slices, interview/init), with the 2 Track A-2 tools APPENDED LAST so the
+ * existing tool indices/order mirrors are undisturbed. This order is the canonical source the
  * four order-sensitive name mirrors copy (see .omc/research/canonical-tool-names.md).
  */
 export const TOOL_DEFS: readonly ToolDef[] = [
@@ -1166,56 +1168,6 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     },
     run: (paths, args) => runSliceSetStatus(paths, optString(args, "sliceId"), optString(args, "status")),
   },
-  // ---- Proof suite (PS-Q4: th_proof_run/component/report; read/coordination-only) ----
-  // Read/coordination-only — NEVER gate-mutating (containment invariant). These run
-  // the full suite (real OS-process spawns) so they are ASYNC: dispatched via
-  // `runAsync`; `run` is the unreachable sync-contract guard. The injected registry
-  // gives the coverage matrix its known MCP-tool set (self-derived from TOOL_DEFS).
-  {
-    name: "th_proof_run",
-    description:
-      "Mechanical self-test and report runner over harvested proof scenarios: evaluates all nine component cards, the enforced coverage matrix, and the split-gated regression verdict. With `selfTest`, drives the deterministic self-test spine via real `run*` handlers (no LLM) to produce harvestable artifacts first — does NOT drive a live agent/sub-process pipeline. Read/coordination-only — never gate-mutating.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        selfTest: boolProp("Deterministic mechanical-reachability mode (no live LLM)."),
-      },
-      additionalProperties: false,
-    },
-    run: () => asyncToolGuard("th_proof_run"),
-    runAsync: (paths, args) => runProofRun(paths, { registry: proofRegistry(), selfTest: optBool(args, "selfTest") }),
-  },
-  {
-    name: "th_proof_component",
-    description:
-      "Run a single proof component (1–9) and emit its report card. Read/coordination-only. Components 1/2/5 derive verdicts only from harvested live artifacts; 3/4/6/7/8/9 are LLM-free mechanical sub-proofs.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        component: numberProp("Component number to run (1–9)."),
-        selfTest: boolProp("Deterministic mechanical-reachability mode (no live LLM)."),
-      },
-      required: ["component"],
-      additionalProperties: false,
-    },
-    run: () => asyncToolGuard("th_proof_component"),
-    runAsync: (paths, args) => {
-      const n = optNumber(args, "component");
-      return runProofComponent(paths, {
-        registry: proofRegistry(),
-        component: n === undefined ? undefined : String(n),
-        selfTest: optBool(args, "selfTest"),
-      });
-    },
-  },
-  {
-    name: "th_proof_report",
-    description:
-      "Harvest the finished live proof scenarios and emit the consolidated dual-format report (the final consolidation step of the in-session workflow). Read/coordination-only.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    run: () => asyncToolGuard("th_proof_report"),
-    runAsync: (paths) => runProofReport(paths, { registry: proofRegistry() }),
-  },
   // ---- Interview + init tools ----
   // Store-only/deterministic: the interview tools RECORD agent-supplied scores and
   // PERSIST .twinharness/interview.json (no LLM in the deterministic layer); th_init
@@ -1224,33 +1176,33 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_interview_start",
     description:
-      "Start a scored Socratic interview: create .twinharness/interview.json with the idea + resolved ambiguity threshold (default 0.20). Store-only; overwrites any prior interview. `idea` is required.",
+      "Start a scored Socratic interview: create .twinharness/interview.json with the idea + resolved confidence cutoff (default 0.80). Store-only; overwrites any prior interview. `idea` is required. (Ready when confidence ≥ cutoff.)",
     inputSchema: {
       type: "object",
       properties: {
         idea: stringProp("The initial idea/brief to interview against (required)."),
-        threshold: numberProp("Ambiguity-gate threshold in [0,1] (default 0.20)."),
+        cutoff: numberProp("Confidence-gate cutoff in [0,1] (default 0.80); ready when confidence ≥ cutoff."),
       },
       required: ["idea"],
       additionalProperties: false,
     },
     run: (paths, args) =>
-      runInterviewStart(paths, { idea: optString(args, "idea"), threshold: optNumber(args, "threshold") }),
+      runInterviewStart(paths, { idea: optString(args, "idea"), cutoff: optNumber(args, "cutoff") }),
   },
   {
     name: "th_interview_record",
     description:
-      "Append one agent-supplied round to the interview store and update the latest ambiguity. Store-only — the agent supplies ALL judgment; the tool COMPUTES nothing but `ready = ambiguity <= threshold`. `scores` is a JSON object {goal,constraints,criteria}; `entities` is a JSON array of strings (both parsed in-handler). `question`, `answer`, `scores`, and `ambiguity` are required.",
+      "Append one agent-supplied round to the interview store and update the latest confidence. Store-only — the agent supplies ALL judgment; the tool COMPUTES nothing but `ready = confidence >= cutoff`. `scores` is a JSON object {goal,constraints,criteria}; `entities` is a JSON array of strings (both parsed in-handler). `question`, `answer`, `scores`, and `confidence` are required.",
     inputSchema: {
       type: "object",
       properties: {
         question: stringProp("The question asked this round (required)."),
         answer: stringProp("The answer captured this round (required)."),
         scores: stringProp('JSON object of per-dimension scores, e.g. {"goal":0.2,"constraints":0.3,"criteria":0.1} (required).'),
-        ambiguity: numberProp("Agent-computed ambiguity for this round, a number in [0,1] (required)."),
+        confidence: numberProp("Agent-computed confidence for this round, a number in [0,1] (required); ready when confidence ≥ cutoff."),
         entities: stringProp('JSON array of entity strings captured this round, e.g. ["auth","db"] (optional).'),
       },
-      required: ["question", "answer", "scores", "ambiguity"],
+      required: ["question", "answer", "scores", "confidence"],
       additionalProperties: false,
     },
     run: (paths, args) => {
@@ -1275,7 +1227,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
         question: optString(args, "question"),
         answer: optString(args, "answer"),
         scores,
-        ambiguity: optNumber(args, "ambiguity"),
+        confidence: optNumber(args, "confidence"),
         entities,
       });
     },
@@ -1283,7 +1235,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_interview_status",
     description:
-      "Report the interview gate state: { started, rounds, ambiguity, threshold, ready }. A missing/corrupt store reports started:false, ready:false. Read-only; COMPUTES only `ready`.",
+      "Report the interview gate state: { started, rounds, confidence, cutoff, ready }. Ready when confidence ≥ cutoff. A missing/corrupt store reports started:false, ready:false. Read-only; COMPUTES only `ready`.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runInterviewStatus(paths),
   },
@@ -1300,19 +1252,43 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     },
     run: (paths, args) => runInitMcp(paths, { brownfield: optBool(args, "brownfield") }),
   },
+  // ---- Track A-2 — context budget + handoff (appended at the end of the registry
+  // so existing tool indices/order mirrors are undisturbed) ----
+  {
+    name: "th_budget_check",
+    description:
+      "Deterministic context-budget estimate (Track A-2): from agent-supplied proxy counts (filesRead, slicesBuilt, toolCalls, artifacts) compute { estTokens, pct, verdict } against the budget. The budget is `max`×1000 when given, else the persisted state.max_tokens, else the tier-aware default. verdict = ok | warn (pct≥0.75) | over (pct≥1.0). Read-only; the math is mechanical, the counts are the caller's.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        max: numberProp("Budget override in THOUSANDS (k); omit to use state.max_tokens or the tier default."),
+        filesRead: numberProp("Proxy count: files read so far."),
+        slicesBuilt: numberProp("Proxy count: slices built so far."),
+        toolCalls: numberProp("Proxy count: tool calls so far."),
+        artifacts: numberProp("Proxy count: approved artifacts carried."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runBudgetCheck(paths, {
+        max: optNumber(args, "max"),
+        filesRead: optNumber(args, "filesRead"),
+        slicesBuilt: optNumber(args, "slicesBuilt"),
+        toolCalls: optNumber(args, "toolCalls"),
+        artifacts: optNumber(args, "artifacts"),
+      }),
+  },
+  {
+    name: "th_handoff_write",
+    description:
+      "Assemble .twinharness/HANDOFF.md (Track A-2): the run state (current_stage, slices), the `th next` recommended action, the approved-artifact Summary blocks (reuses th context pack), the open questions, an explicit 'do not re-read docs/, trust the summaries' directive, and a machine-readable resume snapshot consumed by `th handoff verify`. Use on a Fresh-session handoff when the budget verdict is 'over'. Writes one file under the state dir.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runHandoffWrite(paths),
+  },
 ] as const;
 
 /**
- * The live MCP tool registry the proof engine consumes. The known MCP-tool set
- * SELF-DERIVES from `TOOL_DEFS` (never a hand-maintained list) so the coverage
- * matrix's MCP-tool dimension can never silently drift from what is registered.
- */
-function proofRegistry(): ProofToolRegistry {
-  return { names: TOOL_DEFS.map((t) => t.name) };
-}
-
-/**
- * The sync-contract guard for the async-only tools (th_proof_* + th_verify_run).
+ * The sync-contract guard for the async-only tools (th_verify_run).
  * The CallTool path dispatches them via {@link ToolDef.runAsync}, so this is never
  * reached in practice; it exists only to satisfy the required synchronous `run`
  * contract that the synchronous tools rely on.
@@ -1434,62 +1410,17 @@ export function validateToolArgs(name: string, args: unknown): { ok: true } | { 
 }
 
 /**
- * C1/A1 — append one `{tool,ts,ok,reason?}` record to the DEDICATED producer-side
- * MCP call trail at `<stateDir>/proof-calls.jsonl`.
- *
- * This is the ONLY artifact that records WHICH MCP tools a live run actually
- * invoked, so the proof coverage-matrix can compute the MCP-tool dimension from
- * real evidence. It is deliberately a dedicated file — NOT `telemetry.jsonl`, and
- * NOT gated by the telemetry opt-in switch — so the coverage evidence cannot be
- * silently emptied by the M3 opt-in, log-rotation, or route/scorecard co-mingling.
- *
- * Best-effort by contract (A2): a logging failure must NEVER break or alter a tool
- * call — every error is swallowed. {@link callTool} writes at FOUR sites so the
- * trail is complete and the report can count its own call:
- *   - unknown-tool guard  → `ok:false, reason:"unknown_tool"` (#5)
- *   - invalid-args guard  → `ok:false, reason:"invalid_args"` (#5)
- *   - BEFORE dispatch     → `ok:true` (so th_proof_report sees its own call — #4)
- *   - catch (handler threw)→ `ok:false, reason:"threw"` (APPENDED after the pre-dispatch
- *       `ok:true` — both rows persist; the consumer keys the coverage touched-set on
- *       `tool` and ignores `ok`, so the pair does not double-count)
- * The consumer is `readProofCalls`/`harvestScenario` in `src/core/proof/harvest.ts`.
- */
-function appendProofCall(paths: ProjectPaths, tool: string, ok: boolean, reason?: string): void {
-  try {
-    const record: { tool: string; ts: string; ok: boolean; reason?: string } = {
-      tool,
-      ts: new Date().toISOString(),
-      ok,
-    };
-    if (reason !== undefined) record.reason = reason;
-    const line = JSON.stringify(record) + "\n";
-    fs.appendFileSync(path.join(paths.stateDir, "proof-calls.jsonl"), line);
-  } catch {
-    // best-effort: trail logging must never affect the tool call.
-  }
-}
-
-/**
  * Execute a single MCP tool call end-to-end: look up the tool, enforce the closed
- * typed inputSchema, dispatch to the pure `run*` handler, map the CommandResult to
- * an MCP result, and record the call in the dedicated proof-calls trail (C1/A1/A2).
+ * typed inputSchema, dispatch to the pure `run*` handler, and map the CommandResult
+ * to an MCP result.
  *
- * Exported so the adapter — INCLUDING the trail instrumentation — is unit-testable
- * directly, without a socket or a live transport (the same testability boundary as
- * the exported `toToolResult`/`TOOL_DEFS`). The CallTool request handler is a thin
- * wrapper over this.
+ * Exported so the adapter is unit-testable directly, without a socket or a live
+ * transport (the same testability boundary as the exported `toToolResult`/
+ * `TOOL_DEFS`). The CallTool request handler is a thin wrapper over this.
  */
 export async function callTool(name: string, args: ToolArgs = {}): Promise<CallToolResult> {
   const def = TOOL_DEFS.find((t) => t.name === name);
   if (!def) {
-    // #5: record the attempted unknown-tool call (ok:false) BEFORE returning, so
-    // the proof trail reflects what the Orchestrator TRIED to invoke — not only
-    // the calls that resolved to a real tool. Fully guarded (best-effort).
-    try {
-      appendProofCall(resolvePathsForCall(), name, false, "unknown_tool");
-    } catch {
-      // best-effort: trail logging must never affect the tool call.
-    }
     return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
   }
   // Enforce the closed, typed inputSchema BEFORE dispatch (H-1): extra,
@@ -1497,13 +1428,6 @@ export async function callTool(name: string, args: ToolArgs = {}): Promise<CallT
   // instead of being silently passed to the handler.
   const valid = validateToolArgs(def.name, args);
   if (!valid.ok) {
-    // #5: record the rejected-arguments attempt (ok:false) so an invalid call is
-    // auditable in the trail instead of vanishing at the validation boundary.
-    try {
-      appendProofCall(resolvePathsForCall(), def.name, false, "invalid_args");
-    } catch {
-      // best-effort
-    }
     return {
       content: [{ type: "text", text: `Invalid arguments for ${def.name}: ${valid.errors}` }],
       isError: true,
@@ -1513,25 +1437,11 @@ export async function callTool(name: string, args: ToolArgs = {}): Promise<CallT
   // tool error rather than crashing the server process.
   try {
     const paths = resolvePathsForCall();
-    // C1/A1/A2 + #4: record the call BEFORE dispatch so a tool that inspects the
-    // proof-calls trail WHILE it runs — notably th_proof_report, which builds the
-    // coverage matrix from the trail — can count its OWN call. `ok:true` here means
-    // the call passed validation and dispatched; a handler that returns a failure
-    // CommandResult does NOT flip it (only an unexpected throw does — see below).
-    appendProofCall(paths, def.name, true);
-    // Async tools (the th_proof_* suite) spawn real OS processes — await runAsync
+    // Async tools (th_verify_run) spawn real OS processes — await runAsync
     // when present; otherwise call the synchronous handler.
     const cmd = def.runAsync ? await def.runAsync(paths, args) : def.run(paths, args);
     return toToolResult(cmd);
   } catch (err) {
-    // The handler threw unexpectedly: append an ok:false record (in addition to the
-    // pre-dispatch ok:true) so the trail tells the truth about the crash. Fully
-    // guarded so a path-resolution or logging error here can never escape the catch.
-    try {
-      appendProofCall(resolvePathsForCall(), def.name, false, "threw");
-    } catch {
-      // best-effort
-    }
     const message = err instanceof Error ? err.message : String(err);
     return { content: [{ type: "text", text: `Tool ${def.name} failed: ${message}` }], isError: true };
   }

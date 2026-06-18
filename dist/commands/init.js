@@ -40,6 +40,7 @@ const output_1 = require("../core/output");
 const state_schema_1 = require("../core/state-schema");
 const state_store_1 = require("../core/state-store");
 const log_1 = require("../core/log");
+const budget_1 = require("./budget");
 const DRIFT_LOG_HEADER = `# Drift Log
 
 Append-only record of implementation discoveries (spec §10). Each entry records the
@@ -63,10 +64,19 @@ Escalation: ...
  * downstream stages adopt the existing-codebase variants (characterization Slice 0,
  * reuse-first drift, overlay architecture). Default (greenfield) leaves the field
  * undefined so the serialized state hashes byte-identically to a pre-G5 init.
+ *
+ * `--max-tokens <k>` (Track A-2) records the per-session context budget. The flag
+ * is given in THOUSANDS; the ×1000 conversion happens HERE (the write site, via
+ * `kToTokens`), never in the parser — so `--max-tokens 150` persists as
+ * `max_tokens: 150000`. It is applied on a fresh init AND as a targeted update on
+ * an already-initialized run (so a resume can re-set the budget without --force).
  */
 function runInit(paths, opts) {
     const created = [];
     const skipped = [];
+    const maxTokens = opts.maxTokens !== undefined && Number.isFinite(opts.maxTokens) && opts.maxTokens > 0
+        ? (0, budget_1.kToTokens)(opts.maxTokens)
+        : undefined;
     if (!fs.existsSync(paths.docsDir)) {
         fs.mkdirSync(paths.docsDir, { recursive: true });
         created.push("docs/");
@@ -74,7 +84,15 @@ function runInit(paths, opts) {
     fs.mkdirSync(paths.stateDir, { recursive: true });
     const existing = (0, state_store_1.readState)(paths);
     if (existing.exists && !opts.force) {
-        skipped.push(".twinharness/state.json (already exists; use --force to reset)");
+        // Non-destructive: preserve state.json, but a --max-tokens override is a free
+        // (non-gate) policy value, so apply it as a targeted single-field update.
+        if (maxTokens !== undefined && existing.state) {
+            (0, state_store_1.writeState)(paths, { ...existing.state, max_tokens: maxTokens });
+            skipped.push(".twinharness/state.json (already exists; updated max_tokens only)");
+        }
+        else {
+            skipped.push(".twinharness/state.json (already exists; use --force to reset)");
+        }
     }
     else {
         // Greenfield is the default: leave `project_mode` undefined so serialization
@@ -83,6 +101,8 @@ function runInit(paths, opts) {
         const state = (0, state_schema_1.initialState)();
         if (opts.brownfield)
             state.project_mode = "brownfield";
+        if (maxTokens !== undefined)
+            state.max_tokens = maxTokens;
         (0, state_store_1.writeState)(paths, state);
         created.push(".twinharness/state.json");
     }
@@ -93,13 +113,22 @@ function runInit(paths, opts) {
     else {
         skipped.push("drift-log.md (already exists)");
     }
-    (0, log_1.structuredLog)({ cmd: "init", created, skipped, ...(opts.brownfield ? { project_mode: "brownfield" } : {}) });
+    (0, log_1.structuredLog)({
+        cmd: "init",
+        created,
+        skipped,
+        ...(opts.brownfield ? { project_mode: "brownfield" } : {}),
+        ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
+    });
     const data = { created, skipped };
     if (opts.brownfield)
         data.project_mode = "brownfield";
+    if (maxTokens !== undefined)
+        data.max_tokens = maxTokens;
     const human = [
         "TwinHarness initialized.",
         ...(opts.brownfield ? ["  project_mode: brownfield (adopting an existing codebase)"] : []),
+        ...(maxTokens !== undefined ? [`  max_tokens: ${maxTokens}`] : []),
         ...created.map((c) => `  created: ${c}`),
         ...skipped.map((s) => `  skipped: ${s}`),
     ].join("\n");

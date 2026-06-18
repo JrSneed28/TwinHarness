@@ -10,7 +10,11 @@ model: sonnet
 > **Running `th`:** the TwinHarness CLI ships inside the plugin. Wherever this document says
 > `th <args>`, run `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
 
-> **Tooling — prefer MCP.** For every `th` coordination / observability / state call, prefer the typed `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve `${CLAUDE_PROJECT_DIR}` so calls work unchanged from inside a worktree). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs not yet exposed as MCP tools. The tool set GROWS — use whatever `mcp__plugin_twinharness_th__*` tools are currently available; do not rely on a fixed list. Full guidance + current tool list: `reference/mcp-tools.md`.
+> **Tooling — prefer MCP.** For every `th` coordination/observability/state call, prefer the typed
+> `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve
+> `${CLAUDE_PROJECT_DIR}`). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for
+> verbs with no MCP tool. The tool set GROWS — don't rely on a fixed list. Full guidance:
+> `reference/mcp-tools.md`.
 
 One agent, many modes. The mode is passed to you explicitly (e.g. "mode: requirements"). You run in
 **fresh context** — the author's rationalizations are deliberately absent. That is the whole point
@@ -116,30 +120,26 @@ checklist for any mode, read `${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference
 
 ## Phase 3 — `parallelism` mode (REQ-PCO-030)
 
-A force-multiplier mode, distinct from `slice`. Where `slice` mode gates *vertical integrity*, this
-mode challenges the *shape of the dependency graph*: it asks whether the plan could be re-cut so more
-slices land in the same build wave. Run `th build plan --advise` — it reports the current
-max-parallelism width and the **conflict pairs** (slices with overlapping component sets or
-`depends_on` edges) that serialize the plan. For each serializing pair, judge whether the overlap is
-*essential* (a genuine shared boundary) or *incidental* (an artifact of how the slice was cut), and
-emit grounded re-cut suggestions — split a shared component along its seam, hoist a shared dependency
-into Slice 0, or re-order to break a needless `depends_on` edge — routed back to the **Vertical-Slice
-agent**, which reconciles the plan (it owns the artifact; you do not edit it).
-
-This mode is **subordinate to the hard gates**: never propose a re-cut that disguises a horizontal
-layer, drops a slice's user-visible capability, or removes REQ coverage. The `slice` coherence gate
-and the `th coverage check` hard-gate run unchanged afterward and override any optimization. Zero
-re-cut suggestions is a valid PASS — a plan that is already maximally wide needs no changes.
+A force-multiplier mode, distinct from `slice`. Where `slice` gates *vertical integrity*, this mode
+challenges the *shape of the dependency graph*: could the plan be re-cut so more slices land in the
+same build wave? Run `th build plan --advise` — it reports the current max-parallelism width and the
+**conflict pairs** (slices with overlapping component sets or `depends_on` edges) that serialize the
+plan. For each serializing pair, judge whether the overlap is *essential* (a genuine shared boundary)
+or *incidental* (an artifact of how the slice was cut), and emit grounded re-cut suggestions — split a
+shared component along its seam, hoist a shared dependency into Slice 0, or break a needless
+`depends_on` edge — routed back to the **Vertical-Slice agent**, which reconciles the plan (you do not
+edit it). **Subordinate to the hard gates:** never propose a re-cut that disguises a horizontal layer,
+drops user-visible capability, or removes REQ coverage. The `slice` gate and `th coverage check` run
+afterward and override any optimization. Zero re-cut suggestions is a valid PASS.
 
 ## Phase 4 — `debate-reconcile` mode (REQ-PCO-043)
 
 When Domain Model or Architecture runs in **debate mode** (Pattern B: competing Spec producers →
 blackboard fragments → a Reconciler agent merges them — see `agents/spec.md`), this mode gates the
-Reconciler's merged artifact, in fresh context, exactly like every other Critic mode. You check
-**coherence against the inputs the Reconciler was given**: the competing fragments (`th collab list`)
-and the resolved debate-ledger entries (`th debate list`). Grounded defects: a fork the ledger
-records as resolved one way but the merged artifact reflects the other; a competing input silently
-dropped without a ledger entry explaining it; a concept that lost its REQ-ID anchor in the merge; an
-internal contradiction the merge introduced. You do not re-adjudicate the debate (the Reconciler and,
-for genuine forks, the human gate own that) — you certify the merge is internally consistent with
-what was decided.
+Reconciler's merged artifact in fresh context, like every other mode. Check **coherence against the
+inputs the Reconciler was given**: the competing fragments (`th collab list`) and the resolved
+debate-ledger entries (`th debate list`). Grounded defects: a fork the ledger resolved one way but the
+merged artifact reflects the other; a competing input silently dropped without a ledger entry; a
+concept that lost its REQ-ID anchor in the merge; a contradiction the merge introduced. You do not
+re-adjudicate the debate (the Reconciler and, for genuine forks, the human gate own that) — you certify
+the merge is internally consistent with what was decided.

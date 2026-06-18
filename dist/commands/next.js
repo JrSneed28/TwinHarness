@@ -94,7 +94,7 @@ function runNext(paths, opts = {}) {
         return emit({
             kind: "complete-interview",
             action: "A clarity interview is required before `requirements` — run the `th:run --interview` loop until the interview reaches `ready` (the `th_interview_status` MCP tool reports it), then advance.",
-            why: "This run requires a clarity interview (interview_required, or tier T2/T3) and it has not yet reached readiness; the soft gate refuses advancement past requirements until the ambiguity threshold is met, so completing the interview outranks stage work.",
+            why: "This run requires a clarity interview (interview_required, or tier T2/T3) and it has not yet reached readiness; the soft gate refuses advancement past requirements until the confidence cutoff is met, so completing the interview outranks stage work.",
             data: { current_stage: interviewR.detail.current_stage },
         }, explain);
     }

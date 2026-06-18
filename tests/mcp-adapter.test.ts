@@ -317,7 +317,7 @@ describe("SLICE-4 / TASK-010 — MCP adapter: repo-map tool wiring (REQ-RU-044..
 
   // ---- REQ-RU-051: adapter holds no orchestration logic ----
   it("REQ-RU-051: mcp_adapter_no_orchestration_logic — each new run is a one-liner delegating to run* handler", () => {
-    // Structural proof: call each new tool without a real project;
+    // Structural check: call each new tool without a real project;
     // each must delegate cleanly (return a CommandResult, never throw).
     tp = makeTempProject();
     for (const name of ["th_repo_map", "th_repo_relevant", "th_repo_impact", "th_context_pack"]) {
@@ -342,12 +342,12 @@ describe("SLICE-4 / TASK-010 — MCP adapter: repo-map tool wiring (REQ-RU-044..
 // SLICE-4 / TASK-011 — REQ-RU-094 + REQ-RU-040 (MCP half)
 // ===========================================================================
 
-describe("SLICE-4 / TASK-011 — MCP tool-count 63 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
+describe("SLICE-4 / TASK-011 — MCP tool-count 60 + schema/no-exec battery (REQ-RU-094, REQ-RU-040)", () => {
   // Full registry, in registration order. The original 23-tool battery (REQ-RU-094)
   // is extended by the 12 coordination tools added after it (th_build_dispatch/plan,
-  // artifact-lease / collab / debate trios), then the th_proof_* trio (35→38), then
-  // the th_interview_*/th_init tools (38→42) — and finally the MCP-tool-expansion
-  // adds 21 more (42→63): 5 typed gate-transition tools (th_tier_record,
+  // artifact-lease / collab / debate trios), then
+  // the th_interview_*/th_init tools (35→39) — and finally the MCP-tool-expansion
+  // adds 21 more (39→60): 5 typed gate-transition tools (th_tier_record,
   // th_stage_advance, th_implementation_unlock, th_write_gate_set,
   // th_blast_radius_record) interleaved after th_state_set, plus 16 wired handlers
   // (th_drift_list/resolve, th_coverage_report, th_artifact_register/list,
@@ -410,17 +410,16 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 63 + schema/no-exec battery (REQ
     "th_scorecard",
     "th_slices_sync",
     "th_slice_set_status",
-    "th_proof_run",
-    "th_proof_component",
-    "th_proof_report",
     "th_interview_start",
     "th_interview_record",
     "th_interview_status",
     "th_init",
+    "th_budget_check",
+    "th_handoff_write",
   ];
 
-  // ---- REQ-RU-094: full registry, in order (originally 23; now 63 with the coordination + proof + interview/init + gate-transition + wired-handler tools) ----
-  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_63 — TOOL_DEFS exposes exactly 63 tools in order", () => {
+  // ---- REQ-RU-094: full registry, in order (originally 23; now 60 with the coordination + interview/init + gate-transition + wired-handler tools) ----
+  it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_62 — TOOL_DEFS exposes exactly 62 tools in order", () => {
     expect(TOOL_DEFS.map((t) => t.name)).toEqual(expectedAll);
   });
 
@@ -788,30 +787,30 @@ describe("Interview/init MCP tools: th_interview_* + th_init (store-only, idempo
     return d;
   }
 
-  it("th_interview_start → record → status round-trips and flips ready once ambiguity ≤ threshold", () => {
+  it("th_interview_start → record → status round-trips and flips ready once confidence ≥ cutoff", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
 
-    const start = defFor("th_interview_start").run(tp.paths, { idea: "build a CLI", threshold: 0.2 });
+    const start = defFor("th_interview_start").run(tp.paths, { idea: "build a CLI", cutoff: 0.8 });
     expect(start.ok).toBe(true);
 
-    // A high-ambiguity round: not yet ready.
+    // A low-confidence round: not yet ready.
     const r1 = defFor("th_interview_record").run(tp.paths, {
       question: "What is the goal?",
       answer: "Ship a deterministic CLI.",
       scores: JSON.stringify({ goal: 0.5, constraints: 0.4, criteria: 0.3 }),
-      ambiguity: 0.5,
+      confidence: 0.5,
       entities: JSON.stringify(["cli", "harness"]),
     });
     expect(r1.ok).toBe(true);
     expect(r1.data?.ready).toBe(false);
 
-    // A low-ambiguity round at/below the threshold: ready flips true.
+    // A high-confidence round at/above the cutoff: ready flips true.
     const r2 = defFor("th_interview_record").run(tp.paths, {
       question: "Any constraints?",
       answer: "Zero runtime deps.",
-      scores: JSON.stringify({ goal: 0.1, constraints: 0.1, criteria: 0.1 }),
-      ambiguity: 0.1,
+      scores: JSON.stringify({ goal: 0.9, constraints: 0.9, criteria: 0.9 }),
+      confidence: 0.9,
     });
     expect(r2.ok).toBe(true);
     expect(r2.data?.ready).toBe(true);
@@ -819,8 +818,8 @@ describe("Interview/init MCP tools: th_interview_* + th_init (store-only, idempo
     const status = defFor("th_interview_status").run(tp.paths, {});
     expect(status.ok).toBe(true);
     expect(status.data?.rounds).toBe(2);
-    expect(status.data?.ambiguity).toBe(0.1);
-    expect(status.data?.threshold).toBe(0.2);
+    expect(status.data?.confidence).toBe(0.9);
+    expect(status.data?.cutoff).toBe(0.8);
     expect(status.data?.ready).toBe(true);
   });
 
@@ -855,19 +854,19 @@ describe("Interview/init MCP tools: th_interview_* + th_init (store-only, idempo
     if (!res.ok) expect(res.errors).toContain("idea");
   });
 
-  // INVERSE of the GATE_OWNED refusal battery: interview_threshold is NOT gate-owned,
+  // INVERSE of the GATE_OWNED refusal battery: interview_cutoff is NOT gate-owned,
   // so runStateSet / th_state_set ALLOWS it (it is a free policy value, not a gate).
-  it("runStateSet ALLOWS interview_threshold (not gate-owned) and th_state_set does not refuse it", () => {
+  it("runStateSet ALLOWS interview_cutoff (not gate-owned) and th_state_set does not refuse it", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
 
-    const res = runStateSet(tp.paths, "interview_threshold", "0.3");
+    const res = runStateSet(tp.paths, "interview_cutoff", "0.7");
     expect(res.ok).toBe(true);
-    expect(readState(tp.paths).state?.interview_threshold).toBe(0.3);
+    expect(readState(tp.paths).state?.interview_cutoff).toBe(0.7);
 
     // Via the MCP th_state_set wrapper too: not a gate_owned_field refusal.
-    const viaMcp = defFor("th_state_set").run(tp.paths, { key: "interview_threshold", value: "0.15" });
+    const viaMcp = defFor("th_state_set").run(tp.paths, { key: "interview_cutoff", value: "0.85" });
     expect(viaMcp.ok).toBe(true);
-    expect(readState(tp.paths).state?.interview_threshold).toBe(0.15);
+    expect(readState(tp.paths).state?.interview_cutoff).toBe(0.85);
   });
 });

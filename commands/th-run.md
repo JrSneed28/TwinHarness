@@ -1,6 +1,6 @@
 ---
 description: Start or resume a TwinHarness Agentic SDLC run — drive an idea through tier-scaled stages to slice-by-slice build.
-argument-hint: [--interview] [--no-interview] [--threshold 0.20] <your idea, e.g. "build a CLI todo app">
+argument-hint: [--interview] [--no-interview] [--cutoff 0.80] <your idea, e.g. "build a CLI todo app">
 allowed-tools: Bash(node:*), Bash(true), mcp__plugin_twinharness_th__*, Task, Agent, AskUserQuestion
 ---
 
@@ -22,13 +22,19 @@ user.** Use it to decide **resume vs. fresh init**:
 
 ### Flags
 
-- `--interview` — after `th init`, run a full **ambiguity-scored Socratic loop** (below) before
+- `--interview` — after `th init`, run a full **confidence-scored Socratic loop** (below) before
   tiering. This **replaces** the lightweight §14.1 vague-narrowing for this run.
 - `--no-interview` *(default)* — skip the scored loop; if the brief is a vague mega-request, apply the
   lightweight §14.1 narrowing instead.
-- `--threshold <0..1>` — override the interview gate threshold for this run (default **0.20**). Also
-  overridable via the `state.json` field `interview_threshold` (read it with `th_state_get`); a
-  `--threshold` flag wins over the state field, which wins over the 0.20 default.
+- `--cutoff <0..1>` — override the interview gate cutoff for this run (default **0.80**). Also
+  overridable via the `state.json` field `interview_cutoff` (read it with `th_state_get`); a
+  `--cutoff` flag wins over the state field, which wins over the 0.80 default.
+- `--max-tokens <k>` — set the per-session **context budget** in **thousands** ("k"). Passed to
+  `th init`, it persists as `state.json`'s `max_tokens` after a ×1000 conversion (e.g. `--max-tokens
+  150` → `max_tokens: 150000`) and survives across resume. `th budget check` reads it as the default
+  budget when `--max` is omitted; absent ⇒ a tier-aware default (T0/T1 ≈120k, T2 ≈160k, T3 ≈200k).
+  See the **Context budget & handoff** section of the `twinharness` skill for the per-wave checkpoint
+  and the `over` → Continue/Fresh handoff flow.
 
 Follow the `twinharness` skill (the Orchestrator playbook). In brief:
 
@@ -38,15 +44,15 @@ Follow the `twinharness` skill (the Orchestrator playbook). In brief:
    exists, run `th state status` and **resume** from `current_stage`.
 2. **Interview gate (only when `--interview`).** Immediately **after `th init`** and **before** tier
    classification, run the scored Socratic loop:
-   - `th_interview_start { idea: "$ARGUMENTS", threshold? }` → creates `.twinharness/interview.json`.
-     Resolve the threshold as flag → state `interview_threshold` → 0.20.
+   - `th_interview_start { idea: "$ARGUMENTS", cutoff? }` → creates `.twinharness/interview.json`.
+     Resolve the cutoff as flag → state `interview_cutoff` → 0.80.
    - Each round: ask the user one sharp clarifying question, then **you (the model) score it** — the
      deterministic `th` layer cannot call an LLM, so YOU supply the scores. Record the round with
-     `th_interview_record { question, answer, scores{goal,constraints,criteria}, ambiguity, entities[] }`
-     (pass `scores` and `entities` as JSON-encoded strings). **Show the ambiguity score to the user
+     `th_interview_record { question, answer, scores{goal,constraints,criteria}, confidence, entities[] }`
+     (pass `scores` and `entities` as JSON-encoded strings). **Show the confidence score to the user
      each round.**
-   - After each round call `th_interview_status {}` → `{ rounds, ambiguity, threshold, ready }`. Stop
-     when `ready` (ambiguity ≤ resolved threshold).
+   - After each round call `th_interview_status {}` → `{ rounds, confidence, cutoff, ready }`. Stop
+     when `ready` (confidence ≥ resolved cutoff).
    - **Early-exit** is allowed **from round 3 onward** if the user says "good enough" — record a
      warning round noting the early exit. **Hard cap: 20 rounds** — stop and proceed even if not
      `ready`.
@@ -69,6 +75,16 @@ Follow the `twinharness` skill (the Orchestrator playbook). In brief:
    (or flip any gate-owned field) — it never touches the gate-owned `implementation_allowed` field;
    the Stop-gate hook and the existing prerequisite gate own that. The build-phase gate only decides
    *where* (this session vs. a fresh one) you begin, never *whether* the gate is satisfied.
+5.5. **Documentation-phase gate (after all slices pass code-review Critic).** Do **not** automatically
+   generate documentation. Instead, present a **repeatable menu** via `AskUserQuestion`:
+   - **[1] Write documentation** — delegate to the Doc-Writer agent (tier-appropriate modes), run the
+     per-mode Critic loops, then **return to this menu**.
+   - **[2] Run qa-tester** — delegate to the Tester agent (`agents/tester.md`) for a live QA pass,
+     then **return to this menu**.
+   - **[3] Skip → Final Verification** — advance to Stage 11 now.
+
+   Options **[1]** and **[2]** loop; only **[3]** advances. Full detail in
+   `reference/build-and-verify.md` (Stage 10.5).
 6. Keep `state.json` authoritative via the `th` CLI; the Stop-gate hook enforces a valid state before
    any "stage complete" claim.
 

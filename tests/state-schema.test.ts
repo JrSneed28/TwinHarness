@@ -96,7 +96,7 @@ describe("REQ-STATE-SERIALIZE: deterministic serialization", () => {
     const out = serializeState(initialState());
     expect(out.endsWith("\n")).toBe(true);
     // Only required fields appear (the optional fields are absent from initialState()).
-    const OPTIONAL = ["write_gate", "project_mode", "debate_open_blocking", "interview_threshold", "delivery_mode", "has_ui", "interview_required"];
+    const OPTIONAL = ["write_gate", "project_mode", "debate_open_blocking", "interview_cutoff", "delivery_mode", "has_ui", "interview_required", "max_tokens"];
     const requiredOrder = STATE_FIELD_ORDER.filter((k) => !OPTIONAL.includes(k));
     expect(Object.keys(JSON.parse(out))).toEqual(requiredOrder);
   });

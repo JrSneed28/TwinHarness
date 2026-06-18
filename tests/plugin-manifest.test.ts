@@ -139,7 +139,7 @@ describe("REQ-PLUGIN-002: the compiled CLI ships with the plugin", () => {
 });
 
 describe("REQ-PLUGIN-003: every component resolves `th` without relying on PATH", () => {
-  const skillFiles = ["skills/twinharness/SKILL.md", "skills/twinharness-proof/SKILL.md"];
+  const skillFiles = ["skills/twinharness/SKILL.md"];
   const commandFiles = fs
     .readdirSync(path.join(ROOT, "commands"))
     .filter((f) => f.endsWith(".md"))
@@ -149,14 +149,14 @@ describe("REQ-PLUGIN-003: every component resolves `th` without relying on PATH"
     .filter((f) => f.endsWith(".md"))
     .map((f) => `agents/${f}`);
 
-  it("expected component counts (16 agents, 18 commands, 2 skills)", () => {
+  it("expected component counts (16 agents, 16 commands, 1 skill)", () => {
     expect(agentFiles).toHaveLength(16);
-    // 4 original (th-run/status/drift/escalate) + 2 proof surfaces (th-proof, th-proof-component)
+    // 4 original (th-run/status/drift/escalate)
     // + 12 curated human-facing verbs (th-init/doctor/next/scorecard/stage/verify/coverage/
     //   decision-approve/tier/route/repo/test).
-    expect(commandFiles).toHaveLength(18);
-    // twinharness + twinharness-proof (the proof-runner skill).
-    expect(skillFiles).toHaveLength(2);
+    expect(commandFiles).toHaveLength(16);
+    // twinharness (the single runner skill).
+    expect(skillFiles).toHaveLength(1);
   });
 
   it.each([...skillFiles, ...commandFiles, ...agentFiles])(

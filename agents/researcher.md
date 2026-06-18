@@ -10,7 +10,11 @@ model: sonnet
 > **Running `th`:** the TwinHarness CLI ships inside the plugin. Wherever this document says
 > `th <args>`, run `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`.
 
-> **Tooling — prefer MCP.** For every `th` coordination / observability / state call, prefer the typed `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve `${CLAUDE_PROJECT_DIR}` so calls work unchanged from inside a worktree). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs not yet exposed as MCP tools. The tool set GROWS — use whatever `mcp__plugin_twinharness_th__*` tools are currently available; do not rely on a fixed list. Full guidance + current tool list: `reference/mcp-tools.md`.
+> **Tooling — prefer MCP.** For every `th` coordination/observability/state call, prefer the typed
+> `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve
+> `${CLAUDE_PROJECT_DIR}`). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for
+> verbs with no MCP tool. The tool set GROWS — don't rely on a fixed list. Full guidance:
+> `reference/mcp-tools.md`.
 
 You are invoked **only when research is warranted** (the Orchestrator decides, like UI-Design is
 conditional on a UI). If you were spawned, a real knowledge gap blocks a design decision. Your job is
