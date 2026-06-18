@@ -79,9 +79,23 @@ function runNext(paths, opts = {}) {
     if (!tierR.ok) {
         return emit({
             kind: "classify-tier",
-            action: "Tier is unclassified — classify it (`th tier classify <brief.json>` + `th tier veto-check`) and record `th state set tier T<n>`.",
+            action: "Tier is unclassified — classify it (`th tier classify <brief.json>` + `th tier veto-check`), then record it with the typed gate command `th tier record <T>` (CLI fallback: `th state set tier T<n>`).",
             why: "The tier determines which stages are even engaged, so nothing downstream can be sequenced until it is set — classification gates every design stage.",
             data: { current_stage: s.current_stage },
+        }, explain);
+    }
+    // 4-interview. Soft interview gate (audit finding #14). A REQUIRED clarity interview
+    //   (interview_required, or computed true for T2/T3) that has not reached readiness
+    //   must complete BEFORE advancing past `requirements`. Slots right after classify-tier
+    //   to mirror canAdvanceStage's ladder (checkInterview directly after checkTierSet) so
+    //   the oracle and the gate agree. Soft: it only gates the FRONT of the pipeline.
+    const interviewR = (0, gate_preconditions_1.checkInterview)(paths, s);
+    if (!interviewR.ok) {
+        return emit({
+            kind: "complete-interview",
+            action: "A clarity interview is required before `requirements` — run the `th:run --interview` loop until the interview reaches `ready` (the `th_interview_status` MCP tool reports it), then advance.",
+            why: "This run requires a clarity interview (interview_required, or tier T2/T3) and it has not yet reached readiness; the soft gate refuses advancement past requirements until the ambiguity threshold is met, so completing the interview outranks stage work.",
+            data: { current_stage: interviewR.detail.current_stage },
         }, explain);
     }
     // 4a. Brownfield repo-map freshness — a hard gate mirroring `th tier veto-check`.
@@ -222,7 +236,11 @@ function runNext(paths, opts = {}) {
     // 7b. Implementation: dispatch build waves, await in-flight Builders, then advance.
     if (current === "implementation") {
         const prog = (0, health_1.sliceProgress)(s);
-        if (prog.total === 0) {
+        // Empty slices: for a CODE project (default) this is an unsynced plan — emit
+        // sync-slices, and `checkImplementationSettled` AGREES it is unsettled (finding #2,
+        // shared `implementationRequiresSlices` predicate). For no-code/documentation-only
+        // an empty set is legitimately settled, so we fall through to the stage advance.
+        if (prog.total === 0 && (0, gate_preconditions_1.implementationRequiresSlices)(s)) {
             return emit({
                 kind: "sync-slices",
                 action: "Implementation has no slices — run `th slices sync` to populate them from the implementation plan, then `th build next-wave`.",
@@ -266,12 +284,14 @@ function runNext(paths, opts = {}) {
         }
         // All slices settled (done/blocked) → leave the implementation stage.
     }
-    // 8. Otherwise: advance to the next engaged stage for this tier.
-    const next = (0, stages_1.nextStageAfter)(current, s.tier);
+    // 8. Otherwise: advance to the next APPLICABLE engaged stage for this state. Uses
+    //    nextStageAfterFor (finding #13) so a no-UI project (has_ui===false) advances
+    //    straight past the not-applicable ux-design/ui-design stages instead of stalling.
+    const next = (0, stages_1.nextStageAfterFor)(current, s);
     if (next) {
         return emit({
             kind: "advance-stage",
-            action: `Stage "${current}" is settled — advance to "${next.stage}" (produces ${next.produces || "(no artifact)"}; Critic mode: ${next.criticMode}${next.humanGate ? "; human gate" : "; streams"}). Set it with \`th state set current_stage ${next.stage}\`.`,
+            action: `Stage "${current}" is settled — advance to "${next.stage}" (produces ${next.produces || "(no artifact)"}; Critic mode: ${next.criticMode}${next.humanGate ? "; human gate" : "; streams"}). Advance with the typed gate command \`th stage advance\` (CLI fallback: \`th state set current_stage ${next.stage}\`)${next.stage === "implementation" ? "; unlock the build with `th implementation unlock`" : ""}.`,
             why: `Stage "${current}" has met all its mechanical obligations and no higher-priority blocker is open, so the only thing left is to move the pipeline forward to the next engaged stage for tier ${s.tier}.`,
             data: { from: current, to: next.stage, contract: next },
         }, explain);

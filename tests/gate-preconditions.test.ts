@@ -69,7 +69,9 @@ function readyAtRequirements(): ProjectPaths {
   writeFile(paths, "docs/01-requirements.md", "# Requirements\n\nREQ-001 the only requirement.\n");
   writeFile(paths, "docs/09-implementation-plan.md", "# Implementation plan\n\nSLICE-1 covers REQ-001.\n");
   writeFile(paths, "tests/cov.test.ts", "// REQ-001 verified here\n");
-  writeState(paths, { ...initialState(), tier: "T2", current_stage: "requirements" });
+  // interview_required:false so the soft interview gate (finding #14) does not block
+  // here — this helper isolates the stage-ordinal TAIL rung, not the interview rung.
+  writeState(paths, { ...initialState(), tier: "T2", current_stage: "requirements", interview_required: false });
   const reg = runArtifactRegister(paths, "docs/01-requirements.md", 1);
   expect(reg.ok).toBe(true);
   return paths;
@@ -151,11 +153,17 @@ describe("validateTierTransition — AC-B14 + T0 veto + unlock-lock", () => {
   });
 });
 
-describe("checkImplementationSettled — empty slice set is vacuously settled", () => {
+describe("checkImplementationSettled — empty slice set policy (finding #2)", () => {
   const base = (o: Partial<TwinHarnessState>): TwinHarnessState => ({ ...initialState(), ...o });
 
-  it("zero slices PASSES (must not block the advance with a contradictory slices_unsettled:total0)", () => {
-    expect(checkImplementationSettled(base({ slices: [] }))).toEqual({ ok: true });
+  it("zero slices on a CODE project (default) → no_slices_defined (gate refuses; agrees with `th next`)", () => {
+    const r = checkImplementationSettled(base({ slices: [] }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("no_slices_defined");
+  });
+  it("zero slices on a no-code / documentation-only project → PASS (vacuously settled)", () => {
+    expect(checkImplementationSettled(base({ slices: [], delivery_mode: "no-code" }))).toEqual({ ok: true });
+    expect(checkImplementationSettled(base({ slices: [], delivery_mode: "documentation-only" }))).toEqual({ ok: true });
   });
   it("an open (pending) slice → slices_unsettled", () => {
     const s = base({ slices: [{ id: "SLICE-1", status: "pending", components: [] }] });

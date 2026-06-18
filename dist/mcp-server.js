@@ -15651,6 +15651,7 @@ var BLAST_RADIUS_FLAGS = [
 var SLICE_STATUSES = ["pending", "in-progress", "done", "blocked"];
 var WRITE_GATE_VALUES = ["ask", "deny", "off", "strict"];
 var PROJECT_MODES = ["greenfield", "brownfield"];
+var DELIVERY_MODES = ["code", "no-code", "documentation-only"];
 var STATE_FIELD_ORDER = [
   "schema_version",
   "tier",
@@ -15668,6 +15669,9 @@ var STATE_FIELD_ORDER = [
   "write_gate",
   "project_mode",
   "interview_cutoff",
+  "delivery_mode",
+  "has_ui",
+  "interview_required",
   "max_tokens"
 ];
 function initialState() {
@@ -15808,6 +15812,17 @@ function validateState(value) {
     if (typeof v.interview_cutoff !== "number" || !Number.isFinite(v.interview_cutoff) || v.interview_cutoff < 0 || v.interview_cutoff > 1) {
       issues.push({ path: "interview_cutoff", message: "must be a finite number in [0,1] or absent" });
     }
+  }
+  if (v.delivery_mode !== void 0) {
+    if (typeof v.delivery_mode !== "string" || !DELIVERY_MODES.includes(v.delivery_mode)) {
+      issues.push({ path: "delivery_mode", message: `must be one of ${DELIVERY_MODES.join(", ")} or absent` });
+    }
+  }
+  if (v.has_ui !== void 0 && typeof v.has_ui !== "boolean") {
+    issues.push({ path: "has_ui", message: "must be a boolean or absent" });
+  }
+  if (v.interview_required !== void 0 && typeof v.interview_required !== "boolean") {
+    issues.push({ path: "interview_required", message: "must be a boolean or absent" });
   }
   if (v.max_tokens !== void 0 && (!isInteger(v.max_tokens) || v.max_tokens < 1)) {
     issues.push({ path: "max_tokens", message: "must be a positive integer or absent" });
@@ -16187,19 +16202,19 @@ var STATE_FIELD_POLICY = {
   implementation_allowed: {
     managed: true,
     gateOwned: true,
-    owner: "orchestrator unlock flow (`th state set implementation_allowed true` on the CLI)",
+    owner: "typed gate command `th implementation unlock` (raw `th state set` requires --emergency)",
     refusedByStateSet: false
   },
   tier: {
     managed: true,
     gateOwned: true,
-    owner: "`th tier classify`",
+    owner: "`th tier classify` then `th tier record` (raw `th state set` requires --emergency)",
     refusedByStateSet: false
   },
   current_stage: {
     managed: true,
     gateOwned: true,
-    owner: "`th next` / stage advance",
+    owner: "typed gate command `th stage advance` (raw `th state set` requires --emergency)",
     refusedByStateSet: false
   },
   write_gate: {
@@ -16262,13 +16277,22 @@ function engagedStages(tier) {
   if (!tier || tier === "T0") return [];
   return STAGE_PIPELINE.filter((s) => s.tiers.includes(tier));
 }
-function nextStageAfter(currentStage, tier) {
-  const engaged = engagedStages(tier);
+var UI_STAGES = /* @__PURE__ */ new Set(["ux-design", "ui-design"]);
+function projectHasUi(state) {
+  return state.has_ui !== false;
+}
+function engagedStagesFor(state) {
+  const engaged = engagedStages(state.tier);
+  if (projectHasUi(state)) return engaged;
+  return engaged.filter((s) => !UI_STAGES.has(s.stage));
+}
+function nextStageAfterFor(currentStage, state) {
+  const engaged = engagedStagesFor(state);
   if (engaged.length === 0) return void 0;
-  const key = currentStage.toLowerCase();
-  const idx = engaged.findIndex((s) => s.stage === key);
-  if (idx < 0) return engaged[0];
-  return engaged[idx + 1];
+  const key = canonicalizeStage(currentStage);
+  const pipelineIdx = STAGE_PIPELINE.findIndex((s) => s.stage === key);
+  if (pipelineIdx < 0) return engaged[0];
+  return engaged.find((s) => STAGE_PIPELINE.findIndex((p) => p.stage === s.stage) > pipelineIdx);
 }
 
 // src/commands/state.ts
@@ -16327,10 +16351,11 @@ ${formatIssues(r.issues)}`, data: { error: "invalid_state", issues: r.issues } }
     human: typeof value === "string" ? value : JSON.stringify(value, null, 2)
   });
 }
-function runStateSet(paths, key, rawValue) {
-  return withStateLock(paths, () => runStateSetLocked(paths, key, rawValue));
+function runStateSet(paths, key, rawValue, opts = {}) {
+  return withStateLock(paths, () => runStateSetLocked(paths, key, rawValue, opts));
 }
-function runStateSetLocked(paths, key, rawValue) {
+function runStateSetLocked(paths, key, rawValue, opts = {}) {
+  const emergency = opts.emergency === true;
   const segments = key.split(".");
   const firstSegment = segments[0];
   if (!STATE_FIELD_ORDER.includes(firstSegment)) {
@@ -16350,6 +16375,13 @@ function runStateSetLocked(paths, key, rawValue) {
     return failure({
       human: `Refusing to set managed field "${firstSegment}". ${policy.owner}`,
       data: { error: "managed_field", field: firstSegment }
+    });
+  }
+  const gateOwned = GATE_OWNED.has(firstSegment);
+  if (gateOwned && !emergency) {
+    return failure({
+      human: `Refusing raw 'state set ${firstSegment}': gate-owned field. Use the typed gate command (\`th tier record <T>\`, \`th stage advance\`, or \`th implementation unlock [--lock]\`), which enforces the gate ladder. To force a raw write anyway, re-run with --emergency.`,
+      data: { error: "gate_owned_requires_emergency", field: firstSegment }
     });
   }
   const r = readState(paths);
@@ -16383,7 +16415,12 @@ ${formatIssues(validation.issues)}`,
     appendLedger(paths, { event: "gate-state-change", key, value });
     appendHighWater(paths);
   }
-  return success({ data: { key, value }, human: `Set ${key} = ${JSON.stringify(value)}` });
+  const warning = emergency && gateOwned ? `\u26A0\uFE0F  EMERGENCY raw gate write \u2014 set gate-owned field "${firstSegment}" directly, bypassing the typed gate ladder (no precondition check). This override is audit-ledgered.
+` : "";
+  return success({
+    data: { key, value, ...emergency && gateOwned ? { emergency: true } : {} },
+    human: `${warning}Set ${key} = ${JSON.stringify(value)}`
+  });
 }
 function applyGateMutation(paths, fields, source) {
   return withStateLock(paths, () => {
@@ -16396,8 +16433,18 @@ ${formatIssues(r.issues)}`,
         data: { error: "invalid_state", issues: r.issues }
       });
     }
+    const effective = { ...fields };
+    if (Object.prototype.hasOwnProperty.call(fields, "tier") && !Object.prototype.hasOwnProperty.call(fields, "current_stage") && // Defense-in-depth: never rewind the stage once implementation is unlocked.
+    // The guarded callers (runTierRecord / th_tier_record) already refuse a tier
+    // change post-unlock via validateTierTransition's tier_locked_after_unlock, so
+    // a tier mutation should never reach here with implementation_allowed — but if a
+    // direct applyGateMutation caller did, a silent stage rewind would be disruptive.
+    r.state.implementation_allowed !== true) {
+      const backfill = tierUpgradeBackfillStage(r.state.tier, fields.tier, r.state.current_stage);
+      if (backfill !== null) effective.current_stage = backfill;
+    }
     const next = JSON.parse(JSON.stringify(r.state));
-    for (const [key, value] of Object.entries(fields)) {
+    for (const [key, value] of Object.entries(effective)) {
       next[key] = value;
     }
     const validation = validateState(next);
@@ -16409,16 +16456,34 @@ ${formatIssues(validation.issues)}`,
       });
     }
     writeState(paths, validation.state);
-    structuredLog({ cmd: "gate mutation", source, keys: Object.keys(fields) });
-    for (const [key, value] of Object.entries(fields)) {
+    structuredLog({ cmd: "gate mutation", source, keys: Object.keys(effective) });
+    for (const [key, value] of Object.entries(effective)) {
       appendLedger(paths, { event: "gate-state-change", key, value, source });
     }
     appendHighWater(paths);
     return success({
-      data: { source, fields },
-      human: `Applied gate mutation (${source}): ${Object.keys(fields).join(", ")}`
+      data: { source, fields: effective },
+      human: `Applied gate mutation (${source}): ${Object.keys(effective).join(", ")}`
     });
   });
+}
+function tierUpgradeBackfillStage(oldTier, newTierRaw, currentStage) {
+  if (typeof newTierRaw !== "string") return null;
+  const tiers = TIERS;
+  const newIdx = tiers.indexOf(newTierRaw);
+  if (newIdx < 0) return null;
+  const oldIdx = oldTier === null ? -1 : tiers.indexOf(oldTier);
+  const isUpgrade = oldTier === null || newIdx > oldIdx;
+  if (!isUpgrade) return null;
+  const currentOrdinal = STAGE_PIPELINE.findIndex((s) => s.stage === canonicalizeStage(currentStage));
+  if (currentOrdinal < 0) return null;
+  const oldEngaged = new Set(engagedStages(oldTier).map((s) => s.stage));
+  const newEngaged = new Set(engagedStages(newTierRaw).map((s) => s.stage));
+  for (let i = 0; i <= currentOrdinal; i++) {
+    const stage = STAGE_PIPELINE[i].stage;
+    if (newEngaged.has(stage) && !oldEngaged.has(stage)) return stage;
+  }
+  return null;
 }
 
 // src/commands/drift.ts
@@ -17751,7 +17816,7 @@ function reviseEscalations(state, cap = DEFAULT_REVISE_CAP) {
 }
 
 // src/core/gate-preconditions.ts
-var fs18 = __toESM(require("node:fs"));
+var fs19 = __toESM(require("node:fs"));
 var path16 = __toESM(require("node:path"));
 
 // src/core/decisions.ts
@@ -19429,6 +19494,201 @@ function runRepoCheck(paths, _opts = {}) {
   return emit2(computeFreshness({ kind: "diff", added, removed, modified }));
 }
 
+// src/commands/interview.ts
+var fs18 = __toESM(require("node:fs"));
+var DEFAULT_INTERVIEW_CUTOFF = 0.8;
+function isUnit(n) {
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
+}
+function isInterviewState(v) {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v;
+  if (typeof o.idea !== "string") return false;
+  const gate = o.cutoff ?? o.threshold;
+  if (!isUnit(gate)) return false;
+  if (!Array.isArray(o.rounds)) return false;
+  const latest = o.confidence ?? o.ambiguity;
+  if (!(latest === null || latest === void 0 || isUnit(latest))) return false;
+  return true;
+}
+function isLegacyShape(o) {
+  return o.cutoff === void 0 && o.threshold !== void 0;
+}
+function upgradeLegacy(o) {
+  const threshold = o.threshold;
+  const rawRounds = Array.isArray(o.rounds) ? o.rounds : [];
+  const rounds = rawRounds.map((r) => {
+    const rr = r;
+    const amb = rr.ambiguity;
+    const conf = typeof rr.confidence === "number" ? rr.confidence : typeof amb === "number" ? 1 - amb : 0;
+    return {
+      question: String(rr.question ?? ""),
+      answer: String(rr.answer ?? ""),
+      scores: rr.scores,
+      confidence: conf,
+      entities: Array.isArray(rr.entities) ? rr.entities : []
+    };
+  });
+  const latestAmb = o.ambiguity;
+  const confidence = typeof latestAmb === "number" ? 1 - latestAmb : null;
+  return {
+    idea: String(o.idea ?? ""),
+    cutoff: 1 - threshold,
+    rounds,
+    confidence,
+    status: "in-progress"
+  };
+}
+function readInterview(paths) {
+  try {
+    if (!fs18.existsSync(paths.interviewFile)) return null;
+    const raw = fs18.readFileSync(paths.interviewFile, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!isInterviewState(parsed)) return null;
+    const o = parsed;
+    if (isLegacyShape(o)) {
+      const bak = paths.interviewFile + ".bak";
+      try {
+        if (!fs18.existsSync(bak)) fs18.writeFileSync(bak, raw, "utf8");
+      } catch {
+      }
+      const upgraded = upgradeLegacy(o);
+      writeInterview(paths, upgraded);
+      return upgraded;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+function writeInterview(paths, state) {
+  atomicWriteFile(paths.interviewFile, JSON.stringify(state, null, 2) + "\n");
+}
+function computeReady(confidence, cutoff) {
+  return confidence !== null && confidence >= cutoff;
+}
+function interviewReady(paths) {
+  const existing = readInterview(paths);
+  if (!existing) return false;
+  return computeReady(existing.confidence, existing.cutoff);
+}
+function runInterviewStart(paths, opts = {}) {
+  const idea = opts.idea?.trim();
+  if (!idea) {
+    structuredLog({ cmd: "interview start", error: "missing_field", field: "idea" });
+    return failure({ human: "Missing required `idea`.", data: { error: "missing_field", field: "idea" } });
+  }
+  const cutoff = opts.cutoff ?? DEFAULT_INTERVIEW_CUTOFF;
+  if (!isUnit(cutoff)) {
+    structuredLog({ cmd: "interview start", error: "invalid_cutoff" });
+    return failure({
+      human: "`cutoff` must be a finite number in [0,1].",
+      data: { error: "invalid_cutoff", cutoff }
+    });
+  }
+  const state = { idea, cutoff, rounds: [], confidence: null, status: "in-progress" };
+  writeInterview(paths, state);
+  structuredLog({ cmd: "interview start", cutoff });
+  return success({
+    data: { idea, cutoff, rounds: 0, ready: false },
+    human: `Interview started (cutoff ${cutoff}).`
+  });
+}
+function runInterviewRecord(paths, opts = {}) {
+  const existing = readInterview(paths);
+  if (!existing) {
+    structuredLog({ cmd: "interview record", error: "not_started" });
+    return failure({
+      human: "No interview in progress. Run `th interview start` first.",
+      data: { error: "not_started" }
+    });
+  }
+  const question = opts.question?.trim();
+  const answer = opts.answer?.trim();
+  if (!question) {
+    structuredLog({ cmd: "interview record", error: "missing_field", field: "question" });
+    return failure({ human: "Missing required `question`.", data: { error: "missing_field", field: "question" } });
+  }
+  if (!answer) {
+    structuredLog({ cmd: "interview record", error: "missing_field", field: "answer" });
+    return failure({ human: "Missing required `answer`.", data: { error: "missing_field", field: "answer" } });
+  }
+  const s = opts.scores;
+  if (typeof s !== "object" || s === null || !Number.isFinite(s.goal) || !Number.isFinite(s.constraints) || !Number.isFinite(s.criteria)) {
+    structuredLog({ cmd: "interview record", error: "invalid_scores" });
+    return failure({
+      human: "`scores` must be an object { goal, constraints, criteria } of numbers.",
+      data: { error: "invalid_scores" }
+    });
+  }
+  const scoreRec = s;
+  const scores = {
+    goal: scoreRec.goal,
+    constraints: scoreRec.constraints,
+    criteria: scoreRec.criteria
+  };
+  const confidence = opts.confidence;
+  if (!isUnit(confidence)) {
+    structuredLog({ cmd: "interview record", error: "invalid_confidence" });
+    return failure({
+      human: "`confidence` must be a finite number in [0,1].",
+      data: { error: "invalid_confidence", confidence }
+    });
+  }
+  let entities = [];
+  if (opts.entities !== void 0) {
+    if (!Array.isArray(opts.entities) || opts.entities.some((e) => typeof e !== "string")) {
+      structuredLog({ cmd: "interview record", error: "invalid_entities" });
+      return failure({
+        human: "`entities` must be an array of strings.",
+        data: { error: "invalid_entities" }
+      });
+    }
+    entities = opts.entities;
+  }
+  const round = { question, answer, scores, confidence, entities };
+  const next = {
+    ...existing,
+    rounds: [...existing.rounds, round],
+    confidence
+  };
+  writeInterview(paths, next);
+  const ready = computeReady(confidence, next.cutoff);
+  structuredLog({ cmd: "interview record", rounds: next.rounds.length });
+  return success({
+    data: { rounds: next.rounds.length, confidence, cutoff: next.cutoff, ready },
+    human: `Recorded round ${next.rounds.length} (confidence ${confidence}, ready ${ready}).`
+  });
+}
+function runInterviewStatus(paths) {
+  const existing = readInterview(paths);
+  if (!existing) {
+    structuredLog({ cmd: "interview status", started: false });
+    return success({
+      data: {
+        started: false,
+        rounds: 0,
+        confidence: null,
+        cutoff: DEFAULT_INTERVIEW_CUTOFF,
+        ready: false
+      },
+      human: "No interview in progress."
+    });
+  }
+  const ready = computeReady(existing.confidence, existing.cutoff);
+  structuredLog({ cmd: "interview status", rounds: existing.rounds.length });
+  return success({
+    data: {
+      started: true,
+      rounds: existing.rounds.length,
+      confidence: existing.confidence,
+      cutoff: existing.cutoff,
+      ready
+    },
+    human: `Interview: ${existing.rounds.length} round(s), confidence ${existing.confidence ?? "n/a"}, cutoff ${existing.cutoff}, ready ${ready}.`
+  });
+}
+
 // src/core/gate-preconditions.ts
 var PASS = { ok: true };
 function checkBlockingDrift(state) {
@@ -19504,7 +19764,7 @@ function checkGoverningArtifact(paths, state) {
     const produced = contract.produces.replace(/\/$/, "");
     const registered = state.approved_artifacts.some((a) => a.file === produced);
     if (!registered) {
-      const exists = fs18.existsSync(path16.resolve(paths.root, produced));
+      const exists = fs19.existsSync(path16.resolve(paths.root, produced));
       if (!exists) {
         return { ok: false, error: "artifact_not_produced", detail: { stage: current, produces: contract.produces } };
       }
@@ -19524,9 +19784,18 @@ function checkCoverage(paths) {
   }
   return PASS;
 }
+function implementationRequiresSlices(state) {
+  return (state.delivery_mode ?? "code") === "code";
+}
 function checkImplementationSettled(state) {
   const prog = sliceProgress(state);
-  if (prog.total > 0 && !prog.allSettled) {
+  if (prog.total === 0) {
+    if (implementationRequiresSlices(state)) {
+      return { ok: false, error: "no_slices_defined", detail: { delivery_mode: state.delivery_mode ?? "code" } };
+    }
+    return PASS;
+  }
+  if (!prog.allSettled) {
     return {
       ok: false,
       error: "slices_unsettled",
@@ -19552,7 +19821,7 @@ function checkFinalVerification(paths, state) {
     const produced = contract.produces.replace(/\/$/, "");
     const registered = state.approved_artifacts.some((a) => a.file === produced);
     if (!registered) {
-      const exists = fs18.existsSync(path16.resolve(paths.root, produced));
+      const exists = fs19.existsSync(path16.resolve(paths.root, produced));
       return exists ? { ok: false, error: "report_not_registered", detail: { file: produced } } : { ok: false, error: "report_not_produced", detail: { produces: produced } };
     }
   }
@@ -19563,6 +19832,20 @@ function stageOrdinal(stage) {
   return STAGE_PIPELINE.findIndex((s) => s.stage === canonical);
 }
 var IMPLEMENTATION_PLANNING_ORDINAL = STAGE_PIPELINE.findIndex((s) => s.stage === "implementation-planning");
+var REQUIREMENTS_ORDINAL = STAGE_PIPELINE.findIndex((s) => s.stage === "requirements");
+function interviewRequired(state) {
+  if (typeof state.interview_required === "boolean") return state.interview_required;
+  return state.tier === "T2" || state.tier === "T3";
+}
+function checkInterview(paths, state) {
+  if (!interviewRequired(state)) return PASS;
+  if (interviewReady(paths)) return PASS;
+  const ordinal = stageOrdinal(state.current_stage);
+  if (ordinal < 0 || ordinal <= REQUIREMENTS_ORDINAL) {
+    return { ok: false, error: "interview_incomplete", detail: { current_stage: canonicalizeStage(state.current_stage) } };
+  }
+  return PASS;
+}
 function canAdvanceStage(paths, state) {
   let r;
   if (!(r = checkBlockingDrift(state)).ok) return r;
@@ -19570,6 +19853,7 @@ function canAdvanceStage(paths, state) {
   if (!(r = checkVerifySuite(paths)).ok) return r;
   if (!(r = checkArtifactDrift(paths, state)).ok) return r;
   if (!(r = checkTierSet(state)).ok) return r;
+  if (!(r = checkInterview(paths, state)).ok) return r;
   if (!(r = checkRepoMap(paths, state)).ok) return r;
   if (!(r = checkDecisionObligations(paths, state)).ok) return r;
   if (!(r = checkDebate(state)).ok) return r;
@@ -19703,9 +19987,21 @@ function runNext(paths, opts = {}) {
     return emit(
       {
         kind: "classify-tier",
-        action: "Tier is unclassified \u2014 classify it (`th tier classify <brief.json>` + `th tier veto-check`) and record `th state set tier T<n>`.",
+        action: "Tier is unclassified \u2014 classify it (`th tier classify <brief.json>` + `th tier veto-check`), then record it with the typed gate command `th tier record <T>` (CLI fallback: `th state set tier T<n>`).",
         why: "The tier determines which stages are even engaged, so nothing downstream can be sequenced until it is set \u2014 classification gates every design stage.",
         data: { current_stage: s.current_stage }
+      },
+      explain
+    );
+  }
+  const interviewR = checkInterview(paths, s);
+  if (!interviewR.ok) {
+    return emit(
+      {
+        kind: "complete-interview",
+        action: "A clarity interview is required before `requirements` \u2014 run the `th:run --interview` loop until the interview reaches `ready` (the `th_interview_status` MCP tool reports it), then advance.",
+        why: "This run requires a clarity interview (interview_required, or tier T2/T3) and it has not yet reached readiness; the soft gate refuses advancement past requirements until the ambiguity threshold is met, so completing the interview outranks stage work.",
+        data: { current_stage: interviewR.detail.current_stage }
       },
       explain
     );
@@ -19843,7 +20139,7 @@ function runNext(paths, opts = {}) {
   }
   if (current === "implementation") {
     const prog = sliceProgress(s);
-    if (prog.total === 0) {
+    if (prog.total === 0 && implementationRequiresSlices(s)) {
       return emit(
         {
           kind: "sync-slices",
@@ -19895,12 +20191,12 @@ function runNext(paths, opts = {}) {
       );
     }
   }
-  const next = nextStageAfter(current, s.tier);
+  const next = nextStageAfterFor(current, s);
   if (next) {
     return emit(
       {
         kind: "advance-stage",
-        action: `Stage "${current}" is settled \u2014 advance to "${next.stage}" (produces ${next.produces || "(no artifact)"}; Critic mode: ${next.criticMode}${next.humanGate ? "; human gate" : "; streams"}). Set it with \`th state set current_stage ${next.stage}\`.`,
+        action: `Stage "${current}" is settled \u2014 advance to "${next.stage}" (produces ${next.produces || "(no artifact)"}; Critic mode: ${next.criticMode}${next.humanGate ? "; human gate" : "; streams"}). Advance with the typed gate command \`th stage advance\` (CLI fallback: \`th state set current_stage ${next.stage}\`)${next.stage === "implementation" ? "; unlock the build with `th implementation unlock`" : ""}.`,
         why: `Stage "${current}" has met all its mechanical obligations and no higher-priority blocker is open, so the only thing left is to move the pipeline forward to the next engaged stage for tier ${s.tier}.`,
         data: { from: current, to: next.stage, contract: next }
       },
@@ -19945,10 +20241,10 @@ why: ${next.why}` : `next: ${next.action}`;
 }
 
 // src/commands/delegate.ts
-var fs20 = __toESM(require("node:fs"));
+var fs21 = __toESM(require("node:fs"));
 
 // src/commands/context.ts
-var fs19 = __toESM(require("node:fs"));
+var fs20 = __toESM(require("node:fs"));
 var path17 = __toESM(require("node:path"));
 
 // src/core/summary.ts
@@ -20003,11 +20299,11 @@ function runContextPack(paths, opts = {}) {
     let exists = false;
     let isDir = false;
     let content = "";
-    if (fs19.existsSync(abs)) {
-      const stat = fs19.statSync(abs);
+    if (fs20.existsSync(abs)) {
+      const stat = fs20.statSync(abs);
       if (stat.isFile()) {
         exists = true;
-        content = fs19.readFileSync(abs, "utf8");
+        content = fs20.readFileSync(abs, "utf8");
       } else if (stat.isDirectory()) {
         exists = true;
         isDir = true;
@@ -20308,13 +20604,13 @@ function runDelegateCheck(paths, opts) {
         data: { error: "path_outside_root", file: opts.file }
       });
     }
-    if (!fs20.existsSync(abs) || !fs20.statSync(abs).isFile()) {
+    if (!fs21.existsSync(abs) || !fs21.statSync(abs).isFile()) {
       return failure({
         human: `Capsule file not found: ${opts.file}`,
         data: { error: "capsule_not_found", file: opts.file }
       });
     }
-    text = fs20.readFileSync(abs, "utf8");
+    text = fs21.readFileSync(abs, "utf8");
   }
   const v = validateCapsule(text);
   structuredLog({ cmd: "delegate check", ok: v.ok, missing: v.missing.length });
@@ -20415,7 +20711,7 @@ function runBudgetCheck(paths, opts = {}) {
 }
 
 // src/commands/handoff.ts
-var fs21 = __toESM(require("node:fs"));
+var fs22 = __toESM(require("node:fs"));
 var path18 = __toESM(require("node:path"));
 function handoffPath(paths) {
   return path18.join(paths.stateDir, "HANDOFF.md");
@@ -20483,8 +20779,8 @@ function runHandoffWrite(paths) {
     HANDOFF_STATE_CLOSE,
     ""
   ].join("\n");
-  fs21.mkdirSync(paths.stateDir, { recursive: true });
-  fs21.writeFileSync(handoffPath(paths), md, "utf8");
+  fs22.mkdirSync(paths.stateDir, { recursive: true });
+  fs22.writeFileSync(handoffPath(paths), md, "utf8");
   const relPath = path18.relative(paths.root, handoffPath(paths)).split(path18.sep).join("/");
   structuredLog({ cmd: "handoff write", path: relPath, slices: slices.length, artifacts: s.approved_artifacts.length });
   return success({
@@ -20507,7 +20803,7 @@ function runHandoffWrite(paths) {
 }
 
 // src/commands/decision.ts
-var fs22 = __toESM(require("node:fs"));
+var fs23 = __toESM(require("node:fs"));
 var path19 = __toESM(require("node:path"));
 
 // src/core/decision-key.ts
@@ -20567,12 +20863,12 @@ function runDecisionDetect(paths, _opts = {}) {
   const candidates = [];
   const adrDir = path19.join(paths.docsDir, "05-adrs");
   try {
-    const entries = fs22.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
+    const entries = fs23.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
     for (const f of entries) {
       const rel = path19.posix.join("docs/05-adrs", f);
       let title = f;
       try {
-        const heading = firstHeading(fs22.readFileSync(path19.join(adrDir, f), "utf8"));
+        const heading = firstHeading(fs23.readFileSync(path19.join(adrDir, f), "utf8"));
         if (heading) title = heading;
       } catch {
       }
@@ -20581,7 +20877,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const driftBody = fs22.readFileSync(paths.driftLog, "utf8");
+    const driftBody = fs23.readFileSync(paths.driftLog, "utf8");
     const seen = /* @__PURE__ */ new Set();
     for (const line of driftBody.split(/\r?\n/)) {
       const m = /^##\s+(DRIFT-\d+)\b(.*)$/.exec(line);
@@ -20600,7 +20896,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const scopeBody = fs22.readFileSync(path19.join(paths.docsDir, "02-scope.md"), "utf8");
+    const scopeBody = fs23.readFileSync(path19.join(paths.docsDir, "02-scope.md"), "utf8");
     if (/(^##\s+Changes\b)|(^\s*(ADDED|CHANGED):)/m.test(scopeBody)) {
       candidates.push({
         title: "Scope signal: a post-requirements scope change is recorded",
@@ -20762,7 +21058,7 @@ function runArtifactLeases(paths) {
 }
 
 // src/core/collab.ts
-var fs23 = __toESM(require("node:fs"));
+var fs24 = __toESM(require("node:fs"));
 var path20 = __toESM(require("node:path"));
 function validatePathSegment(segment, label) {
   if (path20.isAbsolute(segment)) {
@@ -20793,19 +21089,19 @@ function writeFragment(paths, input) {
   validatePathSegment(input.name, "name");
   const dir = collabDir(paths, input.stage, input.round);
   const file = path20.join(dir, input.name);
-  if (!input.force && fs23.existsSync(file)) {
+  if (!input.force && fs24.existsSync(file)) {
     throw new FragmentExistsError(file);
   }
-  fs23.mkdirSync(dir, { recursive: true });
-  fs23.writeFileSync(file, input.content, "utf8");
+  fs24.mkdirSync(dir, { recursive: true });
+  fs24.writeFileSync(file, input.content, "utf8");
   return file;
 }
 function listFragments(paths, stage, round) {
   const out = [];
   const readRound = (r) => {
     const dir = collabDir(paths, stage, r);
-    if (!fs23.existsSync(dir) || !fs23.statSync(dir).isDirectory()) return;
-    const names = fs23.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
+    if (!fs24.existsSync(dir) || !fs24.statSync(dir).isDirectory()) return;
+    const names = fs24.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
     for (const name of names) {
       out.push({ stage, round: r, name, path: path20.join(dir, name) });
     }
@@ -20815,8 +21111,8 @@ function listFragments(paths, stage, round) {
     return out;
   }
   const stageDir = collabDir(paths, stage);
-  if (!fs23.existsSync(stageDir) || !fs23.statSync(stageDir).isDirectory()) return out;
-  const rounds = fs23.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  if (!fs24.existsSync(stageDir) || !fs24.statSync(stageDir).isDirectory()) return out;
+  const rounds = fs24.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
   for (const r of rounds) readRound(r);
   return out;
 }
@@ -20824,14 +21120,14 @@ function mergeFragments(paths, stage, round) {
   const fragments = listFragments(paths, stage, round);
   const unanchored = [];
   for (const f of fragments) {
-    const content = fs23.readFileSync(f.path, "utf8");
+    const content = fs24.readFileSync(f.path, "utf8");
     if (extractReqIds(content).length === 0) unanchored.push(f.name);
   }
   if (unanchored.length > 0) {
     return { ok: false, merged: "", fragments, unanchored };
   }
   const parts = fragments.map((f) => {
-    const content = fs23.readFileSync(f.path, "utf8");
+    const content = fs24.readFileSync(f.path, "utf8");
     return content.endsWith("\n") ? content : `${content}
 `;
   });
@@ -20936,7 +21232,7 @@ function runCollabMerge(paths, opts) {
 }
 
 // src/commands/debate.ts
-var fs24 = __toESM(require("node:fs"));
+var fs25 = __toESM(require("node:fs"));
 var path21 = __toESM(require("node:path"));
 
 // src/core/debate-log.ts
@@ -21009,16 +21305,16 @@ function debateLogPath(paths) {
 }
 function readDebateLog(paths) {
   const file = debateLogPath(paths);
-  if (!fs24.existsSync(file)) {
-    fs24.writeFileSync(file, DEBATE_LOG_HEADER, "utf8");
+  if (!fs25.existsSync(file)) {
+    fs25.writeFileSync(file, DEBATE_LOG_HEADER, "utf8");
     return DEBATE_LOG_HEADER;
   }
-  return fs24.readFileSync(file, "utf8");
+  return fs25.readFileSync(file, "utf8");
 }
 function appendDebateLog(paths, block) {
   const current = readDebateLog(paths);
   const sep11 = current.endsWith("\n") ? "" : "\n";
-  fs24.writeFileSync(debateLogPath(paths), `${current}${sep11}${block}`, "utf8");
+  fs25.writeFileSync(debateLogPath(paths), `${current}${sep11}${block}`, "utf8");
 }
 function runDebateAdd(paths, opts) {
   return withStateLock(paths, () => runDebateAddLocked(paths, opts));
@@ -21077,7 +21373,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs24.existsSync(file) ? fs24.readFileSync(file, "utf8") : "";
+  const text = fs25.existsSync(file) ? fs25.readFileSync(file, "utf8") : "";
   const entries = sortById(effectiveEntries(parseDebateEntries(text)));
   const openBlocking = r.state.debate_open_blocking ?? 0;
   const human = entries.length ? entries.map((e) => `${e.id}  (${e.topic})  ${e.status}`).join("\n") : "(no debate entries)";
@@ -21111,7 +21407,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs24.existsSync(file) ? fs24.readFileSync(file, "utf8") : "";
+  const text = fs25.existsSync(file) ? fs25.readFileSync(file, "utf8") : "";
   const entries = parseDebateEntries(text);
   const entry = entries.find((e) => e.id === id);
   if (!entry) {
@@ -21153,196 +21449,6 @@ ${formatIssues(r.issues)}`,
   return success({
     data: { id, status: "resolved", debate_open_blocking: debateOpenBlocking },
     human: `${id} marked resolved. Open blocking debates: ${debateOpenBlocking}.`
-  });
-}
-
-// src/commands/interview.ts
-var fs25 = __toESM(require("node:fs"));
-var DEFAULT_INTERVIEW_CUTOFF = 0.8;
-function isUnit(n) {
-  return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
-}
-function isInterviewState(v) {
-  if (typeof v !== "object" || v === null) return false;
-  const o = v;
-  if (typeof o.idea !== "string") return false;
-  const gate = o.cutoff ?? o.threshold;
-  if (!isUnit(gate)) return false;
-  if (!Array.isArray(o.rounds)) return false;
-  const latest = o.confidence ?? o.ambiguity;
-  if (!(latest === null || latest === void 0 || isUnit(latest))) return false;
-  return true;
-}
-function isLegacyShape(o) {
-  return o.cutoff === void 0 && o.threshold !== void 0;
-}
-function upgradeLegacy(o) {
-  const threshold = o.threshold;
-  const rawRounds = Array.isArray(o.rounds) ? o.rounds : [];
-  const rounds = rawRounds.map((r) => {
-    const rr = r;
-    const amb = rr.ambiguity;
-    const conf = typeof rr.confidence === "number" ? rr.confidence : typeof amb === "number" ? 1 - amb : 0;
-    return {
-      question: String(rr.question ?? ""),
-      answer: String(rr.answer ?? ""),
-      scores: rr.scores,
-      confidence: conf,
-      entities: Array.isArray(rr.entities) ? rr.entities : []
-    };
-  });
-  const latestAmb = o.ambiguity;
-  const confidence = typeof latestAmb === "number" ? 1 - latestAmb : null;
-  return {
-    idea: String(o.idea ?? ""),
-    cutoff: 1 - threshold,
-    rounds,
-    confidence,
-    status: "in-progress"
-  };
-}
-function readInterview(paths) {
-  try {
-    if (!fs25.existsSync(paths.interviewFile)) return null;
-    const raw = fs25.readFileSync(paths.interviewFile, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!isInterviewState(parsed)) return null;
-    const o = parsed;
-    if (isLegacyShape(o)) {
-      const bak = paths.interviewFile + ".bak";
-      try {
-        if (!fs25.existsSync(bak)) fs25.writeFileSync(bak, raw, "utf8");
-      } catch {
-      }
-      const upgraded = upgradeLegacy(o);
-      writeInterview(paths, upgraded);
-      return upgraded;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-function writeInterview(paths, state) {
-  atomicWriteFile(paths.interviewFile, JSON.stringify(state, null, 2) + "\n");
-}
-function computeReady(confidence, cutoff) {
-  return confidence !== null && confidence >= cutoff;
-}
-function runInterviewStart(paths, opts = {}) {
-  const idea = opts.idea?.trim();
-  if (!idea) {
-    structuredLog({ cmd: "interview start", error: "missing_field", field: "idea" });
-    return failure({ human: "Missing required `idea`.", data: { error: "missing_field", field: "idea" } });
-  }
-  const cutoff = opts.cutoff ?? DEFAULT_INTERVIEW_CUTOFF;
-  if (!isUnit(cutoff)) {
-    structuredLog({ cmd: "interview start", error: "invalid_cutoff" });
-    return failure({
-      human: "`cutoff` must be a finite number in [0,1].",
-      data: { error: "invalid_cutoff", cutoff }
-    });
-  }
-  const state = { idea, cutoff, rounds: [], confidence: null, status: "in-progress" };
-  writeInterview(paths, state);
-  structuredLog({ cmd: "interview start", cutoff });
-  return success({
-    data: { idea, cutoff, rounds: 0, ready: false },
-    human: `Interview started (cutoff ${cutoff}).`
-  });
-}
-function runInterviewRecord(paths, opts = {}) {
-  const existing = readInterview(paths);
-  if (!existing) {
-    structuredLog({ cmd: "interview record", error: "not_started" });
-    return failure({
-      human: "No interview in progress. Run `th interview start` first.",
-      data: { error: "not_started" }
-    });
-  }
-  const question = opts.question?.trim();
-  const answer = opts.answer?.trim();
-  if (!question) {
-    structuredLog({ cmd: "interview record", error: "missing_field", field: "question" });
-    return failure({ human: "Missing required `question`.", data: { error: "missing_field", field: "question" } });
-  }
-  if (!answer) {
-    structuredLog({ cmd: "interview record", error: "missing_field", field: "answer" });
-    return failure({ human: "Missing required `answer`.", data: { error: "missing_field", field: "answer" } });
-  }
-  const s = opts.scores;
-  if (typeof s !== "object" || s === null || !Number.isFinite(s.goal) || !Number.isFinite(s.constraints) || !Number.isFinite(s.criteria)) {
-    structuredLog({ cmd: "interview record", error: "invalid_scores" });
-    return failure({
-      human: "`scores` must be an object { goal, constraints, criteria } of numbers.",
-      data: { error: "invalid_scores" }
-    });
-  }
-  const scoreRec = s;
-  const scores = {
-    goal: scoreRec.goal,
-    constraints: scoreRec.constraints,
-    criteria: scoreRec.criteria
-  };
-  const confidence = opts.confidence;
-  if (!isUnit(confidence)) {
-    structuredLog({ cmd: "interview record", error: "invalid_confidence" });
-    return failure({
-      human: "`confidence` must be a finite number in [0,1].",
-      data: { error: "invalid_confidence", confidence }
-    });
-  }
-  let entities = [];
-  if (opts.entities !== void 0) {
-    if (!Array.isArray(opts.entities) || opts.entities.some((e) => typeof e !== "string")) {
-      structuredLog({ cmd: "interview record", error: "invalid_entities" });
-      return failure({
-        human: "`entities` must be an array of strings.",
-        data: { error: "invalid_entities" }
-      });
-    }
-    entities = opts.entities;
-  }
-  const round = { question, answer, scores, confidence, entities };
-  const next = {
-    ...existing,
-    rounds: [...existing.rounds, round],
-    confidence
-  };
-  writeInterview(paths, next);
-  const ready = computeReady(confidence, next.cutoff);
-  structuredLog({ cmd: "interview record", rounds: next.rounds.length });
-  return success({
-    data: { rounds: next.rounds.length, confidence, cutoff: next.cutoff, ready },
-    human: `Recorded round ${next.rounds.length} (confidence ${confidence}, ready ${ready}).`
-  });
-}
-function runInterviewStatus(paths) {
-  const existing = readInterview(paths);
-  if (!existing) {
-    structuredLog({ cmd: "interview status", started: false });
-    return success({
-      data: {
-        started: false,
-        rounds: 0,
-        confidence: null,
-        cutoff: DEFAULT_INTERVIEW_CUTOFF,
-        ready: false
-      },
-      human: "No interview in progress."
-    });
-  }
-  const ready = computeReady(existing.confidence, existing.cutoff);
-  structuredLog({ cmd: "interview status", rounds: existing.rounds.length });
-  return success({
-    data: {
-      started: true,
-      rounds: existing.rounds.length,
-      confidence: existing.confidence,
-      cutoff: existing.cutoff,
-      ready
-    },
-    human: `Interview: ${existing.rounds.length} round(s), confidence ${existing.confidence ?? "n/a"}, cutoff ${existing.cutoff}, ready ${ready}.`
   });
 }
 
@@ -21600,6 +21706,7 @@ function runStageCurrent(paths) {
 // src/commands/doctor.ts
 var fs28 = __toESM(require("node:fs"));
 var path23 = __toESM(require("node:path"));
+var DOCTOR_STRICT_KEY_ALLOWLIST = /* @__PURE__ */ new Set([]);
 function pluginRoot() {
   return path23.resolve(__dirname, "..", "..");
 }
@@ -21765,6 +21872,12 @@ function runDoctor(paths, opts = {}) {
         detail: `${fullyMapped}/${breakdown.total} planned+tested; ${breakdown.implemented}/${breakdown.total} implemented; ${passing}`
       });
     }
+    const verifyCfg = readVerifyConfig(paths);
+    checks.push({
+      name: "verify commands",
+      status: "ok",
+      detail: verifyCfg.commands.length ? `${verifyCfg.commands.length} configured (run by \`th verify run\`): ${verifyCfg.commands.map((c) => `"${c}"`).join(", ")}` : 'none configured (add with `th verify add "<command>"`)'
+    });
     const escalations = reviseEscalations(s);
     if (escalations.length > 0) {
       checks.push({
@@ -21774,6 +21887,25 @@ function runDoctor(paths, opts = {}) {
       });
     } else {
       checks.push({ name: "revise loops", status: "ok", detail: "none at cap" });
+    }
+  }
+  const unknownKeyWarnings = (r.warnings ?? []).filter((w) => w.message.includes("unknown top-level key"));
+  if (unknownKeyWarnings.length > 0) {
+    const keys = unknownKeyWarnings.map((w) => w.path);
+    const offending = keys.filter((k) => !DOCTOR_STRICT_KEY_ALLOWLIST.has(k));
+    const allowed = keys.filter((k) => DOCTOR_STRICT_KEY_ALLOWLIST.has(k));
+    if (offending.length > 0) {
+      checks.push({
+        name: "state keys",
+        status: opts.strict ? "fail" : "warn",
+        detail: `unknown top-level key(s): ${offending.join(", ")}` + (opts.strict ? " \u2014 not in the --strict allowlist (a typo like `teir`?)" : " \u2014 run `th doctor --strict` to fail on this")
+      });
+    } else {
+      checks.push({
+        name: "state keys",
+        status: "ok",
+        detail: `${allowed.length} allowlisted forward-compat key(s): ${allowed.join(", ")}`
+      });
     }
   }
   const hasFail = checks.some((c) => c.status === "fail");
@@ -22231,7 +22363,7 @@ var TOOL_DEFS = [
   },
   {
     name: "th_stage_advance",
-    description: "Advance to the next engaged stage for the current tier. Calls canAdvanceStage (the full mechanical ladder: blocking drift, revise caps, failing verify, artifact drift, tier set, brownfield repo-map, decision obligations, open debates, the current stage's governing artifact, coverage at implementation-planning, all slices settled at implementation). Refuses with the first failing rung's stable error, or no_next_stage at the terminal stage. Writes current_stage via the locked+ledgered setter (source=th_stage_advance).",
+    description: "Advance to the next APPLICABLE engaged stage for the run (UX/UI stages are skipped when has_ui===false \u2014 #13). Calls canAdvanceStage (the full mechanical ladder: blocking drift, revise caps, failing verify, artifact drift, tier set, brownfield repo-map, decision obligations, open debates, the current stage's governing artifact, coverage at implementation-planning, all slices settled at implementation). Refuses with the first failing rung's stable error, or no_next_stage at the terminal stage. Writes current_stage via the locked+ledgered setter (source=th_stage_advance).",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => {
       const gs = gateState(paths);
@@ -22240,10 +22372,10 @@ var TOOL_DEFS = [
       const adv = canAdvanceStage(paths, state);
       if (!adv.ok) return gateRefusal(adv);
       const current = canonicalizeStage(state.current_stage);
-      const next = nextStageAfter(current, state.tier);
+      const next = nextStageAfterFor(current, state);
       if (!next) {
         return failure({
-          human: "Already at the terminal engaged stage for this tier; there is no next stage to advance to.",
+          human: "Already at the terminal engaged stage for this run; there is no next stage to advance to.",
           data: { error: "no_next_stage", current_stage: current }
         });
       }

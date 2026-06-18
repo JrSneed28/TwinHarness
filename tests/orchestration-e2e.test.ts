@@ -14,17 +14,28 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
-import { runStateSet } from "../src/commands/state";
 import { runArtifactRegister } from "../src/commands/artifact";
 import { runSlicesSync, runSliceSetStatus } from "../src/commands/slices";
 import { runBuildNextWave, runBuildClaim, runBuildRelease } from "../src/commands/build";
 import { runCoverageCheck } from "../src/commands/coverage";
 import { evaluateStopGate, runHookPretoolGate, type PreToolHookInput } from "../src/commands/hook";
 import { writeVerifyConfig, writeVerifyReport } from "../src/core/verify";
-import { readState } from "../src/core/state-store";
+import { readState, writeState } from "../src/core/state-store";
+import type { ProjectPaths } from "../src/core/paths";
+import type { TwinHarnessState } from "../src/core/state-schema";
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
+
+/**
+ * Position gate-owned state (tier, current_stage, implementation_allowed, slices)
+ * for the run. After the #11 demotion a raw `th state set` refuses gate-owned
+ * fields, so this in-process e2e uses the ungated low-level positioning writer
+ * directly (the stop-gate it exercises never consults the interview soft-gate).
+ */
+function position(paths: ProjectPaths, patch: Partial<TwinHarnessState>): void {
+  writeState(paths, { ...readState(paths).state!, ...patch });
+}
 
 function writeFile(t: TempProject, rel: string, content: string): void {
   const abs = path.join(t.root, ...rel.split("/"));
@@ -50,8 +61,7 @@ describe("REQ-E2E-001: a run advances init → build → coverage → final-veri
     expect(readState(paths).state?.current_stage).toBe("init");
 
     // 2. Classify + record tier (Orchestrator's call; recorded mechanically).
-    runStateSet(paths, "tier", "T2");
-    runStateSet(paths, "current_stage", "requirements");
+    position(paths, { tier: "T2", current_stage: "requirements" });
     expect(readState(paths).state?.tier).toBe("T2");
 
     // 3. Requirements artifact → register (content-hashed, approved).
@@ -81,8 +91,7 @@ describe("REQ-E2E-001: a run advances init → build → coverage → final-veri
     expect(readState(paths).state?.slices.map((s) => s.id)).toEqual(["SLICE-0", "SLICE-1"]);
 
     // 5. Unlock implementation.
-    runStateSet(paths, "implementation_allowed", "true");
-    runStateSet(paths, "current_stage", "implementation");
+    position(paths, { implementation_allowed: true, current_stage: "implementation" });
 
     // 6. Build wave: SLICE-0 dispatches; SLICE-1 is held on its dependency.
     let wave = runBuildNextWave(paths).data?.wave as string[];
@@ -111,7 +120,7 @@ describe("REQ-E2E-001: a run advances init → build → coverage → final-veri
     expect(cov.data?.gaps).toEqual([]);
 
     // 9. Final verification: stop-gate blocks while SLICE-1 is unfinished.
-    runStateSet(paths, "current_stage", "final-verification");
+    position(paths, { current_stage: "final-verification" });
     expect(evaluateStopGate(paths).block).toBe(true);
 
     // Finish SLICE-1 → with no verify suite configured, the gate now allows.
@@ -146,22 +155,20 @@ describe("REQ-E2E-002: the write-gate enforces phase and component boundaries th
     runInit(paths, {});
 
     // Phase A (implementation_allowed=false): impl writes gate; docs/root-md allowed.
-    runStateSet(paths, "current_stage", "architecture");
+    position(paths, { current_stage: "architecture" });
     expect(decisionOf(runHookPretoolGate(paths, writeInput("src/app.ts", root)))).toBe("ask");
     expect(isAllow(runHookPretoolGate(paths, writeInput("docs/01-requirements.md", root)))).toBe(true);
     expect(isAllow(runHookPretoolGate(paths, writeInput("README.md", root)))).toBe(true);
 
     // Phase B: implementation allowed, slices own path-like components.
-    runStateSet(paths, "implementation_allowed", "true");
-    runStateSet(paths, "current_stage", "implementation");
-    runStateSet(
-      paths,
-      "slices",
-      JSON.stringify([
+    position(paths, {
+      implementation_allowed: true,
+      current_stage: "implementation",
+      slices: [
         { id: "SLICE-0", status: "in-progress", components: ["src/skeleton.ts"] },
         { id: "SLICE-1", status: "pending", components: ["src/feature.ts"] },
-      ]),
-    );
+      ],
+    });
 
     // In-progress slice's own path → allowed; another slice's path → component-boundary ask.
     expect(isAllow(runHookPretoolGate(paths, writeInput("src/skeleton.ts", root)))).toBe(true);

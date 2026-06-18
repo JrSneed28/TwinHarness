@@ -17,9 +17,9 @@
  *    `@modelcontextprotocol/sdk` dependency. The zero-runtime-dependency CLI
  *    guarantee is therefore intact.
  *  - It exposes a MINIMAL set: the coordination/observability commands the
- *    Orchestrator needs. `init`/`migrate` and the hook gates are deliberately
- *    EXCLUDED (scaffolding + the Claude Code hook protocol are not Orchestrator
- *    tools).
+ *    Orchestrator needs. Destructive `init`/`migrate` and hook gates are
+ *    deliberately EXCLUDED; the safe idempotent `th_init` IS exposed (no force
+ *    over MCP — destructive re-init is CLI/human-only); hook gates remain excluded.
  *
  * The project root is taken from `CLAUDE_PROJECT_DIR` (set by Claude Code for an
  * enabled plugin's MCP server) and falls back to `process.cwd()`.
@@ -71,7 +71,7 @@ import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
 
 // --- Component B: typed gate-transition tooling (precondition helpers + locked setter) ---
 import { readState } from "./core/state-store";
-import { nextStageAfter, canonicalizeStage } from "./core/stages";
+import { nextStageAfterFor, canonicalizeStage } from "./core/stages";
 import {
   TIERS,
   WRITE_GATE_VALUES,
@@ -341,7 +341,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_stage_advance",
     description:
-      "Advance to the next engaged stage for the current tier. Calls canAdvanceStage (the full mechanical ladder: blocking drift, revise caps, failing verify, artifact drift, tier set, brownfield repo-map, decision obligations, open debates, the current stage's governing artifact, coverage at implementation-planning, all slices settled at implementation). Refuses with the first failing rung's stable error, or no_next_stage at the terminal stage. Writes current_stage via the locked+ledgered setter (source=th_stage_advance).",
+      "Advance to the next APPLICABLE engaged stage for the run (UX/UI stages are skipped when has_ui===false — #13). Calls canAdvanceStage (the full mechanical ladder: blocking drift, revise caps, failing verify, artifact drift, tier set, brownfield repo-map, decision obligations, open debates, the current stage's governing artifact, coverage at implementation-planning, all slices settled at implementation). Refuses with the first failing rung's stable error, or no_next_stage at the terminal stage. Writes current_stage via the locked+ledgered setter (source=th_stage_advance).",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => {
       const gs = gateState(paths);
@@ -350,10 +350,10 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       const adv = canAdvanceStage(paths, state);
       if (!adv.ok) return gateRefusal(adv);
       const current = canonicalizeStage(state.current_stage);
-      const next = nextStageAfter(current, state.tier);
+      const next = nextStageAfterFor(current, state);
       if (!next) {
         return failure({
-          human: "Already at the terminal engaged stage for this tier; there is no next stage to advance to.",
+          human: "Already at the terminal engaged stage for this run; there is no next stage to advance to.",
           data: { error: "no_next_stage", current_stage: current },
         });
       }

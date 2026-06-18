@@ -106,9 +106,10 @@ describe("REQ-CLI-BROWNFIELD-001: `th init --brownfield` flag is parsed and stam
 describe("REQ-CLI-STRICT-001: state set accepts the new write_gate `strict` value", () => {
   it("strict is accepted and reads back; an invalid value is rejected", () => {
     run(tp!.root, ["init"]);
-    expect(run(tp!.root, ["state", "set", "write_gate", "strict"]).status).toBe(0);
+    // write_gate is gate-owned (#11): a raw `state set` needs --emergency to force it.
+    expect(run(tp!.root, ["state", "set", "write_gate", "strict", "--emergency"]).status).toBe(0);
     expect(run(tp!.root, ["state", "get", "write_gate"]).stdout).toContain("strict");
-    expect(run(tp!.root, ["state", "set", "write_gate", "bogus"]).status).not.toBe(0);
+    expect(run(tp!.root, ["state", "set", "write_gate", "bogus", "--emergency"]).status).not.toBe(0);
   });
 });
 

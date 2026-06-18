@@ -10,8 +10,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
-import { runStateSet } from "../src/commands/state";
 import { runDriftAdd } from "../src/commands/drift";
+import { readState, writeState } from "../src/core/state-store";
+import type { TwinHarnessState } from "../src/core/state-schema";
 import { runReviseBump } from "../src/commands/revise";
 import { runArtifactRegister } from "../src/commands/artifact";
 import { runSlicesSync } from "../src/commands/slices";
@@ -27,6 +28,18 @@ function writeFile(t: TempProject, rel: string, content: string): void {
   const abs = path.join(t.root, ...rel.split("/"));
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, content, "utf8");
+}
+
+/**
+ * Position durable state for a test. Gate-owned fields (tier, current_stage,
+ * implementation_allowed, blast_radius_flags) can no longer be moved with a raw
+ * `th state set` after the #11 demotion, so setup uses the ungated low-level
+ * positioning writer directly. `interview_required: false` is passed on T2/T3
+ * positions so the new soft interview gate (#14) doesn't preempt the obligation
+ * under test (these tests are not about the interview gate).
+ */
+function position(t: TempProject, patch: Partial<TwinHarnessState>): void {
+  writeState(t.paths, { ...readState(t.paths).state!, ...patch });
 }
 
 describe("REQ-NEXT-001: no run / invalid state", () => {
@@ -47,7 +60,7 @@ describe("REQ-NEXT-002: blocking drift outranks everything else", () => {
   it("open blocking drift → kind resolve-blocking-drift", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2", interview_required: false });
     runDriftAdd(tp.paths, { layer: "requirement", ref: "SLICE-1 / TASK-1", discovery: "x", action: "paused" });
     expect(runNext(tp.paths).data?.kind).toBe("resolve-blocking-drift");
   });
@@ -57,7 +70,7 @@ describe("REQ-NEXT-003: a revise loop at cap escalates to the human", () => {
   it("revise count >= cap → kind escalate-revise", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2", interview_required: false });
     runReviseBump(tp.paths, "architecture");
     runReviseBump(tp.paths, "architecture");
     runReviseBump(tp.paths, "architecture"); // count 3 == default cap
@@ -77,16 +90,14 @@ describe("REQ-NEXT-005: current stage owes its produced artifact", () => {
   it("at requirements with no artifact on disk → kind produce-artifact", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
-    runStateSet(tp.paths, "current_stage", "requirements");
+    position(tp, { tier: "T2", current_stage: "requirements", interview_required: false });
     expect(runNext(tp.paths).data?.kind).toBe("produce-artifact");
   });
 
   it("artifact exists but unregistered → kind register-artifact", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
-    runStateSet(tp.paths, "current_stage", "requirements");
+    position(tp, { tier: "T2", current_stage: "requirements", interview_required: false });
     writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
     expect(runNext(tp.paths).data?.kind).toBe("register-artifact");
   });
@@ -94,8 +105,7 @@ describe("REQ-NEXT-005: current stage owes its produced artifact", () => {
   it("artifact produced + registered → advances to the next engaged stage", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
-    runStateSet(tp.paths, "current_stage", "requirements");
+    position(tp, { tier: "T2", current_stage: "requirements", interview_required: false });
     writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
     runArtifactRegister(tp.paths, "docs/01-requirements.md", 1);
     const res = runNext(tp.paths);
@@ -109,8 +119,7 @@ describe("REQ-NEXT-006: re-register a silently changed artifact before advancing
   it("registered artifact edited on disk → kind re-register-artifact", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
-    runStateSet(tp.paths, "current_stage", "requirements");
+    position(tp, { tier: "T2", current_stage: "requirements", interview_required: false });
     writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
     runArtifactRegister(tp.paths, "docs/01-requirements.md", 1);
     // Edit after registration → drift.
@@ -123,7 +132,7 @@ describe("REQ-NEXT-008: a failing suite routes to the Debugger before advancing"
   it("verify report failing → kind investigate-failure", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2", interview_required: false });
     runVerifyAdd(tp.paths, "false");
     runVerifyRun(tp.paths);
     expect(runNext(tp.paths).data?.kind).toBe("investigate-failure");
@@ -134,9 +143,12 @@ describe("REQ-NEXT-009: implementation stage dispatches build waves", () => {
   it("pending slices at implementation → kind dispatch-wave, action prefers `th build dispatch`", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
-    runStateSet(tp.paths, "current_stage", "implementation");
-    runStateSet(tp.paths, "slices", JSON.stringify([{ id: "SLICE-1", status: "pending", components: ["api"] }]));
+    position(tp, {
+      tier: "T2",
+      current_stage: "implementation",
+      interview_required: false,
+      slices: [{ id: "SLICE-1", status: "pending", components: ["api"] }],
+    });
     const res = runNext(tp.paths);
     expect(res.data?.kind).toBe("dispatch-wave");
     // Task 5: the action recommends the single-payload `th build dispatch` …
@@ -148,21 +160,27 @@ describe("REQ-NEXT-009: implementation stage dispatches build waves", () => {
   it("only in-progress slices remain → kind await-builders", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
-    runStateSet(tp.paths, "current_stage", "implementation");
-    runStateSet(tp.paths, "slices", JSON.stringify([{ id: "SLICE-1", status: "in-progress", components: ["api"] }]));
+    position(tp, {
+      tier: "T2",
+      current_stage: "implementation",
+      interview_required: false,
+      slices: [{ id: "SLICE-1", status: "in-progress", components: ["api"] }],
+    });
     expect(runNext(tp.paths).data?.kind).toBe("await-builders");
   });
 
   it("a dependency deadlock → kind stalled-build (not a cheery dispatch-wave)", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
-    runStateSet(tp.paths, "current_stage", "implementation");
-    runStateSet(tp.paths, "slices", JSON.stringify([
-      { id: "SLICE-1", status: "pending", components: ["a"], depends_on: ["SLICE-2"] },
-      { id: "SLICE-2", status: "pending", components: ["b"], depends_on: ["SLICE-1"] },
-    ]));
+    position(tp, {
+      tier: "T2",
+      current_stage: "implementation",
+      interview_required: false,
+      slices: [
+        { id: "SLICE-1", status: "pending", components: ["a"], depends_on: ["SLICE-2"] },
+        { id: "SLICE-2", status: "pending", components: ["b"], depends_on: ["SLICE-1"] },
+      ],
+    });
     expect(runNext(tp.paths).data?.kind).toBe("stalled-build");
   });
 });
@@ -171,7 +189,7 @@ describe("REQ-NEXT-012: brownfield repo-map freshness gates pre-implementation w
   it("brownfield + tier set + NO repo-map → kind refresh-repo-map", () => {
     tp = makeTempProject();
     runInit(tp.paths, { brownfield: true });
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2", interview_required: false });
     // No repo-map.json on disk → `th repo check` is no-map → must refresh first.
     const res = runNext(tp.paths);
     expect(res.data?.kind).toBe("refresh-repo-map");
@@ -181,7 +199,7 @@ describe("REQ-NEXT-012: brownfield repo-map freshness gates pre-implementation w
   it("brownfield + tier set + STALE repo-map → kind refresh-repo-map", () => {
     tp = makeTempProject();
     runInit(tp.paths, { brownfield: true });
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2", interview_required: false });
     // Build a fresh map, then mutate the tree so it drifts (stale).
     writeFile(tp, "src/foo.ts", "// REQ-001\nexport const x = 1;\n");
     runRepoMap(tp.paths, { write: true });
@@ -192,7 +210,7 @@ describe("REQ-NEXT-012: brownfield repo-map freshness gates pre-implementation w
   it("brownfield + tier set + FRESH repo-map → does NOT emit refresh-repo-map", () => {
     tp = makeTempProject();
     runInit(tp.paths, { brownfield: true });
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2", interview_required: false });
     writeFile(tp, "src/foo.ts", "// REQ-001\nexport const x = 1;\n");
     runRepoMap(tp.paths, { write: true }); // fresh snapshot of the current tree.
     expect(runNext(tp.paths).data?.kind).not.toBe("refresh-repo-map");
@@ -201,8 +219,7 @@ describe("REQ-NEXT-012: brownfield repo-map freshness gates pre-implementation w
   it("brownfield but implementation already unlocked → NOT refresh-repo-map (no build deadlock)", () => {
     tp = makeTempProject();
     runInit(tp.paths, { brownfield: true });
-    runStateSet(tp.paths, "tier", "T2");
-    runStateSet(tp.paths, "implementation_allowed", "true"); // building has begun.
+    position(tp, { tier: "T2", implementation_allowed: true, interview_required: false }); // building has begun.
     // No map (would be stale/absent), but the guard skips the gate once implementation is allowed.
     expect(runNext(tp.paths).data?.kind).not.toBe("refresh-repo-map");
   });
@@ -210,7 +227,7 @@ describe("REQ-NEXT-012: brownfield repo-map freshness gates pre-implementation w
   it("greenfield + no repo-map → NOT refresh-repo-map (gate is brownfield-only)", () => {
     tp = makeTempProject();
     runInit(tp.paths, {}); // greenfield.
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2", interview_required: false });
     expect(runNext(tp.paths).data?.kind).not.toBe("refresh-repo-map");
   });
 });
@@ -219,10 +236,10 @@ describe("REQ-NEXT-007: final-verification floor — slices then coverage then s
   it("unfinished slices at final-verification → kind finish-slices", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T1");
+    position(tp, { tier: "T1" });
     writeFile(tp, "docs/09-implementation-plan.md", "### SLICE-1\nComponents touched: api\n");
     runSlicesSync(tp.paths, { planFile: "docs/09-implementation-plan.md" });
-    runStateSet(tp.paths, "current_stage", "final-verification");
+    position(tp, { current_stage: "final-verification" });
     expect(runNext(tp.paths).data?.kind).toBe("finish-slices");
   });
 });
@@ -231,13 +248,15 @@ describe("REQ-NEXT-011: final-verification mirrors the stop-gate verify-suite ch
   it("verify configured but never run at final-verification → kind run-verify", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T1");
+    position(tp, { tier: "T1" });
     writeFile(tp, "docs/09-implementation-plan.md", "### SLICE-1\nComponents touched: api\n");
     runSlicesSync(tp.paths, { planFile: "docs/09-implementation-plan.md" });
     // Settle the slice so the finish-slices floor is clear; configure a verify
     // command but never run it — exactly what the stop-gate blocks completion on.
-    runStateSet(tp.paths, "slices", JSON.stringify([{ id: "SLICE-1", status: "done", components: ["api"] }]));
-    runStateSet(tp.paths, "current_stage", "final-verification");
+    position(tp, {
+      slices: [{ id: "SLICE-1", status: "done", components: ["api"] }],
+      current_stage: "final-verification",
+    });
     runVerifyAdd(tp.paths, "true");
     expect(runNext(tp.paths).data?.kind).toBe("run-verify");
   });
@@ -245,11 +264,13 @@ describe("REQ-NEXT-011: final-verification mirrors the stop-gate verify-suite ch
   it("verify configured AND run green at final-verification → no run-verify obligation", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T1");
+    position(tp, { tier: "T1" });
     writeFile(tp, "docs/09-implementation-plan.md", "### SLICE-1\nComponents touched: api\n");
     runSlicesSync(tp.paths, { planFile: "docs/09-implementation-plan.md" });
-    runStateSet(tp.paths, "slices", JSON.stringify([{ id: "SLICE-1", status: "done", components: ["api"] }]));
-    runStateSet(tp.paths, "current_stage", "final-verification");
+    position(tp, {
+      slices: [{ id: "SLICE-1", status: "done", components: ["api"] }],
+      current_stage: "final-verification",
+    });
     runVerifyAdd(tp.paths, "true");
     runVerifyRun(tp.paths); // green (`true` exits 0)
     expect(runNext(tp.paths).data?.kind).not.toBe("run-verify");
@@ -266,11 +287,13 @@ describe("REQ-NEXT-011: final-verification mirrors the stop-gate verify-suite ch
   it("REQ-NEXT-011 (flake fix): a green report is deterministically NOT judged un-run across many reads", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T1");
+    position(tp, { tier: "T1" });
     writeFile(tp, "docs/09-implementation-plan.md", "### SLICE-1\nComponents touched: api\n");
     runSlicesSync(tp.paths, { planFile: "docs/09-implementation-plan.md" });
-    runStateSet(tp.paths, "slices", JSON.stringify([{ id: "SLICE-1", status: "done", components: ["api"] }]));
-    runStateSet(tp.paths, "current_stage", "final-verification");
+    position(tp, {
+      slices: [{ id: "SLICE-1", status: "done", components: ["api"] }],
+      current_stage: "final-verification",
+    });
     runVerifyAdd(tp.paths, "true");
     runVerifyRun(tp.paths); // green report on disk
 
@@ -321,7 +344,7 @@ describe("REQ-NEXT-010: --explain adds a WHY for the chosen obligation", () => {
   it("the highest-priority obligation's why explains why it outranks the rest", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T2");
+    position(tp, { tier: "T2", interview_required: false });
     // Open blocking drift is the top-priority obligation; its WHY must cite the stop-gate.
     runDriftAdd(tp.paths, { layer: "requirement", ref: "SLICE-1 / TASK-1", discovery: "x", action: "paused" });
     const res = runNext(tp.paths, { explain: true });

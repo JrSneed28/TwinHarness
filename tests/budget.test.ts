@@ -130,7 +130,7 @@ describe("Track A-2: runBudgetCheck", () => {
   it("sources the tier default from state when --max omitted", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "tier", "T3");
+    runStateSet(tp.paths, "tier", "T3", { emergency: true });
     const res = runBudgetCheck(tp.paths, { filesRead: 1 });
     const d = res.data as Record<string, unknown>;
     expect(d.budget).toBe(TIER_BUDGET_DEFAULTS.T3);
@@ -141,7 +141,7 @@ describe("Track A-2: runBudgetCheck", () => {
   it("sources the persisted state.max_tokens over the tier default", () => {
     tp = makeTempProject();
     runInit(tp.paths, { maxTokens: 150 });
-    runStateSet(tp.paths, "tier", "T3");
+    runStateSet(tp.paths, "tier", "T3", { emergency: true });
     const res = runBudgetCheck(tp.paths, { filesRead: 1 });
     const d = res.data as Record<string, unknown>;
     expect(d.budget).toBe(150000);

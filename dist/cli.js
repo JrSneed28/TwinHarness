@@ -77,7 +77,7 @@ const HELP = `th — TwinHarness mechanical CLI (records and computes; never dec
 Usage:
   th init [--force] [--brownfield]  Scaffold docs/, .twinharness/state.json, drift-log.md
   th state get [dotted.path]        Print state.json (or one value)
-  th state set <dotted.key> <value> Patch state.json (refuses invalid results; rejects unknown keys)
+  th state set <dotted.key> <value> Patch state.json (refuses invalid results; rejects unknown keys; gate-owned fields require --emergency — prefer the typed gate commands below)
   th state status                   Human-readable tier/stage/gate snapshot
   th state verify                   Validate state.json (exit 0 = valid)
   th revise bump <mode> [--cap N]   Increment revise-loop count (computes escalate = count >= cap)
@@ -85,6 +85,9 @@ Usage:
   th revise reset <mode>            Zero revise-loop count (stage passed / zero issues)
   th tier classify <brief.json>     Advisory Tier-0 eligibility + detected blast-radius flags
   th tier veto-check <brief.json>   Mechanical veto gate (exit 3 when a blast-radius flag forbids T0)
+  th tier record <T0-T3>            Typed gate command: validate + record the run's tier (gate-checked; upgrades backfill skipped stages)
+  th stage advance                  Typed gate command: advance to the next engaged stage when the full gate ladder clears
+  th implementation unlock [--lock] Typed gate command: unlock implementation when the gate ladder clears (--lock re-locks)
   th artifact register <file> --version <n>  Content-hash a file and record it in approved_artifacts
   th artifact list                  List recorded approved artifacts (file, version, hash)
   th coverage check [--reqs F] [--plan F] [--tests D] [--scope F]
@@ -234,7 +237,9 @@ Global flags:
   --proposer <n>    (decision add) Proposer attribution (default: orchestrator)
   --reject          (decision approve) Append a rejected event instead of approved (mutually exclusive with --supersede)
   --supersede <id>  (decision approve) Mark this (approved) decision superseded by <id> (mutually exclusive with --reject)
-  --as <actor>      (decision approve) Approver attribution (attribution only — NOT a barrier; default TH_APPROVAL_ACTOR or "human")`;
+  --as <actor>      (decision approve) Approver attribution (attribution only — NOT a barrier; default TH_APPROVAL_ACTOR or "human")
+  --lock            (implementation unlock) Re-lock implementation (set implementation_allowed=false) instead of unlocking
+  --emergency       (state set) Force a raw write to a gate-owned field, bypassing the typed gate ladder (loud + audit-ledgered)`;
 /** Boolean flags (presence = true). */
 const BOOLEAN_FLAGS = {
     "--json": "json",
@@ -258,6 +263,8 @@ const BOOLEAN_FLAGS = {
     "--reject": "reject",
     "--advise": "advise",
     "--self-test": "selfTest",
+    "--lock": "lock",
+    "--emergency": "emergency",
 };
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
 const STRING_FLAGS = {
@@ -359,6 +366,8 @@ function parseArgs(argv) {
         reject: false,
         advise: false,
         selfTest: false,
+        lock: false,
+        emergency: false,
     };
     const positionals = [];
     const unknownFlags = [];
@@ -627,6 +636,8 @@ function dispatch(parsed) {
                     return (0, stage_1.runStageDescribe)(rest[0]);
                 case "list":
                     return (0, stage_1.runStageList)();
+                case "advance":
+                    return (0, stage_1.runStageAdvance)(paths);
                 default:
                     return (0, output_1.failure)({ human: `unknown 'stage' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
@@ -644,7 +655,7 @@ function dispatch(parsed) {
                 case "set":
                     if (rest.length < 2)
                         return (0, output_1.failure)({ human: "usage: th state set <dotted.key> <value>" });
-                    return (0, state_1.runStateSet)(paths, rest[0], rest.slice(1).join(" "));
+                    return (0, state_1.runStateSet)(paths, rest[0], rest.slice(1).join(" "), { emergency: parsed.flags.emergency });
                 case "status":
                     return (0, state_1.runStateStatus)(paths);
                 case "verify":
@@ -658,8 +669,17 @@ function dispatch(parsed) {
                     return (0, tier_1.runTierClassify)(paths, rest[0]);
                 case "veto-check":
                     return (0, tier_1.runTierVetoCheck)(paths, rest[0]);
+                case "record":
+                    return (0, tier_1.runTierRecord)(paths, rest[0]);
                 default:
                     return (0, output_1.failure)({ human: `unknown 'tier' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "implementation":
+            switch (sub) {
+                case "unlock":
+                    return (0, stage_1.runImplementationUnlock)(paths, { lock: parsed.flags.lock });
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'implementation' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
         case "artifact":
             switch (sub) {

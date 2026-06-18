@@ -6,7 +6,7 @@ import { type CommandResult, renderResult, failure, success } from "./core/outpu
 import { runInit } from "./commands/init";
 import { runStateGet, runStateSet, runStateStatus, runStateVerify } from "./commands/state";
 import { runReviseBump, runReviseStatus, runReviseReset } from "./commands/revise";
-import { runTierClassify, runTierVetoCheck } from "./commands/tier";
+import { runTierClassify, runTierVetoCheck, runTierRecord } from "./commands/tier";
 import { runArtifactRegister, runArtifactList } from "./commands/artifact";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
 import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from "./commands/collab";
@@ -41,7 +41,13 @@ import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
 import { runMigrate } from "./commands/migrate";
 import { runDoctor } from "./commands/doctor";
 import { runContextEstimate, runContextPack } from "./commands/context";
-import { runStageCurrent, runStageDescribe, runStageList } from "./commands/stage";
+import {
+  runStageCurrent,
+  runStageDescribe,
+  runStageList,
+  runStageAdvance,
+  runImplementationUnlock,
+} from "./commands/stage";
 import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite, runHandoffVerify, runResume } from "./commands/handoff";
 import { runManifestExport } from "./commands/manifest";
@@ -69,7 +75,7 @@ const HELP = `th — TwinHarness mechanical CLI (records and computes; never dec
 Usage:
   th init [--force] [--brownfield]  Scaffold docs/, .twinharness/state.json, drift-log.md
   th state get [dotted.path]        Print state.json (or one value)
-  th state set <dotted.key> <value> Patch state.json (refuses invalid results; rejects unknown keys)
+  th state set <dotted.key> <value> Patch state.json (refuses invalid results; rejects unknown keys; gate-owned fields require --emergency — prefer the typed gate commands below)
   th state status                   Human-readable tier/stage/gate snapshot
   th state verify                   Validate state.json (exit 0 = valid)
   th revise bump <mode> [--cap N]   Increment revise-loop count (computes escalate = count >= cap)
@@ -77,6 +83,9 @@ Usage:
   th revise reset <mode>            Zero revise-loop count (stage passed / zero issues)
   th tier classify <brief.json>     Advisory Tier-0 eligibility + detected blast-radius flags
   th tier veto-check <brief.json>   Mechanical veto gate (exit 3 when a blast-radius flag forbids T0)
+  th tier record <T0-T3>            Typed gate command: validate + record the run's tier (gate-checked; upgrades backfill skipped stages)
+  th stage advance                  Typed gate command: advance to the next engaged stage when the full gate ladder clears
+  th implementation unlock [--lock] Typed gate command: unlock implementation when the gate ladder clears (--lock re-locks)
   th artifact register <file> --version <n>  Content-hash a file and record it in approved_artifacts
   th artifact list                  List recorded approved artifacts (file, version, hash)
   th coverage check [--reqs F] [--plan F] [--tests D] [--scope F]
@@ -226,7 +235,9 @@ Global flags:
   --proposer <n>    (decision add) Proposer attribution (default: orchestrator)
   --reject          (decision approve) Append a rejected event instead of approved (mutually exclusive with --supersede)
   --supersede <id>  (decision approve) Mark this (approved) decision superseded by <id> (mutually exclusive with --reject)
-  --as <actor>      (decision approve) Approver attribution (attribution only — NOT a barrier; default TH_APPROVAL_ACTOR or "human")`;
+  --as <actor>      (decision approve) Approver attribution (attribution only — NOT a barrier; default TH_APPROVAL_ACTOR or "human")
+  --lock            (implementation unlock) Re-lock implementation (set implementation_allowed=false) instead of unlocking
+  --emergency       (state set) Force a raw write to a gate-owned field, bypassing the typed gate ladder (loud + audit-ledgered)`;
 
 export interface ParsedArgs {
   positionals: string[];
@@ -317,6 +328,8 @@ export interface ParsedArgs {
     slicesBuilt?: number;
     toolCalls?: number;
     artifacts?: number;
+    lock: boolean;
+    emergency: boolean;
   };
 }
 
@@ -345,6 +358,8 @@ const BOOLEAN_FLAGS: Record<string, FlagField> = {
   "--reject": "reject",
   "--advise": "advise",
   "--self-test": "selfTest",
+  "--lock": "lock",
+  "--emergency": "emergency",
 };
 
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
@@ -449,6 +464,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     reject: false,
     advise: false,
     selfTest: false,
+    lock: false,
+    emergency: false,
   };
   const positionals: string[] = [];
   const unknownFlags: string[] = [];
@@ -711,6 +728,8 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           return runStageDescribe(rest[0]);
         case "list":
           return runStageList();
+        case "advance":
+          return runStageAdvance(paths);
         default:
           return failure({ human: `unknown 'stage' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
@@ -727,7 +746,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           return runStateGet(paths, rest[0]);
         case "set":
           if (rest.length < 2) return failure({ human: "usage: th state set <dotted.key> <value>" });
-          return runStateSet(paths, rest[0]!, rest.slice(1).join(" "));
+          return runStateSet(paths, rest[0]!, rest.slice(1).join(" "), { emergency: parsed.flags.emergency });
         case "status":
           return runStateStatus(paths);
         case "verify":
@@ -741,8 +760,17 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           return runTierClassify(paths, rest[0]);
         case "veto-check":
           return runTierVetoCheck(paths, rest[0]);
+        case "record":
+          return runTierRecord(paths, rest[0]);
         default:
           return failure({ human: `unknown 'tier' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    case "implementation":
+      switch (sub) {
+        case "unlock":
+          return runImplementationUnlock(paths, { lock: parsed.flags.lock });
+        default:
+          return failure({ human: `unknown 'implementation' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
     case "artifact":
       switch (sub) {

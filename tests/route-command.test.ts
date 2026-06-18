@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import { runRoute } from "../src/commands/route";
 import { runInit } from "../src/commands/init";
-import { runStateSet } from "../src/commands/state";
+import { readState, writeState } from "../src/core/state-store";
 import { runTelemetrySet } from "../src/commands/telemetry";
 import { telemetryLogPath } from "../src/core/telemetry";
 import { makeTempProject, type TempProject } from "./helpers";
@@ -22,8 +22,12 @@ describe("th route command", () => {
   it("sources tier + blast flags from state (spec security on T3+blast → opus/max)", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "blast_radius_flags", '["authentication"]');
-    runStateSet(tp.paths, "tier", "T3");
+    // tier + blast_radius_flags are gate-owned (#11): position them with the ungated writer.
+    writeState(tp.paths, {
+      ...readState(tp.paths).state!,
+      blast_radius_flags: ["authentication"],
+      tier: "T3",
+    });
     const r = runRoute(tp.paths, { agent: "spec", mode: "security" });
     expect((r.data as any).model).toBe("opus");
     expect((r.data as any).effort).toBe("max");

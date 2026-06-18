@@ -86,8 +86,8 @@ th drift add --layer derived --ref "QA/<scenario-id>" \
 Use `--layer requirement` (blocking) only when the finding contradicts `docs/01-requirements.md` or
 `docs/02-scope.md` — it pauses the build, so use it precisely. For non-blocking Orchestrator visibility
 (PASS confirmations, flaky signals, environmental notes), post a blackboard fragment (MCP preferred:
-`mcp__plugin_twinharness_th__th_collab_fragment { content: "<summary>" }`; CLI:
-`th collab fragment --content "<summary>"`).
+`mcp__plugin_twinharness_th__th_collab_fragment { stage: "qa", round: "tester", name: "QA-001.md", text: "<finding summary>" }`; CLI:
+`th collab fragment --stage qa --round tester --name QA-001.md --text "<finding summary>"`).
 
 ## What you do NOT do
 

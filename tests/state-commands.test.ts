@@ -68,15 +68,17 @@ describe("REQ-STATE-CMD: state get/set/verify/status", () => {
 
   it("set persists valid JSON-parsed values", () => {
     tp = init();
-    expect(runStateSet(tp.paths, "tier", "T2").ok).toBe(true);
+    // tier/implementation_allowed are gate-owned (#11): a raw set needs --emergency.
+    expect(runStateSet(tp.paths, "tier", "T2", { emergency: true }).ok).toBe(true);
     expect(readState(tp.paths).state?.tier).toBe("T2");
-    expect(runStateSet(tp.paths, "implementation_allowed", "true").ok).toBe(true);
+    expect(runStateSet(tp.paths, "implementation_allowed", "true", { emergency: true }).ok).toBe(true);
     expect(readState(tp.paths).state?.implementation_allowed).toBe(true);
   });
 
   it("set refuses an invalid value and leaves state unchanged", () => {
     tp = init();
-    const res = runStateSet(tp.paths, "tier", "T9");
+    // Even under --emergency the write still validates: tier "T9" is rejected.
+    const res = runStateSet(tp.paths, "tier", "T9", { emergency: true });
     expect(res.ok).toBe(false);
     expect(res.data?.error).toBe("would_be_invalid");
     expect(readState(tp.paths).state?.tier).toBeNull();
@@ -165,9 +167,11 @@ describe("REQ-STATE-CMD-MANAGED: state set refuses managed fields", () => {
     expect(readState(tp.paths).state?.drift_open_blocking).toBe(before);
   });
 
-  it("implementation_allowed (non-managed gate field) still succeeds", () => {
+  it("implementation_allowed (gate field, not a managed counter) succeeds under --emergency", () => {
     tp = init();
-    const res = runStateSet(tp.paths, "implementation_allowed", "true");
+    // Not a managed counter, so it is never refused with `managed_field`; it is
+    // gate-owned (#11), so a raw set still needs --emergency, then succeeds.
+    const res = runStateSet(tp.paths, "implementation_allowed", "true", { emergency: true });
     expect(res.ok).toBe(true);
     expect(readState(tp.paths).state?.implementation_allowed).toBe(true);
   });

@@ -5,7 +5,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
-import { runStateSet } from "../src/commands/state";
+import { readState, writeState } from "../src/core/state-store";
 import { runStageList, runStageDescribe, runStageCurrent } from "../src/commands/stage";
 import { STAGE_PIPELINE } from "../src/core/stages";
 
@@ -56,7 +56,8 @@ describe("REQ-STAGE-002: stage current reads state.current_stage", () => {
   it("an engaged stage resolves its contract", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    runStateSet(tp.paths, "current_stage", "contracts");
+    // current_stage is gate-owned (#11): position it with the ungated low-level writer.
+    writeState(tp.paths, { ...readState(tp.paths).state!, current_stage: "contracts" });
     const res = runStageCurrent(tp.paths);
     expect(res.ok).toBe(true);
     const c = res.data?.contract as { stage: string; humanGate: boolean };

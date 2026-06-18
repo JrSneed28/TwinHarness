@@ -71,6 +71,17 @@ export type WriteGate = (typeof WRITE_GATE_VALUES)[number];
 export const PROJECT_MODES = ["greenfield", "brownfield"] as const;
 export type ProjectMode = (typeof PROJECT_MODES)[number];
 
+/**
+ * Delivery mode (audit finding #2). Distinguishes a normal CODE project (which
+ * MUST produce implementation slices) from a no-code / documentation-only project
+ * (where an empty slice set during `implementation` is legitimately settled).
+ * Orthogonal to `project_mode` (greenfield/brownfield), which is why this is a
+ * SEPARATE field rather than reusing that name. Absent ⇒ "code" (the safe default
+ * that keeps the slice obligation in force for existing flows).
+ */
+export const DELIVERY_MODES = ["code", "no-code", "documentation-only"] as const;
+export type DeliveryMode = (typeof DELIVERY_MODES)[number];
+
 export interface TwinHarnessState {
   /**
    * State-schema version. Absent on legacy files (implicitly v1); stamped by
@@ -117,6 +128,31 @@ export interface TwinHarnessState {
    * the legacy `interview_threshold` in schema v2 — the confidence/cutoff semantic flip.)
    */
   interview_cutoff?: number;
+  /**
+   * Delivery mode (audit finding #2). Absent ⇒ "code": a code project that MUST
+   * produce implementation slices, so an EMPTY slice set during the `implementation`
+   * stage is INVALID (the gate and `th next` agree, via `implementationRequiresSlices`).
+   * For "no-code" / "documentation-only" an empty slice set stays vacuously settled.
+   * Omitted from serialization when absent so existing state files hash identically.
+   */
+  delivery_mode?: DeliveryMode;
+  /**
+   * Whether this project has a UI surface (audit finding #13). Absent ⇒ true — the
+   * conservative default that preserves today's behaviour (UX/UI stages engaged for
+   * every tier). When explicitly false the `ux-design`/`ui-design` stages are not
+   * applicable and are mechanically satisfied (treated as "N/A — no UI surface")
+   * rather than silently skipped — see `engagedStagesFor` / `nextStageAfterFor`.
+   * Omitted from serialization when absent so existing state files hash identically.
+   */
+  has_ui?: boolean;
+  /**
+   * Whether a clarity interview must reach readiness before advancing past
+   * `requirements` (audit finding #14, soft gate). Absent ⇒ COMPUTED from tier:
+   * true for T2/T3, false for T0/T1/unclassified (see `interviewRequired`). A literal
+   * boolean here overrides that default. NOT gate-owned. Omitted from serialization
+   * when absent so existing state files hash identically.
+   */
+  interview_required?: boolean;
   /**
    * Per-session context-token budget (Track A-2). When present it is the resolved
    * budget IN TOKENS (e.g. 150000), persisted so a `--max-tokens` override survives
@@ -169,6 +205,9 @@ export const STATE_FIELD_ORDER: (keyof TwinHarnessState)[] = [
   "write_gate",
   "project_mode",
   "interview_cutoff",
+  "delivery_mode",
+  "has_ui",
+  "interview_required",
   "max_tokens",
 ];
 
@@ -356,6 +395,23 @@ export function validateState(value: unknown): ValidationResult {
     ) {
       issues.push({ path: "interview_cutoff", message: "must be a finite number in [0,1] or absent" });
     }
+  }
+
+  // Optional delivery_mode field (audit finding #2) — when present, one of DELIVERY_MODES.
+  if (v.delivery_mode !== undefined) {
+    if (typeof v.delivery_mode !== "string" || !(DELIVERY_MODES as readonly string[]).includes(v.delivery_mode)) {
+      issues.push({ path: "delivery_mode", message: `must be one of ${DELIVERY_MODES.join(", ")} or absent` });
+    }
+  }
+
+  // Optional has_ui field (audit finding #13) — when present, a boolean. Absent ⇒ true.
+  if (v.has_ui !== undefined && typeof v.has_ui !== "boolean") {
+    issues.push({ path: "has_ui", message: "must be a boolean or absent" });
+  }
+
+  // Optional interview_required field (audit finding #14) — when present, a boolean.
+  if (v.interview_required !== undefined && typeof v.interview_required !== "boolean") {
+    issues.push({ path: "interview_required", message: "must be a boolean or absent" });
   }
 
   // Optional max_tokens field (Track A-2) — when present, a positive integer
