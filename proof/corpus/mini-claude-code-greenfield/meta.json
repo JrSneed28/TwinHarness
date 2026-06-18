@@ -1,0 +1,16 @@
+{
+  "id": "mini-claude-code-greenfield",
+  "size": "medium",
+  "domain": "agentic-cli",
+  "tierHint": "T2",
+  "type": "greenfield",
+  "acceptanceCriteria": [
+    "A codebase reader scans a target directory into a file map (paths + language/size) and returns requested file contents, respecting an ignore list.",
+    "A multi-file editor applies create/overwrite/string-replace edits across files atomically — all-or-nothing — and reports what changed.",
+    "A test runner invokes the target project's test command as a subprocess and classifies pass/fail from the exit code and captured output.",
+    "A git committer stages changed files and creates a commit with a generated message, reports the commit hash, and no-ops when nothing changed.",
+    "An agent loop sequences read -> plan -> edit -> run tests -> commit via a pluggable planner, with bounded retry on a failing test run, driven in tests by a deterministic fake planner.",
+    "A colored terminal UI resembling Claude Code's layout renders a header, a scrolling transcript of tool calls/results with distinct colors, and a status line; render/format logic is unit-tested separately from terminal I/O.",
+    "Unit, integration, and end-to-end tests cover the read -> edit -> run-tests -> commit lifecycle without requiring network access."
+  ]
+}

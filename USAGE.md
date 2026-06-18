@@ -956,9 +956,9 @@ Pre-edit blast-radius analysis over the persisted `repo-map.json`. Reads no stat
 | `map_invalid-json` / `map_schema` / `map_version` | Map file malformed or unknown version | Run `th repo map` to regenerate |
 | `unknown_slice` | `--slice` names no known slice | Check `th state status` for valid slice IDs |
 
-#### MCP tools (registered count 38)
+#### MCP tools (registered count 63)
 
-38 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin (REQ-RU-051 — identical code path). The four repo-understanding tools are shown below; the operational proof suite also registers the read/coordination-only `th_proof_run`, `th_proof_component`, and `th_proof_report` (tail-appended, never gate-mutating):
+63 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin (REQ-RU-051 — identical code path). The four repo-understanding tools are shown below; the operational proof suite also registers the read/coordination-only `th_proof_run`, `th_proof_component`, and `th_proof_report`, and the interview/init layer registers the store-only `th_interview_start`, `th_interview_record`, `th_interview_status` plus the idempotent (no-force) `th_init`. The MCP-tool-expansion then adds 21 more (42 → 63): 5 typed, precondition-gated gate-transition tools (`th_tier_record`, `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`, `th_blast_radius_record`) that safely mutate `GATE_OWNED` fields, plus 16 wired handlers (`th_drift_list`, `th_drift_resolve`, `th_coverage_report`, `th_artifact_register`, `th_artifact_list`, `th_verify_add`, `th_verify_list`, `th_verify_clear`, `th_verify_run`, `th_stage_current`, `th_stage_describe`, `th_stage_list`, `th_doctor`, `th_scorecard`, `th_slices_sync`, `th_slice_set_status`):
 
 | Tool name | CLI equivalent | Notes |
 |---|---|---|
@@ -1003,8 +1003,8 @@ process.
 ```
 .claude-plugin/   plugin manifest + marketplace.json (installation wiring)
 .github/          CI workflow (ci.yml — typecheck, build, dist-sync, test on every push/PR)
-agents/           15 agent prompt files
-commands/         4 Claude Code command files (th-run, th-status, th-drift, th-escalate)
+agents/           16 agent prompt files
+commands/         18 Claude Code command files (4 original + 2 proof + 12 curated th-* verbs)
 dist/             compiled CLI — committed on purpose; no build step at install time
 hooks/            Stop hook wiring (hooks.json → th hook stop-gate)
 schemas/          published JSON Schemas for state.json and brief.json (draft-07; editor validation)
@@ -1093,7 +1093,7 @@ Three invariants are enforced by `tests/plugin-manifest.test.ts` — do not figh
 - **Components never call a bare `th`.** Every skill/command/agent resolves the CLI via
   `${CLAUDE_PLUGIN_ROOT}/dist/cli.js` (substituted by Claude Code at load time), because installed
   users don't have `th` on PATH.
-- **15 agents, 4 commands, 1 skill.** The manifest test verifies these counts automatically via
+- **16 agents, 18 commands, 2 skills.** The manifest test verifies these counts automatically via
   `readdirSync` — adding or removing agents will surface immediately.
 - **Version sync.** `plugin.json` version must equal `package.json` version.
 

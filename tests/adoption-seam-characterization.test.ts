@@ -37,10 +37,12 @@ describe("SLICE-0 characterization: MCP tool registry baseline (Seam B)", () => 
    *
    * Anchor: REQ-105
    */
-  it("REQ-105: test_REQ105_tool_count_incremental_path_16_to_38 — TOOL_DEFS.length is exactly 38 after the coordination-primitive layer (th_build_dispatch/plan + th_artifact_*/collab_*/debate_*) plus the proof suite (th_proof_run/component/report)", () => {
+  it("REQ-105: test_REQ105_tool_count_incremental_path_16_to_63 — TOOL_DEFS.length is exactly 63 after the coordination-primitive layer (th_build_dispatch/plan + th_artifact_*/collab_*/debate_*) plus the proof suite (th_proof_run/component/report) plus the interview/init tools (th_interview_*/th_init) plus the MCP-tool-expansion (5 typed gate-transition tools + 16 wired handlers)", () => {
     // The coordination-primitive layer advances the baseline from 23 to 35; the
-    // operational proof suite appends th_proof_run/component/report → 38.
-    expect(TOOL_DEFS.length).toBe(38);
+    // operational proof suite appends th_proof_run/component/report → 38; the
+    // interview/init tools (th_interview_*/th_init) append → 42; and the
+    // MCP-tool-expansion adds 5 typed gate-transition tools + 16 wired handlers → 63.
+    expect(TOOL_DEFS.length).toBe(63);
   });
 
   /**
@@ -97,16 +99,18 @@ describe("SLICE-0 characterization: th_decision_approve absent from TOOL_DEFS (S
    *
    * Anchor: REQ-408
    */
-  it("REQ-408: test_REQ408_mcp_has_no_decision_approve_tool_count_38 — th_decision_approve absent from TOOL_DEFS; count invariant holds at 38", () => {
+  it("REQ-408: test_REQ408_mcp_has_no_decision_approve_tool_count_63 — th_decision_approve absent from TOOL_DEFS; count invariant holds at 63", () => {
     const names = TOOL_DEFS.map((t) => t.name);
 
     // The approve tool must NEVER appear — this invariant is non-negotiable (RULE-011, INV-005).
     expect(names).not.toContain("th_decision_approve");
 
     // The coordination-primitive layer lands the count at 35; the proof suite appends
-    // th_proof_run/component/report → 38. th_decision_approve stays permanently absent
-    // (decision approval is a human gate, never an MCP tool).
-    expect(TOOL_DEFS.length).toBe(38);
+    // th_proof_run/component/report → 38; th_interview_*/th_init → 42; the
+    // MCP-tool-expansion adds 5 typed gate-transition tools + 16 wired handlers → 63.
+    // th_decision_approve stays permanently absent (decision approval is a human
+    // gate, never an MCP tool).
+    expect(TOOL_DEFS.length).toBe(63);
   });
 });
 

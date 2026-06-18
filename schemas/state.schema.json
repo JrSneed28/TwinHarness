@@ -92,6 +92,12 @@
       "type": "string",
       "enum": ["greenfield", "brownfield"],
       "description": "greenfield (default/absent) or brownfield (adopting an existing codebase). Set by th init --brownfield."
+    },
+    "interview_threshold": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Resolved ambiguity-gate threshold for th:run --interview (spec R15). Absent ⇒ default 0.20. Not gate-owned. Omitted from serialization when absent so existing state files hash identically."
     }
   }
 }

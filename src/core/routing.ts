@@ -38,8 +38,17 @@ export interface RouteDecision {
   rationale: string;
 }
 
-/** Heavy design modes that escalate to opus on a T3 or blast-radius project. */
-const OPUS_DESIGN_MODES = new Set(["architecture", "security", "failure-modes", "technical-design"]);
+/** Heavy design modes that route to opus unconditionally (tier/blast may still raise effort). */
+const OPUS_DESIGN_MODES = new Set([
+  "architecture",
+  "technical-design",
+  "security",
+  "failure-modes",
+  "adrs",
+  "contracts",
+  "ux-design",
+  "ui-design",
+]);
 /** Critic modes that escalate to opus on a blast-radius project. */
 const OPUS_CRITIC_MODES = new Set(["slice", "code-review"]);
 /** Agents whose frontmatter default is already opus. */
@@ -47,9 +56,11 @@ const OPUS_DEFAULT_AGENTS = new Set(["orchestrator", "vertical-slice"]);
 
 /**
  * Map the prose routing table to a {model, effort} decision. The effort ladder:
- * haiku→low; default sonnet→medium (high on T3); opus escalations→high, →xhigh
- * when T3 AND blast, →max for the single most extreme case (a security model on a
- * T3 blast-radius project).
+ * haiku→low; default sonnet→medium (high on T3). Heavy design modes route to opus
+ * UNCONDITIONALLY at effort high, raised to xhigh when T3 AND blast, and to max for
+ * the single most extreme case (a security model on a T3 blast-radius project).
+ * Builder/Tester climb a tier ladder: T0 sonnet/high, T1 opus/medium, T2 opus/high,
+ * T3 opus/xhigh; a blast-radius component forces opus regardless of tier.
  */
 export function computeRoute(input: RouteInput): RouteDecision {
   const agent = input.agent;
@@ -63,15 +74,15 @@ export function computeRoute(input: RouteInput): RouteDecision {
     return { model: "haiku", effort: "low", rationale: "trivial mechanical summarization (§2)" };
   }
 
-  // Spec (or stage producer) in a heavy design mode on a T3 / blast-radius project.
-  if (mode && OPUS_DESIGN_MODES.has(mode) && (t3 || blast) && agent !== "critic") {
+  // Spec (or stage producer) in a heavy design mode → opus unconditionally (tier/blast raise effort).
+  if (mode && OPUS_DESIGN_MODES.has(mode) && agent !== "critic") {
     if (mode === "security" && t3 && blast) {
       return { model: "opus", effort: "max", rationale: `security design on a T3 blast-radius project (${mode}, §2/§15.S)` };
     }
     return {
       model: "opus",
       effort: t3 && blast ? "xhigh" : "high",
-      rationale: `heavy design mode "${mode}" on ${t3 ? "T3" : "a blast-radius project"} (§2)`,
+      rationale: `heavy design mode "${mode}" → opus unconditionally (§2)`,
     };
   }
 
@@ -84,9 +95,16 @@ export function computeRoute(input: RouteInput): RouteDecision {
     };
   }
 
-  // Builder on a slice touching a blast-radius component.
-  if (agent === "builder" && (input.componentBlast || blast)) {
-    return { model: "opus", effort: "high", rationale: "builder on a blast-radius component (§2)" };
+  // Builder / Tester climb a tier ladder; a blast-radius component forces opus.
+  if (agent === "builder" || agent === "tester") {
+    if (input.componentBlast || blast) {
+      const effort: RouteEffort = t3 ? "xhigh" : tier === "T2" ? "high" : tier === "T1" ? "medium" : "high";
+      return { model: "opus", effort, rationale: `${agent} on a blast-radius component (§2)` };
+    }
+    if (t3) return { model: "opus", effort: "xhigh", rationale: `${agent} T3 tier ladder (§2)` };
+    if (tier === "T2") return { model: "opus", effort: "high", rationale: `${agent} T2 tier ladder (§2)` };
+    if (tier === "T1") return { model: "opus", effort: "medium", rationale: `${agent} T1 tier ladder (§2)` };
+    return { model: "sonnet", effort: "high", rationale: `${agent} T0 tier floor (§2)` };
   }
 
   // Orchestrator & Vertical-Slice default to opus (frontmatter default).

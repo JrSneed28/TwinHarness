@@ -392,9 +392,9 @@ function buildFaultsCard(): ReportCard {
 }
 
 /** Component 7 (containment) card — exact NAME-SET allowlist + guards + GATE_OWNED + no-network. */
-function buildContainmentCard(toolNames: readonly string[]): ReportCard {
+function buildContainmentCard(toolNames: readonly string[], repoRoot: string): ReportCard {
   const C: ProofComponent = "containment";
-  const report = assertContainment({ toolNames });
+  const report = assertContainment({ toolNames, repoRoot });
   return { component: C, verdict: report.assertions.some((a) => !a.pass) ? "fail" : "pass", assertions: report.assertions, stats: report.stats, diagnostics: report.diagnostics };
 }
 
@@ -496,7 +496,7 @@ export async function runProof(opts: RunProofOptions = {}): Promise<ProofReport>
   if (want.has("failure-injection")) cardsByComponent.set("failure-injection", buildFaultsCard());
 
   // --- Component 7: containment. ---
-  if (want.has("containment")) cardsByComponent.set("containment", buildContainmentCard(toolNames));
+  if (want.has("containment")) cardsByComponent.set("containment", buildContainmentCard(toolNames, repoRoot));
 
   // --- Component 8: cross-platform. ---
   if (want.has("cross-platform")) cardsByComponent.set("cross-platform", buildPlatformCard());

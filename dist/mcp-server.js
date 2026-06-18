@@ -2985,7 +2985,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve14.call(this, root, ref);
+      let _sch = resolve16.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3012,7 +3012,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve14(root, ref) {
+    function resolve16(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3230,8 +3230,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path36) {
-      let input = path36;
+    function removeDotSegments(path38) {
+      let input = path38;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3483,8 +3483,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path36, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path36 && path36 !== "/" ? path36 : void 0;
+        const [path38, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path38 && path38 !== "/" ? path38 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -3643,55 +3643,55 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve14(baseURI, relativeURI, options) {
+    function resolve16(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent2(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent2(base, relative10, options, skipNormalization) {
+    function resolveComponent2(base, relative11, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative10 = parse3(serialize(relative10, options), options);
+        relative11 = parse3(serialize(relative11, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative10.scheme) {
-        target.scheme = relative10.scheme;
-        target.userinfo = relative10.userinfo;
-        target.host = relative10.host;
-        target.port = relative10.port;
-        target.path = removeDotSegments(relative10.path || "");
-        target.query = relative10.query;
+      if (!options.tolerant && relative11.scheme) {
+        target.scheme = relative11.scheme;
+        target.userinfo = relative11.userinfo;
+        target.host = relative11.host;
+        target.port = relative11.port;
+        target.path = removeDotSegments(relative11.path || "");
+        target.query = relative11.query;
       } else {
-        if (relative10.userinfo !== void 0 || relative10.host !== void 0 || relative10.port !== void 0) {
-          target.userinfo = relative10.userinfo;
-          target.host = relative10.host;
-          target.port = relative10.port;
-          target.path = removeDotSegments(relative10.path || "");
-          target.query = relative10.query;
+        if (relative11.userinfo !== void 0 || relative11.host !== void 0 || relative11.port !== void 0) {
+          target.userinfo = relative11.userinfo;
+          target.host = relative11.host;
+          target.port = relative11.port;
+          target.path = removeDotSegments(relative11.path || "");
+          target.query = relative11.query;
         } else {
-          if (!relative10.path) {
+          if (!relative11.path) {
             target.path = base.path;
-            if (relative10.query !== void 0) {
-              target.query = relative10.query;
+            if (relative11.query !== void 0) {
+              target.query = relative11.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative10.path[0] === "/") {
-              target.path = removeDotSegments(relative10.path);
+            if (relative11.path[0] === "/") {
+              target.path = removeDotSegments(relative11.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative10.path;
+                target.path = "/" + relative11.path;
               } else if (!base.path) {
-                target.path = relative10.path;
+                target.path = relative11.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative10.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative11.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative10.query;
+            target.query = relative11.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3699,7 +3699,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative10.fragment;
+      target.fragment = relative11.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -3901,7 +3901,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve14,
+      resolve: resolve16,
       resolveComponent: resolveComponent2,
       equal,
       serialize,
@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs39, exportName) {
+    function addFormats(ajv, list, fs42, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs39[f]);
+        ajv.addFormat(f, fs42[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -7145,10 +7145,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path36) {
-  if (!path36)
+function getElementAtPath(obj, path38) {
+  if (!path38)
     return obj;
-  return path36.reduce((acc, key) => acc?.[key], obj);
+  return path38.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7557,11 +7557,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path36, issues) {
+function prefixIssues(path38, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path36);
+    iss.path.unshift(path38);
     return iss;
   });
 }
@@ -7708,16 +7708,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path36 = []) => {
+  const processError = (error3, path38 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path36, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path38, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path36, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path38, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path36, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path38, ...issue2.path]);
       } else {
-        const fullpath = [...path36, ...issue2.path];
+        const fullpath = [...path38, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -14223,7 +14223,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve14) => setTimeout(resolve14, pollInterval));
+        await new Promise((resolve16) => setTimeout(resolve16, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -14240,7 +14240,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve14, reject) => {
+    return new Promise((resolve16, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -14318,7 +14318,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve14(parseResult.data);
+            resolve16(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -14579,12 +14579,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve14, reject) => {
+    return new Promise((resolve16, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve14, interval);
+      const timeoutId = setTimeout(resolve16, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -15454,20 +15454,20 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve14) => {
+    return new Promise((resolve16) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve14();
+        resolve16();
       } else {
-        this._stdout.once("drain", resolve14);
+        this._stdout.once("drain", resolve16);
       }
     });
   }
 };
 
 // src/mcp-server.ts
-var fs38 = __toESM(require("node:fs"));
-var path35 = __toESM(require("node:path"));
+var fs41 = __toESM(require("node:fs"));
+var path37 = __toESM(require("node:path"));
 
 // src/core/paths.ts
 var fs = __toESM(require("node:fs"));
@@ -15546,7 +15546,8 @@ function resolveProjectPaths(root) {
     stateDir,
     stateFile: path.join(stateDir, "state.json"),
     docsDir: path.join(abs, "docs"),
-    driftLog: path.join(abs, "drift-log.md")
+    driftLog: path.join(abs, "drift-log.md"),
+    interviewFile: path.join(stateDir, "interview.json")
   };
 }
 
@@ -15665,7 +15666,8 @@ var STATE_FIELD_ORDER = [
   "debate_open_blocking",
   "revise_loop_counts",
   "write_gate",
-  "project_mode"
+  "project_mode",
+  "interview_threshold"
 ];
 function initialState() {
   return {
@@ -15799,6 +15801,11 @@ function validateState(value) {
   if (v.project_mode !== void 0) {
     if (typeof v.project_mode !== "string" || !PROJECT_MODES.includes(v.project_mode)) {
       issues.push({ path: "project_mode", message: `must be one of ${PROJECT_MODES.join(", ")} or absent` });
+    }
+  }
+  if (v.interview_threshold !== void 0) {
+    if (typeof v.interview_threshold !== "number" || !Number.isFinite(v.interview_threshold) || v.interview_threshold < 0 || v.interview_threshold > 1) {
+      issues.push({ path: "interview_threshold", message: "must be a finite number in [0,1] or absent" });
     }
   }
   if (v.tier === "T0" && Array.isArray(v.blast_radius_flags) && v.blast_radius_flags.length > 0) {
@@ -16123,6 +16130,18 @@ function verifyLedgerChain(entries) {
   }
   return { ok: true };
 }
+function verifyLedgerSeals(entries, key) {
+  const mismatches = [];
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (typeof e.keyedHash !== "string") continue;
+    const { recordHash: _rh, keyedHash, ...rest } = e;
+    if (computeLedgerKeyedHash(rest, key) !== keyedHash) {
+      mismatches.push({ index: i, event: typeof e.event === "string" ? e.event : "" });
+    }
+  }
+  return { ok: mismatches.length === 0, mismatches };
+}
 
 // src/core/guards.ts
 var NOT_INIT = failure({
@@ -16205,6 +16224,7 @@ var STAGE_PIPELINE = [
   { stage: "scope", tiers: ["T1", "T2", "T3"], produces: "docs/02-scope.md", criticMode: "scope", humanGate: true, summary: "MVP vs later; sticky human sign-off." },
   { stage: "domain-model", tiers: ["T2", "T3"], produces: "docs/03-domain-model.md", criticMode: "domain-model", humanGate: false, summary: "Entities and rules anchored to REQ-IDs; streams." },
   { stage: "architecture", tiers: ["T1", "T2", "T3"], produces: "docs/04-architecture.md", criticMode: "architecture", humanGate: true, summary: "Components/data flow; gate only the 1-2 irreversible decisions." },
+  { stage: "ux-design", tiers: ["T1", "T2", "T3"], produces: "docs/04a-ux-design.md", criticMode: "ux-design", humanGate: true, summary: "Conditional on a UI; UX research/journeys/IA/flows; human picks direction." },
   { stage: "ui-design", tiers: ["T1", "T2", "T3"], produces: "docs/04b-ui-design.md", criticMode: "ui-design", humanGate: true, summary: "Conditional on a UI; human picks 1 of 2-3 directions." },
   { stage: "adrs", tiers: ["T3"], produces: "docs/05-adrs/", criticMode: "adr", humanGate: false, summary: "One ADR per significant, costly-to-reverse decision; streams." },
   { stage: "technical-design", tiers: ["T3"], produces: "docs/06-technical-design.md", criticMode: "technical-design", humanGate: false, summary: "Internal behaviour the architecture left abstract; streams." },
@@ -16361,6 +16381,41 @@ ${formatIssues(validation.issues)}`,
   }
   return success({ data: { key, value }, human: `Set ${key} = ${JSON.stringify(value)}` });
 }
+function applyGateMutation(paths, fields, source) {
+  return withStateLock(paths, () => {
+    const r = readState(paths);
+    if (!r.exists) return NOT_INIT;
+    if (!r.state) {
+      return failure({
+        human: `Existing state.json is invalid; fix it before mutating gates:
+${formatIssues(r.issues)}`,
+        data: { error: "invalid_state", issues: r.issues }
+      });
+    }
+    const next = JSON.parse(JSON.stringify(r.state));
+    for (const [key, value] of Object.entries(fields)) {
+      next[key] = value;
+    }
+    const validation = validateState(next);
+    if (!validation.ok) {
+      return failure({
+        human: `Refusing to write: result would be invalid:
+${formatIssues(validation.issues)}`,
+        data: { error: "would_be_invalid", issues: validation.issues }
+      });
+    }
+    writeState(paths, validation.state);
+    structuredLog({ cmd: "gate mutation", source, keys: Object.keys(fields) });
+    for (const [key, value] of Object.entries(fields)) {
+      appendLedger(paths, { event: "gate-state-change", key, value, source });
+    }
+    appendHighWater(paths);
+    return success({
+      data: { source, fields },
+      human: `Applied gate mutation (${source}): ${Object.keys(fields).join(", ")}`
+    });
+  });
+}
 
 // src/commands/drift.ts
 var fs7 = __toESM(require("node:fs"));
@@ -16495,8 +16550,8 @@ function readDriftLog(paths) {
 }
 function appendDriftLog(paths, block) {
   const current = readDriftLog(paths);
-  const sep11 = current.endsWith("\n") ? "" : "\n";
-  fs7.writeFileSync(paths.driftLog, `${current}${sep11}${block}`, "utf8");
+  const sep12 = current.endsWith("\n") ? "" : "\n";
+  fs7.writeFileSync(paths.driftLog, `${current}${sep12}${block}`, "utf8");
 }
 function runDriftAdd(paths, opts) {
   return withStateLock(paths, () => runDriftAddLocked(paths, opts));
@@ -16542,6 +16597,68 @@ ${formatIssues(r.issues)}`,
   return success({
     data: { id, layer, blocking, drift_open_blocking: driftOpenBlocking },
     human: blocking ? `${id} logged (requirement layer, BLOCKING). Open blocking drift: ${driftOpenBlocking}.` : `${id} logged (derived layer, auto-applied).`
+  });
+}
+function runDriftList(paths) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: `state.json is invalid:
+${formatIssues(r.issues)}`,
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const text = fs7.existsSync(paths.driftLog) ? fs7.readFileSync(paths.driftLog, "utf8") : "";
+  const entries = parseDriftEntries(text);
+  const openBlocking = r.state.drift_open_blocking;
+  const human = entries.length ? entries.map((e) => `${e.id}  (${e.ref})  ${e.layer} layer${e.layer === "requirement" ? " [BLOCKING]" : ""}`).join("\n") : "(no drift entries)";
+  return success({ data: { entries, open_blocking: openBlocking }, human });
+}
+function runDriftResolve(paths, id) {
+  return withStateLock(paths, () => runDriftResolveLocked(paths, id));
+}
+function runDriftResolveLocked(paths, id) {
+  if (!id) return failure({ human: "usage: th drift resolve <DRIFT-NNN>" });
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: `Existing state.json is invalid; fix it before resolving drift:
+${formatIssues(r.issues)}`,
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const text = fs7.existsSync(paths.driftLog) ? fs7.readFileSync(paths.driftLog, "utf8") : "";
+  const entries = parseDriftEntries(text);
+  const entry = entries.find((e) => e.id === id);
+  if (!entry) {
+    return failure({
+      human: `Drift entry not found: ${id}. Known entries: ${entries.map((e) => e.id).join(", ") || "(none)"}`,
+      data: { error: "drift_not_found", id }
+    });
+  }
+  const alreadyResolved = text.split(/\r?\n/).some((line) => line.trim() === `## ${id} \u2014 resolved`);
+  if (alreadyResolved) {
+    return failure({
+      human: `${id} is already resolved. Double-resolving is not allowed.`,
+      data: { error: "already_resolved", id }
+    });
+  }
+  appendDriftLog(paths, `## ${id} \u2014 resolved
+`);
+  const isBlocking = entry.layer === "requirement";
+  let driftOpenBlocking = r.state.drift_open_blocking;
+  if (isBlocking) {
+    driftOpenBlocking = Math.max(0, driftOpenBlocking - 1);
+    writeState(paths, { ...r.state, drift_open_blocking: driftOpenBlocking });
+    appendLedger(paths, { event: "drift-blocking-resolved", id, drift_open_blocking: driftOpenBlocking });
+  }
+  structuredLog({ cmd: "drift resolve", id, layer: entry.layer, drift_open_blocking: driftOpenBlocking });
+  const human = isBlocking ? `${id} marked resolved (requirement layer, blocking cleared). Open blocking drift: ${driftOpenBlocking}.` : `${id} marked resolved (derived layer \u2014 no blocking counter change). Open blocking drift: ${driftOpenBlocking}.`;
+  return success({
+    data: { id, layer: entry.layer, drift_open_blocking: driftOpenBlocking },
+    human
   });
 }
 
@@ -16686,6 +16803,10 @@ function liveLeases(paths, slices) {
   const statusById = new Map(slices.map((s) => [s.id, s.status]));
   return activeLeases(paths).filter((l) => isLeaseLive(l, statusById));
 }
+function staleLeases(paths, slices) {
+  const statusById = new Map(slices.map((s) => [s.id, s.status]));
+  return activeLeases(paths).filter((l) => !isLeaseLive(l, statusById));
+}
 function occupiedComponents(paths, slices) {
   const occ = /* @__PURE__ */ new Map();
   for (const s of slices) {
@@ -16786,7 +16907,16 @@ function validateDeps(slices) {
 }
 
 // src/core/routing.ts
-var OPUS_DESIGN_MODES = /* @__PURE__ */ new Set(["architecture", "security", "failure-modes", "technical-design"]);
+var OPUS_DESIGN_MODES = /* @__PURE__ */ new Set([
+  "architecture",
+  "technical-design",
+  "security",
+  "failure-modes",
+  "adrs",
+  "contracts",
+  "ux-design",
+  "ui-design"
+]);
 var OPUS_CRITIC_MODES = /* @__PURE__ */ new Set(["slice", "code-review"]);
 var OPUS_DEFAULT_AGENTS = /* @__PURE__ */ new Set(["orchestrator", "vertical-slice"]);
 function computeRoute(input) {
@@ -16798,14 +16928,14 @@ function computeRoute(input) {
   if (input.summarization) {
     return { model: "haiku", effort: "low", rationale: "trivial mechanical summarization (\xA72)" };
   }
-  if (mode && OPUS_DESIGN_MODES.has(mode) && (t3 || blast) && agent !== "critic") {
+  if (mode && OPUS_DESIGN_MODES.has(mode) && agent !== "critic") {
     if (mode === "security" && t3 && blast) {
       return { model: "opus", effort: "max", rationale: `security design on a T3 blast-radius project (${mode}, \xA72/\xA715.S)` };
     }
     return {
       model: "opus",
       effort: t3 && blast ? "xhigh" : "high",
-      rationale: `heavy design mode "${mode}" on ${t3 ? "T3" : "a blast-radius project"} (\xA72)`
+      rationale: `heavy design mode "${mode}" \u2192 opus unconditionally (\xA72)`
     };
   }
   if (agent === "critic" && mode && OPUS_CRITIC_MODES.has(mode) && blast) {
@@ -16815,8 +16945,15 @@ function computeRoute(input) {
       rationale: `critic "${mode}" on a blast-radius project (\xA72)`
     };
   }
-  if (agent === "builder" && (input.componentBlast || blast)) {
-    return { model: "opus", effort: "high", rationale: "builder on a blast-radius component (\xA72)" };
+  if (agent === "builder" || agent === "tester") {
+    if (input.componentBlast || blast) {
+      const effort = t3 ? "xhigh" : tier === "T2" ? "high" : tier === "T1" ? "medium" : "high";
+      return { model: "opus", effort, rationale: `${agent} on a blast-radius component (\xA72)` };
+    }
+    if (t3) return { model: "opus", effort: "xhigh", rationale: `${agent} T3 tier ladder (\xA72)` };
+    if (tier === "T2") return { model: "opus", effort: "high", rationale: `${agent} T2 tier ladder (\xA72)` };
+    if (tier === "T1") return { model: "opus", effort: "medium", rationale: `${agent} T1 tier ladder (\xA72)` };
+    return { model: "sonnet", effort: "high", rationale: `${agent} T0 tier floor (\xA72)` };
   }
   if (agent && OPUS_DEFAULT_AGENTS.has(agent)) {
     return { model: "opus", effort: t3 || blast ? "high" : "medium", rationale: `${agent} default (opus)` };
@@ -17241,6 +17378,8 @@ function computeBreakdown(root, opts = {}) {
 // src/core/verify.ts
 var fs11 = __toESM(require("node:fs"));
 var path9 = __toESM(require("node:path"));
+var import_node_child_process = require("node:child_process");
+var OUTPUT_TAIL_CHARS = 2e3;
 var DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60 * 1e3;
 function verifyConfigPath(paths) {
   return path9.join(paths.stateDir, "verify.json");
@@ -17261,6 +17400,10 @@ function readVerifyConfig(paths) {
   }
   return { commands: [] };
 }
+function writeVerifyConfig(paths, config2) {
+  fs11.mkdirSync(paths.stateDir, { recursive: true });
+  fs11.writeFileSync(verifyConfigPath(paths), JSON.stringify(config2, null, 2) + "\n", "utf8");
+}
 function readVerifyReport(paths) {
   const file = verifyReportPath(paths);
   if (!fs11.existsSync(file)) return null;
@@ -17278,6 +17421,37 @@ function readVerifyReport(paths) {
   } catch {
   }
   return null;
+}
+function writeVerifyReport(paths, report) {
+  fs11.mkdirSync(paths.stateDir, { recursive: true });
+  atomicWriteFile(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n");
+}
+function runCommands(root, commands, now = () => /* @__PURE__ */ new Date(), timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) {
+  const results = [];
+  for (const command of commands) {
+    const start = Date.now();
+    const proc = (0, import_node_child_process.spawnSync)(command, {
+      cwd: root,
+      shell: true,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+      input: ""
+    });
+    const durationMs = Date.now() - start;
+    const timedOut = proc.error?.code === "ETIMEDOUT";
+    const combined = `${proc.stdout ?? ""}${proc.stderr ?? ""}${timedOut ? `
+[th verify] command killed after ${timeoutMs}ms timeout` : ""}`;
+    const outputTail = combined.length > OUTPUT_TAIL_CHARS ? combined.slice(-OUTPUT_TAIL_CHARS) : combined;
+    const exitCode = proc.status ?? 124;
+    results.push({ command, exitCode, ok: proc.status === 0, durationMs, outputTail });
+  }
+  return {
+    ok: results.every((r) => r.ok),
+    ranAt: now().toISOString(),
+    results
+  };
 }
 
 // src/commands/coverage.ts
@@ -17343,6 +17517,57 @@ ${filterDescription}`
     human: `coverage gap: ${covered}/${total} REQ-IDs mapped; ${gaps.length} uncovered:
 ${lines.join("\n")}
 ${filterDescription}`
+  });
+}
+function runCoverageReport(paths, opts = {}) {
+  const escaped = rejectEscapingPath(paths, opts);
+  if (escaped) return escaped;
+  const breakdown = computeBreakdown(paths.root, opts);
+  if ("error" in breakdown) {
+    return failure({
+      human: `Requirements file not found: ${breakdown.reqsFile}. Run \`th init\` and author requirements first.`,
+      data: { error: breakdown.error, reqsFile: breakdown.reqsFile }
+    });
+  }
+  const report = readVerifyReport(paths);
+  const suitePassing = report ? report.ok : null;
+  const passingCount = suitePassing === null ? null : breakdown.rows.filter((r) => r.tested && suitePassing).length;
+  structuredLog({
+    cmd: "coverage report",
+    total: breakdown.total,
+    planned: breakdown.planned,
+    implemented: breakdown.implemented,
+    tested: breakdown.tested,
+    passing: passingCount
+  });
+  const cell = (b) => b ? "\u2713" : "\xB7";
+  const passCell = (tested) => suitePassing === null ? "\u2014" : tested && suitePassing ? "\u2713" : "\xB7";
+  const rows = breakdown.rows.map(
+    (r) => `  ${r.req.padEnd(16)} ${cell(r.planned)} planned  ${cell(r.implemented)} implemented  ${cell(r.tested)} tested  ${passCell(r.tested)} passing`
+  );
+  const passingSummary = passingCount === null ? "\u2014 (no verify report \u2014 run `th verify run`)" : `${passingCount}/${breakdown.total}`;
+  const human = [
+    `Coverage breakdown \u2014 ${breakdown.total} REQ-ID(s) checked`,
+    `  planned:     ${breakdown.planned}/${breakdown.total}`,
+    `  implemented: ${breakdown.implemented}/${breakdown.total}`,
+    `  tested:      ${breakdown.tested}/${breakdown.total}`,
+    `  passing:     ${passingSummary}`,
+    breakdown.filterDescription,
+    "",
+    ...rows.length ? rows : ["  (no REQ-IDs found)"]
+  ].join("\n");
+  return success({
+    data: {
+      total: breakdown.total,
+      planned: breakdown.planned,
+      implemented: breakdown.implemented,
+      tested: breakdown.tested,
+      passing: passingCount,
+      suitePassing,
+      rows: breakdown.rows,
+      mvpFilter: breakdown.filterDescription
+    },
+    human
   });
 }
 
@@ -17491,10 +17716,6 @@ function runRoute(paths, opts) {
   });
 }
 
-// src/commands/next.ts
-var fs18 = __toESM(require("node:fs"));
-var path16 = __toESM(require("node:path"));
-
 // src/core/health.ts
 var fs14 = __toESM(require("node:fs"));
 var path12 = __toESM(require("node:path"));
@@ -17528,6 +17749,10 @@ function sliceProgress(state) {
 function reviseEscalations(state, cap = DEFAULT_REVISE_CAP) {
   return Object.entries(state.revise_loop_counts).filter(([, count]) => count >= cap).map(([mode, count]) => ({ mode, count, cap }));
 }
+
+// src/core/gate-preconditions.ts
+var fs18 = __toESM(require("node:fs"));
+var path16 = __toESM(require("node:path"));
 
 // src/core/decisions.ts
 var fs15 = __toESM(require("node:fs"));
@@ -19204,6 +19429,198 @@ function runRepoCheck(paths, _opts = {}) {
   return emit2(computeFreshness({ kind: "diff", added, removed, modified }));
 }
 
+// src/core/gate-preconditions.ts
+var PASS = { ok: true };
+function checkBlockingDrift(state) {
+  if (state.drift_open_blocking > 0) {
+    return { ok: false, error: "blocking_drift_open", detail: { drift_open_blocking: state.drift_open_blocking } };
+  }
+  return PASS;
+}
+function checkReviseEscalation(state) {
+  const escalations = reviseEscalations(state);
+  if (escalations.length > 0) {
+    return { ok: false, error: "revise_escalation_open", detail: { escalations } };
+  }
+  return PASS;
+}
+function checkVerifySuite(paths) {
+  const report = readVerifyReport(paths);
+  if (report && !report.ok) {
+    const failed = report.results.filter((x) => !x.ok).length;
+    return { ok: false, error: "verify_suite_failing", detail: { failed } };
+  }
+  return PASS;
+}
+function checkArtifactDrift(paths, state) {
+  const changed = artifactIntegrity(paths, state).filter((i) => i.status === "changed").map((i) => i.file);
+  if (changed.length > 0) {
+    return { ok: false, error: "artifact_drift", detail: { changed } };
+  }
+  return PASS;
+}
+function checkTierSet(state) {
+  if (state.tier === null) {
+    return { ok: false, error: "tier_unclassified", detail: { current_stage: state.current_stage } };
+  }
+  return PASS;
+}
+function checkRepoMap(paths, state) {
+  if (state.project_mode === "brownfield" && !state.implementation_allowed) {
+    const check = runRepoCheck(paths);
+    if (check.exitCode !== 0) {
+      const absent = check.exitCode === REPO_NO_MAP_EXIT;
+      const shape = check.data?.shape ?? "stale";
+      return { ok: false, error: "repo_map_stale", detail: { absent, shape } };
+    }
+  }
+  return PASS;
+}
+function checkDecisionObligations(paths, state) {
+  const decisions = reduceDecisions(readDecisionEvents(paths));
+  const obligations = gatingObligations(decisions, state);
+  if (obligations.length > 0) {
+    const first = obligations[0];
+    const title = decisions.find((d) => d.id === first.decisionId)?.title ?? "";
+    return {
+      ok: false,
+      error: "decision_obligation_open",
+      detail: { decisionId: first.decisionId, blockedStage: first.blockedStage, title }
+    };
+  }
+  return PASS;
+}
+function checkDebate(state) {
+  const n = state.debate_open_blocking ?? 0;
+  if (n > 0) {
+    return { ok: false, error: "debate_open_blocking", detail: { debate_open_blocking: n } };
+  }
+  return PASS;
+}
+function checkGoverningArtifact(paths, state) {
+  const current = canonicalizeStage(state.current_stage);
+  const contract = stageContract(current);
+  if (contract && contract.produces && !isFinalVerification(current)) {
+    const produced = contract.produces.replace(/\/$/, "");
+    const registered = state.approved_artifacts.some((a) => a.file === produced);
+    if (!registered) {
+      const exists = fs18.existsSync(path16.resolve(paths.root, produced));
+      if (!exists) {
+        return { ok: false, error: "artifact_not_produced", detail: { stage: current, produces: contract.produces } };
+      }
+      return { ok: false, error: "artifact_not_registered", detail: { stage: current, file: produced } };
+    }
+  }
+  return PASS;
+}
+function checkCoverage(paths) {
+  const breakdown = computeBreakdown(paths.root);
+  if ("error" in breakdown) {
+    return { ok: false, error: "reqs_file_missing", detail: { error: breakdown.error, reqsFile: breakdown.reqsFile } };
+  }
+  const gaps = breakdown.rows.filter((row) => !row.planned || !row.tested).map((g) => ({ req: g.req, inSlice: g.planned, inTest: g.tested }));
+  if (gaps.length > 0) {
+    return { ok: false, error: "coverage_failing", detail: { gaps } };
+  }
+  return PASS;
+}
+function checkImplementationSettled(state) {
+  const prog = sliceProgress(state);
+  if (prog.total > 0 && !prog.allSettled) {
+    return {
+      ok: false,
+      error: "slices_unsettled",
+      detail: { total: prog.total, pending: prog.pending, inProgress: prog.inProgress }
+    };
+  }
+  return PASS;
+}
+function checkFinalVerification(paths, state) {
+  const prog = sliceProgress(state);
+  if (!prog.allSettled && prog.total > 0) {
+    const open = state.slices.filter((sl) => sl.status !== "done" && sl.status !== "blocked").map((sl) => sl.id);
+    return { ok: false, error: "slices_unsettled", detail: { open } };
+  }
+  const verifyCfg = readVerifyConfig(paths);
+  if (verifyCfg.commands.length > 0 && !readVerifyReport(paths)) {
+    return { ok: false, error: "verify_suite_never_run", detail: { commands: verifyCfg.commands.length } };
+  }
+  const cov = checkCoverage(paths);
+  if (!cov.ok) return cov;
+  const contract = stageContract(canonicalizeStage(state.current_stage));
+  if (contract && contract.produces) {
+    const produced = contract.produces.replace(/\/$/, "");
+    const registered = state.approved_artifacts.some((a) => a.file === produced);
+    if (!registered) {
+      const exists = fs18.existsSync(path16.resolve(paths.root, produced));
+      return exists ? { ok: false, error: "report_not_registered", detail: { file: produced } } : { ok: false, error: "report_not_produced", detail: { produces: produced } };
+    }
+  }
+  return PASS;
+}
+function stageOrdinal(stage) {
+  const canonical = canonicalizeStage(stage);
+  return STAGE_PIPELINE.findIndex((s) => s.stage === canonical);
+}
+var IMPLEMENTATION_PLANNING_ORDINAL = STAGE_PIPELINE.findIndex((s) => s.stage === "implementation-planning");
+function canAdvanceStage(paths, state) {
+  let r;
+  if (!(r = checkBlockingDrift(state)).ok) return r;
+  if (!(r = checkReviseEscalation(state)).ok) return r;
+  if (!(r = checkVerifySuite(paths)).ok) return r;
+  if (!(r = checkArtifactDrift(paths, state)).ok) return r;
+  if (!(r = checkTierSet(state)).ok) return r;
+  if (!(r = checkRepoMap(paths, state)).ok) return r;
+  if (!(r = checkDecisionObligations(paths, state)).ok) return r;
+  if (!(r = checkDebate(state)).ok) return r;
+  const current = canonicalizeStage(state.current_stage);
+  if (isFinalVerification(current)) {
+    return checkFinalVerification(paths, state);
+  }
+  if (!(r = checkGoverningArtifact(paths, state)).ok) return r;
+  if (current === "implementation-planning") {
+    if (!(r = checkCoverage(paths)).ok) return r;
+  }
+  if (current === "implementation") {
+    if (!(r = checkImplementationSettled(state)).ok) return r;
+  }
+  return PASS;
+}
+function canUnlockImplementation(paths, state) {
+  const adv = canAdvanceStage(paths, state);
+  if (!adv.ok) return adv;
+  const cov = checkCoverage(paths);
+  if (!cov.ok) return cov;
+  const ordinal = stageOrdinal(state.current_stage);
+  if (ordinal < 0 || ordinal < IMPLEMENTATION_PLANNING_ORDINAL) {
+    return {
+      ok: false,
+      error: "stage_before_implementation_planning",
+      detail: { current_stage: canonicalizeStage(state.current_stage) }
+    };
+  }
+  return PASS;
+}
+function validateTierTransition(state, targetTier) {
+  if (!TIERS.includes(targetTier)) {
+    return { ok: false, error: "invalid_tier", detail: { targetTier, validTiers: TIERS } };
+  }
+  if (state.implementation_allowed === true) {
+    return { ok: false, error: "tier_locked_after_unlock", detail: { tier: state.tier } };
+  }
+  if (state.tier !== null) {
+    const curIdx = TIERS.indexOf(state.tier);
+    const tgtIdx = TIERS.indexOf(targetTier);
+    if (tgtIdx < curIdx) {
+      return { ok: false, error: "tier_downgrade_human_only", detail: { from: state.tier, to: targetTier } };
+    }
+  }
+  if (targetTier === "T0" && state.blast_radius_flags.length > 0) {
+    return { ok: false, error: "t0_blast_radius_veto", detail: { flags: state.blast_radius_flags } };
+  }
+  return PASS;
+}
+
 // src/commands/next.ts
 function runNext(paths, opts = {}) {
   const explain = opts.explain === true;
@@ -19230,7 +19647,8 @@ function runNext(paths, opts = {}) {
     );
   }
   const s = r.state;
-  if (s.drift_open_blocking > 0) {
+  const driftR = checkBlockingDrift(s);
+  if (!driftR.ok) {
     return emit(
       {
         kind: "resolve-blocking-drift",
@@ -19241,8 +19659,9 @@ function runNext(paths, opts = {}) {
       explain
     );
   }
-  const escalations = reviseEscalations(s);
-  if (escalations.length > 0) {
+  const reviseR = checkReviseEscalation(s);
+  if (!reviseR.ok) {
+    const escalations = reviseR.detail.escalations;
     return emit(
       {
         kind: "escalate-revise",
@@ -19253,9 +19672,9 @@ function runNext(paths, opts = {}) {
       explain
     );
   }
-  const verifyReport = readVerifyReport(paths);
-  if (verifyReport && !verifyReport.ok) {
-    const failed = verifyReport.results.filter((x) => !x.ok).length;
+  const verifyR = checkVerifySuite(paths);
+  if (!verifyR.ok) {
+    const failed = verifyR.detail.failed;
     return emit(
       {
         kind: "investigate-failure",
@@ -19266,19 +19685,21 @@ function runNext(paths, opts = {}) {
       explain
     );
   }
-  const drifted = artifactIntegrity(paths, s).filter((i) => i.status === "changed");
-  if (drifted.length > 0) {
+  const artDriftR = checkArtifactDrift(paths, s);
+  if (!artDriftR.ok) {
+    const changed = artDriftR.detail.changed;
     return emit(
       {
         kind: "re-register-artifact",
-        action: `Approved artifact changed on disk \u2014 run \`th stale --artifact ${drifted[0].file}\` then re-register: ${drifted.map((i) => i.file).join(", ")}.`,
+        action: `Approved artifact changed on disk \u2014 run \`th stale --artifact ${changed[0]}\` then re-register: ${changed.join(", ")}.`,
         why: "A registered artifact whose on-disk hash no longer matches has silently drifted from what the run governs; re-registering (and cascading the staleness check) must happen before later stages, which would otherwise build on an out-of-date upstream.",
-        data: { changed: drifted.map((i) => i.file) }
+        data: { changed }
       },
       explain
     );
   }
-  if (s.tier === null) {
+  const tierR = checkTierSet(s);
+  if (!tierR.ok) {
     return emit(
       {
         kind: "classify-tier",
@@ -19289,120 +19710,136 @@ function runNext(paths, opts = {}) {
       explain
     );
   }
-  if (s.project_mode === "brownfield" && !s.implementation_allowed) {
-    const check = runRepoCheck(paths);
-    if (check.exitCode !== 0) {
-      const absent = check.exitCode === REPO_NO_MAP_EXIT;
-      return emit(
-        {
-          kind: "refresh-repo-map",
-          action: `Brownfield repo-map is ${absent ? "absent" : "stale"} \u2014 run \`th repo map\` to ${absent ? "generate" : "refresh"} it before tiering or planning proceeds.`,
-          why: "In a brownfield run the repo-map grounds every tiering and planning decision; a map that is absent or has drifted from the working tree would let those decisions run on an outdated understanding, so refreshing it outranks stage work.",
-          data: { shape: check.data?.shape ?? "stale" }
-        },
-        explain
-      );
-    }
+  const repoR = checkRepoMap(paths, s);
+  if (!repoR.ok) {
+    const absent = repoR.detail.absent;
+    return emit(
+      {
+        kind: "refresh-repo-map",
+        action: `Brownfield repo-map is ${absent ? "absent" : "stale"} \u2014 run \`th repo map\` to ${absent ? "generate" : "refresh"} it before tiering or planning proceeds.`,
+        why: "In a brownfield run the repo-map grounds every tiering and planning decision; a map that is absent or has drifted from the working tree would let those decisions run on an outdated understanding, so refreshing it outranks stage work.",
+        data: { shape: repoR.detail.shape }
+      },
+      explain
+    );
   }
-  {
-    const decisions = reduceDecisions(readDecisionEvents(paths));
-    const obligations = gatingObligations(decisions, s);
-    if (obligations.length > 0) {
-      const first = obligations[0];
-      const title = decisions.find((d) => d.id === first.decisionId)?.title ?? "";
-      const titlePart = title ? ` (title: "${title}")` : "";
-      return emit(
-        {
-          kind: "resolve-decision-obligation",
-          action: `Approve ${first.decisionId}${titlePart} \u2014 it blocks stage '${first.blockedStage}' from proceeding.`,
-          why: `Decision ${first.decisionId} is linked to stage '${first.blockedStage}' and is not yet approved; no stage work can proceed while a gating decision is unmet (RULE-007).`,
-          data: { decisionId: first.decisionId, blockedStage: first.blockedStage }
-        },
-        explain
-      );
-    }
+  const decR = checkDecisionObligations(paths, s);
+  if (!decR.ok) {
+    const decisionId = decR.detail.decisionId;
+    const blockedStage = decR.detail.blockedStage;
+    const title = decR.detail.title;
+    const titlePart = title ? ` (title: "${title}")` : "";
+    return emit(
+      {
+        kind: "resolve-decision-obligation",
+        action: `Approve ${decisionId}${titlePart} \u2014 it blocks stage '${blockedStage}' from proceeding.`,
+        why: `Decision ${decisionId} is linked to stage '${blockedStage}' and is not yet approved; no stage work can proceed while a gating decision is unmet (RULE-007).`,
+        data: { decisionId, blockedStage }
+      },
+      explain
+    );
+  }
+  const debateR = checkDebate(s);
+  if (!debateR.ok) {
+    const n = debateR.detail.debate_open_blocking;
+    return emit(
+      {
+        kind: "resolve-debate",
+        action: `${n} open BLOCKING debate${n === 1 ? "" : "s"} must be reconciled before advancing \u2014 resolve or escalate (\`th debate resolve\`).`,
+        why: "An open blocking debate is a Pattern-B reconciliation obligation that the stop-gate already refuses completion on, so it outranks stage work \u2014 the run cannot advance past an unresolved debate.",
+        data: { debate_open_blocking: n }
+      },
+      explain
+    );
   }
   const current = canonicalizeStage(s.current_stage);
-  const contract = stageContract(current);
-  if (contract && contract.produces && !isFinalVerification(current)) {
-    const produced = contract.produces.replace(/\/$/, "");
-    const abs = path16.resolve(paths.root, produced);
-    const registered = s.approved_artifacts.some((a) => a.file === produced);
-    const exists = fs18.existsSync(abs);
-    if (!registered) {
-      if (!exists) {
-        return emit(
-          {
-            kind: "produce-artifact",
-            action: `Stage "${current}" must produce ${contract.produces} (Critic mode: ${contract.criticMode}${contract.humanGate ? "; human gate" : ""}). Produce it, pass the Critic, then register it.`,
-            why: `The current stage "${current}" owes its artifact (${contract.produces}) and it is not yet on disk; the stage cannot be considered settled \u2014 and the run cannot advance \u2014 until that artifact exists, passes the Critic, and is registered.`,
-            data: { stage: current, produces: contract.produces }
-          },
-          explain
-        );
-      }
+  const artR = checkGoverningArtifact(paths, s);
+  if (!artR.ok) {
+    const contract = stageContract(current);
+    if (artR.error === "artifact_not_produced") {
       return emit(
         {
-          kind: "register-artifact",
-          action: `${produced} exists but is not registered \u2014 after the Critic passes${contract.humanGate ? " and the human gate clears" : ""}, run \`th artifact register ${contract.produces} --version <n>\`.`,
-          why: `${produced} exists but is unregistered, so the run is not yet governing it (no recorded hash); registering it after the Critic${contract.humanGate ? " and human gate" : ""} is what lets the stage settle and the pipeline move on.`,
-          data: { stage: current, file: produced }
+          kind: "produce-artifact",
+          action: `Stage "${current}" must produce ${contract.produces} (Critic mode: ${contract.criticMode}${contract.humanGate ? "; human gate" : ""}). Produce it, pass the Critic, then register it.`,
+          why: `The current stage "${current}" owes its artifact (${contract.produces}) and it is not yet on disk; the stage cannot be considered settled \u2014 and the run cannot advance \u2014 until that artifact exists, passes the Critic, and is registered.`,
+          data: { stage: current, produces: contract.produces }
         },
         explain
       );
     }
+    const produced = artR.detail.file;
+    return emit(
+      {
+        kind: "register-artifact",
+        action: `${produced} exists but is not registered \u2014 after the Critic passes${contract.humanGate ? " and the human gate clears" : ""}, run \`th artifact register ${contract.produces} --version <n>\`.`,
+        why: `${produced} exists but is unregistered, so the run is not yet governing it (no recorded hash); registering it after the Critic${contract.humanGate ? " and human gate" : ""} is what lets the stage settle and the pipeline move on.`,
+        data: { stage: current, file: produced }
+      },
+      explain
+    );
   }
   if (current === "implementation-planning") {
     const cov = coverageBlocker(paths);
     if (cov) return emit(cov);
   }
   if (isFinalVerification(current)) {
-    const prog = sliceProgress(s);
-    if (!prog.allSettled && prog.total > 0) {
-      const open = s.slices.filter((sl) => sl.status !== "done" && sl.status !== "blocked").map((sl) => sl.id);
+    const fv = checkFinalVerification(paths, s);
+    if (fv.ok) {
       return emit(
         {
-          kind: "finish-slices",
-          action: `Final verification is blocked while slices are unfinished \u2014 finish or block: ${open.join(", ")} (\`th slice set-status <SLICE-ID> done|blocked\`).`,
-          why: "At final-verification the stop-gate mechanically refuses completion while any slice is neither done nor blocked, so settling the open slices outranks producing the verification report.",
-          data: { open }
+          kind: "human-signoff",
+          action: "Coherence is gated and coverage is clean \u2014 present `th trace render` + the verification report for the human correctness sign-off (\xA711).",
+          why: "Every mechanical gate is satisfied (slices settled, coverage clean, report registered); what remains is the one thing the CLI cannot certify \u2014 correctness \u2014 which only the human can sign off."
         },
         explain
       );
     }
-    const verifyCfg = readVerifyConfig(paths);
-    if (verifyCfg.commands.length > 0 && !readVerifyReport(paths)) {
-      return emit(
-        {
-          kind: "run-verify",
-          action: `Final verification needs a green suite \u2014 ${verifyCfg.commands.length} verify command(s) are configured but \`th verify run\` has never been recorded. Run \`th verify run\` and confirm it is green before sign-off.`,
-          why: "At final-verification the stop-gate refuses completion when verify commands are configured but the suite has never been run, so recording a green `th verify run` outranks producing the verification report or seeking the human sign-off.",
-          data: { commands: verifyCfg.commands.length }
-        },
-        explain
-      );
-    }
-    const cov = coverageBlocker(paths);
-    if (cov) return emit(cov, explain);
-    if (contract && contract.produces) {
-      const produced = contract.produces.replace(/\/$/, "");
-      const registered = s.approved_artifacts.some((a) => a.file === produced);
-      if (!registered) {
-        const exists = fs18.existsSync(path16.resolve(paths.root, produced));
+    switch (fv.error) {
+      case "slices_unsettled": {
+        const open = fv.detail.open;
         return emit(
-          exists ? { kind: "register-artifact", action: `${produced} exists but is not registered \u2014 after the human signs off, run \`th artifact register ${produced} --version <n>\`.`, why: "Slices are settled and coverage is clean, so the only thing standing between here and a governed completion is recording the verification report's hash after the human signs off.", data: { file: produced } } : { kind: "produce-artifact", action: `Produce ${produced} separating coherence (Critic) from correctness (tests + human), then register it.`, why: "Slices are settled and coverage is clean, so the run now owes the verification report itself \u2014 the last artifact, which must separate Critic-certified coherence from test/human-certified correctness.", data: { produces: produced } },
+          {
+            kind: "finish-slices",
+            action: `Final verification is blocked while slices are unfinished \u2014 finish or block: ${open.join(", ")} (\`th slice set-status <SLICE-ID> done|blocked\`).`,
+            why: "At final-verification the stop-gate mechanically refuses completion while any slice is neither done nor blocked, so settling the open slices outranks producing the verification report.",
+            data: { open }
+          },
+          explain
+        );
+      }
+      case "verify_suite_never_run": {
+        const commands = fv.detail.commands;
+        return emit(
+          {
+            kind: "run-verify",
+            action: `Final verification needs a green suite \u2014 ${commands} verify command(s) are configured but \`th verify run\` has never been recorded. Run \`th verify run\` and confirm it is green before sign-off.`,
+            why: "At final-verification the stop-gate refuses completion when verify commands are configured but the suite has never been run, so recording a green `th verify run` outranks producing the verification report or seeking the human sign-off.",
+            data: { commands }
+          },
+          explain
+        );
+      }
+      case "reqs_file_missing":
+      case "coverage_failing": {
+        const cov = coverageBlocker(paths);
+        if (cov) return emit(cov, explain);
+        break;
+      }
+      case "report_not_registered": {
+        const produced = fv.detail.file;
+        return emit(
+          { kind: "register-artifact", action: `${produced} exists but is not registered \u2014 after the human signs off, run \`th artifact register ${produced} --version <n>\`.`, why: "Slices are settled and coverage is clean, so the only thing standing between here and a governed completion is recording the verification report's hash after the human signs off.", data: { file: produced } },
+          explain
+        );
+      }
+      case "report_not_produced": {
+        const produced = fv.detail.produces;
+        return emit(
+          { kind: "produce-artifact", action: `Produce ${produced} separating coherence (Critic) from correctness (tests + human), then register it.`, why: "Slices are settled and coverage is clean, so the run now owes the verification report itself \u2014 the last artifact, which must separate Critic-certified coherence from test/human-certified correctness.", data: { produces: produced } },
           explain
         );
       }
     }
-    return emit(
-      {
-        kind: "human-signoff",
-        action: "Coherence is gated and coverage is clean \u2014 present `th trace render` + the verification report for the human correctness sign-off (\xA711).",
-        why: "Every mechanical gate is satisfied (slices settled, coverage clean, report registered); what remains is the one thing the CLI cannot certify \u2014 correctness \u2014 which only the human can sign off."
-      },
-      explain
-    );
   }
   if (current === "implementation") {
     const prog = sliceProgress(s);
@@ -19481,25 +19918,23 @@ function runNext(paths, opts = {}) {
   );
 }
 function coverageBlocker(paths) {
-  const breakdown = computeBreakdown(paths.root);
-  if ("error" in breakdown) {
+  const cov = checkCoverage(paths);
+  if (cov.ok) return void 0;
+  if (cov.error === "reqs_file_missing") {
     return {
       kind: "fix-coverage",
       action: "Coverage cannot be checked \u2014 author the requirements file first.",
       why: "Coverage is the hard gate before building, and it cannot even be computed without a requirements file \u2014 so authoring it precedes everything downstream.",
-      data: { error: breakdown.error, reqsFile: breakdown.reqsFile }
+      data: { error: cov.detail.error, reqsFile: cov.detail.reqsFile }
     };
   }
-  const gaps = breakdown.rows.filter((row) => !row.planned || !row.tested);
-  if (gaps.length > 0) {
-    return {
-      kind: "fix-coverage",
-      action: `Coverage gate failing \u2014 ${gaps.length} REQ-ID(s) lack a slice and/or a test: ${gaps.map((g) => g.req).join(", ")}. Run \`th coverage check\`.`,
-      why: "The coverage gate mechanically blocks the build until every MVP REQ-ID maps to \u22651 slice and \u22651 test; the listed gaps must be closed before implementation may proceed.",
-      data: { gaps: gaps.map((g) => ({ req: g.req, inSlice: g.planned, inTest: g.tested })) }
-    };
-  }
-  return void 0;
+  const gaps = cov.detail.gaps;
+  return {
+    kind: "fix-coverage",
+    action: `Coverage gate failing \u2014 ${gaps.length} REQ-ID(s) lack a slice and/or a test: ${gaps.map((g) => g.req).join(", ")}. Run \`th coverage check\`.`,
+    why: "The coverage gate mechanically blocks the build until every MVP REQ-ID maps to \u22651 slice and \u22651 test; the listed gaps must be closed before implementation may proceed.",
+    data: { gaps }
+  };
 }
 function emit(next, explain = false) {
   const data = { kind: next.kind, action: next.action, ...next.data ?? {} };
@@ -20407,8 +20842,8 @@ function readDebateLog(paths) {
 }
 function appendDebateLog(paths, block) {
   const current = readDebateLog(paths);
-  const sep11 = current.endsWith("\n") ? "" : "\n";
-  fs23.writeFileSync(debateLogPath(paths), `${current}${sep11}${block}`, "utf8");
+  const sep12 = current.endsWith("\n") ? "" : "\n";
+  fs23.writeFileSync(debateLogPath(paths), `${current}${sep12}${block}`, "utf8");
 }
 function runDebateAdd(paths, opts) {
   return withStateLock(paths, () => runDebateAddLocked(paths, opts));
@@ -20605,6 +21040,23 @@ function runInit(paths, opts) {
   ].join("\n");
   return success({ data, human });
 }
+function runInitMcp(paths, opts = {}) {
+  const existing = readState(paths);
+  if (existing.exists) {
+    const data = { already_initialized: true };
+    if (existing.state) {
+      data.tier = existing.state.tier;
+      data.current_stage = existing.state.current_stage;
+      data.implementation_allowed = existing.state.implementation_allowed;
+    }
+    structuredLog({ cmd: "init", already_initialized: true });
+    return success({
+      data,
+      human: "TwinHarness already initialized; not re-initializing (use the CLI `th init --force` to reset)."
+    });
+  }
+  return runInit(paths, { force: false, brownfield: opts.brownfield });
+}
 
 // src/commands/artifact.ts
 var fs25 = __toESM(require("node:fs"));
@@ -20665,6 +21117,20 @@ ${formatIssues(r.issues)}`,
     data: { file: relKey, version: version2, hash },
     human: `registered ${relKey} v${version2} (${hash})`
   });
+}
+function runArtifactList(paths) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: `state.json is invalid:
+${formatIssues(r.issues)}`,
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const artifacts = r.state.approved_artifacts;
+  const human = artifacts.length ? artifacts.map((a) => `${a.file}  v${a.version}  ${a.hash}`).join("\n") : "(none)";
+  return success({ data: { artifacts }, human });
 }
 
 // src/commands/hook.ts
@@ -21483,10 +21949,10 @@ function dogfoodCard(a, brief) {
 var os2 = __toESM(require("node:os"));
 var fs30 = __toESM(require("node:fs"));
 var path25 = __toESM(require("node:path"));
-var import_node_child_process = require("node:child_process");
+var import_node_child_process2 = require("node:child_process");
 var import_node_util = require("node:util");
 var import_node_perf_hooks = require("node:perf_hooks");
-var execFileP = (0, import_node_util.promisify)(import_node_child_process.execFile);
+var execFileP = (0, import_node_util.promisify)(import_node_child_process2.execFile);
 function defaultCliPath() {
   return path25.resolve(__dirname, "..", "..", "cli.js");
 }
@@ -21936,10 +22402,20 @@ var os5 = __toESM(require("node:os"));
 var fs34 = __toESM(require("node:fs"));
 var path29 = __toESM(require("node:path"));
 var EXPECTED_TOOL_ALLOWLIST = [
-  // --- 35 base tools ---
+  // Canonical TOOL_DEFS order (63). Copied verbatim from the Deliverable-0 list
+  // (.omc/research/canonical-tool-names.md). Order MUST match TOOL_DEFS,
+  // EXPECTED_TOOL_NAMES (repo.test.ts) and expectedAll (mcp-adapter.test.ts).
   "th_state_get",
   "th_state_set",
+  // 5 typed gate-transition tools (precondition-gated GATE_OWNED mutators):
+  "th_tier_record",
+  "th_stage_advance",
+  "th_implementation_unlock",
+  "th_write_gate_set",
+  "th_blast_radius_record",
   "th_drift_add",
+  "th_drift_list",
+  "th_drift_resolve",
   "th_build_next_wave",
   "th_build_claim",
   "th_build_release",
@@ -21947,6 +22423,7 @@ var EXPECTED_TOOL_ALLOWLIST = [
   "th_build_plan",
   "th_route",
   "th_coverage_check",
+  "th_coverage_report",
   "th_next",
   "th_delegate_plan",
   "th_delegate_pack",
@@ -21962,6 +22439,8 @@ var EXPECTED_TOOL_ALLOWLIST = [
   "th_decision_add",
   "th_decision_check",
   "th_decision_list",
+  "th_artifact_register",
+  "th_artifact_list",
   "th_artifact_claim",
   "th_artifact_release",
   "th_artifact_leases",
@@ -21972,10 +22451,26 @@ var EXPECTED_TOOL_ALLOWLIST = [
   "th_debate_add",
   "th_debate_list",
   "th_debate_resolve",
+  "th_verify_add",
+  "th_verify_list",
+  "th_verify_clear",
+  "th_verify_run",
+  "th_stage_current",
+  "th_stage_describe",
+  "th_stage_list",
+  "th_doctor",
+  "th_scorecard",
+  "th_slices_sync",
+  "th_slice_set_status",
   // --- 3 appended proof tools (read/coordination-only; never gate-mutating) ---
   "th_proof_run",
   "th_proof_component",
-  "th_proof_report"
+  "th_proof_report",
+  // --- 4 interview/init tools (store-only / idempotent; never gate-mutating) ---
+  "th_interview_start",
+  "th_interview_record",
+  "th_interview_status",
+  "th_init"
 ];
 var FORBIDDEN_MCP_TOOL = "th_decision_approve";
 var DEFAULT_HOSTILE_PATHS = [
@@ -21995,9 +22490,14 @@ var NETWORK_PATTERNS = [
   /\bfetch\s*\(/,
   /\bXMLHttpRequest\b/
 ];
-function readTelemetrySource() {
-  for (const ext of [".ts", ".js"]) {
-    const file = path29.resolve(__dirname, "..", `telemetry${ext}`);
+function readTelemetrySource(repoRoot) {
+  const candidates = [
+    path29.resolve(__dirname, "..", "telemetry.ts"),
+    path29.resolve(__dirname, "..", "telemetry.js"),
+    path29.resolve(__dirname, "..", "src", "core", "telemetry.ts"),
+    ...repoRoot ? [path29.join(repoRoot, "src", "core", "telemetry.ts")] : []
+  ];
+  for (const file of candidates) {
     try {
       return fs34.readFileSync(file, "utf8");
     } catch {
@@ -22099,7 +22599,7 @@ function assertContainment(input) {
       hint: `GATE_OWNED should hold exactly 5 fields (implementation_allowed, tier, current_stage, write_gate, blast_radius_flags); found ${GATE_OWNED.size}.`
     }
   );
-  const telemetrySource = input.telemetrySource ?? readTelemetrySource();
+  const telemetrySource = input.telemetrySource ?? readTelemetrySource(input.repoRoot);
   const networkHits = telemetrySource === null ? ["<telemetry source unavailable>"] : NETWORK_PATTERNS.filter((re) => re.test(telemetrySource)).map((re) => re.source);
   add(
     {
@@ -22619,9 +23119,9 @@ function buildFaultsCard() {
   };
   return buildReportCard(C2, assertions, stats);
 }
-function buildContainmentCard(toolNames) {
+function buildContainmentCard(toolNames, repoRoot) {
   const C2 = "containment";
-  const report = assertContainment({ toolNames });
+  const report = assertContainment({ toolNames, repoRoot });
   return { component: C2, verdict: report.assertions.some((a) => !a.pass) ? "fail" : "pass", assertions: report.assertions, stats: report.stats, diagnostics: report.diagnostics };
 }
 function buildPlatformCard() {
@@ -22696,7 +23196,7 @@ async function runProof(opts = {}) {
     cardsByComponent.set("performance", buildPerformanceCard(metrics, regressions));
   }
   if (want.has("failure-injection")) cardsByComponent.set("failure-injection", buildFaultsCard());
-  if (want.has("containment")) cardsByComponent.set("containment", buildContainmentCard(toolNames));
+  if (want.has("containment")) cardsByComponent.set("containment", buildContainmentCard(toolNames, repoRoot));
   if (want.has("cross-platform")) cardsByComponent.set("cross-platform", buildPlatformCard());
   const subsystemsTouched = [...new Set(componentsRun.flatMap((c) => [...COMPONENT_SUBSYSTEMS[c]]))];
   const gatesTouched = want.has("runner-report") || want.has("failure-injection") ? exerciseGates() : [];
@@ -22922,7 +23422,625 @@ async function runProofReport(paths, opts = {}) {
   return reportResult(report);
 }
 
+// src/commands/interview.ts
+var fs38 = __toESM(require("node:fs"));
+var DEFAULT_INTERVIEW_THRESHOLD = 0.2;
+function isUnit(n) {
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
+}
+function isInterviewState(v) {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v;
+  if (typeof o.idea !== "string") return false;
+  if (!isUnit(o.threshold)) return false;
+  if (!Array.isArray(o.rounds)) return false;
+  if (!(o.ambiguity === null || isUnit(o.ambiguity))) return false;
+  return true;
+}
+function readInterview(paths) {
+  try {
+    if (!fs38.existsSync(paths.interviewFile)) return null;
+    const parsed = JSON.parse(fs38.readFileSync(paths.interviewFile, "utf8"));
+    return isInterviewState(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function writeInterview(paths, state) {
+  atomicWriteFile(paths.interviewFile, JSON.stringify(state, null, 2) + "\n");
+}
+function computeReady(ambiguity, threshold) {
+  return ambiguity !== null && ambiguity <= threshold;
+}
+function runInterviewStart(paths, opts = {}) {
+  const idea = opts.idea?.trim();
+  if (!idea) {
+    structuredLog({ cmd: "interview start", error: "missing_field", field: "idea" });
+    return failure({ human: "Missing required `idea`.", data: { error: "missing_field", field: "idea" } });
+  }
+  const threshold = opts.threshold ?? DEFAULT_INTERVIEW_THRESHOLD;
+  if (!isUnit(threshold)) {
+    structuredLog({ cmd: "interview start", error: "invalid_threshold" });
+    return failure({
+      human: "`threshold` must be a finite number in [0,1].",
+      data: { error: "invalid_threshold", threshold }
+    });
+  }
+  const state = { idea, threshold, rounds: [], ambiguity: null, status: "in-progress" };
+  writeInterview(paths, state);
+  structuredLog({ cmd: "interview start", threshold });
+  return success({
+    data: { idea, threshold, rounds: 0, ready: false },
+    human: `Interview started (threshold ${threshold}).`
+  });
+}
+function runInterviewRecord(paths, opts = {}) {
+  const existing = readInterview(paths);
+  if (!existing) {
+    structuredLog({ cmd: "interview record", error: "not_started" });
+    return failure({
+      human: "No interview in progress. Run `th interview start` first.",
+      data: { error: "not_started" }
+    });
+  }
+  const question = opts.question?.trim();
+  const answer = opts.answer?.trim();
+  if (!question) {
+    structuredLog({ cmd: "interview record", error: "missing_field", field: "question" });
+    return failure({ human: "Missing required `question`.", data: { error: "missing_field", field: "question" } });
+  }
+  if (!answer) {
+    structuredLog({ cmd: "interview record", error: "missing_field", field: "answer" });
+    return failure({ human: "Missing required `answer`.", data: { error: "missing_field", field: "answer" } });
+  }
+  const s = opts.scores;
+  if (typeof s !== "object" || s === null || !Number.isFinite(s.goal) || !Number.isFinite(s.constraints) || !Number.isFinite(s.criteria)) {
+    structuredLog({ cmd: "interview record", error: "invalid_scores" });
+    return failure({
+      human: "`scores` must be an object { goal, constraints, criteria } of numbers.",
+      data: { error: "invalid_scores" }
+    });
+  }
+  const scoreRec = s;
+  const scores = {
+    goal: scoreRec.goal,
+    constraints: scoreRec.constraints,
+    criteria: scoreRec.criteria
+  };
+  const ambiguity = opts.ambiguity;
+  if (!isUnit(ambiguity)) {
+    structuredLog({ cmd: "interview record", error: "invalid_ambiguity" });
+    return failure({
+      human: "`ambiguity` must be a finite number in [0,1].",
+      data: { error: "invalid_ambiguity", ambiguity }
+    });
+  }
+  let entities = [];
+  if (opts.entities !== void 0) {
+    if (!Array.isArray(opts.entities) || opts.entities.some((e) => typeof e !== "string")) {
+      structuredLog({ cmd: "interview record", error: "invalid_entities" });
+      return failure({
+        human: "`entities` must be an array of strings.",
+        data: { error: "invalid_entities" }
+      });
+    }
+    entities = opts.entities;
+  }
+  const round = { question, answer, scores, ambiguity, entities };
+  const next = {
+    ...existing,
+    rounds: [...existing.rounds, round],
+    ambiguity
+  };
+  writeInterview(paths, next);
+  const ready = computeReady(ambiguity, next.threshold);
+  structuredLog({ cmd: "interview record", rounds: next.rounds.length });
+  return success({
+    data: { rounds: next.rounds.length, ambiguity, threshold: next.threshold, ready },
+    human: `Recorded round ${next.rounds.length} (ambiguity ${ambiguity}, ready ${ready}).`
+  });
+}
+function runInterviewStatus(paths) {
+  const existing = readInterview(paths);
+  if (!existing) {
+    structuredLog({ cmd: "interview status", started: false });
+    return success({
+      data: {
+        started: false,
+        rounds: 0,
+        ambiguity: null,
+        threshold: DEFAULT_INTERVIEW_THRESHOLD,
+        ready: false
+      },
+      human: "No interview in progress."
+    });
+  }
+  const ready = computeReady(existing.ambiguity, existing.threshold);
+  structuredLog({ cmd: "interview status", rounds: existing.rounds.length });
+  return success({
+    data: {
+      started: true,
+      rounds: existing.rounds.length,
+      ambiguity: existing.ambiguity,
+      threshold: existing.threshold,
+      ready
+    },
+    human: `Interview: ${existing.rounds.length} round(s), ambiguity ${existing.ambiguity ?? "n/a"}, threshold ${existing.threshold}, ready ${ready}.`
+  });
+}
+
+// src/commands/verify.ts
+function runVerifyAdd(paths, command) {
+  const trimmed = command?.trim();
+  if (!trimmed) return failure({ human: 'usage: th verify add "<command>"' });
+  const config2 = readVerifyConfig(paths);
+  config2.commands.push(trimmed);
+  writeVerifyConfig(paths, config2);
+  structuredLog({ cmd: "verify add", command: trimmed, count: config2.commands.length });
+  return success({
+    data: { commands: config2.commands },
+    human: `added: ${trimmed}
+${config2.commands.length} command(s) configured.`
+  });
+}
+function runVerifyList(paths) {
+  const config2 = readVerifyConfig(paths);
+  const human = config2.commands.length ? config2.commands.map((c, i) => `  ${i + 1}. ${c}`).join("\n") : '(no verify commands configured \u2014 add one with `th verify add "<command>"`)';
+  return success({ data: { commands: config2.commands }, human });
+}
+function runVerifyClear(paths) {
+  writeVerifyConfig(paths, { commands: [] });
+  structuredLog({ cmd: "verify clear" });
+  return success({ data: { commands: [] }, human: "verify commands cleared." });
+}
+function renderReport(report) {
+  const lines = report.results.map((r) => `  ${r.ok ? "\u2713" : "\u2717"} (${r.exitCode}) ${r.command}  [${r.durationMs}ms]`);
+  const failed = report.results.filter((r) => !r.ok);
+  const tail = failed.length ? ["", "First failure output (tail):", ...failed[0].outputTail.split(/\r?\n/).map((l) => `    ${l}`)] : [];
+  return [
+    report.ok ? `verify PASS \u2014 ${report.results.length} command(s) green` : `verify FAIL \u2014 ${failed.length}/${report.results.length} command(s) failed`,
+    ...lines,
+    ...tail
+  ].join("\n");
+}
+function runVerifyRun(paths) {
+  const config2 = readVerifyConfig(paths);
+  if (config2.commands.length === 0) {
+    return failure({
+      human: 'No verify commands configured. Add one with `th verify add "<command>"` (e.g. `th verify add "npm test"`).',
+      data: { error: "no_verify_commands" }
+    });
+  }
+  const report = runCommands(paths.root, config2.commands);
+  writeVerifyReport(paths, report);
+  structuredLog({ cmd: "verify run", ok: report.ok, commands: report.results.length });
+  const data = { ok: report.ok, ranAt: report.ranAt, results: report.results };
+  return report.ok ? success({ data, human: renderReport(report) }) : failure({ data, human: renderReport(report) });
+}
+
+// src/commands/stage.ts
+function renderContract(c) {
+  return [
+    `Stage:       ${c.stage}`,
+    `Tiers:       ${c.tiers.join(", ")}`,
+    `Produces:    ${c.produces || "(no artifact)"}`,
+    `Critic mode: ${c.criticMode}`,
+    `Human gate:  ${c.humanGate ? "yes (blocking)" : "no (streams)"}`,
+    `Summary:     ${c.summary}`
+  ].join("\n");
+}
+function runStageList() {
+  const human = STAGE_PIPELINE.map(
+    (c) => `${c.stage.padEnd(22)} ${c.tiers.join("/").padEnd(10)} ${c.humanGate ? "[gate] " : "       "}${c.produces || "-"}`
+  ).join("\n");
+  return success({ data: { stages: STAGE_PIPELINE }, human });
+}
+function runStageDescribe(stage) {
+  if (!stage) return failure({ human: "usage: th stage describe <stage>" });
+  const c = stageContract(stage);
+  if (!c) {
+    return failure({
+      human: `Unknown stage: ${stage}. Known: ${STAGE_PIPELINE.map((s) => s.stage).join(", ")}`,
+      data: { error: "unknown_stage", stage }
+    });
+  }
+  return success({ data: { stage: c }, human: renderContract(c) });
+}
+function runStageCurrent(paths) {
+  const r = readState(paths);
+  if (!r.exists) return failure({ human: "No state.json found. Run `th init` first.", data: { error: "not_initialized" } });
+  if (!r.state) return failure({ human: "state.json is invalid.", data: { error: "invalid_state", issues: r.issues } });
+  const current = r.state.current_stage;
+  const c = stageContract(current);
+  if (!c) {
+    return success({
+      data: { current_stage: current, contract: null },
+      human: `Current stage "${current}" has no pipeline contract (pre-stage or bypass). Run \`th stage list\` to see the engaged stages.`
+    });
+  }
+  return success({ data: { current_stage: current, contract: c }, human: renderContract(c) });
+}
+
+// src/commands/doctor.ts
+var fs39 = __toESM(require("node:fs"));
+var path35 = __toESM(require("node:path"));
+function pluginRoot() {
+  return path35.resolve(__dirname, "..", "..");
+}
+function nodeMajor() {
+  const m = /^v?(\d+)\./.exec(process.version);
+  return m ? Number(m[1]) : 0;
+}
+function ledgerChecks(paths, opts) {
+  if (!fs39.existsSync(ledgerPath(paths))) return [];
+  const ledgerEntries = readLedger(paths);
+  const ledgerCount = ledgerEntries.length;
+  const anchors = ledgerEntries.filter((e) => e.event === "high-water").length;
+  const gateMutations = ledgerCount - anchors;
+  const out = [
+    {
+      name: "audit ledger",
+      status: "ok",
+      detail: `${gateMutations} gate-mutation entr${gateMutations === 1 ? "y" : "ies"}${anchors > 0 ? ` (+${anchors} high-water anchor${anchors === 1 ? "" : "s"})` : ""}`
+    }
+  ];
+  const chain = verifyLedgerChain(ledgerEntries);
+  if (chain.ok) {
+    out.push({ name: "ledger chain", status: "ok", detail: ledgerCount > 0 ? "intact (no tampering detected)" : "no entries to verify" });
+  } else {
+    out.push({
+      name: "ledger chain",
+      status: opts.strict ? "fail" : "warn",
+      detail: `BROKEN at entry ${chain.brokenAt} (${chain.reason}) \u2014 a sealed entry was edited, deleted, or reordered${opts.strict ? "" : " (run `th doctor --strict` to fail on this)"}`
+    });
+  }
+  const key = process.env.TH_LEDGER_KEY;
+  if (key) {
+    const seals = verifyLedgerSeals(ledgerEntries, key);
+    if (seals.ok) {
+      const sealed = ledgerEntries.filter((e) => typeof e.keyedHash === "string").length;
+      out.push({ name: "ledger seals", status: "ok", detail: sealed > 0 ? `${sealed} keyed seal(s) verified` : "no keyed seals present" });
+    } else {
+      const where = seals.mismatches.map((m) => `entry ${m.index} (${m.event})`).join(", ");
+      out.push({ name: "ledger seals", status: "warn", detail: `keyed-seal MISMATCH at ${where} \u2014 wrong TH_LEDGER_KEY or a sealed field was tampered (warn-only)` });
+    }
+  }
+  return out;
+}
+function runDoctor(paths, opts = {}) {
+  const checks = [];
+  const major = nodeMajor();
+  checks.push({
+    name: "node",
+    status: major >= 18 ? "ok" : "fail",
+    detail: major >= 18 ? `${process.version} (>= 18)` : `${process.version} \u2014 TwinHarness requires Node >= 18`
+  });
+  const root = pluginRoot();
+  const distCli = path35.join(root, "dist", "cli.js");
+  checks.push({
+    name: "plugin cli",
+    status: fs39.existsSync(distCli) ? "ok" : "warn",
+    detail: fs39.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary"
+  });
+  let version2 = "unknown";
+  try {
+    const pkg = JSON.parse(fs39.readFileSync(path35.join(root, "package.json"), "utf8"));
+    if (typeof pkg.version === "string") version2 = pkg.version;
+  } catch {
+  }
+  checks.push({ name: "version", status: "ok", detail: version2 });
+  checks.push({
+    name: "claude code",
+    status: "warn",
+    detail: "plugin targets Claude Code >=1.0.0 (hook+agent schema v1) \u2014 informational, not host-checked"
+  });
+  const r = readState(paths);
+  if (!r.exists) {
+    checks.push({ name: "project", status: "ok", detail: "no TwinHarness run in this directory (gates inactive \u2014 fail-open)" });
+  } else if (!r.state) {
+    checks.push({
+      name: "state.json",
+      status: "fail",
+      detail: `present but INVALID: ${(r.issues ?? []).map((i) => `${i.path}: ${i.message}`).join("; ") || "schema mismatch"}`
+    });
+    checks.push(...ledgerChecks(paths, opts));
+  } else {
+    const s = r.state;
+    checks.push({ name: "state.json", status: "ok", detail: `valid (tier ${s.tier ?? "unclassified"}, stage ${s.current_stage})` });
+    const sv = s.schema_version;
+    checks.push({
+      name: "schema",
+      status: sv === CURRENT_SCHEMA_VERSION ? "ok" : "warn",
+      detail: sv === CURRENT_SCHEMA_VERSION ? `v${sv} (current)` : `${sv === void 0 ? "legacy (unversioned)" : `v${sv}`} \u2014 run \`th migrate\` to reach v${CURRENT_SCHEMA_VERSION}`
+    });
+    checks.push({
+      name: "blocking drift",
+      status: s.drift_open_blocking > 0 ? "warn" : "ok",
+      detail: s.drift_open_blocking > 0 ? `${s.drift_open_blocking} open \u2014 stop-gate will block completion` : "none"
+    });
+    const lockDir = path35.join(paths.stateDir, ".state.lock");
+    if (fs39.existsSync(lockDir)) {
+      let age = 0;
+      try {
+        age = Date.now() - fs39.statSync(lockDir).mtimeMs;
+      } catch {
+      }
+      checks.push({
+        name: "state lock",
+        status: "warn",
+        detail: `${lockDir} present (${Math.round(age / 1e3)}s old) \u2014 remove it if no \`th\` process is running`
+      });
+    }
+    checks.push(...ledgerChecks(paths, opts));
+    const integrity = artifactIntegrity(paths, s);
+    if (integrity.length === 0) {
+      checks.push({ name: "artifacts", status: "ok", detail: "no artifacts registered yet" });
+    } else {
+      const changed = integrity.filter((i) => i.status === "changed");
+      const missing = integrity.filter((i) => i.status === "missing");
+      const drifted = [...changed, ...missing];
+      checks.push({
+        name: "artifacts",
+        status: drifted.length > 0 ? "warn" : "ok",
+        detail: drifted.length > 0 ? `${changed.length} changed, ${missing.length} missing \u2014 re-register or run \`th stale --artifact <file>\`: ${drifted.map((i) => i.file).join(", ")}` : `${integrity.length} registered, all match recorded hashes`
+      });
+    }
+    const prog = sliceProgress(s);
+    if (prog.total === 0) {
+      checks.push({ name: "slices", status: "ok", detail: "no slices synced yet" });
+    } else {
+      const unfinished = prog.pending + prog.inProgress;
+      checks.push({
+        name: "slices",
+        status: unfinished > 0 ? "warn" : "ok",
+        detail: `${prog.done} done / ${prog.blocked} blocked / ${prog.inProgress} in-progress / ${prog.pending} pending (of ${prog.total})`
+      });
+      const deps = validateDeps(s.slices);
+      if (hasDepIssues(deps)) {
+        const parts = [
+          ...deps.cycles.map((c) => `cycle ${c.join("\u2192")}`),
+          ...deps.dangling.map((d) => `${d.slice}\u2192unknown ${d.missing.join(",")}`)
+        ];
+        checks.push({ name: "slice deps", status: "warn", detail: `unsatisfiable depends_on \u2014 will stall next-wave: ${parts.join("; ")}` });
+      } else {
+        checks.push({ name: "slice deps", status: "ok", detail: "depends_on graph is acyclic with no dangling refs" });
+      }
+      const stale = staleLeases(paths, s.slices);
+      if (stale.length > 0) {
+        checks.push({
+          name: "build leases",
+          status: "warn",
+          detail: `${stale.length} stale lease(s) (owning slice done/blocked/missing) \u2014 \`th build release <ID>\`: ${stale.map((l) => l.slice).join(", ")}`
+        });
+      }
+    }
+    const breakdown = computeBreakdown(paths.root);
+    if ("error" in breakdown) {
+      checks.push({ name: "coverage", status: "ok", detail: "requirements not authored yet" });
+    } else if (breakdown.total === 0) {
+      checks.push({ name: "coverage", status: "ok", detail: "no REQ-IDs found in requirements" });
+    } else {
+      const fullyMapped = breakdown.rows.filter((r2) => r2.planned && r2.tested).length;
+      const report = readVerifyReport(paths);
+      const passing = report ? report.ok ? "suite green" : "suite FAILING" : "suite unknown (run `th verify run`)";
+      checks.push({
+        name: "coverage",
+        status: fullyMapped < breakdown.total ? "warn" : "ok",
+        detail: `${fullyMapped}/${breakdown.total} planned+tested; ${breakdown.implemented}/${breakdown.total} implemented; ${passing}`
+      });
+    }
+    const escalations = reviseEscalations(s);
+    if (escalations.length > 0) {
+      checks.push({
+        name: "revise loops",
+        status: "warn",
+        detail: `at cap (escalate to human): ${escalations.map((e) => `${e.mode} ${e.count}/${e.cap}`).join(", ")}`
+      });
+    } else {
+      checks.push({ name: "revise loops", status: "ok", detail: "none at cap" });
+    }
+  }
+  const hasFail = checks.some((c) => c.status === "fail");
+  const icon = (s) => s === "ok" ? "\u2713" : s === "warn" ? "!" : "\u2717";
+  const human = checks.map((c) => `${icon(c.status)} ${c.name.padEnd(16)} ${c.detail}`).join("\n");
+  const result = { checks, ok: !hasFail };
+  return hasFail ? failure({ data: result, human }) : success({ data: result, human });
+}
+
+// src/commands/slices.ts
+var fs40 = __toESM(require("node:fs"));
+var path36 = __toESM(require("node:path"));
+function parseComponentTokens(raw) {
+  const quoted = [];
+  for (const m of raw.matchAll(/`([^`]+)`/g)) {
+    const tok = m[1].trim();
+    if (tok) quoted.push(tok);
+  }
+  if (quoted.length > 0) return quoted;
+  const stripped = raw.replace(/^[\s\-*]+/, "");
+  return stripped.split(",").map((t) => t.trim()).filter(Boolean);
+}
+function parsePlanSlices(planContent) {
+  const SLICE_HEADING_RE = /^#{1,6}\s+(?:SLICE-(\d+)|Slice\s+(\d+))(?:\s|—|$)/i;
+  const COMPONENTS_RE = /components?\s+touched/i;
+  const DEPENDS_RE = /depends?\s+on/i;
+  const lines = planContent.split(/\r?\n/);
+  const slices = [];
+  const headings = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = SLICE_HEADING_RE.exec(lines[i]);
+    if (m) {
+      const n = m[1] ?? m[2];
+      headings.push({ lineIdx: i, id: `SLICE-${n}` });
+    }
+  }
+  for (let hi = 0; hi < headings.length; hi++) {
+    const { lineIdx, id } = headings[hi];
+    const sectionEnd = headings[hi + 1]?.lineIdx ?? lines.length;
+    let components = [];
+    let dependsOn = [];
+    for (let li = lineIdx + 1; li < sectionEnd; li++) {
+      const line = lines[li];
+      if (components.length === 0 && COMPONENTS_RE.test(line)) {
+        const afterColon = line.replace(COMPONENTS_RE, "").replace(/^[^:]*:\s*/, "").trim();
+        if (afterColon) {
+          components = parseComponentTokens(afterColon);
+        } else if (li + 1 < sectionEnd) {
+          components = parseComponentTokens(lines[li + 1]);
+        }
+      } else if (dependsOn.length === 0 && DEPENDS_RE.test(line)) {
+        for (const m of line.matchAll(/SLICE-\d+/gi)) dependsOn.push(m[0].toUpperCase());
+      }
+    }
+    slices.push({ id, components, dependsOn });
+  }
+  return slices;
+}
+function runSlicesSync(paths, opts = {}) {
+  return withStateLock(paths, () => runSlicesSyncLocked(paths, opts));
+}
+function runSlicesSyncLocked(paths, opts = {}) {
+  const planAbs = path36.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  if (!fs40.existsSync(planAbs) || !fs40.statSync(planAbs).isFile()) {
+    const rel = path36.relative(paths.root, planAbs).split(path36.sep).join("/");
+    return failure({
+      human: `Plan file not found: ${rel}. Provide the path with --plan or author the implementation plan first.`,
+      data: { error: "plan_file_not_found", planFile: rel }
+    });
+  }
+  const planContent = fs40.readFileSync(planAbs, "utf8");
+  const planSlices = parsePlanSlices(planContent);
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: `state.json is invalid:
+${formatIssues(r.issues)}`,
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const stateById = /* @__PURE__ */ new Map();
+  for (const s of r.state.slices) stateById.set(s.id, s);
+  const planIds = new Set(planSlices.map((s) => s.id));
+  const missing = r.state.slices.filter((s) => !planIds.has(s.id)).map((s) => s.id);
+  const upserted = planSlices.map((ps) => {
+    const existing = stateById.get(ps.id);
+    const slice = {
+      id: ps.id,
+      status: existing?.status ?? "pending",
+      components: ps.components
+    };
+    if (ps.dependsOn.length > 0) slice.depends_on = ps.dependsOn;
+    return slice;
+  });
+  let finalSlices;
+  if (opts.removeMissing) {
+    finalSlices = upserted;
+  } else {
+    const missingEntries = r.state.slices.filter((s) => !planIds.has(s.id));
+    finalSlices = [...upserted, ...missingEntries];
+  }
+  const nextState = { ...r.state, slices: finalSlices };
+  const validation = validateState(nextState);
+  if (!validation.ok) {
+    return failure({
+      human: `Refusing to write: result would be invalid:
+${formatIssues(validation.issues)}`,
+      data: { error: "would_be_invalid", issues: validation.issues }
+    });
+  }
+  const added = planSlices.filter((ps) => !stateById.has(ps.id)).map((ps) => ps.id);
+  const updated = planSlices.filter((ps) => stateById.has(ps.id)).map((ps) => ps.id);
+  const data = {
+    added,
+    updated,
+    missing,
+    removed: opts.removeMissing ? missing : [],
+    total: finalSlices.length,
+    dryRun: opts.dryRun ?? false
+  };
+  if (!opts.dryRun) {
+    writeState(paths, validation.state);
+  }
+  structuredLog({ cmd: "slices sync", ...data });
+  const missingNote = missing.length ? `
+  ${missing.length} slice(s) in state but absent from plan (${missing.join(", ")})` + (opts.removeMissing ? " \u2014 removed." : " \u2014 kept (pass --remove-missing to delete).") : "";
+  const dryNote = opts.dryRun ? " (dry run \u2014 no write)" : "";
+  const human = `slices sync: ${added.length} added, ${updated.length} kept, total ${finalSlices.length}${dryNote}.${missingNote}`;
+  return success({ data, human });
+}
+function runSliceSetStatus(paths, sliceId, status) {
+  return withStateLock(paths, () => runSliceSetStatusLocked(paths, sliceId, status));
+}
+function runSliceSetStatusLocked(paths, sliceId, status) {
+  if (!sliceId) {
+    return failure({ human: "usage: th slice set-status <SLICE-ID> <status>" });
+  }
+  if (!status || !SLICE_STATUSES.includes(status)) {
+    return failure({
+      human: `Invalid status "${status ?? ""}". Must be one of: ${SLICE_STATUSES.join(", ")}`,
+      data: { error: "invalid_status", validStatuses: [...SLICE_STATUSES] }
+    });
+  }
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: `state.json is invalid; fix it before updating slice status:
+${formatIssues(r.issues)}`,
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const idx = r.state.slices.findIndex((s) => s.id === sliceId);
+  if (idx < 0) {
+    return failure({
+      human: `Slice not found: ${sliceId}. Known slices: ${r.state.slices.map((s) => s.id).join(", ") || "(none)"}`,
+      data: { error: "slice_not_found", sliceId }
+    });
+  }
+  const slices = r.state.slices.map(
+    (s, i) => i === idx ? { ...s, status } : s
+  );
+  const nextState = { ...r.state, slices };
+  const validation = validateState(nextState);
+  if (!validation.ok) {
+    return failure({
+      human: `Refusing to write: result would be invalid:
+${formatIssues(validation.issues)}`,
+      data: { error: "would_be_invalid", issues: validation.issues }
+    });
+  }
+  writeState(paths, validation.state);
+  let releasedLease;
+  if (status === "done" || status === "blocked") {
+    const held = activeLeases(paths).find((l) => l.slice === sliceId);
+    if (held) {
+      appendLeaseEvent(paths, { event: "release", slice: sliceId, components: held.components });
+      releasedLease = held.components;
+    }
+  }
+  structuredLog({ cmd: "slice set-status", sliceId, status, releasedLease: releasedLease ?? null });
+  return success({
+    data: { sliceId, status, ...releasedLease ? { releasedLease } : {} },
+    human: `${sliceId} status set to "${status}".${releasedLease ? ` Released lease on: ${releasedLease.join(", ") || "(none)"}.` : ""}`
+  });
+}
+
 // src/mcp-server.ts
+var WRITE_GATE_RANK = { off: 0, ask: 1, deny: 2, strict: 3 };
+function gateState(paths) {
+  const r = readState(paths);
+  if (!r.exists) {
+    return { error: failure({ human: "No TwinHarness run here. Run `th init` first.", data: { error: "not_initialized" } }) };
+  }
+  if (!r.state) {
+    return { error: failure({ human: "state.json is invalid (`th state verify` for details).", data: { error: "invalid_state", issues: r.issues } }) };
+  }
+  return { state: r.state };
+}
+function gateRefusal(check) {
+  return failure({ human: `Gate refused: ${check.error}`, data: { error: check.error ?? "gate_refused", ...check.detail ?? {} } });
+}
 function resolvePathsForCall() {
   return resolveProjectPaths(process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
 }
@@ -22995,6 +24113,134 @@ var TOOL_DEFS = [
       return runStateSet(paths, key, rawValue);
     }
   },
+  // ---- Typed gate-transition tools (Component B) ----
+  // Each enforces a precondition via the shared gate-precondition helpers (the SAME
+  // single source of truth `th next` uses), then routes the write through the
+  // locked+ledgered `applyGateMutation` with a HARD-CODED `source` = the tool name
+  // (never read from args — an agent cannot spoof provenance, AC-B16). These are the
+  // FIRST machine-enforced gate ladder; `th_state_set`'s H-2 refusal stays intact.
+  {
+    name: "th_tier_record",
+    description: "Record (classify or re-classify) the run's tier. Calls validateTierTransition: refuses t0_blast_radius_veto (T0 with blast-radius flags), tier_locked_after_unlock (once implementation_allowed===true), and tier_downgrade_human_only (a downward re-tier over MCP \u2014 a review-dodge vector). Set-from-unclassified and upgrades are allowed. Writes via the locked+ledgered setter (source=th_tier_record).",
+    inputSchema: {
+      type: "object",
+      properties: { tier: { type: "string", description: "Target tier.", enum: TIERS } },
+      required: ["tier"],
+      additionalProperties: false
+    },
+    run: (paths, args) => {
+      const tier = optString(args, "tier");
+      if (tier === void 0) return failure({ human: "th_tier_record requires `tier`.", data: { error: "missing_tier" } });
+      const gs = gateState(paths);
+      if ("error" in gs) return gs.error;
+      const check = validateTierTransition(gs.state, tier);
+      if (!check.ok) return gateRefusal(check);
+      return applyGateMutation(paths, { tier }, "th_tier_record");
+    }
+  },
+  {
+    name: "th_stage_advance",
+    description: "Advance to the next engaged stage for the current tier. Calls canAdvanceStage (the full mechanical ladder: blocking drift, revise caps, failing verify, artifact drift, tier set, brownfield repo-map, decision obligations, open debates, the current stage's governing artifact, coverage at implementation-planning, all slices settled at implementation). Refuses with the first failing rung's stable error, or no_next_stage at the terminal stage. Writes current_stage via the locked+ledgered setter (source=th_stage_advance).",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => {
+      const gs = gateState(paths);
+      if ("error" in gs) return gs.error;
+      const state = gs.state;
+      const adv = canAdvanceStage(paths, state);
+      if (!adv.ok) return gateRefusal(adv);
+      const current = canonicalizeStage(state.current_stage);
+      const next = nextStageAfter(current, state.tier);
+      if (!next) {
+        return failure({
+          human: "Already at the terminal engaged stage for this tier; there is no next stage to advance to.",
+          data: { error: "no_next_stage", current_stage: current }
+        });
+      }
+      return applyGateMutation(paths, { current_stage: next.stage }, "th_stage_advance");
+    }
+  },
+  {
+    name: "th_implementation_unlock",
+    description: "Set implementation_allowed. allowed:true requires the FULL canUnlockImplementation ladder (canAdvanceStage's complete ladder + tail: coverage passes AND current_stage \u2265 implementation-planning) and refuses with the first failing rung's stable error. allowed:false (re-lock/tighten) is always permitted. Writes via the locked+ledgered setter (source=th_implementation_unlock).",
+    inputSchema: {
+      type: "object",
+      properties: { allowed: boolProp("true to unlock implementation (full gate ladder); false to re-lock (always allowed).") },
+      required: ["allowed"],
+      additionalProperties: false
+    },
+    run: (paths, args) => {
+      const allowed = optBool(args, "allowed");
+      if (allowed === void 0) return failure({ human: "th_implementation_unlock requires boolean `allowed`.", data: { error: "missing_allowed" } });
+      const gs = gateState(paths);
+      if ("error" in gs) return gs.error;
+      if (allowed) {
+        const check = canUnlockImplementation(paths, gs.state);
+        if (!check.ok) return gateRefusal(check);
+      }
+      return applyGateMutation(paths, { implementation_allowed: allowed }, "th_implementation_unlock");
+    }
+  },
+  {
+    name: "th_write_gate_set",
+    description: "Set the PreToolUse write-gate level. TIGHTEN-ONLY over MCP: rank off < ask < deny < strict; any change to a strictly LOWER rank is refused (would_loosen_write_gate). An absent write_gate is treated as the default (ask). Writes via the locked+ledgered setter (source=th_write_gate_set).",
+    inputSchema: {
+      type: "object",
+      properties: { value: { type: "string", description: "Target write-gate level.", enum: WRITE_GATE_VALUES } },
+      required: ["value"],
+      additionalProperties: false
+    },
+    run: (paths, args) => {
+      const value = optString(args, "value");
+      if (value === void 0 || !WRITE_GATE_VALUES.includes(value)) {
+        return failure({ human: `th_write_gate_set requires \`value\` one of ${WRITE_GATE_VALUES.join(", ")}.`, data: { error: "invalid_write_gate" } });
+      }
+      const gs = gateState(paths);
+      if ("error" in gs) return gs.error;
+      const current = gs.state.write_gate ?? "ask";
+      if (WRITE_GATE_RANK[value] < WRITE_GATE_RANK[current]) {
+        return failure({
+          human: `Refusing to loosen write_gate from "${current}" to "${value}" over MCP (tighten-only).`,
+          data: { error: "would_loosen_write_gate", from: current, to: value }
+        });
+      }
+      return applyGateMutation(paths, { write_gate: value }, "th_write_gate_set");
+    }
+  },
+  {
+    name: "th_blast_radius_record",
+    description: "Add or remove a \xA75 blast-radius flag (idempotent merge). present:true adds the flag, present:false removes it. Refuses t0_blast_radius_veto when the current tier is T0 and the result would carry any flag (re-tier above T0 first). Writes the merged, canonically-ordered blast_radius_flags via the locked+ledgered setter (source=th_blast_radius_record).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        flag: { type: "string", description: "Blast-radius flag.", enum: BLAST_RADIUS_FLAGS },
+        present: boolProp("true to add the flag, false to remove it.")
+      },
+      required: ["flag", "present"],
+      additionalProperties: false
+    },
+    run: (paths, args) => {
+      const flag = optString(args, "flag");
+      const present = optBool(args, "present");
+      if (flag === void 0 || !BLAST_RADIUS_FLAGS.includes(flag)) {
+        return failure({ human: `th_blast_radius_record requires \`flag\` one of ${BLAST_RADIUS_FLAGS.join(", ")}.`, data: { error: "invalid_flag" } });
+      }
+      if (present === void 0) return failure({ human: "th_blast_radius_record requires boolean `present`.", data: { error: "missing_present" } });
+      const gs = gateState(paths);
+      if ("error" in gs) return gs.error;
+      const state = gs.state;
+      const cur = new Set(state.blast_radius_flags);
+      if (present) cur.add(flag);
+      else cur.delete(flag);
+      const merged = BLAST_RADIUS_FLAGS.filter((f) => cur.has(f));
+      if (state.tier === "T0" && merged.length > 0) {
+        return failure({
+          human: `Refusing: Tier 0 forbids blast-radius flags (\xA75). Re-tier above T0 (th_tier_record) before recording "${flag}".`,
+          data: { error: "t0_blast_radius_veto", flags: merged }
+        });
+      }
+      return applyGateMutation(paths, { blast_radius_flags: merged }, "th_blast_radius_record");
+    }
+  },
   {
     name: "th_drift_add",
     description: "Append a \xA710 drift entry. `layer` is required: `requirement` is BLOCKING (increments the open-blocking counter the stop-gate reads); `derived` auto-applies. Optional ref/discovery/action/escalation/source mirror the CLI flags.",
@@ -23019,6 +24265,23 @@ var TOOL_DEFS = [
       escalation: optString(args, "escalation"),
       source: optString(args, "source")
     })
+  },
+  {
+    name: "th_drift_list",
+    description: "List recorded \xA710 drift entries plus the open-blocking count the stop-gate reads. Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runDriftList(paths)
+  },
+  {
+    name: "th_drift_resolve",
+    description: "Resolve an open drift entry by id; decrements the open-blocking counter when it was a requirement-layer (blocking) entry. Errors if the id is unknown or already resolved. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: { id: stringProp("The DRIFT-NNN id to resolve.") },
+      required: ["id"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runDriftResolve(paths, optString(args, "id"))
   },
   {
     name: "th_build_next_wave",
@@ -23105,6 +24368,28 @@ var TOOL_DEFS = [
       planFile: optString(args, "planFile"),
       testsDir: optString(args, "testsDir"),
       scopeFile: optString(args, "scopeFile")
+    })
+  },
+  {
+    name: "th_coverage_report",
+    description: "Full planned/implemented/tested traceability breakdown for every checked REQ-ID (structured payload). Optional reqs/plan/tests/scope/code path overrides mirror the CLI flags. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        reqsFile: stringProp("Requirements file (default docs/01-requirements.md)."),
+        planFile: stringProp("Implementation-plan file (default docs/09-implementation-plan.md)."),
+        testsDir: stringProp("Tests directory (default tests)."),
+        scopeFile: stringProp("Scope file for MVP filtering (default docs/02-scope.md)."),
+        codeDir: stringProp("Code directory scanned for the implemented dimension (default src).")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runCoverageReport(paths, {
+      reqsFile: optString(args, "reqsFile"),
+      planFile: optString(args, "planFile"),
+      testsDir: optString(args, "testsDir"),
+      scopeFile: optString(args, "scopeFile"),
+      codeDir: optString(args, "codeDir")
     })
   },
   {
@@ -23349,6 +24634,35 @@ var TOOL_DEFS = [
     },
     run: (paths, _args) => runDecisionList(paths)
   },
+  // Artifact governance — content-hash + register/list approved versioned artifacts.
+  {
+    name: "th_artifact_register",
+    description: "Content-hash a file or directory (project-root-relative) and upsert it into approved_artifacts at the given version (re-registering replaces the entry). Rejects absolute paths and `..`/outside-root escapes; surfaces artifact_too_large when the hash byte-budget is exceeded. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: stringProp("Project-root-relative path to the file or directory to register."),
+        version: numberProp("Positive integer version to record.")
+      },
+      required: ["path", "version"],
+      additionalProperties: false
+    },
+    run: (paths, args) => {
+      const file = optString(args, "path");
+      const version2 = optNumber(args, "version");
+      if (file === void 0) return failure({ human: "th_artifact_register requires `path`.", data: { error: "missing_path" } });
+      if (path37.isAbsolute(file) || file.split(/[\\/]/).includes("..")) {
+        return failure({ human: `Refusing a path that is absolute or escapes the project root: ${file}`, data: { error: "path_escape", path: file } });
+      }
+      return runArtifactRegister(paths, file, version2);
+    }
+  },
+  {
+    name: "th_artifact_list",
+    description: "List every recorded approved artifact ({file, version, hash}). Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runArtifactList(paths)
+  },
   // Section leases — fine-grained artifact-section coordination (mirrors build leases).
   {
     name: "th_artifact_claim",
@@ -23489,7 +24803,112 @@ var TOOL_DEFS = [
     },
     run: (paths, args) => runDebateResolve(paths, { id: optString(args, "id"), resolution: optString(args, "resolution") })
   },
-  // ---- Proof suite (PS-Q4: th_proof_run/component/report, tail-appended 35→38) ----
+  // ---- Verify suite config + run (verify.json + verify-report.json) ----
+  {
+    name: "th_verify_add",
+    description: 'Append a project verify command (e.g. "npm test") to verify.json. Commands are operator-authored and executed by th_verify_run.',
+    inputSchema: {
+      type: "object",
+      properties: { command: stringProp("The shell command to add (required).") },
+      required: ["command"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runVerifyAdd(paths, optString(args, "command"))
+  },
+  {
+    name: "th_verify_list",
+    description: "List the configured verify commands. Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runVerifyList(paths)
+  },
+  {
+    name: "th_verify_clear",
+    description: "Remove all configured verify commands.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runVerifyClear(paths)
+  },
+  {
+    name: "th_verify_run",
+    description: "Execute every configured verify command in the project root and record the report \u2014 the one command that runs project tests. Commands run OUTSIDE the state lock; only the report write is persisted (AC-B11). ASYNC: spawns real OS processes (dispatched via runAsync; `run` is the sync-contract guard).",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: () => asyncToolGuard("th_verify_run"),
+    runAsync: async (paths) => runVerifyRun(paths)
+  },
+  // ---- Stage contract introspection (read-only) ----
+  {
+    name: "th_stage_current",
+    description: "The stage contract for state.current_stage (or a plain note for a pre-pipeline stage). Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runStageCurrent(paths)
+  },
+  {
+    name: "th_stage_describe",
+    description: "Describe one pipeline stage's contract (produces / critic mode / human gate / tiers). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: { stage: stringProp("The stage id to describe (e.g. architecture).") },
+      required: ["stage"],
+      additionalProperties: false
+    },
+    run: (_paths, args) => runStageDescribe(optString(args, "stage"))
+  },
+  {
+    name: "th_stage_list",
+    description: "List every pipeline stage with its tiers, human-gate flag, and produced artifact. Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: () => runStageList()
+  },
+  // ---- Run-health audit + scorecard (structured payloads) ----
+  {
+    name: "th_doctor",
+    description: "Run-health audit: a structured report of artifact drift, slice progress, revise escalations, coverage, and gate posture. Optional strict raises advisories to failures. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: { strict: boolProp("Treat advisories as failures (default false).") },
+      additionalProperties: false
+    },
+    run: (paths, args) => runDoctor(paths, { strict: optBool(args, "strict") })
+  },
+  {
+    name: "th_scorecard",
+    description: "One-glance run scorecard: tier, stage, implementation gate, coverage, slice progress, suite status, drift, revise escalations, artifact integrity, and routing summary (structured payload). Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runScorecard(paths, {})
+  },
+  // ---- Implementation-plan slice sync + status ----
+  {
+    name: "th_slices_sync",
+    description: "Upsert implementation-plan slices into state.slices (existing ids keep their status; new ids start pending). planFile overrides the plan path; dryRun computes without writing; removeMissing drops state slices no longer in the plan. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        planFile: stringProp("Implementation-plan file (default docs/09-implementation-plan.md)."),
+        dryRun: boolProp("Compute and report without writing state."),
+        removeMissing: boolProp("Remove state slices no longer present in the plan.")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runSlicesSync(paths, {
+      planFile: optString(args, "planFile"),
+      dryRun: optBool(args, "dryRun"),
+      removeMissing: optBool(args, "removeMissing")
+    })
+  },
+  {
+    name: "th_slice_set_status",
+    description: "Set a slice's status (pending|in-progress|done|blocked). Errors on an unknown slice id or invalid status. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sliceId: stringProp("The SLICE-ID to update (e.g. SLICE-3)."),
+        status: { type: "string", description: "New status.", enum: SLICE_STATUSES }
+      },
+      required: ["sliceId", "status"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runSliceSetStatus(paths, optString(args, "sliceId"), optString(args, "status"))
+  },
+  // ---- Proof suite (PS-Q4: th_proof_run/component/report; read/coordination-only) ----
   // Read/coordination-only — NEVER gate-mutating (containment invariant). These run
   // the full suite (real OS-process spawns) so they are ASYNC: dispatched via
   // `runAsync`; `run` is the unreachable sync-contract guard. The injected registry
@@ -23535,6 +24954,82 @@ var TOOL_DEFS = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: () => asyncToolGuard("th_proof_report"),
     runAsync: (paths) => runProofReport(paths, { registry: proofRegistry() })
+  },
+  // ---- Interview + init tools ----
+  // Store-only/deterministic: the interview tools RECORD agent-supplied scores and
+  // PERSIST .twinharness/interview.json (no LLM in the deterministic layer); th_init
+  // is idempotent and never gate-mutating. All four are containment-safe and join the
+  // EXPECTED_TOOL_ALLOWLIST. th_init deliberately exposes NO `force` (R17).
+  {
+    name: "th_interview_start",
+    description: "Start a scored Socratic interview: create .twinharness/interview.json with the idea + resolved ambiguity threshold (default 0.20). Store-only; overwrites any prior interview. `idea` is required.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        idea: stringProp("The initial idea/brief to interview against (required)."),
+        threshold: numberProp("Ambiguity-gate threshold in [0,1] (default 0.20).")
+      },
+      required: ["idea"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runInterviewStart(paths, { idea: optString(args, "idea"), threshold: optNumber(args, "threshold") })
+  },
+  {
+    name: "th_interview_record",
+    description: "Append one agent-supplied round to the interview store and update the latest ambiguity. Store-only \u2014 the agent supplies ALL judgment; the tool COMPUTES nothing but `ready = ambiguity <= threshold`. `scores` is a JSON object {goal,constraints,criteria}; `entities` is a JSON array of strings (both parsed in-handler). `question`, `answer`, `scores`, and `ambiguity` are required.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        question: stringProp("The question asked this round (required)."),
+        answer: stringProp("The answer captured this round (required)."),
+        scores: stringProp('JSON object of per-dimension scores, e.g. {"goal":0.2,"constraints":0.3,"criteria":0.1} (required).'),
+        ambiguity: numberProp("Agent-computed ambiguity for this round, a number in [0,1] (required)."),
+        entities: stringProp('JSON array of entity strings captured this round, e.g. ["auth","db"] (optional).')
+      },
+      required: ["question", "answer", "scores", "ambiguity"],
+      additionalProperties: false
+    },
+    run: (paths, args) => {
+      const scoresRaw = optString(args, "scores");
+      let scores;
+      try {
+        scores = scoresRaw === void 0 ? void 0 : JSON.parse(scoresRaw);
+      } catch {
+        return failure({ human: "`scores` must be valid JSON for { goal, constraints, criteria }.", data: { error: "invalid_scores_json" } });
+      }
+      const entitiesRaw = optString(args, "entities");
+      let entities;
+      try {
+        entities = entitiesRaw === void 0 ? void 0 : JSON.parse(entitiesRaw);
+      } catch {
+        return failure({ human: "`entities` must be a valid JSON array of strings.", data: { error: "invalid_entities_json" } });
+      }
+      return runInterviewRecord(paths, {
+        question: optString(args, "question"),
+        answer: optString(args, "answer"),
+        scores,
+        ambiguity: optNumber(args, "ambiguity"),
+        entities
+      });
+    }
+  },
+  {
+    name: "th_interview_status",
+    description: "Report the interview gate state: { started, rounds, ambiguity, threshold, ready }. A missing/corrupt store reports started:false, ready:false. Read-only; COMPUTES only `ready`.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runInterviewStatus(paths)
+  },
+  {
+    name: "th_init",
+    description: "Initialize TwinHarness scaffolding (docs/, state.json, drift-log.md). IDEMPOTENT and non-destructive: on an already-initialized project it returns { already_initialized: true, \u2026 } WITHOUT clobbering state.json. `brownfield` records project_mode:brownfield on a fresh init. There is NO force over MCP \u2014 destructive re-init is CLI/human-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        brownfield: boolProp("Record project_mode:brownfield for adopting an existing codebase (fresh init only).")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runInitMcp(paths, { brownfield: optBool(args, "brownfield") })
   }
 ];
 function proofRegistry() {
@@ -23556,13 +25051,13 @@ function listTools() {
 var SERVER_NAME = "twinharness-th";
 function readServerVersion() {
   const candidates = [
-    path35.join(__dirname, "..", "package.json"),
-    path35.join(__dirname, "..", "..", "package.json")
+    path37.join(__dirname, "..", "package.json"),
+    path37.join(__dirname, "..", "..", "package.json")
   ];
   for (const candidate of candidates) {
     try {
-      if (fs38.existsSync(candidate)) {
-        const json = JSON.parse(fs38.readFileSync(candidate, "utf8"));
+      if (fs41.existsSync(candidate)) {
+        const json = JSON.parse(fs41.readFileSync(candidate, "utf8"));
         if (typeof json === "object" && json !== null && "version" in json) {
           const v = json.version;
           if (typeof v === "string") return v;
@@ -23613,7 +25108,7 @@ function validateToolArgs(name, args) {
 function appendProofCall(paths, tool, ok) {
   try {
     const line = JSON.stringify({ tool, ts: (/* @__PURE__ */ new Date()).toISOString(), ok }) + "\n";
-    fs38.appendFileSync(path35.join(paths.stateDir, "proof-calls.jsonl"), line);
+    fs41.appendFileSync(path37.join(paths.stateDir, "proof-calls.jsonl"), line);
   } catch {
   }
 }

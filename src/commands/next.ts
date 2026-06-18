@@ -1,16 +1,24 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success } from "../core/output";
 import { readState } from "../core/state-store";
 import { stageContract, nextStageAfter, canonicalizeStage, isFinalVerification } from "../core/stages";
-import { artifactIntegrity, sliceProgress, reviseEscalations } from "../core/health";
-import { computeBreakdown } from "../core/coverage";
-import { readVerifyConfig, readVerifyReport } from "../core/verify";
+import { sliceProgress, type ReviseEscalation } from "../core/health";
 import { occupiedComponents } from "../core/leases";
 import { computeWave, validateDeps, hasDepIssues } from "../core/wave";
-import { gatingObligations, reduceDecisions, readDecisionEvents } from "../core/decisions";
-import { runRepoCheck, REPO_NO_MAP_EXIT } from "./repo";
+import {
+  type GateResult,
+  checkBlockingDrift,
+  checkReviseEscalation,
+  checkVerifySuite,
+  checkArtifactDrift,
+  checkTierSet,
+  checkRepoMap,
+  checkDecisionObligations,
+  checkDebate,
+  checkGoverningArtifact,
+  checkCoverage,
+  checkFinalVerification,
+} from "../core/gate-preconditions";
 
 /**
  * `th next` — the next-action ORACLE (audit F7 — the playbook can fall out of the
@@ -31,6 +39,7 @@ export type NextKind =
   | "fix-state"
   | "resolve-blocking-drift"
   | "escalate-revise"
+  | "resolve-debate"
   | "classify-tier"
   | "refresh-repo-map"
   | "resolve-decision-obligation"
@@ -92,8 +101,14 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
   }
   const s = r.state;
 
+  // The mechanical-obligation ladder. Each rung's PREDICATE now lives once in
+  // `src/core/gate-preconditions.ts` (consumed by both this oracle and the typed
+  // MCP gate tools so they can never drift); runNext renders the matching action.
+  // The short-circuit ORDER below is the contract pinned by next-characterization.
+
   // 1. Blocking drift outranks stage progress — the stop-gate will refuse completion.
-  if (s.drift_open_blocking > 0) {
+  const driftR = checkBlockingDrift(s);
+  if (!driftR.ok) {
     return emit(
       {
         kind: "resolve-blocking-drift",
@@ -106,8 +121,9 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
   }
 
   // 2. A revise loop at its cap owes a human decision (§18 — stop looping).
-  const escalations = reviseEscalations(s);
-  if (escalations.length > 0) {
+  const reviseR = checkReviseEscalation(s);
+  if (!reviseR.ok) {
+    const escalations = reviseR.detail!.escalations as ReviseEscalation[];
     return emit(
       {
         kind: "escalate-revise",
@@ -120,9 +136,9 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
   }
 
   // 2b. A failing test suite is a defect owed to the Debugger before advancing.
-  const verifyReport = readVerifyReport(paths);
-  if (verifyReport && !verifyReport.ok) {
-    const failed = verifyReport.results.filter((x) => !x.ok).length;
+  const verifyR = checkVerifySuite(paths);
+  if (!verifyR.ok) {
+    const failed = verifyR.detail!.failed as number;
     return emit(
       {
         kind: "investigate-failure",
@@ -135,21 +151,23 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
   }
 
   // 3. Silent artifact drift: a governed doc changed on disk without re-registration.
-  const drifted = artifactIntegrity(paths, s).filter((i) => i.status === "changed");
-  if (drifted.length > 0) {
+  const artDriftR = checkArtifactDrift(paths, s);
+  if (!artDriftR.ok) {
+    const changed = artDriftR.detail!.changed as string[];
     return emit(
       {
         kind: "re-register-artifact",
-        action: `Approved artifact changed on disk — run \`th stale --artifact ${drifted[0]!.file}\` then re-register: ${drifted.map((i) => i.file).join(", ")}.`,
+        action: `Approved artifact changed on disk — run \`th stale --artifact ${changed[0]}\` then re-register: ${changed.join(", ")}.`,
         why: "A registered artifact whose on-disk hash no longer matches has silently drifted from what the run governs; re-registering (and cascading the staleness check) must happen before later stages, which would otherwise build on an out-of-date upstream.",
-        data: { changed: drifted.map((i) => i.file) },
+        data: { changed },
       },
       explain,
     );
   }
 
   // 4. Tier not yet classified — that gates every engaged stage.
-  if (s.tier === null) {
+  const tierR = checkTierSet(s);
+  if (!tierR.ok) {
     return emit(
       {
         kind: "classify-tier",
@@ -166,47 +184,63 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
   //     building begins, Builders writing code naturally make the map stale, so
   //     freshness is the invariant only while the map still grounds tiering and
   //     planning decisions. Reuses the single `th repo check` freshness oracle
-  //     (`runRepoCheck`) — no duplicate hashing.
-  if (s.project_mode === "brownfield" && !s.implementation_allowed) {
-    const check = runRepoCheck(paths);
-    if (check.exitCode !== 0) {
-      const absent = check.exitCode === REPO_NO_MAP_EXIT;
-      return emit(
-        {
-          kind: "refresh-repo-map",
-          action: `Brownfield repo-map is ${absent ? "absent" : "stale"} — run \`th repo map\` to ${absent ? "generate" : "refresh"} it before tiering or planning proceeds.`,
-          why: "In a brownfield run the repo-map grounds every tiering and planning decision; a map that is absent or has drifted from the working tree would let those decisions run on an outdated understanding, so refreshing it outranks stage work.",
-          data: { shape: (check.data as { shape?: string } | undefined)?.shape ?? "stale" },
-        },
-        explain,
-      );
-    }
+  //     (`runRepoCheck`, via checkRepoMap) — no duplicate hashing.
+  const repoR = checkRepoMap(paths, s);
+  if (!repoR.ok) {
+    const absent = repoR.detail!.absent as boolean;
+    return emit(
+      {
+        kind: "refresh-repo-map",
+        action: `Brownfield repo-map is ${absent ? "absent" : "stale"} — run \`th repo map\` to ${absent ? "generate" : "refresh"} it before tiering or planning proceeds.`,
+        why: "In a brownfield run the repo-map grounds every tiering and planning decision; a map that is absent or has drifted from the working tree would let those decisions run on an outdated understanding, so refreshing it outranks stage work.",
+        data: { shape: repoR.detail!.shape },
+      },
+      explain,
+    );
   }
 
   // 4b. Decision-governance obligation: an unapproved gating decision blocks the stage
   //     (REQ-501..504). Slots after classify-tier (run-integrity already cleared above)
   //     and before produce-artifact (stage work). Uses the single gatingObligations
-  //     predicate (RULE-007 / ARCH-RISK-005 — no second implementation). Tolerant
-  //     reader: a corrupt decisions.jsonl skips bad lines and falls through cleanly.
-  {
-    // Read + reduce the decision ledger ONCE (PERF-009): both the gating check
-    // and the title lookup below consume the same reduced set.
-    const decisions = reduceDecisions(readDecisionEvents(paths));
-    const obligations = gatingObligations(decisions, s);
-    if (obligations.length > 0) {
-      const first = obligations[0]!;
-      const title = decisions.find((d) => d.id === first.decisionId)?.title ?? "";
-      const titlePart = title ? ` (title: "${title}")` : "";
-      return emit(
-        {
-          kind: "resolve-decision-obligation",
-          action: `Approve ${first.decisionId}${titlePart} — it blocks stage '${first.blockedStage}' from proceeding.`,
-          why: `Decision ${first.decisionId} is linked to stage '${first.blockedStage}' and is not yet approved; no stage work can proceed while a gating decision is unmet (RULE-007).`,
-          data: { decisionId: first.decisionId, blockedStage: first.blockedStage },
-        },
-        explain,
-      );
-    }
+  //     predicate (RULE-007 / ARCH-RISK-005 — no second implementation) via
+  //     checkDecisionObligations. Tolerant: a corrupt decisions.jsonl falls through cleanly.
+  const decR = checkDecisionObligations(paths, s);
+  if (!decR.ok) {
+    const decisionId = decR.detail!.decisionId as string;
+    const blockedStage = decR.detail!.blockedStage as string;
+    const title = decR.detail!.title as string;
+    const titlePart = title ? ` (title: "${title}")` : "";
+    return emit(
+      {
+        kind: "resolve-decision-obligation",
+        action: `Approve ${decisionId}${titlePart} — it blocks stage '${blockedStage}' from proceeding.`,
+        why: `Decision ${decisionId} is linked to stage '${blockedStage}' and is not yet approved; no stage work can proceed while a gating decision is unmet (RULE-007).`,
+        data: { decisionId, blockedStage },
+      },
+      explain,
+    );
+  }
+
+  // 4c. Open BLOCKING debate (NEW rung — AC-B15). The stop-gate already refuses
+  //     completion on an open debate (`src/commands/hook.ts:65`) but runNext()
+  //     historically did NOT consult `debate_open_blocking` — a pre-existing
+  //     oracle/stop-gate divergence. checkDebate closes it. This rung slots after
+  //     the decision obligation and before stage-artifact work, mirroring the
+  //     blocking-drift precedent (a human-only reconciliation obligation). NOTE:
+  //     this intentionally changes the debate-blocked `th next` output (see the
+  //     next-characterization test's debate case).
+  const debateR = checkDebate(s);
+  if (!debateR.ok) {
+    const n = debateR.detail!.debate_open_blocking as number;
+    return emit(
+      {
+        kind: "resolve-debate",
+        action: `${n} open BLOCKING debate${n === 1 ? "" : "s"} must be reconciled before advancing — resolve or escalate (\`th debate resolve\`).`,
+        why: "An open blocking debate is a Pattern-B reconciliation obligation that the stop-gate already refuses completion on, so it outranks stage work — the run cannot advance past an unresolved debate.",
+        data: { debate_open_blocking: n },
+      },
+      explain,
+    );
   }
 
   // 5. Stage-specific obligations for the current stage. Canonicalize ONCE so the
@@ -214,38 +248,35 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
   // near-miss spellings like `Final-Verification` / `10-final-verification`
   // (C-1/M-2 — without this, hook.ts and next.ts disagree).
   const current = canonicalizeStage(s.current_stage);
-  const contract = stageContract(current);
 
-  // final-verification produces its report LAST — after slices settle and
-  // coverage is clean — so it owns its full obligation order below (step 7),
-  // not the generic produce/register check here.
-  if (contract && contract.produces && !isFinalVerification(current)) {
-    const produced = contract.produces.replace(/\/$/, "");
-    const abs = path.resolve(paths.root, produced);
-    const registered = s.approved_artifacts.some((a) => a.file === produced);
-    const exists = fs.existsSync(abs);
-    if (!registered) {
-      if (!exists) {
-        return emit(
-          {
-            kind: "produce-artifact",
-            action: `Stage "${current}" must produce ${contract.produces} (Critic mode: ${contract.criticMode}${contract.humanGate ? "; human gate" : ""}). Produce it, pass the Critic, then register it.`,
-            why: `The current stage "${current}" owes its artifact (${contract.produces}) and it is not yet on disk; the stage cannot be considered settled — and the run cannot advance — until that artifact exists, passes the Critic, and is registered.`,
-            data: { stage: current, produces: contract.produces },
-          },
-          explain,
-        );
-      }
+  // 5. The current non-final stage's governing artifact must be produced AND
+  //    registered (checkGoverningArtifact excludes final-verification, which owns
+  //    its own report-last ladder in step 7). validateState does NOT backstop this
+  //    rung, so it is load-bearing for the stage-advance gate.
+  const artR = checkGoverningArtifact(paths, s);
+  if (!artR.ok) {
+    const contract = stageContract(current)!;
+    if (artR.error === "artifact_not_produced") {
       return emit(
         {
-          kind: "register-artifact",
-          action: `${produced} exists but is not registered — after the Critic passes${contract.humanGate ? " and the human gate clears" : ""}, run \`th artifact register ${contract.produces} --version <n>\`.`,
-          why: `${produced} exists but is unregistered, so the run is not yet governing it (no recorded hash); registering it after the Critic${contract.humanGate ? " and human gate" : ""} is what lets the stage settle and the pipeline move on.`,
-          data: { stage: current, file: produced },
+          kind: "produce-artifact",
+          action: `Stage "${current}" must produce ${contract.produces} (Critic mode: ${contract.criticMode}${contract.humanGate ? "; human gate" : ""}). Produce it, pass the Critic, then register it.`,
+          why: `The current stage "${current}" owes its artifact (${contract.produces}) and it is not yet on disk; the stage cannot be considered settled — and the run cannot advance — until that artifact exists, passes the Critic, and is registered.`,
+          data: { stage: current, produces: contract.produces },
         },
         explain,
       );
     }
+    const produced = artR.detail!.file as string;
+    return emit(
+      {
+        kind: "register-artifact",
+        action: `${produced} exists but is not registered — after the Critic passes${contract.humanGate ? " and the human gate clears" : ""}, run \`th artifact register ${contract.produces} --version <n>\`.`,
+        why: `${produced} exists but is unregistered, so the run is not yet governing it (no recorded hash); registering it after the Critic${contract.humanGate ? " and human gate" : ""} is what lets the stage settle and the pipeline move on.`,
+        data: { stage: current, file: produced },
+      },
+      explain,
+    );
   }
 
   // 6. Implementation-planning: coverage is the hard gate before building.
@@ -255,63 +286,67 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
   }
 
   // 7. Final-verification: all slices settled + coverage clean + human signs off.
+  //    The full ladder (slices → verify-suite → coverage → report artifact → human
+  //    sign-off) is the single predicate `checkFinalVerification`; this block only
+  //    renders the matching action for whichever sub-rung is first unmet.
   if (isFinalVerification(current)) {
-    const prog = sliceProgress(s);
-    if (!prog.allSettled && prog.total > 0) {
-      const open = s.slices.filter((sl) => sl.status !== "done" && sl.status !== "blocked").map((sl) => sl.id);
+    const fv = checkFinalVerification(paths, s);
+    if (fv.ok) {
       return emit(
         {
-          kind: "finish-slices",
-          action: `Final verification is blocked while slices are unfinished — finish or block: ${open.join(", ")} (\`th slice set-status <SLICE-ID> done|blocked\`).`,
-          why: "At final-verification the stop-gate mechanically refuses completion while any slice is neither done nor blocked, so settling the open slices outranks producing the verification report.",
-          data: { open },
+          kind: "human-signoff",
+          action: "Coherence is gated and coverage is clean — present `th trace render` + the verification report for the human correctness sign-off (§11).",
+          why: "Every mechanical gate is satisfied (slices settled, coverage clean, report registered); what remains is the one thing the CLI cannot certify — correctness — which only the human can sign off.",
         },
         explain,
       );
     }
-    // Verify-suite gate — mirror the Stop-gate (core hook.ts evaluateStopGate):
-    // at final-verification, a configured-but-never-run suite blocks completion.
-    // (A RED suite is already surfaced globally as investigate-failure in step 2b,
-    // so only the never-run case needs handling here.)
-    const verifyCfg = readVerifyConfig(paths);
-    if (verifyCfg.commands.length > 0 && !readVerifyReport(paths)) {
-      return emit(
-        {
-          kind: "run-verify",
-          action: `Final verification needs a green suite — ${verifyCfg.commands.length} verify command(s) are configured but \`th verify run\` has never been recorded. Run \`th verify run\` and confirm it is green before sign-off.`,
-          why: "At final-verification the stop-gate refuses completion when verify commands are configured but the suite has never been run, so recording a green `th verify run` outranks producing the verification report or seeking the human sign-off.",
-          data: { commands: verifyCfg.commands.length },
-        },
-        explain,
-      );
-    }
-
-    const cov = coverageBlocker(paths);
-    if (cov) return emit(cov, explain);
-
-    // Slices settled + coverage clean → the report itself is the next artifact.
-    if (contract && contract.produces) {
-      const produced = contract.produces.replace(/\/$/, "");
-      const registered = s.approved_artifacts.some((a) => a.file === produced);
-      if (!registered) {
-        const exists = fs.existsSync(path.resolve(paths.root, produced));
+    switch (fv.error) {
+      case "slices_unsettled": {
+        const open = fv.detail!.open as string[];
         return emit(
-          exists
-            ? { kind: "register-artifact", action: `${produced} exists but is not registered — after the human signs off, run \`th artifact register ${produced} --version <n>\`.`, why: "Slices are settled and coverage is clean, so the only thing standing between here and a governed completion is recording the verification report's hash after the human signs off.", data: { file: produced } }
-            : { kind: "produce-artifact", action: `Produce ${produced} separating coherence (Critic) from correctness (tests + human), then register it.`, why: "Slices are settled and coverage is clean, so the run now owes the verification report itself — the last artifact, which must separate Critic-certified coherence from test/human-certified correctness.", data: { produces: produced } },
+          {
+            kind: "finish-slices",
+            action: `Final verification is blocked while slices are unfinished — finish or block: ${open.join(", ")} (\`th slice set-status <SLICE-ID> done|blocked\`).`,
+            why: "At final-verification the stop-gate mechanically refuses completion while any slice is neither done nor blocked, so settling the open slices outranks producing the verification report.",
+            data: { open },
+          },
+          explain,
+        );
+      }
+      case "verify_suite_never_run": {
+        const commands = fv.detail!.commands as number;
+        return emit(
+          {
+            kind: "run-verify",
+            action: `Final verification needs a green suite — ${commands} verify command(s) are configured but \`th verify run\` has never been recorded. Run \`th verify run\` and confirm it is green before sign-off.`,
+            why: "At final-verification the stop-gate refuses completion when verify commands are configured but the suite has never been run, so recording a green `th verify run` outranks producing the verification report or seeking the human sign-off.",
+            data: { commands },
+          },
+          explain,
+        );
+      }
+      case "reqs_file_missing":
+      case "coverage_failing": {
+        const cov = coverageBlocker(paths);
+        if (cov) return emit(cov, explain);
+        break;
+      }
+      case "report_not_registered": {
+        const produced = fv.detail!.file as string;
+        return emit(
+          { kind: "register-artifact", action: `${produced} exists but is not registered — after the human signs off, run \`th artifact register ${produced} --version <n>\`.`, why: "Slices are settled and coverage is clean, so the only thing standing between here and a governed completion is recording the verification report's hash after the human signs off.", data: { file: produced } },
+          explain,
+        );
+      }
+      case "report_not_produced": {
+        const produced = fv.detail!.produces as string;
+        return emit(
+          { kind: "produce-artifact", action: `Produce ${produced} separating coherence (Critic) from correctness (tests + human), then register it.`, why: "Slices are settled and coverage is clean, so the run now owes the verification report itself — the last artifact, which must separate Critic-certified coherence from test/human-certified correctness.", data: { produces: produced } },
           explain,
         );
       }
     }
-
-    return emit(
-      {
-        kind: "human-signoff",
-        action: "Coherence is gated and coverage is clean — present `th trace render` + the verification report for the human correctness sign-off (§11).",
-        why: "Every mechanical gate is satisfied (slices settled, coverage clean, report registered); what remains is the one thing the CLI cannot certify — correctness — which only the human can sign off.",
-      },
-      explain,
-    );
   }
 
   // 7b. Implementation: dispatch build waves, await in-flight Builders, then advance.
@@ -399,27 +434,30 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
   );
 }
 
-/** Coverage gate as a next-action, or undefined when coverage is clean. */
+/**
+ * Coverage gate as a next-action, or undefined when coverage is clean. Renders the
+ * shared `checkCoverage` predicate (single source of truth) into the `fix-coverage`
+ * message — the data payload is preserved byte-for-byte from the prior inline logic.
+ */
 function coverageBlocker(paths: ProjectPaths): NextAction | undefined {
-  const breakdown = computeBreakdown(paths.root);
-  if ("error" in breakdown) {
+  const cov = checkCoverage(paths);
+  if (cov.ok) return undefined;
+  if (cov.error === "reqs_file_missing") {
     return {
       kind: "fix-coverage",
       action: "Coverage cannot be checked — author the requirements file first.",
       why: "Coverage is the hard gate before building, and it cannot even be computed without a requirements file — so authoring it precedes everything downstream.",
-      data: { error: breakdown.error, reqsFile: breakdown.reqsFile },
+      data: { error: cov.detail!.error, reqsFile: cov.detail!.reqsFile },
     };
   }
-  const gaps = breakdown.rows.filter((row) => !row.planned || !row.tested);
-  if (gaps.length > 0) {
-    return {
-      kind: "fix-coverage",
-      action: `Coverage gate failing — ${gaps.length} REQ-ID(s) lack a slice and/or a test: ${gaps.map((g) => g.req).join(", ")}. Run \`th coverage check\`.`,
-      why: "The coverage gate mechanically blocks the build until every MVP REQ-ID maps to ≥1 slice and ≥1 test; the listed gaps must be closed before implementation may proceed.",
-      data: { gaps: gaps.map((g) => ({ req: g.req, inSlice: g.planned, inTest: g.tested })) },
-    };
-  }
-  return undefined;
+  // The only remaining failure code is `coverage_failing` (gaps present).
+  const gaps = cov.detail!.gaps as Array<{ req: string; inSlice: boolean; inTest: boolean }>;
+  return {
+    kind: "fix-coverage",
+    action: `Coverage gate failing — ${gaps.length} REQ-ID(s) lack a slice and/or a test: ${gaps.map((g) => g.req).join(", ")}. Run \`th coverage check\`.`,
+    why: "The coverage gate mechanically blocks the build until every MVP REQ-ID maps to ≥1 slice and ≥1 test; the listed gaps must be closed before implementation may proceed.",
+    data: { gaps },
+  };
 }
 
 /**

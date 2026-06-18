@@ -40,7 +40,7 @@
 4. Tool has no `file_path` → allow.
 5. Target path is doc/state territory → allow:
    `docs/**`, `.twinharness/**`, `.agentic-sdlc/**` (legacy), `drift-log.md`, root `*.md`,
-   `.claude/**`, `.gitignore`. (Spec/Critic/doc-writer/ui-designer keep working through every
+   `.claude/**`, `.gitignore`. (Spec/Critic/doc-writer/ux-ui-designer keep working through every
    pre-build stage.)
 6. **Phase A — pre-implementation** (`implementation_allowed: false`):
    any other path → fire with the configured semantics (`ask` default). This is the primary

@@ -149,10 +149,12 @@ describe("REQ-PLUGIN-003: every component resolves `th` without relying on PATH"
     .filter((f) => f.endsWith(".md"))
     .map((f) => `agents/${f}`);
 
-  it("expected component counts (15 agents, 6 commands, 2 skills)", () => {
-    expect(agentFiles).toHaveLength(15);
-    // 4 original (th-run/status/drift/escalate) + 2 proof surfaces (th-proof, th-proof-component).
-    expect(commandFiles).toHaveLength(6);
+  it("expected component counts (16 agents, 18 commands, 2 skills)", () => {
+    expect(agentFiles).toHaveLength(16);
+    // 4 original (th-run/status/drift/escalate) + 2 proof surfaces (th-proof, th-proof-component)
+    // + 12 curated human-facing verbs (th-init/doctor/next/scorecard/stage/verify/coverage/
+    //   decision-approve/tier/route/repo/test).
+    expect(commandFiles).toHaveLength(18);
     // twinharness + twinharness-proof (the proof-runner skill).
     expect(skillFiles).toHaveLength(2);
   });
@@ -184,7 +186,10 @@ describe("REQ-PLUGIN-003: every component resolves `th` without relying on PATH"
     },
   );
 
-  it.each(commandFiles)(
+  // `th-decision-approve` is the one exception: `th decision approve` is TTY-gated,
+  // human-only, and NEVER an MCP tool (spec §8), so its command must NOT pre-authorize
+  // a non-existent MCP tool — it invokes the CLI directly.
+  it.each(commandFiles.filter((rel) => !rel.endsWith("th-decision-approve.md")))(
     "%s pre-authorizes the th MCP tools via allowed-tools (commands prefer MCP, fall back to CLI)",
     (rel) => {
       // Every command body routes coordination/observability/state through the

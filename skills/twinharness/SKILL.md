@@ -111,6 +111,25 @@ than reimplementing it. Existing auth/money/migrations in touched code are §5 b
 `${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference/pipeline-stages.md` and
 `${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference/build-and-verify.md`.
 
+### 1.5. Interview gate (`--interview`)
+
+When `/twinharness:th-run` is invoked with **`--interview`**, run a full **ambiguity-scored Socratic
+loop** immediately **after `th init`** and **before** tier classification. This **replaces the §14.1
+vague-narrow step** for that run (without `--interview`, the lightweight §14.1 narrowing still applies).
+
+The deterministic `th` layer cannot call an LLM, so **the Orchestrator (you) performs the scoring**;
+the `th_interview_*` MCP tools only persist state (store-only, under `.twinharness/interview.json`):
+
+- `th_interview_start { idea, threshold? }` → creates `.twinharness/interview.json`. Resolve the
+  threshold as `--threshold` flag → state field `interview_threshold` → **0.20** default.
+- Each round: ask one sharp clarifying question, **score it yourself**, then
+  `th_interview_record { question, answer, scores{goal,constraints,criteria}, ambiguity, entities[] }`
+  (pass `scores`/`entities` as JSON-encoded strings). **Show the ambiguity score each round.**
+- `th_interview_status {}` → `{ rounds, ambiguity, threshold, ready }`. Stop when `ready`
+  (ambiguity ≤ threshold).
+- **Early-exit** allowed from **round 3** with a recorded warning; **hard cap 20 rounds**.
+- Then proceed to tiering + requirements, **seeding from `.twinharness/interview.json`**.
+
 ### 2. Requirements stage
 
 Delegate to the **Spec agent (`agents/spec.md`) in `requirements` mode** with the
@@ -194,6 +213,21 @@ ADRs (T3), Technical Design (T3), Contracts, Security (T3/blast-radius), Failure
 
 ### 10. Stage 10 — Software Implementation
 
+**Build-phase gate (§8-style human gate — always, immediately before implementation).** After the
+design stages are coherence-gated and the slice plan is approved, and **before the first Builder
+writes any code**, surface an `AskUserQuestion` with two choices:
+
+- **"begin now"** → continue building in this same session.
+- **"begin in a fresh Claude Code session"** → **pause** and print the EXACT `/twinharness:th-run`
+  resume command (carrying the project context so the new conversation re-enters at `current_stage`),
+  then **STOP**. "Fresh session" = a **new Claude Code conversation**, never a detached/tmux/background
+  process.
+
+This gate is a human gate exactly like the other §8 gates: it **never** calls `th_state_set
+implementation_allowed` and never flips any gate-owned field — it only decides *where* the build
+begins (this session vs. a fresh one), not *whether* the prerequisite gate is satisfied. The
+prerequisite gate below and the Stop-gate hook own `implementation_allowed`.
+
 Prerequisite gate: `th state verify` exits zero; `drift_open_blocking` = 0; approved slice plan;
 `implementation_allowed: true`. Build slice-by-slice, task-by-task; Critic code-review loop after
 each slice; bidirectional drift loop throughout; parallel waves via `th slices sync` + `th build plan`.
@@ -235,9 +269,10 @@ Stage 10 (implementation) and Stage 11 (final verification) are described in the
   `final-verification`, `documentation`, `ui-design`.
 - **Vertical Slice** (`agents/vertical-slice.md`) — fresh-context slice decomposition (Stage 9).
 - **Builder** (`agents/builder.md`) — write code + tests, run checks, drift write-back (Stage 10).
-- **UI Designer** (`agents/ui-designer.md`) — user-centered UI design in fresh context (Stage 4b, conditional on project having a UI).
+- **UX/UI Designer** (`agents/ux-ui-designer.md`) — user-centered design in fresh context: Stage 4a UX (research/journeys/IA/flows → `docs/04a-ux-design.md`) then Stage 4b UI (visual/wireframes → `docs/04b-ui-design.md`), conditional on project having a UI.
 - **Doc-Writer** (`agents/doc-writer.md`) — tier-scaled documentation generation from contracts and implementation (Stage 10.5).
 - **Codebase-Inspector** (`agents/codebase-inspector.md`) — fresh-context existing-codebase mapper on a brownfield run; emits source-anchored `docs/00-existing-codebase-analysis.md` (on-demand, like the Researcher/Debugger).
+- **Tester** (`agents/tester.md`) — **broad-QA, on-demand** (not a fixed SDLC stage): launches and drives the *real* built project (CLI/TUI/service/web) to find defects. Selects a driver per project type (direct process/stdio capture; `claude-in-chrome` for web; tmux optional — never required), routes its model by tier/blast (sonnet floor → opus), and routes findings to `th drift add` / the blackboard. No Agent spawn. Invoke directly or via `/twinharness:th-test`.
 - **Orchestrator** (`agents/orchestrator.md`) — your own playbook for tiering, routing, gates, state.
 
 ## Delegating high-context work (`th delegate`)

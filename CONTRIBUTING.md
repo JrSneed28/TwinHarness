@@ -58,7 +58,7 @@ contract. These facts must remain true:
 
 | Invariant | Value |
 |-----------|-------|
-| Agent count | 15 (files in `agents/*.md`) |
+| Agent count | 16 (files in `agents/*.md`) |
 | Command count | 4 (files in `commands/*.md`) |
 | Skill count | 1 (`skills/twinharness/SKILL.md`) |
 | CLI invocation in every component | `"${CLAUDE_PLUGIN_ROOT}/dist/cli.js"` |
@@ -105,7 +105,7 @@ GitHub auto-populates these from [`.github/`](.github/):
 | `src/` | TypeScript source for the `th` CLI |
 | `dist/` | Compiled CLI output — committed, do not gitignore |
 | `skills/` | Prompt files for Claude Code skills |
-| `agents/` | Agent prompt files (15 total) |
+| `agents/` | Agent prompt files (16 total) |
 | `commands/` | Slash-command prompt files (4 total) |
 | `templates/` | Artifact skeleton templates |
 | `hooks/` | Gate wiring (`hooks.json`, Stop and PreToolUse hooks) |

@@ -133,12 +133,14 @@ describe("SLICE-1 — MCP sub-claim / sub-release wrappers", () => {
   );
 
   it(
-    "REQ-105: test_REQ105_tool_count_incremental_path_16_to_38 — TOOL_DEFS.length is 38 after the coordination-primitive layer + proof tools; toToolResult round-trips for the sub-lease tools",
+    "REQ-105: test_REQ105_tool_count_incremental_path_16_to_63 — TOOL_DEFS.length is 63 after the coordination-primitive layer + proof + interview/init + gate-transition + wired-handler tools; toToolResult round-trips for the sub-lease tools",
     () => {
       // The coordination-primitive layer advances the count to 35 (th_build_dispatch/plan
-      // inserted into the build group + th_artifact_*/collab_*/debate_* appended), and the
-      // th_proof_* trio (run/component/report) appends at the tail to reach 38 (PS-Q4).
-      expect(TOOL_DEFS.length).toBe(38);
+      // inserted into the build group + th_artifact_*/collab_*/debate_* appended), the
+      // th_proof_* trio (run/component/report) reaches 38 (PS-Q4), the
+      // th_interview_*/th_init tools append to reach 42, and the MCP-tool-expansion
+      // adds 21 more (5 typed gate-transition tools + 16 wired handlers) → 63.
+      expect(TOOL_DEFS.length).toBe(63);
 
       // Both sub-lease tools must be present.
       const names = TOOL_DEFS.map((t) => t.name);
@@ -148,10 +150,12 @@ describe("SLICE-1 — MCP sub-claim / sub-release wrappers", () => {
       // The forbidden tool must remain absent.
       expect(names).not.toContain("th_decision_approve");
 
-      // th_build_dispatch + th_build_plan were inserted after th_build_release, shifting
-      // the sub-lease tools from positions 16/17 to 18/19.
-      expect(names[18]).toBe("th_build_sub_claim");
-      expect(names[19]).toBe("th_build_sub_release");
+      // th_build_dispatch + th_build_plan were inserted after th_build_release (16/17→18/19),
+      // and the MCP-tool-expansion then inserted 5 typed gate tools (positions 3-7),
+      // th_drift_list/resolve (9-10) and th_coverage_report (18) ahead of the build group,
+      // shifting the sub-lease tools to canonical positions 27/28 → indices 26/27.
+      expect(names[26]).toBe("th_build_sub_claim");
+      expect(names[27]).toBe("th_build_sub_release");
     },
   );
 });

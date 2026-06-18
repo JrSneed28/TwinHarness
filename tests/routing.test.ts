@@ -36,9 +36,41 @@ describe("computeRoute", () => {
     ).toMatchObject({ model: "opus", effort: "max" });
   });
 
-  it("a heavy design mode with neither T3 nor blast does NOT escalate", () => {
+  it("a heavy design mode routes to opus even without T3/blast", () => {
     expect(computeRoute({ agent: "spec", mode: "architecture", tier: "T2" })).toMatchObject({
-      model: "sonnet",
+      model: "opus",
+      effort: "high",
+    });
+  });
+
+  it("every heavy design mode routes to opus unconditionally (no tier/blast needed)", () => {
+    for (const mode of [
+      "architecture",
+      "technical-design",
+      "security",
+      "failure-modes",
+      "adrs",
+      "contracts",
+      "ux-design",
+      "ui-design",
+    ]) {
+      expect(computeRoute({ agent: "spec", mode })).toMatchObject({ model: "opus" });
+    }
+  });
+
+  it("tier/blast raise the effort of a heavy design mode", () => {
+    // security + T3 + blast → the single most extreme case.
+    expect(
+      computeRoute({ agent: "spec", mode: "security", tier: "T3", blastFlags: ["authentication"] }),
+    ).toMatchObject({ model: "opus", effort: "max" });
+    // any design mode + T3 + blast → xhigh.
+    expect(
+      computeRoute({ agent: "spec", mode: "architecture", tier: "T3", blastFlags: ["money"] }),
+    ).toMatchObject({ model: "opus", effort: "xhigh" });
+    // a design mode with neither T3 nor blast → high.
+    expect(computeRoute({ agent: "spec", mode: "contracts" })).toMatchObject({
+      model: "opus",
+      effort: "high",
     });
   });
 
@@ -66,6 +98,22 @@ describe("computeRoute", () => {
       model: "opus",
     });
     expect(computeRoute({ agent: "builder" })).toMatchObject({ model: "sonnet" });
+  });
+
+  it("builder climbs the tier ladder: T0 sonnet/high → T3 opus/xhigh", () => {
+    expect(computeRoute({ agent: "builder", tier: "T0" })).toMatchObject({ model: "sonnet", effort: "high" });
+    expect(computeRoute({ agent: "builder", tier: "T1" })).toMatchObject({ model: "opus", effort: "medium" });
+    expect(computeRoute({ agent: "builder", tier: "T2" })).toMatchObject({ model: "opus", effort: "high" });
+    expect(computeRoute({ agent: "builder", tier: "T3" })).toMatchObject({ model: "opus", effort: "xhigh" });
+    // componentBlast forces opus regardless of tier.
+    expect(computeRoute({ agent: "builder", componentBlast: true })).toMatchObject({ model: "opus" });
+  });
+
+  it("tester inherits the same tier ladder as builder", () => {
+    expect(computeRoute({ agent: "tester", tier: "T0" })).toMatchObject({ model: "sonnet", effort: "high" });
+    expect(computeRoute({ agent: "tester", tier: "T1" })).toMatchObject({ model: "opus", effort: "medium" });
+    expect(computeRoute({ agent: "tester", tier: "T2" })).toMatchObject({ model: "opus", effort: "high" });
+    expect(computeRoute({ agent: "tester", tier: "T3" })).toMatchObject({ model: "opus", effort: "xhigh" });
   });
 
   it("orchestrator & vertical-slice default to opus", () => {

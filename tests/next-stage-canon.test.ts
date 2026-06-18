@@ -14,6 +14,7 @@ import { runInit } from "../src/commands/init";
 import { runNext } from "../src/commands/next";
 import { writeState } from "../src/core/state-store";
 import { initialState } from "../src/core/state-schema";
+import { nextStageAfter } from "../src/core/stages";
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
@@ -53,5 +54,9 @@ describe("F-2/M-2: th next takes the final-verification branch for near-miss sta
     // Canonicalized to final-verification → nextStageAfter returns undefined (last
     // engaged stage), so it must NOT emit "advance-stage" back to an early stage.
     expect(res.data?.kind).not.toBe("advance-stage");
+  });
+
+  it("the stage after architecture is the new ux-design (Stage 4a) for an engaged tier", () => {
+    expect(nextStageAfter("architecture", "T2")?.stage).toBe("ux-design");
   });
 });

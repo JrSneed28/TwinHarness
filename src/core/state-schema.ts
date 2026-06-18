@@ -107,6 +107,15 @@ export interface TwinHarnessState {
    * Omitted from serialization when absent so existing state files hash identically.
    */
   project_mode?: ProjectMode;
+  /**
+   * Resolved ambiguity-gate threshold for `th:run --interview` (spec R15). Absent ⇒
+   * the default (0.20) is applied by the interview loop. Persisted so a `--threshold`
+   * override survives across the run and the requirements stage / build gate can read
+   * it. When present it must be a finite number in [0,1]. NOT gate-owned (a free policy
+   * value, not a security gate) so `th_state_set` may set it over MCP. Omitted from
+   * serialization when absent so existing state files hash identically.
+   */
+  interview_threshold?: number;
 }
 
 export interface ValidationIssue {
@@ -146,6 +155,7 @@ export const STATE_FIELD_ORDER: (keyof TwinHarnessState)[] = [
   "revise_loop_counts",
   "write_gate",
   "project_mode",
+  "interview_threshold",
 ];
 
 /** Fresh state written by `th init` — unclassified, implementation not yet allowed. */
@@ -319,6 +329,18 @@ export function validateState(value: unknown): ValidationResult {
   if (v.project_mode !== undefined) {
     if (typeof v.project_mode !== "string" || !(PROJECT_MODES as readonly string[]).includes(v.project_mode)) {
       issues.push({ path: "project_mode", message: `must be one of ${PROJECT_MODES.join(", ")} or absent` });
+    }
+  }
+
+  // Optional interview_threshold field (spec R15) — when present, a finite number in [0,1].
+  if (v.interview_threshold !== undefined) {
+    if (
+      typeof v.interview_threshold !== "number" ||
+      !Number.isFinite(v.interview_threshold) ||
+      v.interview_threshold < 0 ||
+      v.interview_threshold > 1
+    ) {
+      issues.push({ path: "interview_threshold", message: "must be a finite number in [0,1] or absent" });
     }
   }
 

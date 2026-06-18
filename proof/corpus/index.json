@@ -3,6 +3,7 @@
     "tiny-cli-greenfield",
     "small-lib-greenfield",
     "medium-app-greenfield",
-    "small-lib-brownfield"
+    "small-lib-brownfield",
+    "mini-claude-code-greenfield"
   ]
 }

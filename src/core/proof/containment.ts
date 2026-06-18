@@ -13,10 +13,12 @@
  *   (d) telemetry stays local — a static scan proves `telemetry.ts` imports no
  *       network module and makes no `fetch`/socket call.
  *
- * NOTE (plan Step 7): we do NOT assert against the LIVE `TOOL_DEFS` here — it still
- * carries 35 until the MCP registration phase. The live-registry equality is owned
- * by the three frozen tests updated in Phase C. Callers pass {@link EXPECTED_TOOL_ALLOWLIST}
- * (the post-registration 38) as `toolNames` to prove the allowlist's own integrity.
+ * NOTE: we do NOT assert against the LIVE `TOOL_DEFS` here — this module never
+ * imports the MCP server (R7 — no bundle cycle), so callers inject the live
+ * tool-name list. Live-registry equality (now 63 tools: 42 prior + 21 new — 5
+ * typed gate-transition tools + 16 wired handlers) is owned by the frozen MCP
+ * parity/manifest tests. Callers pass {@link EXPECTED_TOOL_ALLOWLIST} (63) as
+ * `toolNames` to prove the allowlist's own integrity.
  */
 
 import * as os from "node:os";
@@ -27,15 +29,27 @@ import { GATE_OWNED, fieldPolicy } from "../state-fields";
 import type { Assertion, Diagnostic } from "./types";
 
 /**
- * The 35 base MCP tool names (verified against `TOOL_DEFS`, plan Step 7) PLUS the 3
- * appended proof tools — 38 total. `th_decision_approve` is INTENTIONALLY excluded
- * (RULE-011/INV-005: a human-only TTY gate is never exposed over MCP).
+ * The full MCP tool-name allowlist — 63 total (42 prior + 21 new: 5 typed
+ * gate-transition tools + 16 wired handlers), verified against `TOOL_DEFS` in
+ * canonical order (plan Step 7 / Deliverable 0). `th_decision_approve` is
+ * INTENTIONALLY excluded (RULE-011/INV-005: a human-only TTY gate is never
+ * exposed over MCP).
  */
 export const EXPECTED_TOOL_ALLOWLIST: readonly string[] = [
-  // --- 35 base tools ---
+  // Canonical TOOL_DEFS order (63). Copied verbatim from the Deliverable-0 list
+  // (.omc/research/canonical-tool-names.md). Order MUST match TOOL_DEFS,
+  // EXPECTED_TOOL_NAMES (repo.test.ts) and expectedAll (mcp-adapter.test.ts).
   "th_state_get",
   "th_state_set",
+  // 5 typed gate-transition tools (precondition-gated GATE_OWNED mutators):
+  "th_tier_record",
+  "th_stage_advance",
+  "th_implementation_unlock",
+  "th_write_gate_set",
+  "th_blast_radius_record",
   "th_drift_add",
+  "th_drift_list",
+  "th_drift_resolve",
   "th_build_next_wave",
   "th_build_claim",
   "th_build_release",
@@ -43,6 +57,7 @@ export const EXPECTED_TOOL_ALLOWLIST: readonly string[] = [
   "th_build_plan",
   "th_route",
   "th_coverage_check",
+  "th_coverage_report",
   "th_next",
   "th_delegate_plan",
   "th_delegate_pack",
@@ -58,6 +73,8 @@ export const EXPECTED_TOOL_ALLOWLIST: readonly string[] = [
   "th_decision_add",
   "th_decision_check",
   "th_decision_list",
+  "th_artifact_register",
+  "th_artifact_list",
   "th_artifact_claim",
   "th_artifact_release",
   "th_artifact_leases",
@@ -68,10 +85,26 @@ export const EXPECTED_TOOL_ALLOWLIST: readonly string[] = [
   "th_debate_add",
   "th_debate_list",
   "th_debate_resolve",
+  "th_verify_add",
+  "th_verify_list",
+  "th_verify_clear",
+  "th_verify_run",
+  "th_stage_current",
+  "th_stage_describe",
+  "th_stage_list",
+  "th_doctor",
+  "th_scorecard",
+  "th_slices_sync",
+  "th_slice_set_status",
   // --- 3 appended proof tools (read/coordination-only; never gate-mutating) ---
   "th_proof_run",
   "th_proof_component",
   "th_proof_report",
+  // --- 4 interview/init tools (store-only / idempotent; never gate-mutating) ---
+  "th_interview_start",
+  "th_interview_record",
+  "th_interview_status",
+  "th_init",
 ] as const;
 
 /** The human-only gate that must NEVER appear in the MCP allowlist. */
@@ -97,14 +130,33 @@ const NETWORK_PATTERNS: readonly RegExp[] = [
   /\bXMLHttpRequest\b/,
 ];
 
-/** Best-effort read of the real `telemetry.ts` source (dist falls back to `.js`). */
-function readTelemetrySource(): string | null {
-  for (const ext of [".ts", ".js"]) {
-    const file = path.resolve(__dirname, "..", `telemetry${ext}`);
+/**
+ * Best-effort read of the real `telemetry.ts` source. The telemetry module being
+ * scanned is the TwinHarness IMPLEMENTATION's own — anchored to the install
+ * location (`__dirname`), never to the governed project/scenario root (which, in an
+ * isolated live scenario, is an empty temp SUT with no `src/`). Tries, in order:
+ *   1. `<__dirname>/../telemetry.ts` — un-bundled source/tests, where `__dirname`
+ *      is `src/core/proof`;
+ *   2. `<__dirname>/../telemetry.js` — un-bundled `dist/cli.js`, where `__dirname`
+ *      is `dist/core/proof`;
+ *   3. `<__dirname>/../src/core/telemetry.ts` — the BUNDLED `dist/mcp-server.js`,
+ *      where esbuild collapses `__dirname` to `dist/`, so candidates (1)/(2) resolve
+ *      to a non-existent `<install>/telemetry.*`;
+ *   4. `<repoRoot>/src/core/telemetry.ts` — explicit override, last resort.
+ * Returns `null` only when no candidate is readable.
+ */
+function readTelemetrySource(repoRoot?: string): string | null {
+  const candidates = [
+    path.resolve(__dirname, "..", "telemetry.ts"),
+    path.resolve(__dirname, "..", "telemetry.js"),
+    path.resolve(__dirname, "..", "src", "core", "telemetry.ts"),
+    ...(repoRoot ? [path.join(repoRoot, "src", "core", "telemetry.ts")] : []),
+  ];
+  for (const file of candidates) {
     try {
       return fs.readFileSync(file, "utf8");
     } catch {
-      /* try next */
+      /* try next candidate */
     }
   }
   return null;
@@ -121,6 +173,8 @@ export interface ContainmentInput {
   containmentRoot?: string;
   /** Override the telemetry source for the no-network scan (defaults to reading `telemetry.ts`). */
   telemetrySource?: string;
+  /** Repo root used to locate `src/core/telemetry.ts` when running the bundled `dist/cli.js`. */
+  repoRoot?: string;
 }
 
 export interface ContainmentReport {
@@ -244,7 +298,7 @@ export function assertContainment(input: ContainmentInput): ContainmentReport {
   );
 
   // (d) telemetry no-network (static source scan).
-  const telemetrySource = input.telemetrySource ?? readTelemetrySource();
+  const telemetrySource = input.telemetrySource ?? readTelemetrySource(input.repoRoot);
   const networkHits =
     telemetrySource === null
       ? ["<telemetry source unavailable>"]

@@ -90,12 +90,19 @@ describe("REQ-RU-001: dispatch() attachment point — `repo` group now wired (SL
 // Pinning the exact count + names makes any future change to the surface deliberate.
 // ---------------------------------------------------------------------------
 
-describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 38 tools registered (coordination-primitive layer added th_build_dispatch/plan, th_artifact_*, th_collab_*, th_debate_* on top of the prior 23; the operational proof suite appends th_proof_run/component/report)", () => {
+describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 63 tools registered (on top of the prior 42, the MCP-tool-expansion adds 5 typed gate-transition tools — th_tier_record/stage_advance/implementation_unlock/write_gate_set/blast_radius_record — plus 16 wired handlers — th_drift_list/resolve, th_coverage_report, th_artifact_register/list, th_verify_add/list/clear/run, th_stage_current/describe/list, th_doctor, th_scorecard, th_slices_sync, th_slice_set_status)", () => {
   // Anchor: REQ-NFR-002
   const EXPECTED_TOOL_NAMES = [
     "th_state_get",
     "th_state_set",
+    "th_tier_record",
+    "th_stage_advance",
+    "th_implementation_unlock",
+    "th_write_gate_set",
+    "th_blast_radius_record",
     "th_drift_add",
+    "th_drift_list",
+    "th_drift_resolve",
     "th_build_next_wave",
     "th_build_claim",
     "th_build_release",
@@ -103,6 +110,7 @@ describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 38 tools registered (coord
     "th_build_plan",
     "th_route",
     "th_coverage_check",
+    "th_coverage_report",
     "th_next",
     "th_delegate_plan",
     "th_delegate_pack",
@@ -118,6 +126,8 @@ describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 38 tools registered (coord
     "th_decision_add",
     "th_decision_check",
     "th_decision_list",
+    "th_artifact_register",
+    "th_artifact_list",
     "th_artifact_claim",
     "th_artifact_release",
     "th_artifact_leases",
@@ -128,16 +138,31 @@ describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 38 tools registered (coord
     "th_debate_add",
     "th_debate_list",
     "th_debate_resolve",
+    "th_verify_add",
+    "th_verify_list",
+    "th_verify_clear",
+    "th_verify_run",
+    "th_stage_current",
+    "th_stage_describe",
+    "th_stage_list",
+    "th_doctor",
+    "th_scorecard",
+    "th_slices_sync",
+    "th_slice_set_status",
     "th_proof_run",
     "th_proof_component",
     "th_proof_report",
+    "th_interview_start",
+    "th_interview_record",
+    "th_interview_status",
+    "th_init",
   ] as const;
 
-  it("REQ-NFR-002 — TOOL_DEFS.length === 38 (coordination-primitive layer added th_build_dispatch/plan, th_artifact_claim/release/leases, th_collab_init/fragment/list/merge, th_debate_add/list/resolve on top of the prior 23; the proof suite appends th_proof_run/component/report → 38)", () => {
-    expect(TOOL_DEFS.length).toBe(38);
+  it("REQ-NFR-002 — TOOL_DEFS.length === 63 (the MCP-tool-expansion adds 5 typed gate-transition tools + 16 wired handlers on top of the prior 42 → 63)", () => {
+    expect(TOOL_DEFS.length).toBe(63);
   });
 
-  it("REQ-NFR-002 — TOOL_DEFS contains exactly the 38 expected tool names", () => {
+  it("REQ-NFR-002 — TOOL_DEFS contains exactly the 63 expected tool names", () => {
     const names = TOOL_DEFS.map((t) => t.name);
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
   });

@@ -10,10 +10,11 @@ Live drift log (captured before this prompt runs):
 
 !`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" drift list || true`
 
-Prefer the typed `mcp__plugin_twinharness_th__*` MCP tools where exposed — e.g. `th_drift_add` to log a
-new discovery, `th_state_get` to read `drift_open_blocking`. `drift list` and `drift resolve` are
-**not** exposed as MCP tools yet, so use the CLI for those (the `th` CLI ships inside this plugin —
-`th <args>` below means this invocation; see `reference/mcp-tools.md`):
+Prefer the typed `mcp__plugin_twinharness_th__*` MCP tools — e.g. `th_drift_add` to log a new
+discovery, `th_drift_list` to list open drift, `th_drift_resolve` to resolve an entry, and
+`th_state_get` to read `drift_open_blocking`. All are now exposed as MCP tools; the CLI remains
+available as a fallback (the `th` CLI ships inside this plugin — `th <args>` below means this
+invocation; see `reference/mcp-tools.md`):
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" drift list --json
