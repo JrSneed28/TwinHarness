@@ -15,7 +15,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     command group and its `--self-test`/`--brief`/`--corpus-root`/`--output-root`/`--scenario-root`
     flags are gone.
   - **MCP:** the `th_proof_run`, `th_proof_component`, and `th_proof_report` tools are
-    de-registered. The MCP registry now holds exactly **60 tools** (was 63).
+    de-registered (−3). The shipped 0.7.0 MCP registry holds **62 tools**.
   - **Producer trail:** the MCP adapter no longer writes the dedicated
     `<stateDir>/proof-calls.jsonl` call trail (the `appendProofCall` instrumentation is removed
     from `callTool`'s success and error paths).

@@ -21762,8 +21762,8 @@ function runDoctor(paths, opts = {}) {
   const major = nodeMajor();
   checks.push({
     name: "node",
-    status: major >= 18 ? "ok" : "fail",
-    detail: major >= 18 ? `${process.version} (>= 18)` : `${process.version} \u2014 TwinHarness requires Node >= 18`
+    status: major >= 20 ? "ok" : "fail",
+    detail: major >= 20 ? `${process.version} (>= 20)` : `${process.version} \u2014 TwinHarness requires Node >= 20`
   });
   const root = pluginRoot();
   const distCli = path23.join(root, "dist", "cli.js");
