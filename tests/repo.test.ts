@@ -281,7 +281,7 @@ describe("SLICE-1 / TASK-001 — repo-map schema (serialize / parse / render)", 
   it("REQ-RU-064 — schema_version is present and emitted first", () => {
     const s = serializeRepoMap(sampleMap());
     const obj = JSON.parse(s) as Record<string, unknown>;
-    expect(obj.schema_version).toBe(2);
+    expect(obj.schema_version).toBe(3);
     expect(Object.keys(obj)[0]).toBe("schema_version");
   });
 
@@ -350,7 +350,7 @@ describe("SLICE-1 / TASK-001 — repo-map schema (serialize / parse / render)", 
 
   it("REQ-RU-043 — parseRepoMap on a schema-invalid object returns map_schema (no throw)", () => {
     // Right version, wrong shape (languages must be an array).
-    const r = parseRepoMap(JSON.stringify({ schema_version: 2, languages: "nope" }));
+    const r = parseRepoMap(JSON.stringify({ schema_version: 3, languages: "nope" }));
     expect(r.ok).toBe(false);
     expect(r.error).toBe("map_schema");
   });
@@ -370,7 +370,7 @@ describe("SLICE-1 / TASK-001 — repo-map schema (serialize / parse / render)", 
     const s = serializeRepoMap(sampleMap());
     const r = parseRepoMap(s);
     expect(r.ok).toBe(true);
-    expect(r.map?.schema_version).toBe(2);
+    expect(r.map?.schema_version).toBe(3);
     // re-serializing the parsed map is byte-identical (determinism survives the round trip).
     expect(serializeRepoMap(r.map!)).toBe(s);
   });
@@ -677,7 +677,7 @@ describe("SLICE-1 / TASK-003 — runRepoMap handler + CLI dispatch + dual-artifa
     expect(res.status).toBe(0);
     const parsed = JSON.parse(res.stdout) as { ok: boolean; schemaVersion: number; counts: Record<string, number> };
     expect(parsed.ok).toBe(true);
-    expect(parsed.schemaVersion).toBe(2);
+    expect(parsed.schemaVersion).toBe(3);
     expect(typeof parsed.counts.files).toBe("number");
   });
 
@@ -1514,7 +1514,7 @@ describe("SLICE-2 / TASK-006 — runRepoRelevant handler + CLI relevant dispatch
     fs.mkdirSync(tp.paths.stateDir, { recursive: true });
     fs.writeFileSync(
       path.join(tp.paths.stateDir, "repo-map.json"),
-      JSON.stringify({ schema_version: 2, languages: "not-an-array" }),
+      JSON.stringify({ schema_version: 3, languages: "not-an-array" }),
       "utf8",
     );
     const res = runRepoRelevant(tp.paths, { req: "REQ-001" });

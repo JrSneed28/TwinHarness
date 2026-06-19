@@ -14,7 +14,7 @@ import { computeRelevance, computeImpact } from "../src/core/repo-map/query";
 /** Build an in-memory map with explicit files + edges (no FS). */
 function mapWith(
   files: { path: string; component?: string | null; is_test?: boolean; req_ids?: string[]; symbols?: { name: string; kind: string }[] }[],
-  edges?: { from: string; to: string; basis: "parsed" | "unresolved"; external?: boolean }[],
+  edges?: { from: string; to: string; basis: "parsed" | "alias" | "unresolved"; external?: boolean }[],
 ): RepoMap {
   const m = emptyRepoMap("/tmp/x");
   m.files = files.map((f) => ({
@@ -68,6 +68,26 @@ describe("P2-5 — resolved import proximity outranks a same-component sibling",
     // The importer earns nothing from the unresolved edge (different component, no
     // other signal) → it does not appear in related at all.
     expect(r.related.some((i) => i.path === "src/api/importer.ts")).toBe(false);
+  });
+
+  it("DEFERRED pre-work — an ALIAS edge earns NO importProximity and is NOT a resolved neighbor", () => {
+    // An `alias`-basis edge (tsconfig/jsconfig or workspace-bare resolution) lands on
+    // an in-repo file but is recorded for inspection/telemetry ONLY — the ranking
+    // contract excludes it exactly like unresolved: no importProximity, never followed
+    // as a resolved neighbor, never outranks a path-token.
+    const map = mapWith(
+      [
+        { path: "src/core/target.ts", component: "src/core" },
+        { path: "src/api/importer.ts", component: "src/api" },
+      ],
+      [{ from: "src/api/importer.ts", to: "src/core/target.ts", basis: "alias" }],
+    );
+    const r = computeRelevance(map, { kind: "file", value: "src/core/target.ts" });
+    // The alias importer (different component, no other signal) earns nothing → absent.
+    expect(r.related.some((i) => i.path === "src/api/importer.ts")).toBe(false);
+    // And it contributes NO directImpact resolved-importer entry either.
+    const imp = computeImpact(map, { kind: "file", value: "src/core/target.ts" });
+    expect(imp.directImpact.some((i) => i.path === "src/api/importer.ts")).toBe(false);
   });
 
   it("P2-5 — a query keyword matching an exported symbol name boosts that file", () => {

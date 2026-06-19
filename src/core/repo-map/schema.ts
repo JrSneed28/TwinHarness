@@ -31,8 +31,14 @@ import { BLAST_RADIUS_FLAGS, type BlastRadiusFlag } from "../state-schema";
  * in-place migration: a version mismatch is detected by `parseRepoMap`
  * (`map_version`) and consumers REGENERATE via `th repo map` (RULE-006). Old (v1)
  * maps therefore fail CLOSED rather than being silently read as stale.
+ *
+ * v2 → v3 (DEFERRED-ITEMS-PLAN pre-work + #1 + #2): adds the `"alias"` edge basis
+ * (tsconfig/jsconfig paths+baseUrl and workspace bare-package resolution) and the
+ * optional `coverage` field (lcov-derived file→test association). `EDGE_BASES` is a
+ * parser-enforced CLOSED union, so adding a value is forward-incompatible. Same
+ * no-migration contract: a v2 map fails CLOSED (`map_version`) and is regenerated.
  */
-export const REPO_MAP_SCHEMA_VERSION = 2;
+export const REPO_MAP_SCHEMA_VERSION = 3;
 
 /** Source of a language detection. */
 export type LanguageSource = "extension" | "manifest" | "both";
@@ -181,7 +187,7 @@ export interface FileEntry {
  * `EdgeBasis` deliberately reuses the `parsed` ProvenanceBasis value and adds the
  * edge-only `unresolved` sentinel.
  */
-export type EdgeBasis = "parsed" | "unresolved";
+export type EdgeBasis = "parsed" | "alias" | "unresolved";
 export interface ImportEdge {
   /** POSIX-relative source file (always in-repo). */
   from: string;
@@ -562,7 +568,7 @@ const SYMBOL_KINDS: readonly string[] = [
   "trait",
   "other",
 ];
-const EDGE_BASES: readonly string[] = ["parsed", "unresolved"];
+const EDGE_BASES: readonly string[] = ["parsed", "alias", "unresolved"];
 
 /** Validate an optional `symbols` array (P2-1). Absent ⇒ valid (omit-when-absent). */
 function isValidSymbols(v: unknown): boolean {

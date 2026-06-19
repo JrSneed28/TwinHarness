@@ -18184,7 +18184,7 @@ var fs16 = __toESM(require("node:fs"));
 var path15 = __toESM(require("node:path"));
 
 // src/core/repo-map/schema.ts
-var REPO_MAP_SCHEMA_VERSION = 2;
+var REPO_MAP_SCHEMA_VERSION = 3;
 function emptyRepoMap(repoRoot) {
   return {
     schema_version: REPO_MAP_SCHEMA_VERSION,
@@ -18386,7 +18386,7 @@ var SYMBOL_KINDS = [
   "trait",
   "other"
 ];
-var EDGE_BASES = ["parsed", "unresolved"];
+var EDGE_BASES = ["parsed", "alias", "unresolved"];
 function isValidSymbols(v) {
   if (v === void 0) return true;
   return Array.isArray(v) && v.every(
