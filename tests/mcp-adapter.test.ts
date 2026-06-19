@@ -671,6 +671,9 @@ describe("MCP coordination tools delegate to their handlers (locked, real state)
   it("th_debate_add increments open_blocking, th_debate_list reflects it, th_debate_resolve clears it", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
+    // P5-2: the debate ledger is an advanced feature, off below T2 — record T2 so
+    // the runtime tier gate lets these MCP wrappers reach their handlers.
+    runStateSet(tp.paths, "tier", "T2", { emergency: true });
 
     const added = defFor("th_debate_add").run(tp.paths, {
       topic: "queue vs. stream",
@@ -700,6 +703,8 @@ describe("MCP coordination tools delegate to their handlers (locked, real state)
   it("th_collab_fragment writes an anchored fragment, th_collab_list returns it", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
+    // P5-2: blackboard collab is an advanced feature, off below T2 — record T2.
+    runStateSet(tp.paths, "tier", "T2", { emergency: true });
 
     const frag = defFor("th_collab_fragment").run(tp.paths, {
       stage: "architecture",
@@ -720,6 +725,8 @@ describe("MCP coordination tools delegate to their handlers (locked, real state)
   it("th_artifact_leases is empty (ok) on a fresh project; claim then leases lists the lease", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
+    // P5-2: section leases are an advanced feature, off below T2 — record T2.
+    runStateSet(tp.paths, "tier", "T2", { emergency: true });
 
     // Empty list on a fresh project.
     const empty = defFor("th_artifact_leases").run(tp.paths, {});

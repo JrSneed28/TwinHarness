@@ -226,6 +226,12 @@
       "is_test": false,
       "req_ids": [
         "REQ-RU-013"
+      ],
+      "symbols": [
+        {
+          "name": "d",
+          "kind": "const"
+        }
       ]
     },
     {
@@ -235,6 +241,12 @@
       "is_test": false,
       "req_ids": [
         "REQ-RU-003"
+      ],
+      "symbols": [
+        {
+          "name": "c",
+          "kind": "const"
+        }
       ]
     },
     {
@@ -244,6 +256,12 @@
       "is_test": false,
       "req_ids": [
         "REQ-RU-001"
+      ],
+      "symbols": [
+        {
+          "name": "a",
+          "kind": "const"
+        }
       ]
     },
     {
@@ -254,6 +272,12 @@
       "req_ids": [
         "REQ-RU-001",
         "REQ-RU-002"
+      ],
+      "symbols": [
+        {
+          "name": "b",
+          "kind": "const"
+        }
       ]
     },
     {

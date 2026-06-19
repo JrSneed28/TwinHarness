@@ -18,8 +18,13 @@ import { TOOL_DEFS } from "../src/mcp-server";
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
 
-/** Set up a temp project with a parent slice in-progress and its top-level lease held. */
+/** Set up a temp project with a parent slice in-progress and its top-level lease held.
+ *
+ * Records tier T2 so the Phase-5 sub-lease feature gate (P5-2) is ACTIVE: sub-leases
+ * are advanced coordination, off below T2, and these tests exercise the MCP wrapper's
+ * parity with the CLI handler — which only runs once the feature is enabled. */
 function parentInProgress(t: TempProject, id = "SLICE-P", components = ["core", "api"]): void {
+  runStateSet(t.paths, "tier", "T2", { emergency: true });
   runStateSet(t.paths, "slices", JSON.stringify([{ id, status: "in-progress", components }]));
   runBuildClaim(t.paths, id);
 }

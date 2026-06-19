@@ -25,11 +25,12 @@ import { structuredLog } from "../core/log";
 import { requireState } from "../core/guards";
 import { scanRepo, type ScanOptions } from "../core/repo-map/scanner";
 import { serializeRepoMap, renderRepoMapMarkdown, parseRepoMap, type RepoMap } from "../core/repo-map/schema";
-import { hashContent } from "../core/hash";
+import { hashFileBytes } from "../core/hash";
 import { atomicWriteFile } from "../core/atomic-io";
 import { computeRelevance, computeImpact, type Selector, type ImpactSelector } from "../core/repo-map/query";
 import { computeFreshness, diffHashes } from "../core/repo-map/freshness";
 import { REPO_STALE_EXIT, REPO_NO_MAP_EXIT } from "../core/repo-map/freshness-codes";
+import { cachedFreshness } from "../core/repo-map/freshness-cache";
 
 /** `--format` text-rendering values (distinct from the global `--json` envelope). */
 const FORMATS = ["summary", "json", "md"] as const;
@@ -84,12 +85,18 @@ export function runRepoMap(paths: ProjectPaths, opts: RepoMapOptions = {}): Comm
   // Scan (best-effort; never throws on repo content — REQ-RU-090).
   const map: RepoMap = scanRepo(paths.root, opts.scanOptions ?? {});
 
-  // DS-002 — Populate fileHashes: content-hash every tracked file within scope.
-  // Read-only; NEVER execute scanned content (REQ-NFR-003). Unreadable files are
-  // silently skipped (best-effort; REQ-RU-090). CRLF→LF normalized for
-  // cross-platform determinism (REQ-NFR-002).
+  // DS-002 / P2-4 — Populate fileHashes: content-hash every tracked file within
+  // scope from its RAW bytes (`hashFileBytes`). Read-only; NEVER execute scanned
+  // content (REQ-NFR-003). Unreadable files are silently skipped (best-effort;
+  // REQ-RU-090).
+  //
+  // P2-4 (#6): we hash the raw Buffer (no utf8 decode, no CRLF normalize) so two
+  // DISTINCT binaries cannot collapse to the same digest via U+FFFD/CRLF lossiness
+  // (which would silently miss a real edit). This is the all-or-nothing pair with
+  // `runRepoCheck` — BOTH paths use `hashFileBytes`, so a text file's stored hash
+  // and re-check hash still agree byte-for-byte.
   // Anchor: REQ-202 — per-file hashes enable modified-file detection.
-  // Anchor: REQ-NFR-002 — deterministic: CRLF→LF normalization via hashContent.
+  // Anchor: REQ-NFR-002 — deterministic: byte-exact SHA-256 via hashFileBytes.
   // Anchor: REQ-NFR-003 — read-only; no subprocess; no require/eval.
   // Anchor: REQ-NFR-004 — field populated here; absent on old maps (backward-compat preserved by serializer).
   {
@@ -97,8 +104,7 @@ export function runRepoMap(paths: ProjectPaths, opts: RepoMapOptions = {}): Comm
     for (const f of map.files) {
       const abs = path.join(paths.root, f.path);
       try {
-        const content = fs.readFileSync(abs, "utf8");
-        hashes[f.path] = hashContent(content);
+        hashes[f.path] = hashFileBytes(abs);
       } catch {
         // Unreadable file — skip silently (REQ-RU-090, REQ-NFR-003).
       }
@@ -172,17 +178,32 @@ export function runRepoMap(paths: ProjectPaths, opts: RepoMapOptions = {}): Comm
     const banner = partial
       ? `⚠ PARTIAL SCAN — cap hit: ${map.scanReport.capHit}. The repo map is INCOMPLETE (scanned ${map.scanReport.filesScanned} file(s)); relevance/impact/context results will be partial. Raise the scan caps and re-run \`th repo map\`.`
       : null;
+    // P3-6 — surface a likely-missed layout so a structure miss is never silent.
+    const lowConfWarn = map.scanReport.lowConfidenceStructure
+      ? `⚠ LOW-CONFIDENCE STRUCTURE — ${map.scanReport.filesScanned} file(s) scanned but no source roots/components were derived. The layout may be unconventional; check \`th repo map --format json\` and consider configuring source roots.`
+      : null;
+    // P3-5 — summarize exclusion reasons (why dirs were pruned).
+    const exclusions = map.scanReport.exclusions ?? [];
+    const exclusionLine =
+      exclusions.length > 0
+        ? `  excluded: ${[...new Set(exclusions.map((e) => e.reason))]
+            .sort()
+            .map((reason) => `${reason} (${exclusions.filter((e) => e.reason === reason).length})`)
+            .join(", ")}`
+        : null;
     const capLine = partial
       ? `cap hit: ${map.scanReport.capHit} (scanned ${map.scanReport.filesScanned})`
       : `scanned ${map.scanReport.filesScanned} file(s), skipped ${map.scanReport.filesSkipped}`;
     human = [
       ...(banner ? [banner, ""] : []),
+      ...(lowConfWarn ? [lowConfWarn, ""] : []),
       "Repo map:",
       `  languages: ${counts.languages}  package managers: ${counts.packageManagers}`,
       `  roots — source: ${counts.sourceRoots}  test: ${counts.testRoots}  docs: ${counts.docsRoots}`,
       `  components: ${counts.components}  entrypoints: ${counts.entrypoints}  files: ${counts.files}`,
       `  REQ anchors: ${counts.reqAnchors}  candidate commands: ${counts.candidateCommands}  generated dirs: ${counts.generatedPaths}`,
       `  blast-radius flags: ${blastRadiusFlags.length ? blastRadiusFlags.join(", ") : "(none)"}`,
+      ...(exclusionLine ? [exclusionLine] : []),
       `  ${capLine}`,
       write ? `wrote ${artifacts.length} artifact(s): ${artifacts.join(", ")}` : "(dry-run — nothing written)",
     ].join("\n");
@@ -662,7 +683,13 @@ function formatImpactHuman(
 export { REPO_STALE_EXIT, REPO_NO_MAP_EXIT };
 
 export interface RepoCheckOptions {
-  // No flags beyond --json and --cwd (universal).
+  /**
+   * P4-8 — scan-cap overrides matching `th repo map`. When a large-repo map was built
+   * with raised caps, the freshness re-scan MUST use the same caps so it covers the
+   * same scope (otherwise files beyond the default cap would phantom as added/removed).
+   * Absent ⇒ scanner defaults (the common case).
+   */
+  scanOptions?: ScanOptions;
 }
 
 /**
@@ -691,7 +718,7 @@ export interface RepoCheckOptions {
  * Anchor: REQ-NFR-003 — read-only; no subprocess; no path escape.
  * Anchor: REQ-NFR-004 — absent fileHashes → no_hashes stale (not crash, not fresh).
  */
-export function runRepoCheck(paths: ProjectPaths, _opts: RepoCheckOptions = {}): CommandResult {
+export function runRepoCheck(paths: ProjectPaths, opts: RepoCheckOptions = {}): CommandResult {
   const REPO_MAP_JSON = path.join(paths.stateDir, "repo-map.json");
 
   // This handler is now PURE I/O + delegation (ARCH-002): it reads the map, scans
@@ -730,7 +757,8 @@ export function runRepoCheck(paths: ProjectPaths, _opts: RepoCheckOptions = {}):
   // ---- Step 4: Rescan the working tree (same scope as runRepoMap) -------------
   // Reuse scanRepo defaults (GENERATED_DIRS, FILE_COUNT_CAP) for scope coherence
   // (REQ-202). Read-only; never executes content (REQ-NFR-003).
-  const currentMap = scanRepo(paths.root);
+  // P4-8 — honor cap overrides so the re-scan scope matches a large-repo `th repo map`.
+  const currentMap = scanRepo(paths.root, opts.scanOptions ?? {});
 
   // ---- Step 5: Hash current files within the rescan scope --------------------
   // Anchor: REQ-NFR-003 — content read via readFileSync; no execution; no path escape.
@@ -742,10 +770,11 @@ export function runRepoCheck(paths: ProjectPaths, _opts: RepoCheckOptions = {}):
     // Scope containment: relPosix ensures the path is within root by construction
     // (scanner.ts relPosix strips abs prefix — no escape possible). Defense-in-depth:
     // resolve and verify before reading.
+    // P2-4: byte-exact `hashFileBytes` — the SAME function the store path uses, so
+    // a text file matches and binaries no longer collide (no missed staleness).
     // Anchor: REQ-NFR-003 — no path escape: only files emitted by scanRepo (within root).
     try {
-      const content = fs.readFileSync(abs, "utf8");
-      currentHashes[f.path] = hashContent(content);
+      currentHashes[f.path] = hashFileBytes(abs);
     } catch {
       // Unreadable file → skip (REQ-NFR-003, REQ-RU-090). This file will appear
       // as "removed" only if it was previously tracked in map.fileHashes.
@@ -757,4 +786,107 @@ export function runRepoCheck(paths: ProjectPaths, _opts: RepoCheckOptions = {}):
   // Anchor: REQ-NFR-002 — hash-compare only; no mtime; deterministic.
   const { added, removed, modified } = diffHashes(map.fileHashes, currentHashes);
   return emit(computeFreshness({ kind: "diff", added, removed, modified }));
+}
+
+// ---------------------------------------------------------------------------
+// P4-10 — bounded-cost freshness wrapper + P4-1/2/3/4 freshness summary.
+// ---------------------------------------------------------------------------
+
+/**
+ * P4-10 — `runRepoCheck` behind the cheap-signal cache. Identical return shape;
+ * a cache hit (the working-tree stat signature is unchanged since the last full
+ * check) skips the full `scanRepo` + re-hash. This is the SINGLE entry point used
+ * by BOTH freshness consumers added in Phase 4 — the MCP repo tools (P4-3) and the
+ * brownfield `checkRepoMap` gate (P4-5) — so per-call full-tree hashing is never
+ * shipped on a hot path. `th repo check` itself stays uncached (an explicit,
+ * authoritative re-check). `structuredLog` is emitted by the underlying
+ * `runRepoCheck` on a miss; a hit replays the same cached outcome.
+ */
+export function runRepoCheckCached(paths: ProjectPaths, opts: RepoCheckOptions = {}): CommandResult {
+  return cachedFreshness(paths, (p) => runRepoCheck(p, opts));
+}
+
+/**
+ * P4-1/2/3/4 — the freshness/partial summary every downstream consumer (context
+ * pack, doctor, MCP repo tools, relevance/impact) reads to decide whether the
+ * persisted map can still be trusted. Derived at QUERY time (never persisted), so
+ * determinism (REQ-NFR-001) is untouched.
+ *
+ *  - `fresh`           — true iff `th repo check` returns exit 0.
+ *  - `stale`           — the negation (added/removed/modified/no-hashes/absent/parse-fail).
+ *  - `mapPresent`      — false only on no-map (exit 5).
+ *  - `shape`           — the freshness outcome shape (fresh|stale|no-map|parse-fail label).
+ *  - `added/removed/modified` — counts (0 when not applicable) for doctor's drift line.
+ *  - `partial`/`scanIncomplete` — the PERSISTED partial-scan marker (capHit≠null), read
+ *    from the map; a partial map is INCOMPLETE even when "fresh", so consumers must
+ *    surface it too (P4-4).
+ */
+export interface RepoFreshnessSummary {
+  fresh: boolean;
+  stale: boolean;
+  mapPresent: boolean;
+  shape: string;
+  added: number;
+  removed: number;
+  modified: number;
+  /** P4-4 — persisted partial-scan marker (capHit≠null on disk). */
+  partial: boolean;
+  scanIncomplete: boolean;
+  /** Which cap was hit (null when complete), echoed for messaging. */
+  capHit: null | "file-count" | "total-bytes";
+}
+
+/**
+ * P4-5 helper — read JUST the persisted partial-scan marker (capHit) without a full
+ * freshness re-scan. Cheap: parses the on-disk map and returns its deterministic
+ * `capHit` (null when the map is absent/invalid or the scan was complete). Used by the
+ * brownfield gate so it can block a partial map BEFORE paying for a freshness scan.
+ */
+export function repoMapPartialMarker(paths: ProjectPaths): { partial: boolean; capHit: RepoFreshnessSummary["capHit"] } {
+  const loaded = loadPersistedMap(paths, "repo partial");
+  if (loaded.result || !loaded.map) return { partial: false, capHit: null };
+  const capHit = loaded.map.scanReport.capHit;
+  return { partial: capHit !== null, capHit };
+}
+
+/**
+ * Compute the {@link RepoFreshnessSummary} for the persisted map (P4-1/2/3/4).
+ * Read-only; uses the cached freshness check (P4-10) so it is cheap to call on hot
+ * paths. The partial marker is read independently of freshness so a partial-but-
+ * unchanged map is still flagged as incomplete.
+ */
+export function repoFreshnessSummary(paths: ProjectPaths): RepoFreshnessSummary {
+  const check = runRepoCheckCached(paths);
+  const data = (check.data ?? {}) as {
+    shape?: string;
+    added?: string[];
+    removed?: string[];
+    modified?: string[];
+  };
+  const mapPresent = check.exitCode !== REPO_NO_MAP_EXIT;
+  const shape = data.shape ?? (check.ok ? "fresh" : "stale");
+
+  // P4-4 — read the persisted partial marker. Independent of freshness: a complete-
+  // but-unchanged scan is fresh AND not partial; a capped scan is partial even if
+  // unchanged. Missing/invalid map ⇒ not partial (the freshness layer already flags it).
+  let partial = false;
+  let capHit: RepoFreshnessSummary["capHit"] = null;
+  const loaded = loadPersistedMap(paths, "repo freshness");
+  if (!loaded.result && loaded.map) {
+    capHit = loaded.map.scanReport.capHit;
+    partial = capHit !== null;
+  }
+
+  return {
+    fresh: check.ok,
+    stale: !check.ok,
+    mapPresent,
+    shape,
+    added: (data.added ?? []).length,
+    removed: (data.removed ?? []).length,
+    modified: (data.modified ?? []).length,
+    partial,
+    scanIncomplete: partial,
+    capHit,
+  };
 }

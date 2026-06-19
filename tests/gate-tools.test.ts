@@ -17,10 +17,21 @@ import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
 import { readLedger, verifyLedgerChain, type LedgerEntry } from "../src/core/ledger";
-import { writeVerifyConfig, readVerifyReport } from "../src/core/verify";
+import { writeVerifyConfig, readVerifyReport, commandSetHash } from "../src/core/verify";
 import { TOOL_DEFS } from "../src/mcp-server";
 import type { CommandResult } from "../src/core/output";
 import type { ProjectPaths } from "../src/core/paths";
+
+/** Write an APPROVED verify config (P6-2): a set with a matching approvedHash so
+ *  `th_verify_run` executes it instead of refusing it as unapproved. */
+function writeApprovedVerifyConfig(paths: ProjectPaths, commands: string[]): void {
+  writeVerifyConfig(paths, {
+    commands,
+    approvedHash: commandSetHash(commands),
+    approvedBy: "test",
+    approvedAt: "2026-01-01T00:00:00.000Z",
+  });
+}
 
 let tp: TempProject | undefined;
 afterEach(() => {
@@ -269,7 +280,7 @@ describe("th_artifact_register — path containment (AC-A6)", () => {
 describe("th_verify_run (AC-B11)", () => {
   it("runs the configured command, writes the report, and never holds the state lock", async () => {
     const paths = seed({ tier: "T1", current_stage: "implementation" });
-    writeVerifyConfig(paths, { commands: ["exit 0"] });
+    writeApprovedVerifyConfig(paths, ["exit 0"]);
     const stateBefore = fs.readFileSync(paths.stateFile, "utf8");
     const r = await toolRunAsync("th_verify_run", paths);
     expect(r.ok).toBe(true);
@@ -283,7 +294,7 @@ describe("th_verify_run (AC-B11)", () => {
 
   it("surfaces a failing command as a non-ok report", async () => {
     const paths = seed({ tier: "T1", current_stage: "implementation" });
-    writeVerifyConfig(paths, { commands: ["exit 1"] });
+    writeApprovedVerifyConfig(paths, ["exit 1"]);
     const r = await toolRunAsync("th_verify_run", paths);
     expect(r.ok).toBe(false);
     expect(readVerifyReport(paths)?.ok).toBe(false);

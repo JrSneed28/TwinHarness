@@ -84,3 +84,23 @@ describe("GOV-3 (P2-5): the strict fail-closed-on-invalid-state behaviour is doc
     expect(security).toContain('write_gate: "strict"');
   });
 });
+
+describe("SEC-017 (P6-1): the human-only TTY gate is documented as a guardrail, not a sandbox", () => {
+  it("CONTAINS the guardrail-not-sandbox framing for th decision approve", () => {
+    expect(security).toContain("human-only guardrail, not a sandbox");
+    expect(security).toContain("records the real, observed invocation provenance");
+    expect(security).toContain("attributionSuspect");
+    expect(security).toContain("approval-audit.jsonl");
+  });
+});
+
+describe("SEC-019 (P6-2/3/4/5): verify hardening boundaries are documented", () => {
+  it("CONTAINS the approve-before-first-run, curated-env, redaction, tree-kill, and read-only claims", () => {
+    expect(security).toContain("Approve-before-first-run");
+    expect(security).toContain("unapproved_command_set");
+    expect(security).toContain("Curated child environment");
+    expect(security).toContain("Output redaction");
+    expect(security).toContain("Process-tree kill on timeout");
+    expect(security).toContain("Optional read-only mode");
+  });
+});

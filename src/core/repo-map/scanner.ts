@@ -40,12 +40,37 @@ import {
   type OwnershipHint,
   type PublicApiSurface,
   type Provenance,
+  type ExportedSymbol,
+  type ImportEdge,
+  type ExclusionEntry,
   emptyRepoMap,
 } from "./schema";
+import {
+  looksBinary,
+  isParseableExt,
+  extractSymbols,
+  extractImports,
+  resolveRelativeTsJs,
+  resolveRelativePython,
+  type RawImport,
+} from "./extract";
 
 /** Scan caps (TD §Internal — ODQ-001..003; internal tuning, reversible). */
 export const FILE_COUNT_CAP = 25_000;
 export const TOTAL_BYTES_CAP = 64 * 1024 * 1024; // 64 MB
+
+/**
+ * P2 cost gate (REQ-NFR-007). The import/symbol graph is bounded INDEPENDENTLY of
+ * the file/byte caps so it can never blow the 64 MB / 25k envelope: at 25k files
+ * and these caps the serialized graph stays small. Reaching a cap stops graph
+ * accumulation (it does NOT mark the scan partial — only file/byte caps do that).
+ *   - MAX_SYMBOLS_PER_FILE: a single pathological file can't emit thousands of symbols.
+ *   - MAX_TOTAL_SYMBOLS / MAX_TOTAL_EDGES: whole-graph ceilings (benchmarked in
+ *     repo-bounded-cost.test.ts).
+ */
+export const MAX_SYMBOLS_PER_FILE = 200;
+export const MAX_TOTAL_SYMBOLS = 100_000;
+export const MAX_TOTAL_EDGES = 200_000;
 
 /**
  * Directory names that are generated/build/cache and are EXCLUDED before being
@@ -72,11 +97,11 @@ export const GENERATED_DIRS = new Set([
   ".mypy_cache",
   ".tox",
   "coverage",
-  "vendor",
-  "bin",
-  "obj",
   ".venv",
   "venv",
+  // NOTE: vendor/bin/obj are NOT here (P3-5) — they are CONTEXT-AWARE
+  // (CONTEXT_AWARE_PRUNE_DIRS): pruned only at a module/package root, walked
+  // otherwise, so a hand-written `bin/` of scripts is no longer silently dropped.
 ]);
 
 /**
@@ -104,7 +129,10 @@ const GENERATED_ARTIFACTS = new Set(["docs/00-repo-map.md"]);
  */
 export const MAX_READ_BYTES = 2 * 1024 * 1024; // 2 MB — oversize files are name-only.
 
-/** Extension → language name. */
+/**
+ * Extension → language name. P3-4 extends this with C/C++/Objective-C/Swift/Dart/
+ * Scala/Shell/SQL so mixed-language / mobile repos report their languages.
+ */
 const EXT_LANG: Record<string, string> = {
   ".ts": "TypeScript",
   ".tsx": "TypeScript",
@@ -125,6 +153,27 @@ const EXT_LANG: Record<string, string> = {
   ".cs": ".NET",
   ".fs": ".NET",
   ".vb": ".NET",
+  // P3-4 — C / C++ / Objective-C.
+  ".c": "C",
+  ".h": "C/C++",
+  ".cc": "C++",
+  ".cpp": "C++",
+  ".cxx": "C++",
+  ".hh": "C++",
+  ".hpp": "C++",
+  ".hxx": "C++",
+  ".m": "Objective-C",
+  ".mm": "Objective-C++",
+  // P3-4 — Swift / Dart / Scala.
+  ".swift": "Swift",
+  ".dart": "Dart",
+  ".scala": "Scala",
+  ".sc": "Scala",
+  // P3-4 — Shell / SQL.
+  ".sh": "Shell",
+  ".bash": "Shell",
+  ".zsh": "Shell",
+  ".sql": "SQL",
 };
 
 /** Manifest file name → language name (manifest-based detection). */
@@ -142,6 +191,11 @@ const MANIFEST_LANG: Record<string, string> = {
   "pipfile": "Python",
   "gemfile": "Ruby",
   "composer.json": "PHP",
+  // P3-3 — additional ecosystems.
+  "pubspec.yaml": "Dart",
+  "podfile": "Swift/Objective-C",
+  "cmakelists.txt": "C/C++",
+  "build.sbt": "Scala",
 };
 
 /** Manifest/lockfile name → package-manager name (REQ-RU-003). */
@@ -165,6 +219,57 @@ const PM_MANIFEST: Record<string, string> = {
   "pom.xml": "maven",
   "build.gradle": "gradle",
   "build.gradle.kts": "gradle",
+  // P3-3 — additional package managers / build tools.
+  "pubspec.yaml": "pub",
+  "pubspec.lock": "pub",
+  "podfile": "cocoapods",
+  "podfile.lock": "cocoapods",
+  "cmakelists.txt": "cmake",
+  "build.sbt": "sbt",
+};
+
+/**
+ * P3-3 — file names (lowercased) that are MANIFESTS marking a directory as a
+ * PACKAGE ROOT. A directory containing any of these is a package root; `src/lib/
+ * tests/docs` and components are detected relative to EACH root (P3-1/P3-2), not
+ * only at depth 0. This fixes monorepos / nested packages / sub-root source.
+ */
+const PACKAGE_MANIFESTS = new Set([
+  "package.json",
+  "go.mod",
+  "cargo.toml",
+  "pyproject.toml",
+  "setup.py",
+  "pipfile",
+  "requirements.txt",
+  "gemfile",
+  "composer.json",
+  "pom.xml",
+  "build.gradle",
+  "build.gradle.kts",
+  "build.sbt",
+  "pubspec.yaml",
+  "cmakelists.txt",
+]);
+
+/**
+ * P3-3 — workspace/monorepo manifests (lowercased) that declare child packages.
+ * Their PRESENCE marks a workspace root; the children are discovered structurally
+ * by package-manifest detection (we do not glob the patterns — that is Phase 2B).
+ */
+const WORKSPACE_FILES = new Set([
+  "pnpm-workspace.yaml",
+  "lerna.json",
+]);
+
+/**
+ * P3-5 — non-source build/task manifests added to the manifest-detection set so
+ * mixed repos surface their build tooling. Not package roots themselves.
+ */
+const TASK_MANIFESTS: Record<string, string> = {
+  "justfile": "just",
+  "taskfile.yml": "task",
+  "taskfile.yaml": "task",
 };
 
 /** Conventional source-root directory names (REQ-RU-005). */
@@ -220,7 +325,23 @@ interface ScannerState {
 export interface ScanOptions {
   fileCountCap?: number;
   totalBytesCap?: number;
+  /**
+   * P3-5 — extra directory/path tokens to PRUNE (POSIX-relative paths or bare dir
+   * names). A pruned path is recorded with reason `configured` in `scanReport.
+   * exclusions`. In production these come from a project `.twinharnessignore` /
+   * config; the scanner itself never reads that file (the command layer wires it).
+   */
+  excludePaths?: string[];
 }
+
+/**
+ * P3-5 — directory names that are CONTEXT-AWARE: only pruned when they sit at a
+ * module/package root (i.e. a sibling manifest indicates they are dependency/build
+ * output, e.g. Go `vendor/`, build `bin/`/`obj/`). Elsewhere (a source dir literally
+ * named `bin` with hand-written scripts) they are NOT silently dropped — they are
+ * walked. This fixes the over-pruning of #4.
+ */
+const CONTEXT_AWARE_PRUNE_DIRS = new Set(["vendor", "bin", "obj"]);
 
 // Anchor: REQ-RU-010 — test location detection (is_test on conventional test paths).
 function isTestPath(relPosix: string): boolean {
@@ -275,6 +396,15 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
 
   const st: ScannerState = { filesScanned: 0, filesSkipped: 0, totalBytes: 0, capHit: null };
 
+  // P3-5 — configured exclusion tokens (bare names or POSIX path prefixes).
+  const excludeSet = new Set<string>(opts.excludePaths ?? []);
+
+  // P2-1/P2-2 — graph accumulators. `rawImportsByFile` defers edge resolution until
+  // AFTER the walk (we need the full file set to resolve relative specifiers in-
+  // memory; no extra FS access). `symbolTotal` enforces the whole-graph cost cap.
+  const rawImportsByFile = new Map<string, { ext: string; imports: RawImport[] }>();
+  let symbolTotal = 0;
+
   // Accumulators (deduped by key, unsorted — the serializer sorts).
   const langs = new Map<string, { evidence: Set<string>; sources: Set<string> }>();
   const pms = new Map<string, Set<string>>();
@@ -323,13 +453,37 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
     }
   };
 
-  // Component for a file = its top-level directory under a source root (REQ-RU-007/012).
+  // P3-1/P3-2 — package roots discovered during the walk (POSIX-relative dir of a
+  // package manifest; "" = repo root). Source/test/docs roots and components are
+  // derived RELATIVE to these roots after the walk, not from a depth===0 assumption.
+  const packageRoots = new Set<string>([""]); // repo root is always a package root
+  // Candidate conventional-root dirs found at ANY depth: {rel dir, parent dir, kind}.
+  const rootCandidates: { rel: string; parent: string; kind: "source" | "test" | "docs" }[] = [];
+  // P3-5 — per-path exclusion reasons (in-memory only; surfaced, never persisted).
+  const exclusions: ExclusionEntry[] = [];
+
+  /**
+   * P3-2 — component for a file derived from the NEAREST enclosing package root: the
+   * first path segment under that root (the conventional source-root name) plus one
+   * more segment, e.g. under root "packages/app" the file
+   * "packages/app/src/auth/x.ts" → component "packages/app/src/auth". Falls back to
+   * the legacy top-level `src/<dir>` shape at the repo root so existing maps are
+   * unchanged when there are no nested package roots.
+   */
   const componentForFile = (rel: string): string | null => {
-    const parts = rel.split("/");
+    // Choose the longest package root that is a prefix of `rel` (nearest root).
+    let best = "";
+    for (const r of packageRoots) {
+      if (r === "") continue;
+      if ((rel === r || rel.startsWith(r + "/")) && r.length > best.length) best = r;
+    }
+    const sub = best === "" ? rel : rel.slice(best.length + 1);
+    const parts = sub.split("/");
     if (parts.length < 2) return null;
     const top = parts[0]!;
-    if (!SOURCE_ROOT_NAMES.has(top)) return null;
-    return `${parts[0]}/${parts[1]}`;
+    if (!SOURCE_ROOT_NAMES.has(top.toLowerCase())) return null;
+    const local = `${parts[0]}/${parts[1]}`;
+    return best === "" ? local : `${best}/${local}`;
   };
 
   // --- bounded recursive walk; exclusion BEFORE read (REQ-RU-006/041) ---------
@@ -342,6 +496,27 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
       return; // unreadable dir — skip, do not crash (REQ-RU-090).
     }
 
+    // P3-1/P3-3 — does THIS directory contain a package or workspace manifest?
+    // Computed once per directory (before descending) so child conventional-root
+    // dirs can be promoted relative to a real package root, at any depth.
+    const dirRel = relPosix(absRoot, absDir);
+    const dirRelKey = dirRel === "." ? "" : dirRel;
+    let dirHasManifest = depth === 0; // repo root is always a package root
+    let dirHasDeps = false; // any package/lock manifest ⇒ vendor/bin/obj are deps output
+    for (const e of entries) {
+      if (!e.isFile()) continue;
+      const ln = e.name.toLowerCase();
+      if (PACKAGE_MANIFESTS.has(ln)) {
+        dirHasManifest = true;
+        dirHasDeps = true;
+      }
+      // P3-3 — a pnpm/lerna workspace declaration marks a package/workspace root so
+      // its child packages' src/test/docs roots resolve relative to it.
+      if (WORKSPACE_FILES.has(ln)) dirHasManifest = true;
+      if (ln in PM_MANIFEST) dirHasDeps = true;
+    }
+    if (dirHasManifest) packageRoots.add(dirRelKey);
+
     for (const entry of entries) {
       if (st.capHit) return;
       const abs = path.join(absDir, entry.name);
@@ -350,20 +525,42 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
       if (entry.isDirectory()) {
         // Producer's own state dir: skip SILENTLY (not recorded) so the map is
         // idempotent once `.twinharness/` exists (REQ-NFR-001).
-        if (PRODUCER_DIRS.has(entry.name)) continue;
+        if (PRODUCER_DIRS.has(entry.name)) {
+          exclusions.push({ path: rel, reason: "producer-dir" });
+          continue;
+        }
         // EXCLUSION BEFORE READ: never descend into a generated/build/cache dir.
         // Anchor: REQ-RU-041 — generated/build/cache dirs excluded across ALL areas (nested too).
         if (GENERATED_DIRS.has(entry.name)) {
           generatedPaths.add(rel);
+          exclusions.push({ path: rel, reason: "generated-dir" });
           continue;
         }
-        // Root-level root detection (REQ-RU-005).
-        if (depth === 0) {
-          const lower = entry.name.toLowerCase();
-          if (SOURCE_ROOT_NAMES.has(lower)) sourceRoots.add(rel);
-          if (TEST_ROOT_NAMES.has(lower)) testRoots.add(rel);
-          if (DOCS_ROOT_NAMES.has(lower)) docsRoots.add(rel);
+        // P3-5 — CONTEXT-AWARE prune: vendor/bin/obj are pruned ONLY when a sibling
+        // manifest indicates they are dependency/build output (a module root). A
+        // plain `bin/` of hand-written scripts (no sibling manifest) is WALKED, not
+        // silently dropped (#4 fix).
+        if (CONTEXT_AWARE_PRUNE_DIRS.has(entry.name.toLowerCase()) && dirHasDeps) {
+          generatedPaths.add(rel);
+          exclusions.push({ path: rel, reason: "vendor-at-module-root" });
+          continue;
         }
+        // P3-5 — configured exclusions (.twinharnessignore / ScanOptions). Matches a
+        // bare dir name OR a POSIX-relative path prefix.
+        if (
+          excludeSet.has(entry.name) ||
+          excludeSet.has(rel) ||
+          [...excludeSet].some((x) => rel === x || rel.startsWith(x.replace(/\/$/, "") + "/"))
+        ) {
+          exclusions.push({ path: rel, reason: "configured" });
+          continue;
+        }
+        // Conventional-root detection at ANY depth (P3-1): record a candidate; it is
+        // promoted to a real root after the walk IFF its parent dir is a package root.
+        const lower = entry.name.toLowerCase();
+        if (SOURCE_ROOT_NAMES.has(lower)) rootCandidates.push({ rel, parent: dirRelKey, kind: "source" });
+        if (TEST_ROOT_NAMES.has(lower)) rootCandidates.push({ rel, parent: dirRelKey, kind: "test" });
+        if (DOCS_ROOT_NAMES.has(lower)) rootCandidates.push({ rel, parent: dirRelKey, kind: "docs" });
         walk(abs, depth + 1);
         continue;
       }
@@ -411,7 +608,8 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
       // Manifest-based language + package-manager detection (REQ-RU-002/003).
       const manifestLang = MANIFEST_LANG[nameLower];
       if (manifestLang) recordLang(manifestLang, rel, "manifest");
-      const pmName = PM_MANIFEST[nameLower];
+      // P3-3 — task runners (Justfile/Taskfile) surface as build tooling too.
+      const pmName = PM_MANIFEST[nameLower] ?? TASK_MANIFESTS[nameLower];
       if (pmName) {
         let set = pms.get(pmName);
         if (!set) {
@@ -422,16 +620,13 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
       }
 
       const isTest = isTestPath(rel);
-      const component = componentForFile(rel);
-      if (component) {
-        componentFileCounts.set(component, (componentFileCounts.get(component) ?? 0) + 1);
-        // Anchor: REQ-RU-012 — ownership hints (file→component mapping) recorded.
-        ownershipHints.set(component, component);
-      }
 
+      // P3-2 — component is derived AFTER the walk (it depends on the full set of
+      // package roots, which may include nested/monorepo roots discovered later).
+      // Set null now; reassigned in the post-walk component pass below.
       const fileEntry: FileEntry = {
         path: rel,
-        component,
+        component: null,
         language: langName ?? null,
         is_test: isTest,
         req_ids: [], // filled from this file's single read below.
@@ -441,17 +636,23 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
       // Blast-radius signal detection by path tokens (REQ-RU-013).
       recordBlast(rel);
 
-      // SINGLE READ (P3-1): a file at or under the per-file cap is read ONCE here;
-      // that one buffer serves BOTH REQ-ID anchor extraction AND the manifest
-      // detectors below. An oversize file is never read (name-only) — this is the
-      // BOUNDED-COST guarantee (PERF-001, REQ-NFR-007, REQ-RU-090). The walk's own
-      // exclusions (GENERATED_DIRS/PRODUCER_DIRS skipped before descent,
-      // GENERATED_ARTIFACTS skipped per-file) mean every anchor collected here is
-      // already correctly scoped, so no post-filter is needed (REQ-NFR-001).
+      // SINGLE READ (P3-1): a file at or under the per-file cap is read ONCE here as
+      // a RAW Buffer. That one buffer serves the binary sniff (P2-4), REQ-ID anchor
+      // extraction, the manifest detectors, AND symbol/import extraction (P2-1/2).
+      // An oversize file is never read (name-only) — the BOUNDED-COST guarantee
+      // (PERF-001, REQ-NFR-007, REQ-RU-090).
+      //
+      // P2-4 binary guard: a NUL byte in the buffer ⇒ treat as binary. Binary files
+      // are NEVER decoded for anchors/symbols/imports (a lossy utf8 decode would
+      // both invent garbage anchors and is meaningless for parsing). They are still
+      // counted/sized/hashed (hashing happens in the command layer on raw bytes).
       let content: string | undefined;
       if (size <= MAX_READ_BYTES) {
         try {
-          content = fs.readFileSync(abs, "utf8");
+          const buf = fs.readFileSync(abs);
+          // P2-4 binary guard: a NUL byte ⇒ binary ⇒ leave `content` undefined so
+          // no anchors/symbols/imports are extracted from a lossy utf8 decode.
+          if (!looksBinary(buf)) content = buf.toString("utf8");
         } catch {
           content = undefined; // unreadable → name-only, like an oversize file.
         }
@@ -471,6 +672,25 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
             }
             set.add(rel);
           }
+        }
+      }
+
+      // P2-1 / P2-2 — symbol + import extraction from the SAME single read. Only for
+      // text source files in the parse allowlist (never binary, never oversize). The
+      // per-file symbol cap and the whole-graph symbol cap (REQ-NFR-007) bound cost.
+      if (content !== undefined && isParseableExt(ext)) {
+        if (symbolTotal < MAX_TOTAL_SYMBOLS) {
+          const syms = extractSymbols(ext, content, MAX_SYMBOLS_PER_FILE);
+          if (syms.length > 0) {
+            const room = MAX_TOTAL_SYMBOLS - symbolTotal;
+            const bounded = syms.length > room ? syms.slice(0, room) : syms;
+            fileEntry.symbols = bounded;
+            symbolTotal += bounded.length;
+          }
+        }
+        const imports = extractImports(ext, content);
+        if (imports.length > 0) {
+          rawImportsByFile.set(rel, { ext, imports });
         }
       }
 
@@ -534,6 +754,59 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
   };
 
   walk(absRoot, 0);
+
+  // --- P3-1/P3-2: promote conventional roots + derive components (post-walk) ----
+  // A candidate src/lib/tests/docs dir becomes a real root ONLY when its parent is
+  // a package root (the repo root, or any dir that held a package manifest). This
+  // fixes monorepos / nested packages / sub-root source: roots are detected relative
+  // to EACH package root, not under the old `depth===0` assumption (scanner.ts:360).
+  for (const c of rootCandidates) {
+    if (!packageRoots.has(c.parent)) continue;
+    if (c.kind === "source") sourceRoots.add(c.rel);
+    else if (c.kind === "test") testRoots.add(c.rel);
+    else docsRoots.add(c.rel);
+  }
+  // Re-derive each file's component from the (now-complete) package-root set.
+  for (const fe of files) {
+    const comp = componentForFile(fe.path);
+    fe.component = comp;
+    if (comp) {
+      componentFileCounts.set(comp, (componentFileCounts.get(comp) ?? 0) + 1);
+      ownershipHints.set(comp, comp);
+    }
+  }
+
+  // --- P2-2: resolve import edges (locally-resolvable only; never guess) --------
+  // Resolution is pure + in-memory: a relative specifier is resolved against the
+  // full set of scanned file paths. Bare/aliased/tsconfig-paths specifiers are
+  // recorded as `unresolved`/`external` (Phase 2B does full module resolution). The
+  // whole-graph edge cap bounds cost (REQ-NFR-007).
+  const fileSet = new Set<string>(files.map((f) => f.path));
+  const edges: ImportEdge[] = [];
+  const edgeSeen = new Set<string>();
+  outer: for (const [from, { ext, imports }] of rawImportsByFile.entries()) {
+    const e = ext.replace(/^\./, "").toLowerCase();
+    const isTsJs = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"].includes(e);
+    const isPy = e === "py";
+    for (const imp of imports) {
+      if (edges.length >= MAX_TOTAL_EDGES) break outer;
+      let to: string | null = null;
+      if (isTsJs) to = resolveRelativeTsJs(from, imp.specifier, fileSet);
+      else if (isPy) to = resolveRelativePython(from, imp.specifier, fileSet);
+      if (to !== null) {
+        const key = `${from}\0${to}\0parsed`;
+        if (edgeSeen.has(key)) continue;
+        edgeSeen.add(key);
+        edges.push({ from, to, kind: "import", basis: "parsed" });
+      } else {
+        // Honest unresolved label — NEVER guessed into an in-repo path (RULE / S1).
+        const key = `${from}\0${imp.specifier}\0unresolved`;
+        if (edgeSeen.has(key)) continue;
+        edgeSeen.add(key);
+        edges.push({ from, to: imp.specifier, kind: "import", basis: "unresolved", external: true });
+      }
+    }
+  }
 
   // --- REQ anchors (REQ-RU-011, REQ-NFR-003) ----------------------------------
   // Collected DURING the single main walk above (P3-1): each file was read at most
@@ -604,12 +877,28 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
     provenance: entrypointProvenance(e.source),
   }));
 
+  // P2-3 — public-API beyond the manifest: barrel/`index` files that EXPORT symbols
+  // are a parsed public surface. Combine the manifest `exports` hints (above) with
+  // parsed barrel hints. When ANY hint is parsed, the surface basis is "parsed"
+  // (higher trust than manifest-only); otherwise it stays "manifest".
+  const parsedApiHints: { name: string; source: string }[] = [];
+  for (const fe of files) {
+    const base = fe.path.split("/").pop()!.toLowerCase();
+    const isBarrel = /^(index|mod|lib)\.[a-z]+$/.test(base) || base === "__init__.py";
+    if (isBarrel && fe.symbols && fe.symbols.length > 0) {
+      parsedApiHints.push({ name: fe.path, source: "barrel:exports" });
+    }
+  }
+  const allApiHints = [...apiHints, ...parsedApiHints];
   map.public_api =
-    apiHints.length > 0
+    allApiHints.length > 0
       ? ({
-          hints: apiHints,
+          hints: allApiHints,
           confidence: "heuristic",
-          provenance: { basis: "manifest", confidence: "medium" },
+          provenance:
+            parsedApiHints.length > 0
+              ? { basis: "parsed", confidence: "medium" }
+              : { basis: "manifest", confidence: "medium" },
         } as PublicApiSurface)
       : null;
 
@@ -629,12 +918,24 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
     provenance: PROV_PATH_TOKEN,
   })) as BlastRadiusSignal[];
 
+  // P2-2 — attach edges only when non-empty (omit-when-absent — the serializer also
+  // omits an empty array, but keeping the in-memory field absent is tidier).
+  if (edges.length > 0) map.edges = edges;
+
+  // P3-6 — low-confidence-structure warning: files were scanned but NO source roots
+  // and NO components were derived (a likely-missed layout). Surfaced visibly so a
+  // structure miss is never silent. The floor (5) avoids flagging tiny/empty repos.
+  const lowConfidenceStructure =
+    st.filesScanned > 5 && sourceRoots.size === 0 && componentFileCounts.size === 0;
+
   map.scanReport = {
     filesScanned: st.filesScanned,
     filesSkipped: st.filesSkipped,
     // The single main walk is the sole source of the cap signal now (P3-1): a cap
     // hit makes the map PARTIAL (REQ-NFR-007); a cap is NOT an error (RULE-014).
     capHit: st.capHit,
+    ...(lowConfidenceStructure ? { lowConfidenceStructure: true } : {}),
+    ...(exclusions.length > 0 ? { exclusions } : {}),
   };
 
   return map;

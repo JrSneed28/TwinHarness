@@ -76,7 +76,8 @@ You do not build a slice alone. Inside the slice worktree you work **concurrentl
 
 - **Test-Author (`agents/test-author.md`)** — extends the REQ-ID-anchored test suite for the slice's
   tasks **while you write implementation**, so the contract is pinned by anchored tests as the code
-  lands (not bolted on afterward).
+  lands (not bolted on afterward). It is a **Builder triad-mode, not a standalone delegate** (P5-4) —
+  your test corner only; no Test-Author without a live Builder.
 - **Verifier** — runs the slice's suite and its end-to-end acceptance tests and routes the evidence back.
 
 All three share the **same slice worktree**, and the **blackboard (`delegations/` dir)** is the fast

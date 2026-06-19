@@ -45,6 +45,13 @@ Use `th repo relevant` / `th repo impact` to find the few things that matter, th
 to return them. Never dump a whole artifact back — if the honest answer needs the full file, hand back
 **path + anchors + a summary** and let the asker decide to open it.
 
+## Confidence & basis (P2-9)
+
+Every signal carries a **`basis`** + **`confidence`**; label each CAPSULE item. `parsed`/`manifest`+`high`
+= fact, state it plainly; a `path-token`/`unresolved` signal is a heuristic → **"possible — verify"**,
+never coupling evidence and never outranking a higher-basis signal. Confident-wrong is worse than an
+honest "possible — verify".
+
 ## Behavior — answering a query
 
 ```

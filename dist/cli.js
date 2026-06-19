@@ -88,6 +88,7 @@ Usage:
   th tier classify <brief.json>     Advisory Tier-0 eligibility + detected blast-radius flags
   th tier veto-check <brief.json>   Mechanical veto gate (exit 3 when a blast-radius flag forbids T0)
   th tier record <T0-T3>            Typed gate command: validate + record the run's tier (gate-checked; upgrades backfill skipped stages)
+  th tier features                  Show which advanced-coordination features (collab/debate/section-lease/sub-lease) are active for the current tier (+ "use when")
   th stage advance                  Typed gate command: advance to the next engaged stage when the full gate ladder clears
   th implementation unlock [--lock] Typed gate command: unlock implementation when the gate ladder clears (--lock re-locks)
   th artifact register <file> --version <n>  Content-hash a file and record it in approved_artifacts
@@ -96,10 +97,11 @@ Usage:
                                     Verify every (MVP) REQ-ID maps to ≥1 slice and ≥1 test (hard gate)
   th coverage report [--reqs F] [--plan F] [--tests D] [--scope F] [--code D]
                                     Planned/implemented/tested/passing breakdown per REQ-ID (status view)
-  th verify add "<command>"         Add a project test/check command to the verify list
-  th verify list                    Show configured verify commands
+  th verify add "<command>" [--as <actor>]  Add a project test/check command (records actor+time provenance; the new set is UNAPPROVED until \`th verify approve\`)
+  th verify list                    Show configured verify commands (with provenance + approval status)
+  th verify approve [--as <actor>]  Human-confirm the current command SET for execution (hash-pinned; re-required after any add/change)
   th verify clear                   Remove all configured verify commands
-  th verify run                     Run every configured verify command; writes a report; exit 1 on failure
+  th verify run [--read-only]       Run every configured verify command; refuses an UNAPPROVED set; --read-only refuses repo-mutating commands; writes a report; exit 1 on failure
   th build plan [--include-done] [--advise]  Schedule slices into dependency-aware, conflict-free build waves (§16; a slice's wave is strictly after its hard depends_on); --advise emits the parallelism-optimizer advisory (max wave width + serializing conflict pairs); exit 7 when the depends_on graph is unsatisfiable (cycle/dangling)
   th build next-wave                Live oracle: slices dispatchable in parallel now (deps done, components free)
   th build dispatch                 Live oracle: full parallel wave + per-slice spawn descriptors in one payload (for single-message batch spawn)
@@ -144,7 +146,8 @@ Usage:
                                     Advisory model+effort for an agent spawn (computes; the Orchestrator applies)
   th telemetry on|off|status        Toggle/report opt-in, LOCAL-ONLY run telemetry (never sent off-machine)
   th context estimate               Approximate the prompt-surface token cost (flags oversized files)
-  th context pack [--slice <ID>]    Assemble the §9 handoff bundle (artifact Summary blocks + slice framing)
+  th context pack [--slice <ID>|--req <REQ-ID>|--file <path>] [--max-tokens <N>]
+                                    Assemble the §9 handoff bundle (artifact Summary blocks + slice/REQ/file framing; --max-tokens bounds the pack)
   th budget check [--max <k>] [--files-read N] [--slices-built N] [--tool-calls N] [--artifacts N]
                                     Deterministic context-budget estimate from agent-supplied proxy counts → { estTokens, pct, verdict } (--max in thousands; tier-aware default when omitted)
   th handoff write                  Assemble .twinharness/HANDOFF.md (run state + next action + artifact Summary blocks + open questions + "don't re-read docs/" directive)
@@ -156,9 +159,10 @@ Usage:
                                     Assemble a bounded child-agent handoff (reuses context pack for a slice)
   th delegate capsule               Print the blank Delegation Capsule skeleton (the strict return format)
   th delegate check --capsule <path>  Validate a returned capsule has every required section (presence only)
-  th repo map [--write|--no-write] [--format <summary|json|md>]
-                                    Scan the repo; write .twinharness/repo-map.json + docs/00-repo-map.md (writes by default; --no-write = dry/preview)
-  th repo check                     Report whether .twinharness/repo-map.json is fresh vs the working tree (exit 0 fresh / 4 stale / 5 no-map / 1 parse-fail)
+  th repo map [--write|--no-write] [--format <summary|json|md>] [--max-files <N>] [--max-bytes <N>]
+                                    Scan the repo; write .twinharness/repo-map.json + docs/00-repo-map.md (writes by default; --no-write = dry/preview; --max-files/--max-bytes raise the scan caps for large repos)
+  th repo check [--max-files <N>] [--max-bytes <N>]
+                                    Report whether .twinharness/repo-map.json is fresh vs the working tree (exit 0 fresh / 4 stale / 5 no-map / 1 parse-fail; pass the same caps used to build the map)
   th repo relevant (--slice <ID> | --req <REQ-ID> | --file <path> | --query <kw>)
                    [--maxResults <n>] [--format <slice|req|file|json>]
                                     Precision context: read-first/related/tests/risks for a selector (reads persisted map)
@@ -267,6 +271,7 @@ const BOOLEAN_FLAGS = {
     "--self-test": "selfTest",
     "--lock": "lock",
     "--emergency": "emergency",
+    "--read-only": "readOnly",
 };
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
 const STRING_FLAGS = {
@@ -337,7 +342,26 @@ const NUMBER_FLAGS = {
     "--slices-built": "slicesBuilt",
     "--tool-calls": "toolCalls",
     "--artifacts": "artifacts",
+    // P4-8 — configurable scan caps for large repos. RAW numbers; the scanner clamps
+    // ≤0 to its default. `--max-files` = file-count cap; `--max-bytes` = total-bytes cap.
+    "--max-files": "maxFiles",
+    "--max-bytes": "maxBytes",
 };
+/**
+ * P4-8 — build the scanner `ScanOptions` cap overrides from the parsed `--max-files`
+ * / `--max-bytes` flags. Returns `{}` when neither is set (the scanner then uses its
+ * default envelope). Shared by `th repo map` and `th repo check` so both scan the
+ * SAME scope. Values ≤0 are clamped to the default by the scanner, so no validation
+ * is needed here.
+ */
+function buildScanOptions(flags) {
+    const out = {};
+    if (typeof flags.maxFiles === "number")
+        out.fileCountCap = flags.maxFiles;
+    if (typeof flags.maxBytes === "number")
+        out.totalBytesCap = flags.maxBytes;
+    return out;
+}
 /**
  * Table-driven flag parser. Unknown `--flags` and value-less flags are recorded
  * (rather than silently swallowed as positionals / coerced to NaN — the old
@@ -370,6 +394,7 @@ function parseArgs(argv) {
         selfTest: false,
         lock: false,
         emergency: false,
+        readOnly: false,
     };
     const positionals = [];
     const unknownFlags = [];
@@ -544,7 +569,14 @@ function dispatch(parsed) {
                 case "estimate":
                     return (0, context_1.runContextEstimate)();
                 case "pack":
-                    return (0, context_1.runContextPack)(paths, { slice: parsed.flags.slice });
+                    // P4-6/P4-7 — optional REQ/file selectors for the repo-relevant layer and a
+                    // --max-tokens budget (raw tokens here; the budget compares directly).
+                    return (0, context_1.runContextPack)(paths, {
+                        slice: parsed.flags.slice,
+                        req: parsed.flags.req,
+                        file: parsed.flags.file,
+                        maxTokens: parsed.flags.maxTokens,
+                    });
                 default:
                     return (0, output_1.failure)({ human: `unknown 'context' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
@@ -565,6 +597,8 @@ function dispatch(parsed) {
                         task: parsed.flags.task,
                         intent: parsed.flags.intent,
                         slice: parsed.flags.slice,
+                        req: parsed.flags.req,
+                        file: parsed.flags.file,
                     });
                 case "capsule":
                     return (0, delegate_1.runDelegateCapsule)();
@@ -580,7 +614,12 @@ function dispatch(parsed) {
                     // --dry-run) builds in memory only. --write is accepted (it is the
                     // default). --no-write/--dry-run wins when both are given.
                     const noWrite = parsed.flags.noWrite || parsed.flags.dryRun;
-                    return (0, repo_1.runRepoMap)(paths, { write: !noWrite, format: parsed.flags.format });
+                    // P4-8 — configurable scan caps for large repos.
+                    return (0, repo_1.runRepoMap)(paths, {
+                        write: !noWrite,
+                        format: parsed.flags.format,
+                        scanOptions: buildScanOptions(parsed.flags),
+                    });
                 }
                 case "relevant":
                     // Anchor: REQ-RU-020 — four selectors (--slice/--req/--file/--query)
@@ -611,7 +650,11 @@ function dispatch(parsed) {
                     // Anchor: REQ-203 — exit 0 fresh / 4 stale / 5 no-map / 1 parse-fail.
                     // Anchor: REQ-204 — { fresh, added[], removed[], modified[] } report.
                     // Anchor: REQ-205 — deterministic strategy; never executes content.
-                    return (0, repo_1.runRepoCheck)(paths, {});
+                    // P4-8 — `th repo check` accepts the SAME --max-files/--max-bytes overrides
+                    // as `th repo map`, so a large-repo map built with raised caps is re-checked
+                    // against the matching scan scope (mismatched caps would phantom-flag files
+                    // outside the build's scope as added/removed).
+                    return (0, repo_1.runRepoCheck)(paths, { scanOptions: buildScanOptions(parsed.flags) });
                 default:
                     return (0, output_1.failure)({ human: `unknown 'repo' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
@@ -692,6 +735,8 @@ function dispatch(parsed) {
                     return (0, tier_1.runTierVetoCheck)(paths, rest[0]);
                 case "record":
                     return (0, tier_1.runTierRecord)(paths, rest[0]);
+                case "features":
+                    return (0, tier_1.runTierFeatures)(paths);
                 default:
                     return (0, output_1.failure)({ human: `unknown 'tier' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
@@ -741,9 +786,14 @@ function dispatch(parsed) {
         case "verify":
             switch (sub) {
                 case "run":
-                    return (0, verify_1.runVerifyRun)(paths);
+                    // P6-5 (#19): --read-only refuses repo-mutating verify commands.
+                    return (0, verify_1.runVerifyRun)(paths, { readOnly: parsed.flags.readOnly });
                 case "add":
-                    return (0, verify_1.runVerifyAdd)(paths, rest.join(" "));
+                    // P6-2 (#19): --as records the actor in per-command provenance.
+                    return (0, verify_1.runVerifyAdd)(paths, rest.join(" "), { as: parsed.flags.as });
+                case "approve":
+                    // P6-2 (#19): human-confirm the current command set for execution.
+                    return (0, verify_1.runVerifyApprove)(paths, { as: parsed.flags.as });
                 case "list":
                     return (0, verify_1.runVerifyList)(paths);
                 case "clear":

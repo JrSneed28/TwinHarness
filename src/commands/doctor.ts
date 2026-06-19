@@ -10,6 +10,7 @@ import { computeBreakdown } from "../core/coverage";
 import { readVerifyConfig, readVerifyReport } from "../core/verify";
 import { staleLeases } from "../core/leases";
 import { validateDeps, hasDepIssues } from "../core/wave";
+import { repoFreshnessSummary } from "./repo";
 
 /**
  * `th doctor` — self-diagnostic + run-health audit. Reports environment and
@@ -196,6 +197,23 @@ export function runDoctor(paths: ProjectPaths, opts: { strict?: boolean } = {}):
       detail: s.drift_open_blocking > 0 ? `${s.drift_open_blocking} open — stop-gate will block completion` : "none",
     });
 
+    // P6-7 (#18) — write-gate honesty signal. Surface the active write-gate mode
+    // AND the guardrail-not-sandbox caveat at the point an operator inspects health.
+    // The gate is a guardrail for a COMPLIANT agent, not a security sandbox: a
+    // determined/non-compliant agent can still write via an unparsed Bash construct
+    // (here-docs, subshells, variable indirection, `python -c`/`node -e`). Make that
+    // explicit so nobody mistakes the gate for containment.
+    const writeMode = s.write_gate ?? "ask (default)";
+    checks.push({
+      name: "write gate",
+      status: "ok",
+      detail:
+        `mode: ${writeMode} — GUARDRAIL for a compliant agent, NOT a security sandbox. ` +
+        `The Bash heuristic is conservative and fail-open (unparsed here-docs/subshells/variable ` +
+        `indirection and program-mediated writes like \`python -c\`/\`node -e\` bypass it). ` +
+        `Do not run TwinHarness against untrusted repos and review \`th verify list\` before \`th verify run\`.`,
+    });
+
     // Stale lock from a crashed `th` process.
     const lockDir = path.join(paths.stateDir, ".state.lock");
     if (fs.existsSync(lockDir)) {
@@ -235,6 +253,31 @@ export function runDoctor(paths: ProjectPaths, opts: { strict?: boolean } = {}):
             ? `${changed.length} changed, ${missing.length} missing — re-register or run \`th stale --artifact <file>\`: ${drifted.map((i) => i.file).join(", ")}`
             : `${integrity.length} registered, all match recorded hashes`,
       });
+    }
+
+    // P4-2 (#10) — repo-map freshness, reported like the artifact-drift check above:
+    // added/removed/modified counts when the persisted map has drifted from the
+    // working tree, plus a distinct PARTIAL signal when the scan was capped (an
+    // incomplete map is untrustworthy even when otherwise "fresh"). Read-only; uses
+    // the cached freshness check (P4-10). A missing map is informational (warn), not a
+    // hard fail — `th repo map` may simply not have been run yet.
+    const repo = repoFreshnessSummary(paths);
+    if (!repo.mapPresent) {
+      checks.push({ name: "repo map", status: "warn", detail: "no repo-map.json — run `th repo map` to build it (relevance/impact/freshness inactive until then)" });
+    } else if (repo.partial) {
+      checks.push({
+        name: "repo map",
+        status: "warn",
+        detail: `PARTIAL scan (cap hit: ${repo.capHit}) — the map is INCOMPLETE; raise the scan caps and re-run \`th repo map\``,
+      });
+    } else if (repo.stale) {
+      checks.push({
+        name: "repo map",
+        status: "warn",
+        detail: `STALE — ${repo.added} added, ${repo.removed} removed, ${repo.modified} modified vs the working tree; run \`th repo map\` to refresh`,
+      });
+    } else {
+      checks.push({ name: "repo map", status: "ok", detail: "fresh — matches the working tree" });
     }
 
     // Slice progress.

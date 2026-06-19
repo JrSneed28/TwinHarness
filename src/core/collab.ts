@@ -163,6 +163,82 @@ export function listFragments(paths: ProjectPaths, stage: string, round?: string
   return out;
 }
 
+/* ------------------------------------------------------------------ *
+ * Fragment GC / TTL stale-recovery (Phase 5 / P5-3).                   *
+ *                                                                      *
+ * Blackboard fragments are dropped by parallel writers and consumed by *
+ * a Reconciler. A writer that crashed (or a round abandoned after a     *
+ * re-plan) leaves orphaned fragments on disk that no Reconciler will     *
+ * ever merge — clutter that can also confuse a later merge of the same  *
+ * round. This is the fragment analogue of the section-lease dead-holder *
+ * bug. The recovery is a TTL sweep keyed on each fragment file's mtime: *
+ * a fragment untouched for longer than the TTL is considered stale and  *
+ * recoverable. {@link staleFragments} is a pure predicate (lists them); *
+ * {@link sweepStaleFragments} performs the GC (deletes them and reports  *
+ * what it removed). The caller decides WHEN to sweep — listing never     *
+ * deletes anything.                                                     *
+ * ------------------------------------------------------------------ */
+
+/** Default fragment TTL: 24 hours in ms. A fragment untouched longer than this is stale. */
+export const FRAGMENT_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** A stale fragment: the located fragment plus its last-modified epoch ms. */
+export interface StaleFragment extends Fragment {
+  /** File mtime in epoch milliseconds (the basis of the staleness decision). */
+  mtimeMs: number;
+}
+
+/**
+ * List the STALE fragments for a stage (optionally one round): every fragment whose
+ * file mtime is older than `ttlMs` relative to `now`. Pure — it reads the tree and
+ * decides nothing; it never deletes. Mirrors {@link staleSectionLeases} on the
+ * lease side. Clock-injectable for deterministic tests.
+ */
+export function staleFragments(
+  paths: ProjectPaths,
+  stage: string,
+  round?: string,
+  ttlMs: number = FRAGMENT_TTL_MS,
+  now: () => Date = () => new Date(),
+): StaleFragment[] {
+  const cutoff = now().getTime() - ttlMs;
+  const out: StaleFragment[] = [];
+  for (const f of listFragments(paths, stage, round)) {
+    let mtimeMs: number;
+    try {
+      mtimeMs = fs.statSync(f.path).mtimeMs;
+    } catch {
+      continue; // raced deletion — skip
+    }
+    if (mtimeMs < cutoff) out.push({ ...f, mtimeMs });
+  }
+  return out;
+}
+
+/**
+ * GC the stale fragments for a stage (optionally one round): delete every fragment
+ * older than `ttlMs` and return the {@link StaleFragment} descriptors that were
+ * removed. Idempotent (a second sweep finds none) and bounded to the collab tree
+ * (it only ever touches files {@link listFragments} returned). Clock-injectable.
+ */
+export function sweepStaleFragments(
+  paths: ProjectPaths,
+  stage: string,
+  round?: string,
+  ttlMs: number = FRAGMENT_TTL_MS,
+  now: () => Date = () => new Date(),
+): StaleFragment[] {
+  const stale = staleFragments(paths, stage, round, ttlMs, now);
+  for (const f of stale) {
+    try {
+      fs.rmSync(f.path);
+    } catch {
+      // Best-effort GC: a fragment already gone (raced) is fine.
+    }
+  }
+  return stale;
+}
+
 /**
  * Reconcile a round: concatenate every fragment in deterministic (sorted-by-name)
  * order. Before concatenating it validates that EVERY fragment carries at least

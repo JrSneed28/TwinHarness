@@ -93,7 +93,7 @@ with the shell, in the project root, with full user privileges — exactly like 
 test/lint scripts a developer would run by hand. Every other `th` command only
 records and computes.
 
-Two boundaries keep this narrow:
+Several boundaries keep this narrow:
 
 - **Operator-authored only.** `th verify run` sources commands solely from
   `verify.json`. It never reads commands from artifact content, drift entries, or
@@ -103,6 +103,59 @@ Two boundaries keep this narrow:
   command added by a compromised or confused agent would run with your
   privileges. `th verify list` shows exactly what will run; review it on an
   untrusted project before invoking `th verify run`.
+- **Approve-before-first-run (hash-pinned).** Each `th verify add` records
+  per-command provenance (the actor and timestamp) and leaves the command SET
+  **unapproved**. `th verify run` refuses to execute an unapproved set with
+  `unapproved_command_set`; a human must `th verify approve` the current set first.
+  The approval pins a hash of the exact command list, so any later add/change
+  re-requires confirmation — an injected or silently-changed command cannot run on
+  a stale approval.
+- **Curated child environment.** Verify commands run with a **curated** env, not a
+  full inherit of the parent process environment. Only an allowlist (PATH, locale,
+  shell/temp essentials) plus the `NODE_*`/`npm_*` tool families is forwarded, so a
+  secret injected into the parent environment (CI tokens, cloud credentials) is not
+  handed to a command sourced from a possibly-untrusted project.
+- **Output redaction.** The persisted/printed failure `outputTail` is
+  secret-redacted (common token/credential shapes — `*token`/`*secret`/`password`
+  assignments, `Authorization:` headers, AWS/GitHub/Slack tokens, PEM private-key
+  blocks). This is best-effort defense-in-depth: a secret in an unrecognized shape
+  can still leak, so do not treat redaction as a guarantee.
+- **Process-tree kill on timeout.** A command that exceeds the per-command budget is
+  killed together with its process tree (`taskkill /T /F` on Windows; a `ps`-walked
+  descendant SIGKILL on POSIX) so a grandchild (a spawned test runner or dev server)
+  cannot survive as an orphan.
+- **Optional read-only mode.** `th verify run --read-only` refuses any configured
+  command that looks repo-mutating (write/redirection, package install, git
+  mutation, or a destructive fs verb) so a verification on an untrusted project
+  cannot mutate the working tree. The detector is the same conservative-regex,
+  honest-caveat posture as the write-gate heuristic — it catches common mutating
+  shapes, not every possible mutation.
+
+### `th decision approve` is a human-only guardrail, not a sandbox
+
+`th decision approve` is gated behind a **controlling-TTY check** (no TTY → refused)
+plus an interactive y/N confirmation, and it is never exposed over MCP. This is a
+**guardrail for a compliant agent**, not a cryptographic attestation or a sandbox:
+an agent's tool shell has no TTY, so it is structurally blocked from self-approving,
+but a determined actor who can allocate a PTY could in principle drive the prompt.
+We do not claim otherwise.
+
+What hardens accountability instead of pretending to prevent it: every approval
+**records the real, observed invocation provenance** — `process.stdin.isTTY`, the
+parent pid and parent command name (`/proc/<ppid>/comm` where available), the
+hostname, and this process's pid — sealed into the `decisions.jsonl` hash chain so
+a reviewer who edits the recorded provenance breaks the chain detectably. The
+attribution is no longer self-asserted: `th decision approve` resolves the approver
+from an **explicit** `--as` / `TH_APPROVAL_ACTOR`; when neither is supplied the
+approval is recorded with `attributionSuspect: true` (an **unattributed** approval is
+flagged for review rather than silently laundered into a confident "human" claim).
+
+Every approval attempt — including ones blocked at the TTY barrier, which never reach
+`decisions.jsonl` — is additionally appended to a durable
+`.twinharness/approval-audit.jsonl` log (gitignored). That log survives a silenced
+stderr (`TH_NO_LOG=1`), so a blocked or declined attempt and its provenance remain
+auditable after the fact. None of this is cryptographic (by design): it makes a
+forged approval **detectable in review**, not impossible.
 
 ### The Researcher agent fetches untrusted external content
 

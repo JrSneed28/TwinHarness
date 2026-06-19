@@ -49,7 +49,7 @@ import { runCoverageCheck, runCoverageReport } from "./commands/coverage";
 import { runRoute } from "./commands/route";
 import { runNext } from "./commands/next";
 import { runDelegatePlan, runDelegatePack, runDelegateCheck } from "./commands/delegate";
-import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck } from "./commands/repo";
+import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck, repoFreshnessSummary } from "./commands/repo";
 import { runContextPack } from "./commands/context";
 import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite } from "./commands/handoff";
@@ -57,6 +57,7 @@ import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } 
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
 import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from "./commands/collab";
 import { runDebateAdd, runDebateList, runDebateResolve } from "./commands/debate";
+import { type AdvancedFeature, featureActiveForState, featureSpec } from "./commands/tier";
 import { GATE_OWNED } from "./core/state-fields";
 import { runInterviewStart, runInterviewRecord, runInterviewStatus } from "./commands/interview";
 import { runInitMcp } from "./commands/init";
@@ -115,6 +116,126 @@ function gateState(paths: ProjectPaths): { state: TwinHarnessState } | { error: 
 function gateRefusal(check: GateResult): CommandResult {
   return failure({ human: `Gate refused: ${check.error}`, data: { error: check.error ?? "gate_refused", ...(check.detail ?? {}) } });
 }
+
+/* ------------------------------------------------------------------ *
+ * Tier-gating advanced tools (Phase 5 / P5-2, plan §B2).               *
+ *                                                                      *
+ * Advanced coordination tools (collab, debate, section leases, sub-    *
+ * leases) STAY advertised in TOOL_DEFS — the count + name contracts     *
+ * (mcp-parity.test.ts) are invariant — but their `run` closure first    *
+ * consults this RUNTIME gate. When the active tier does not enable the  *
+ * feature (P5-1 default: <T2 and no live parallel authorship), the tool *
+ * returns a structured `tier_locked` failure instead of executing, so   *
+ * the capability is OFF without ever vanishing from the registry.       *
+ *                                                                      *
+ * The tier is resolved via a PLAIN state read (`requireState(paths)     *
+ * .state.tier` — the same read the existing gate tools do), NOT a       *
+ * re-classification: cheap and already on disk. This is ONE shared      *
+ * helper used by every gated closure so the gate logic can never drift  *
+ * between tools.                                                        *
+ * ------------------------------------------------------------------ */
+
+/**
+ * The runtime tier gate (P5-2). Returns `undefined` when `feature` is enabled for
+ * the run's current state (the closure proceeds), or a structured `tier_locked`
+ * {@link CommandResult} when it is locked (the closure returns it instead of
+ * running). A missing/invalid state.json reads as the conservative default
+ * (unclassified tier, no slices) — i.e. LOCKED — so an uninitialized project never
+ * silently exposes advanced coordination over MCP.
+ *
+ * The refusal carries a stable `error:"tier_locked"` token, the `feature`, and a
+ * human line pointing at `th tier features` / `th tier record` so a caller knows
+ * exactly which capability is off and how to enable it. Never throws — a locked
+ * tool is a clean refusal, not a crash (the parity-compatible contract).
+ */
+function assertTierAllows(paths: ProjectPaths, feature: AdvancedFeature): CommandResult | undefined {
+  // Plain state read (NOT a re-classification): the tier is already on disk.
+  const r = readState(paths);
+  // Conservative default for absent/invalid state: an unclassified single-writer
+  // run with no slices, which {@link featureActiveForState} evaluates as locked.
+  const state: TwinHarnessState = r.state ?? { ...EMPTY_STATE_FOR_GATE };
+  if (featureActiveForState(feature, state)) return undefined;
+  const spec = featureSpec(feature);
+  const tierLabel = state.tier ?? "unclassified";
+  return failure({
+    data: {
+      error: "tier_locked",
+      feature,
+      tier: tierLabel,
+    },
+    human:
+      `Advanced feature "${feature}" is locked at tier ${tierLabel} — it activates at tier ≥T2 or when >1 slice is in flight. ` +
+      `Enable via \`th tier record <T2|T3>\` (or run \`th tier features\` to see what is active).` +
+      (spec ? ` Use when: ${spec.useWhen}` : ""),
+  });
+}
+
+/**
+ * P4-3 — attach repo-map freshness/partial status to a repo-query tool result so an
+ * MCP agent sees staleness INLINE (it cannot run `th repo check` between tool calls
+ * the way a human would). The freshness summary is computed via the cached check
+ * (P4-10), so this is cheap to add on every `th_repo_relevant`/`th_repo_impact` call.
+ * Additive: only merges a `freshness` object (and a top-level `stale` boolean) into
+ * the existing `data`; the rest of the result (ok/exitCode/human) is untouched. On a
+ * failure result (e.g. no map) we leave it alone — the failure already explains itself.
+ */
+function withFreshness(paths: ProjectPaths, result: CommandResult): CommandResult {
+  if (!result.ok || !result.data) return result;
+  const f = repoFreshnessSummary(paths);
+  return {
+    ...result,
+    data: {
+      ...(result.data as Record<string, unknown>),
+      stale: !f.fresh || f.partial,
+      freshness: {
+        fresh: f.fresh,
+        stale: f.stale,
+        partial: f.partial,
+        scanIncomplete: f.scanIncomplete,
+        shape: f.shape,
+        added: f.added,
+        removed: f.removed,
+        modified: f.modified,
+        capHit: f.capHit,
+      },
+    },
+  };
+}
+
+/**
+ * P7-2 — compact-by-default rendering for the HEAVY oracle tools (`th_doctor`,
+ * `th_scorecard`, `th_coverage_report`). These return a large multi-line human
+ * report whose full text floods a prompt every call. By default we collapse the
+ * `human` text to its HEADLINE (the first non-empty line) so the text block stays
+ * one line; the FULL machine payload is always intact in `structuredContent`
+ * (`result.data` is untouched), and a caller that wants the long form passes
+ * `verbose:true`. This trims prompt cost without ever dropping data — the
+ * structured payload is the source of truth, the text is a convenience rendering.
+ *
+ * Additive + lossless: on `verbose` (or when there is no multi-line human text /
+ * no data to fall back to) the result is returned UNCHANGED. A failure result is
+ * also returned unchanged — its message already explains itself and is short.
+ */
+export function compactHeavyResult(result: CommandResult, verbose: boolean): CommandResult {
+  if (verbose || !result.ok || typeof result.human !== "string") return result;
+  const lines = result.human.split("\n");
+  if (lines.length <= 1) return result; // already compact
+  const headline = lines.find((l) => l.trim().length > 0) ?? lines[0]!;
+  const omitted = lines.length - 1;
+  return {
+    ...result,
+    human: `${headline}\n(compact: ${omitted} more line(s) omitted — pass verbose:true for the full report; full data in structuredContent)`,
+  };
+}
+
+/**
+ * A minimal valid state used ONLY as the conservative default for
+ * {@link assertTierAllows} when state.json is absent/invalid: an unclassified tier
+ * with no slices, which evaluates to LOCKED for every advanced feature. Kept tiny
+ * (only the fields the activation predicate reads) and frozen so it is never
+ * mutated.
+ */
+const EMPTY_STATE_FOR_GATE = Object.freeze({ tier: null, slices: [] }) as unknown as TwinHarnessState;
 
 /* ------------------------------------------------------------------ *
  * Project-paths resolution                                            *
@@ -591,7 +712,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_coverage_report",
     description:
-      "Full planned/implemented/tested traceability breakdown for every checked REQ-ID (structured payload). Optional reqs/plan/tests/scope/code path overrides mirror the CLI flags. Read-only.",
+      "Full planned/implemented/tested traceability breakdown for every checked REQ-ID (structured payload). Optional reqs/plan/tests/scope/code path overrides mirror the CLI flags. COMPACT by default — the per-REQ table is collapsed to a headline in the text block (the full breakdown stays in structuredContent); pass `verbose:true` for the full human table. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -600,17 +721,21 @@ export const TOOL_DEFS: readonly ToolDef[] = [
         testsDir: stringProp("Tests directory (default tests)."),
         scopeFile: stringProp("Scope file for MVP filtering (default docs/02-scope.md)."),
         codeDir: stringProp("Code directory scanned for the implemented dimension (default src)."),
+        verbose: boolProp("Emit the full human breakdown in the text block (default false: a compact headline; full data always in structuredContent)."),
       },
       additionalProperties: false,
     },
     run: (paths, args) =>
-      runCoverageReport(paths, {
-        reqsFile: optString(args, "reqsFile"),
-        planFile: optString(args, "planFile"),
-        testsDir: optString(args, "testsDir"),
-        scopeFile: optString(args, "scopeFile"),
-        codeDir: optString(args, "codeDir"),
-      }),
+      compactHeavyResult(
+        runCoverageReport(paths, {
+          reqsFile: optString(args, "reqsFile"),
+          planFile: optString(args, "planFile"),
+          testsDir: optString(args, "testsDir"),
+          scopeFile: optString(args, "scopeFile"),
+          codeDir: optString(args, "codeDir"),
+        }),
+        optBool(args, "verbose") === true,
+      ),
   },
   {
     name: "th_next",
@@ -730,7 +855,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       },
       additionalProperties: false,
     },
-    run: (paths, args) => runRepoRelevant(paths, { slice: optString(args, "slice"), req: optString(args, "req"), file: optString(args, "file"), query: optString(args, "query"), maxResults: optNumber(args, "maxResults") }),
+    run: (paths, args) => withFreshness(paths, runRepoRelevant(paths, { slice: optString(args, "slice"), req: optString(args, "req"), file: optString(args, "file"), query: optString(args, "query"), maxResults: optNumber(args, "maxResults") })),
   },
   // Anchor: REQ-RU-046
   {
@@ -745,7 +870,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       },
       additionalProperties: false,
     },
-    run: (paths, args) => runRepoImpact(paths, { file: optString(args, "file"), component: optString(args, "component") }),
+    run: (paths, args) => withFreshness(paths, runRepoImpact(paths, { file: optString(args, "file"), component: optString(args, "component") })),
   },
   // Anchor: REQ-RU-052
   {
@@ -777,6 +902,8 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       additionalProperties: false,
     },
     run: (paths, args) => {
+      const locked = assertTierAllows(paths, "sub-lease");
+      if (locked) return locked;
       const components = (optString(args, "components") ?? "").split(",").map((c) => c.trim()).filter(Boolean);
       return runBuildSubClaim(paths, optString(args, "parentSlice"), components);
     },
@@ -795,7 +922,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       required: ["subId"],
       additionalProperties: false,
     },
-    run: (paths, args) => runBuildSubRelease(paths, optString(args, "subId")),
+    run: (paths, args) => assertTierAllows(paths, "sub-lease") ?? runBuildSubRelease(paths, optString(args, "subId")),
   },
   // Anchor: REQ-206
   {
@@ -922,7 +1049,9 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       required: ["section", "holder"],
       additionalProperties: false,
     },
-    run: (paths, args) => runArtifactClaim(paths, { section: optString(args, "section"), holder: optString(args, "holder") }),
+    run: (paths, args) =>
+      assertTierAllows(paths, "section-lease") ??
+      runArtifactClaim(paths, { section: optString(args, "section"), holder: optString(args, "holder") }),
   },
   {
     name: "th_artifact_release",
@@ -936,13 +1065,15 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       required: ["section", "holder"],
       additionalProperties: false,
     },
-    run: (paths, args) => runArtifactRelease(paths, { section: optString(args, "section"), holder: optString(args, "holder") }),
+    run: (paths, args) =>
+      assertTierAllows(paths, "section-lease") ??
+      runArtifactRelease(paths, { section: optString(args, "section"), holder: optString(args, "holder") }),
   },
   {
     name: "th_artifact_leases",
     description: "List the active section leases ({section, holder}). Read-only.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    run: (paths) => runArtifactLeases(paths),
+    run: (paths) => assertTierAllows(paths, "section-lease") ?? runArtifactLeases(paths),
   },
   // Anchor: REQ-PCO-040 — blackboard collab substrate (fragments + reconcile-merge).
   {
@@ -955,7 +1086,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       required: ["stage"],
       additionalProperties: false,
     },
-    run: (paths, args) => runCollabInit(paths, { stage: optString(args, "stage") }),
+    run: (paths, args) => assertTierAllows(paths, "collab") ?? runCollabInit(paths, { stage: optString(args, "stage") }),
   },
   {
     name: "th_collab_fragment",
@@ -974,6 +1105,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       additionalProperties: false,
     },
     run: (paths, args) =>
+      assertTierAllows(paths, "collab") ??
       runCollabFragment(paths, {
         stage: optString(args, "stage"),
         round: optString(args, "round"),
@@ -994,7 +1126,9 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       required: ["stage"],
       additionalProperties: false,
     },
-    run: (paths, args) => runCollabList(paths, { stage: optString(args, "stage"), round: optString(args, "round") }),
+    run: (paths, args) =>
+      assertTierAllows(paths, "collab") ??
+      runCollabList(paths, { stage: optString(args, "stage"), round: optString(args, "round") }),
   },
   {
     name: "th_collab_merge",
@@ -1009,7 +1143,9 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       required: ["stage", "round"],
       additionalProperties: false,
     },
-    run: (paths, args) => runCollabMerge(paths, { stage: optString(args, "stage"), round: optString(args, "round") }),
+    run: (paths, args) =>
+      assertTierAllows(paths, "collab") ??
+      runCollabMerge(paths, { stage: optString(args, "stage"), round: optString(args, "round") }),
   },
   // Anchor: REQ-PCO-042 — append-only debate ledger (mirrors the drift ledger).
   {
@@ -1028,6 +1164,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       additionalProperties: false,
     },
     run: (paths, args) =>
+      assertTierAllows(paths, "debate") ??
       runDebateAdd(paths, {
         topic: optString(args, "topic"),
         positions: optString(args, "positions"),
@@ -1039,7 +1176,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     name: "th_debate_list",
     description: "List debate entries (collapsed to the latest per id, sorted) plus the open-blocking count. Read-only.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    run: (paths) => runDebateList(paths),
+    run: (paths) => assertTierAllows(paths, "debate") ?? runDebateList(paths),
   },
   {
     name: "th_debate_resolve",
@@ -1054,7 +1191,9 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       required: ["id"],
       additionalProperties: false,
     },
-    run: (paths, args) => runDebateResolve(paths, { id: optString(args, "id"), resolution: optString(args, "resolution") }),
+    run: (paths, args) =>
+      assertTierAllows(paths, "debate") ??
+      runDebateResolve(paths, { id: optString(args, "id"), resolution: optString(args, "resolution") }),
   },
   // ---- Verify suite config + run (verify.json + verify-report.json) ----
   {
@@ -1117,20 +1256,30 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_doctor",
     description:
-      "Run-health audit: a structured report of artifact drift, slice progress, revise escalations, coverage, and gate posture. Optional strict raises advisories to failures. Read-only.",
+      "Run-health audit: a structured report of artifact drift, slice progress, revise escalations, coverage, and gate posture. Optional strict raises advisories to failures. COMPACT by default — the text block is a headline (full report in structuredContent); pass `verbose:true` for the full human report. Read-only.",
     inputSchema: {
       type: "object",
-      properties: { strict: boolProp("Treat advisories as failures (default false).") },
+      properties: {
+        strict: boolProp("Treat advisories as failures (default false)."),
+        verbose: boolProp("Emit the full human report in the text block (default false: a compact headline; full data always in structuredContent)."),
+      },
       additionalProperties: false,
     },
-    run: (paths, args) => runDoctor(paths, { strict: optBool(args, "strict") }),
+    run: (paths, args) =>
+      compactHeavyResult(runDoctor(paths, { strict: optBool(args, "strict") }), optBool(args, "verbose") === true),
   },
   {
     name: "th_scorecard",
     description:
-      "One-glance run scorecard: tier, stage, implementation gate, coverage, slice progress, suite status, drift, revise escalations, artifact integrity, and routing summary (structured payload). Read-only.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    run: (paths) => runScorecard(paths, {}),
+      "One-glance run scorecard: tier, stage, implementation gate, coverage, slice progress, suite status, drift, revise escalations, artifact integrity, and routing summary (structured payload). COMPACT by default — the text block is a headline (full scorecard in structuredContent); pass `verbose:true` for the full human table. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        verbose: boolProp("Emit the full human scorecard in the text block (default false: a compact headline; full data always in structuredContent)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) => compactHeavyResult(runScorecard(paths, {}), optBool(args, "verbose") === true),
   },
   // ---- Implementation-plan slice sync + status ----
   {
@@ -1287,6 +1436,304 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   },
 ] as const;
 
+/* ------------------------------------------------------------------ *
+ * P7-2 — machine-readable tool annotations (hints + grouping).        *
+ *                                                                      *
+ * Each tool carries MCP-standard behavior hints (readOnlyHint /        *
+ * destructiveHint / idempotentHint) plus a TwinHarness `category` for  *
+ * cheap client-side grouping. The hints follow the MCP spec semantics: *
+ *  - readOnlyHint   = the tool performs NO state/disk mutation.         *
+ *  - destructiveHint = a mutating tool may DESTROY/overwrite data       *
+ *                      (only meaningful when readOnlyHint is false).    *
+ *  - idempotentHint = re-invoking with the same args has no ADDITIONAL  *
+ *                     effect (read-only tools are idempotent by         *
+ *                     definition; append/ledger tools are NOT).         *
+ *                                                                      *
+ * This is a THIN annotation/grouping layer (plan P7-2): it adds         *
+ * metadata only. It NEVER removes a tool, renames one, or changes the   *
+ * count — the consolidation of overlapping oracles                      *
+ * (`next`/`next_wave`/`dispatch`; `doctor`/`scorecard`) is expressed    *
+ * purely as a shared `category`, so a client can group them without the *
+ * registry losing a single entry. Kept in ONE table (not 62 inline      *
+ * edits) so the annotations are reviewable at a glance and a missing     *
+ * entry is caught by the parity test below.                            *
+ * ------------------------------------------------------------------ */
+
+/** TwinHarness tool grouping categories (stable machine tokens for clients). */
+export type ToolCategory =
+  | "state"
+  | "gate"
+  | "drift"
+  | "build"
+  | "routing"
+  | "coverage"
+  | "oracle"
+  | "delegate"
+  | "repo"
+  | "context"
+  | "decision"
+  | "artifact"
+  | "collab"
+  | "debate"
+  | "verify"
+  | "stage"
+  | "health"
+  | "slices"
+  | "interview"
+  | "lifecycle";
+
+/** The behavior hints + category attached to a tool. */
+export interface ToolAnnotation {
+  category: ToolCategory;
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+}
+
+/**
+ * The annotation table — one entry per tool, keyed by tool name. The parity test
+ * {@link /* P7-2 *\/} asserts EVERY `TOOL_DEFS` entry has exactly one annotation here
+ * (no gaps, no orphans), so this can never silently drift from the registry.
+ *
+ * `ro` = read-only (no mutation); `wr` = a mutating tool. The `idempotentHint` is
+ * true for every read-only tool and for mutating tools whose re-invocation with the
+ * same args is a no-op (set-to-value, upsert, regenerate, clear); it is FALSE for
+ * append/ledger/lease tools where a second call records another event.
+ */
+const ro = (category: ToolCategory): ToolAnnotation => ({ category, readOnlyHint: true, destructiveHint: false, idempotentHint: true });
+/** A mutating tool: idempotent set/upsert by default; pass `destructive` for data loss. */
+const wr = (category: ToolCategory, opts?: { idempotent?: boolean; destructive?: boolean }): ToolAnnotation => ({
+  category,
+  readOnlyHint: false,
+  destructiveHint: opts?.destructive === true,
+  idempotentHint: opts?.idempotent !== false,
+});
+
+export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
+  // state
+  th_state_get: ro("state"),
+  th_state_set: wr("state", { idempotent: true }),
+  // gate-transition (record/advance/unlock/set) — set-to-value, so idempotent
+  th_tier_record: wr("gate", { idempotent: true }),
+  th_stage_advance: wr("gate", { idempotent: false }),
+  th_implementation_unlock: wr("gate", { idempotent: true }),
+  th_write_gate_set: wr("gate", { idempotent: true }),
+  th_blast_radius_record: wr("gate", { idempotent: true }),
+  // drift ledger (append) + read
+  th_drift_add: wr("drift", { idempotent: false }),
+  th_drift_list: ro("drift"),
+  th_drift_resolve: wr("drift", { idempotent: false }),
+  // build oracles (read-only) + leases (mutating)
+  th_build_next_wave: ro("oracle"),
+  th_build_claim: wr("build", { idempotent: true }),
+  th_build_release: wr("build", { idempotent: true }),
+  th_build_dispatch: ro("oracle"),
+  th_build_plan: ro("oracle"),
+  th_build_sub_claim: wr("build", { idempotent: false }),
+  th_build_sub_release: wr("build", { idempotent: true }),
+  // routing
+  th_route: ro("routing"),
+  // coverage
+  th_coverage_check: ro("coverage"),
+  th_coverage_report: ro("coverage"),
+  // next-action oracle
+  th_next: ro("oracle"),
+  // delegate (all read-only / advisory; pack writes nothing to state)
+  th_delegate_plan: ro("delegate"),
+  th_delegate_pack: ro("delegate"),
+  th_delegate_check: ro("delegate"),
+  // repo: map regenerates (idempotent overwrite); the queries are read-only
+  th_repo_map: wr("repo", { idempotent: true }),
+  th_repo_relevant: ro("repo"),
+  th_repo_impact: ro("repo"),
+  th_repo_check: ro("repo"),
+  // context
+  th_context_pack: ro("context"),
+  // decision ledger (append) + read
+  th_decision_detect: ro("decision"),
+  th_decision_add: wr("decision", { idempotent: false }),
+  th_decision_check: ro("decision"),
+  th_decision_list: ro("decision"),
+  // artifacts: register (content-hash record, idempotent) + leases + read
+  th_artifact_register: wr("artifact", { idempotent: true }),
+  th_artifact_list: ro("artifact"),
+  th_artifact_claim: wr("artifact", { idempotent: true }),
+  th_artifact_release: wr("artifact", { idempotent: true }),
+  th_artifact_leases: ro("artifact"),
+  // collab blackboard
+  th_collab_init: wr("collab", { idempotent: true }),
+  th_collab_fragment: wr("collab", { idempotent: false, destructive: true }),
+  th_collab_list: ro("collab"),
+  th_collab_merge: ro("collab"),
+  // debate ledger (append) + read
+  th_debate_add: wr("debate", { idempotent: false }),
+  th_debate_list: ro("debate"),
+  th_debate_resolve: wr("debate", { idempotent: false }),
+  // verify config + run
+  th_verify_add: wr("verify", { idempotent: false }),
+  th_verify_list: ro("verify"),
+  th_verify_clear: wr("verify", { idempotent: true, destructive: true }),
+  th_verify_run: wr("verify", { idempotent: true }),
+  // stage contract introspection (read-only)
+  th_stage_current: ro("stage"),
+  th_stage_describe: ro("stage"),
+  th_stage_list: ro("stage"),
+  // run-health oracles
+  th_doctor: ro("health"),
+  th_scorecard: ro("health"),
+  // slices
+  th_slices_sync: wr("slices", { idempotent: true }),
+  th_slice_set_status: wr("slices", { idempotent: true }),
+  // interview
+  th_interview_start: wr("interview", { idempotent: true, destructive: true }),
+  th_interview_record: wr("interview", { idempotent: false }),
+  th_interview_status: ro("interview"),
+  // lifecycle
+  th_init: wr("lifecycle", { idempotent: true }),
+  // context budget + handoff
+  th_budget_check: ro("context"),
+  th_handoff_write: wr("context", { idempotent: true }),
+};
+
+/** The MCP-standard annotation object for a tool (or undefined if unknown). */
+export function toolAnnotations(name: string): ToolAnnotation | undefined {
+  return TOOL_ANNOTATIONS[name];
+}
+
+/* ------------------------------------------------------------------ *
+ * P7-1 — CLI↔MCP command parity (realises the never-implemented        *
+ * EXPECTED_TOOL_ALLOWLIST). The CLI is the source of truth; MCP is a    *
+ * thin adapter exposing a SUBSET. This makes the intended divergence    *
+ * EXPLICIT and mechanical: every live CLI command leaf either has a     *
+ * matching `TOOL_DEFS` entry, or appears in {@link MCP_EXCLUDED} with a  *
+ * recorded reason. A new CLI command with neither fails the parity test.*
+ * ------------------------------------------------------------------ */
+
+/**
+ * Map a CLI command leaf (e.g. `repo map`, `state get`, `next`) to the MCP tool
+ * name that mirrors it (`th_repo_map`, `th_state_get`, `th_next`): prefix `th_`,
+ * collapse spaces and hyphens to underscores. This is the EXACT naming convention
+ * the registry follows, so a tool's presence can be checked mechanically.
+ */
+export function cliCommandToToolName(commandLeaf: string): string {
+  return "th_" + commandLeaf.trim().replace(/[ -]+/g, "_");
+}
+
+/**
+ * The DELIBERATE CLI↔MCP divergence set (P7-1): CLI command leaves that are
+ * intentionally NOT exposed as MCP tools, each with a recorded reason. An MCP
+ * agent must never reach these — they are emergency/force, gate-owned human-only,
+ * Claude Code hook-protocol, CLI-meta, or local-only surfaces. The parity test
+ * asserts every non-excluded CLI command HAS a tool and every excluded one does
+ * NOT, so this list is the single source of the intended boundary.
+ */
+export const MCP_EXCLUDED: Readonly<Record<string, string>> = {
+  // --- Claude Code hook protocol (speak the hook JSON contract on stdout, not a
+  // tool result; never an agent-callable tool). ---
+  "hook stop-gate": "Claude Code Stop-hook protocol; not an agent tool.",
+  "hook pretool-gate": "Claude Code PreToolUse write-gate protocol; not an agent tool.",
+  "hook subagent-stop": "Claude Code SubagentStop-hook protocol; not an agent tool.",
+  // --- CLI meta (no run state to mutate; the MCP server advertises its own
+  // version/help via the protocol). ---
+  version: "CLI meta; the MCP server advertises version via the protocol.",
+  help: "CLI meta; MCP clients read tool descriptions, not `th help`.",
+  // --- Destructive / lifecycle: migrate rewrites state.json in place; the safe
+  // idempotent `th_init` IS exposed (no force over MCP). ---
+  migrate: "Destructive state schema rewrite; CLI/human-only (th_init is the safe idempotent MCP entry).",
+  // --- Gate-owned HUMAN-ONLY: decision approval is a TTY-gated human transition
+  // (RULE-011 / INV-005) — th_decision_approve must NEVER exist as a tool. ---
+  "decision approve": "HUMAN-ONLY TTY-gated transition (RULE-011); permanently absent from MCP.",
+  // --- Local-only operator surface (telemetry never leaves the machine; an MCP
+  // agent has no reason to toggle the operator's local opt-in). ---
+  "telemetry on": "Local-only operator opt-in; not an agent capability.",
+  "telemetry off": "Local-only operator opt-in; not an agent capability.",
+  "telemetry status": "Local-only operator opt-in; not an agent capability.",
+  // --- Advisory/standalone CLI surfaces deliberately kept off MCP to hold the
+  // adapter to the coordination/observability subset (plan boundary rule). ---
+  "state status": "Human-readable snapshot; agents read th_state_get / th_scorecard structurally.",
+  "state verify": "CLI/CI exit-code gate; agents read th_doctor for validity posture.",
+  "revise bump": "Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface.",
+  "revise status": "Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface.",
+  "revise reset": "Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface.",
+  "tier classify": "Advisory brief classifier (reads a brief.json file); the gated th_tier_record is the MCP write path.",
+  "tier veto-check": "CLI/CI exit-code veto gate; the gated th_tier_record enforces the veto on the MCP write path.",
+  "tier features": "Operator inspection of the feature-activation layer; the MCP gate enforces it inline (tier_locked).",
+  "verify approve": "Human-confirms a verify command SET for execution (provenance gate); CLI/human-only.",
+  "build leases": "Lease inspection convenience; agents read th_build_dispatch / th_build_next_wave.",
+  "debug pack": "Debugger evidence-bundle CLI surface (read-first orientation); not an MCP coordination tool.",
+  "debug log add": "Debugger evidence ledger; not an MCP coordination tool.",
+  "debug log list": "Debugger evidence ledger; not an MCP coordination tool.",
+  "anchors scan": "REQ-anchor/CI exit-code surface; not an MCP coordination tool.",
+  "trace render": "On-demand traceability render; not an MCP coordination tool.",
+  stale: "Diff-scoped staleness CLI surface; not an MCP coordination tool.",
+  "context estimate": "Prompt-surface estimator (operator sizing); th_context_pack/th_budget_check are the MCP context surfaces.",
+  "handoff verify": "Resume-integrity CLI check; th_handoff_write is the MCP handoff surface.",
+  resume: "Resume detector (prints th next); agents call th_next directly.",
+  "delegate capsule": "Prints a blank capsule skeleton; a static template, not a coordination tool.",
+  "manifest export": "Deterministic run-snapshot CLI surface; agents read th_scorecard / th_state_get.",
+  preview: "Pre-run pipeline preview (operator orientation); the MCP th_stage_* tools expose stage contracts.",
+};
+
+/**
+ * The REVERSE divergence (P7-1): MCP tools that have NO 1:1 CLI command leaf, each
+ * with a recorded reason. These are the deliberate MCP-only additions — the typed
+ * gate setters the CLI reaches only via `th state set <field> --emergency`, and the
+ * MCP-driven interview surface (there is no `th interview` CLI group). Pinned so a
+ * NEW MCP-only tool must be justified here, and so the parity test's CLI→MCP
+ * partition can account for every tool.
+ */
+export const MCP_ONLY_TOOLS: Readonly<Record<string, string>> = {
+  th_blast_radius_record: "Typed gate setter; the CLI reaches blast_radius only via `th state set ... --emergency`.",
+  th_write_gate_set: "Typed gate setter; the CLI reaches write_gate only via `th state set write_gate ... --emergency`.",
+  th_interview_start: "MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment).",
+  th_interview_record: "MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment).",
+  th_interview_status: "MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment).",
+};
+
+/**
+ * The canonical list of LIVE `th` command leaves (group + sub, e.g. `repo map`,
+ * `state get`, single-word `next`/`doctor`/`resume`/`migrate`/`stale`). This is the
+ * CLI command SET the parity test partitions into {covered, excluded}. A companion
+ * test pins this list against the enumerated commands in the CLI `HELP` string, so
+ * it can never silently drift from the dispatcher's own help.
+ *
+ * Derived from the `dispatch` switch in cli.ts (every reachable leaf). Hook leaves
+ * are handled in `main()` before dispatch but are real commands, so they are listed
+ * here (and excluded above).
+ */
+export const CLI_COMMAND_LEAVES: readonly string[] = [
+  "init",
+  "state get", "state set", "state status", "state verify",
+  "revise bump", "revise status", "revise reset",
+  "tier classify", "tier veto-check", "tier record", "tier features",
+  "stage advance", "stage current", "stage describe", "stage list",
+  "implementation unlock",
+  "artifact register", "artifact list", "artifact claim", "artifact release", "artifact leases",
+  "coverage check", "coverage report",
+  "verify add", "verify list", "verify approve", "verify clear", "verify run",
+  "build plan", "build next-wave", "build dispatch", "build claim", "build release",
+  "build sub-claim", "build sub-release", "build leases",
+  "debug pack", "debug log add", "debug log list",
+  "anchors scan",
+  "trace render",
+  "stale",
+  "slices sync", "slice set-status",
+  "drift add", "drift list", "drift resolve",
+  "collab init", "collab fragment", "collab list", "collab merge",
+  "debate add", "debate list", "debate resolve",
+  "hook stop-gate", "hook pretool-gate", "hook subagent-stop",
+  "migrate", "doctor", "next", "preview", "scorecard", "route",
+  "telemetry on", "telemetry off", "telemetry status",
+  "context estimate", "context pack",
+  "budget check",
+  "handoff write", "handoff verify", "resume",
+  "delegate plan", "delegate pack", "delegate capsule", "delegate check",
+  "repo map", "repo check", "repo relevant", "repo impact",
+  "decision detect", "decision add", "decision approve", "decision check", "decision list",
+  "manifest export",
+  "version", "help",
+];
+
 /**
  * The sync-contract guard for the async-only tools (th_verify_run).
  * The CallTool path dispatches them via {@link ToolDef.runAsync}, so this is never
@@ -1297,16 +1744,33 @@ function asyncToolGuard(name: string): CommandResult {
   return failure({ human: `${name} runs asynchronously; dispatch via the awaiting CallTool path.`, data: { error: "async_tool" } });
 }
 
-/** The advertised `Tool` list (name + description + JSON-Schema input). */
+/** The advertised `Tool` list (name + description + JSON-Schema input + P7-2 annotations). */
 export function listTools(): Tool[] {
-  return TOOL_DEFS.map((t) => ({
-    name: t.name,
-    description: t.description,
-    // `ToolInputSchema` is a closed, strict shape; the SDK's `Tool.inputSchema`
-    // carries an open index signature. They are structurally identical at
-    // runtime — widen to the SDK type for the advertised list.
-    inputSchema: t.inputSchema as unknown as Tool["inputSchema"],
-  }));
+  return TOOL_DEFS.map((t) => {
+    const ann = TOOL_ANNOTATIONS[t.name];
+    return {
+      name: t.name,
+      description: t.description,
+      // `ToolInputSchema` is a closed, strict shape; the SDK's `Tool.inputSchema`
+      // carries an open index signature. They are structurally identical at
+      // runtime — widen to the SDK type for the advertised list.
+      inputSchema: t.inputSchema as unknown as Tool["inputSchema"],
+      // P7-2: MCP-standard behavior hints (readOnlyHint/destructiveHint/
+      // idempotentHint). The TwinHarness `category` is carried in `_meta` (the
+      // standard `annotations` object has no `category` field) so a client can
+      // group tools without a non-standard key on `annotations`.
+      ...(ann
+        ? {
+            annotations: {
+              readOnlyHint: ann.readOnlyHint,
+              destructiveHint: ann.destructiveHint,
+              idempotentHint: ann.idempotentHint,
+            },
+            _meta: { "twinharness.dev/category": ann.category },
+          }
+        : {}),
+    };
+  });
 }
 
 /* ------------------------------------------------------------------ *

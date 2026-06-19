@@ -26,6 +26,9 @@ design — you read fragments and ledger entries directly from disk, so peer cha
 main context**. You merge and adjudicate; the normal **Critic** then gates what you produced. You do
 **not** weaken that gate and you do **not** own the human gate.
 
+> **Single writer, two lanes (P5-4).** The single-deterministic-writer invariant has two writers: you
+> write the reconciled ARTIFACT; `merge-coordinator.md` writes the merged CODE tree.
+
 ## Two patterns you reconcile
 
 - **Pattern A — fan-out / reconcile.** Several agents each produce a FRAGMENT of the same artifact in

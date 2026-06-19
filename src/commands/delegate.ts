@@ -116,6 +116,10 @@ export interface DelegatePackOptions {
   task?: string;
   intent?: string;
   slice?: string;
+  /** P4-7 — frame the handoff's repo-relevant layer for a REQ-ID (agent-specific pack). */
+  req?: string;
+  /** P4-7 — frame the handoff's repo-relevant layer for a file path (failure/file pack). */
+  file?: string;
 }
 
 export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions): CommandResult {
@@ -125,11 +129,13 @@ export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions):
   }
 
   // Reuse `th context pack` for slice framing + artifact Summary blocks when a
-  // slice is given. Propagate its failure (no state / unknown slice) so the
-  // caller fixes the precondition instead of getting a half-built handoff.
+  // slice/REQ/file selector is given. Propagate its failure (no state / unknown
+  // slice) so the caller fixes the precondition instead of getting a half-built
+  // handoff. P4-7 — REQ- and file-specific packs give per-agent views (a Debugger
+  // gets a failure/file pack; a Spec agent gets a REQ pack).
   let contextPack: string | null = null;
-  if (opts.slice) {
-    const pack = runContextPack(paths, { slice: opts.slice });
+  if (opts.slice || opts.req || opts.file) {
+    const pack = runContextPack(paths, { slice: opts.slice, req: opts.req, file: opts.file });
     if (!pack.ok) return pack;
     contextPack = pack.human ?? null;
   }
@@ -140,8 +146,16 @@ export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions):
     `Task: ${opts.task ?? "(describe the task)"}`,
     `Intent: ${parsed.intent ?? "(read|write|debug|review|artifact|repo-analysis)"}`,
     `Slice: ${opts.slice ?? "(none)"}`,
+    ...(opts.req ? [`REQ: ${opts.req}`] : []),
+    ...(opts.file ? [`File: ${opts.file}`] : []),
     `Allowed scope: ${
-      opts.slice ? `the components of ${opts.slice}; do not edit outside them` : "(state the file/dir/component boundary)"
+      opts.slice
+        ? `the components of ${opts.slice}; do not edit outside them`
+        : opts.file
+          ? `${opts.file} and its direct neighbors; do not edit outside them`
+          : opts.req
+            ? `the files anchored to ${opts.req}; do not edit outside them`
+            : "(state the file/dir/component boundary)"
     }`,
     "",
     "Context pack:",

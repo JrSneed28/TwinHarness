@@ -132,6 +132,26 @@ export interface OwnershipHint {
   provenance?: Provenance;
 }
 
+/**
+ * P2-1 — an exported symbol extracted from a source file by lightweight, pure text
+ * parsing (NEVER execution — RULE-004). `kind` is a coarse, language-agnostic bucket
+ * ("function" | "class" | "type" | "const" | "interface" | "enum" | "other"); over-
+ * coarse is fine (RULE-008). Additive + omit-when-absent (REQ-NFR-004).
+ */
+export type SymbolKind =
+  | "function"
+  | "class"
+  | "type"
+  | "interface"
+  | "enum"
+  | "const"
+  | "trait"
+  | "other";
+export interface ExportedSymbol {
+  name: string;
+  kind: SymbolKind;
+}
+
 export interface FileEntry {
   /** POSIX-relative; the primary sort key. */
   path: string;
@@ -142,6 +162,35 @@ export interface FileEntry {
   is_test: boolean;
   /** Sorted lexicographically by the serializer. */
   req_ids: string[];
+  /**
+   * P2-1 — exported symbols (parsed). Additive, omit-when-absent. The serializer
+   * emits this key ONLY when the array is non-empty; sorts by (name, kind).
+   */
+  symbols?: ExportedSymbol[];
+}
+
+/**
+ * P2-2 — an import edge between two in-repo files (resolved) OR from an in-repo file
+ * to an UNRESOLVED specifier (bare/aliased/tsconfig-paths — recorded honestly as
+ * `external`, NEVER guessed). `basis` carries the Provenance basis:
+ *   "parsed"     — `to` is an in-repo path resolved from a relative/same-package
+ *                  specifier (trustworthy; only these may outrank path-token signals).
+ *   "unresolved" — the specifier is bare/aliased and `to` is the RAW specifier text;
+ *                  `external:true`. NEVER promoted to high confidence (P2-5/P2-8).
+ *
+ * `EdgeBasis` deliberately reuses the `parsed` ProvenanceBasis value and adds the
+ * edge-only `unresolved` sentinel.
+ */
+export type EdgeBasis = "parsed" | "unresolved";
+export interface ImportEdge {
+  /** POSIX-relative source file (always in-repo). */
+  from: string;
+  /** POSIX-relative target file (in-repo) when basis="parsed"; raw specifier when "unresolved". */
+  to: string;
+  kind: "import";
+  basis: EdgeBasis;
+  /** True when `to` is NOT an in-repo path (bare/aliased/tsconfig-paths). Omit-when-false. */
+  external?: boolean;
 }
 
 export interface ReqAnchor {
@@ -162,6 +211,23 @@ export interface BlastRadiusSignal {
 }
 
 /**
+ * P3-5 — a pruned/excluded path with a machine reason. In-memory ONLY (part of
+ * ScanReport); surfaced by `th repo map` but NEVER persisted (run-varying — depends
+ * on traversal). The reasons are a closed vocabulary so callers can switch on them.
+ */
+export type ExclusionReason =
+  | "generated-dir" // a known generated/build/cache dir name (node_modules, dist, …)
+  | "vendor-at-module-root" // vendor/bin/obj pruned because a sibling manifest indicates deps
+  | "producer-dir" // TwinHarness's own state dir (.twinharness)
+  | "gitignore-signal" // matched a .gitignore pattern (signal only — never blind)
+  | "configured"; // matched a project .twinharnessignore / ScanOptions exclude
+export interface ExclusionEntry {
+  /** POSIX-relative path that was pruned. */
+  path: string;
+  reason: ExclusionReason;
+}
+
+/**
  * Bounded-scan report (REQ-NFR-007). In-memory ONLY — the serializer strips it;
  * it never appears in the persisted `repo-map.json`.
  */
@@ -169,6 +235,17 @@ export interface ScanReport {
   filesScanned: number;
   filesSkipped: number;
   capHit: null | "file-count" | "total-bytes";
+  /**
+   * P3-6 — set when files were scanned (> a small floor) but NO source roots and
+   * NO components were derived: a likely-missed layout. Surfaced as a visible
+   * warning so a structure miss is never silent. In-memory only.
+   */
+  lowConfidenceStructure?: boolean;
+  /**
+   * P3-5 — per-path exclusion reasons (why a dir/file was pruned). In-memory only;
+   * surfaced in `th repo map`, never persisted (run-varying).
+   */
+  exclusions?: ExclusionEntry[];
 }
 
 /**
@@ -196,6 +273,12 @@ export interface RepoMap {
   files: FileEntry[];
   req_anchors: ReqAnchor[];
   blast_radius_signals: BlastRadiusSignal[];
+  /**
+   * P2-2 — import edges (parsed). Additive, omit-when-absent (REQ-NFR-004): the
+   * serializer emits `edges` ONLY when the array is non-empty, so a repo with no
+   * parsed imports stays byte-backward-readable. Sorted by (from, to, basis).
+   */
+  edges?: ImportEdge[];
   /**
    * DS-002 — POSIX-relative path → SHA-256 hex (64-char lowercase).
    * Additive, omit-when-absent (REQ-NFR-004). Populated by `runRepoMap` after
@@ -360,6 +443,16 @@ export function serializeRepoMap(map: RepoMap): string {
         language: f.language,
         is_test: f.is_test,
         req_ids: sortStrings(f.req_ids),
+        // P2-1 — emit `symbols` ONLY when non-empty (omit-when-absent — REQ-NFR-004).
+        // Sorted by (name, kind) for byte-stable output (ADR-003).
+        ...(f.symbols && f.symbols.length > 0
+          ? {
+              symbols: byKey(
+                f.symbols.map((s) => ({ name: s.name, kind: s.kind })),
+                (s) => `${s.name} ${s.kind}`,
+              ),
+            }
+          : {}),
       })),
       (f) => toPosix(f.path),
     ),
@@ -379,6 +472,24 @@ export function serializeRepoMap(map: RepoMap): string {
       })),
       (s) => s.flag,
     ),
+    // P2-2: emit `edges` ONLY when non-empty (omit-when-absent — REQ-NFR-004).
+    // Sorted by (from, to, basis) for byte-stable output (ADR-003). `external` is
+    // emitted only when true (omit-when-false). Placed after blast_radius_signals
+    // and before fileHashes (fixed contract order).
+    ...(map.edges && map.edges.length > 0
+      ? {
+          edges: byKey(
+            map.edges.map((e) => ({
+              from: toPosix(e.from),
+              to: e.basis === "parsed" ? toPosix(e.to) : e.to,
+              kind: e.kind,
+              basis: e.basis,
+              ...(e.external ? { external: true } : {}),
+            })),
+            (e) => `${toPosix(e.from)} ${e.to} ${e.basis}`,
+          ),
+        }
+      : {}),
     // DS-002: emit fileHashes ONLY when present and non-empty (omit-when-absent —
     // REQ-NFR-004). Keys are sorted for byte-stable output (REQ-NFR-002).
     // Anchor: REQ-NFR-002 — deterministic: sorted keys, CRLF-normalized values (via hashContent).
@@ -439,6 +550,34 @@ const PROVENANCE_BASES: readonly string[] = [
   "component",
 ];
 const CONFIDENCE_TIERS: readonly string[] = ["high", "medium", "low"];
+
+// P2-1/P2-2 — symbol-kind + edge-basis vocabularies, mirrored from the unions above.
+const SYMBOL_KINDS: readonly string[] = [
+  "function",
+  "class",
+  "type",
+  "interface",
+  "enum",
+  "const",
+  "trait",
+  "other",
+];
+const EDGE_BASES: readonly string[] = ["parsed", "unresolved"];
+
+/** Validate an optional `symbols` array (P2-1). Absent ⇒ valid (omit-when-absent). */
+function isValidSymbols(v: unknown): boolean {
+  if (v === undefined) return true;
+  return (
+    Array.isArray(v) &&
+    v.every(
+      (s) =>
+        isPlainObject(s) &&
+        typeof s.name === "string" &&
+        typeof s.kind === "string" &&
+        SYMBOL_KINDS.includes(s.kind),
+    )
+  );
+}
 
 /**
  * Validate an optional `provenance` value (P1-3). Absent ⇒ valid (omit-when-absent).
@@ -519,6 +658,10 @@ export function parseRepoMap(raw: string | null | undefined): RepoMapParseResult
     files: p.files as FileEntry[],
     req_anchors: p.req_anchors as ReqAnchor[],
     blast_radius_signals: p.blast_radius_signals as BlastRadiusSignal[],
+    // P2-2: carry edges when present (validated above).
+    ...(p.edges !== undefined && p.edges !== null
+      ? { edges: p.edges as ImportEdge[] }
+      : {}),
     // DS-002: carry fileHashes when present (validated above).
     ...(p.fileHashes !== undefined && p.fileHashes !== null
       ? { fileHashes: p.fileHashes as Record<string, string> }
@@ -611,8 +754,24 @@ function validateRepoMapShape(v: Record<string, unknown>): boolean {
       (f.component === null || typeof f.component === "string") &&
       (f.language === null || typeof f.language === "string") &&
       typeof f.is_test === "boolean" &&
-      isStringArray(f.req_ids))
+      isStringArray(f.req_ids) &&
+      isValidSymbols(f.symbols))
   ) return false;
+
+  // P2-2 — edges: optional. When present, every entry must have in-repo `from`,
+  // string `to`, kind "import", a known basis, and (when present) boolean external.
+  if (v.edges !== undefined && v.edges !== null) {
+    if (!Array.isArray(v.edges) ||
+      !v.edges.every((e) =>
+        isPlainObject(e) &&
+        typeof e.from === "string" &&
+        typeof e.to === "string" &&
+        e.kind === "import" &&
+        typeof e.basis === "string" &&
+        EDGE_BASES.includes(e.basis) &&
+        (e.external === undefined || typeof e.external === "boolean"))
+    ) return false;
+  }
 
   const reqIdRe = new RegExp(`^${REQ_ID_PATTERN}$`);
   if (!Array.isArray(v.req_anchors) ||
@@ -680,6 +839,16 @@ export function renderRepoMapMarkdown(map: RepoMap): string {
   const lines: string[] = [];
   lines.push("# Repo Map");
   lines.push("");
+
+  // P4-4 — PARTIAL banner: when the scan hit a cap the map is INCOMPLETE, and every
+  // downstream consumer (relevance/impact/context pack) inherits that incompleteness.
+  // Surface it at the very top of the human artifact so it is impossible to miss. The
+  // `capHit` enum is the deterministic marker (P1-2); the run-varying counts are not
+  // emitted here, so the markdown stays stable for an unchanged scan.
+  if (map.scanReport.capHit !== null) {
+    lines.push(`> ⚠ **PARTIAL SCAN** — cap hit: \`${map.scanReport.capHit}\`. This map is INCOMPLETE; relevance/impact/context results derived from it will be partial. Raise the scan caps and re-run \`th repo map\`.`);
+    lines.push("");
+  }
 
   lines.push("## Languages");
   if (serialized.languages.length === 0) lines.push("(none detected)");

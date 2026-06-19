@@ -44,10 +44,21 @@ const WEIGHTS = {
     sliceComponent: 80,
     /** File path contains the query keyword (case-insensitive substring). */
     queryPathMatch: 70,
-    /** REQ-ID appears in a file's req_ids (query hits a req token). */
+    /** REQ-ID appears in a file's req_ids (query hits a query token). */
     queryReqMatch: 60,
-    /** File is a sibling of an exact-match file (same component). */
+    /**
+     * P2-5 — 1-hop RESOLVED import proximity (a `basis:"parsed"` edge directly
+     * in/out of a seed file). Set ABOVE siblingComponent because a resolved import is
+     * HARD EVIDENCE of coupling, where a shared component is only a path-token
+     * heuristic. Only resolved edges earn this; unresolved/external edges earn
+     * NOTHING (rev 2 S1: regex/unresolved may never outrank path-token until P2-8
+     * telemetry validates them — and we never built a regex tier above this).
+     */
+    importProximity: 55,
+    /** File is a sibling of an exact-match file (same component) — path-token tier. */
     siblingComponent: 40,
+    /** P2-5 — query keyword matches an EXPORTED symbol name (parsed evidence). */
+    symbolNameMatch: 45,
     /** File matches a blast-radius signal's matching_paths. */
     blastRadius: 30,
     /** Related test file for a selected source file. */
@@ -65,6 +76,24 @@ function sortedUniq(arr) {
 /** Case-insensitive substring match. */
 function containsCI(haystack, needle) {
     return haystack.toLowerCase().includes(needle.toLowerCase());
+}
+/**
+ * P2-6 — name-convention file→test link: does `testPath` look like the test for
+ * `srcPath`? Strips test markers (.test/.spec suffix, foo_test.go, test_foo.py) from
+ * the test's basename and compares the resulting stem to the source's stem. Pure
+ * string logic, language-agnostic, false-negative-favouring.
+ */
+function testMatchesSourceByName(testPath, srcPath) {
+    const tBase = testPath.split("/").pop() ?? testPath;
+    const sBase = srcPath.split("/").pop() ?? srcPath;
+    const sStem = sBase.replace(/\.[a-z0-9]+$/i, "");
+    // Derive the candidate source stem implied by the test name.
+    let tStem = tBase.replace(/\.[a-z0-9]+$/i, ""); // drop extension
+    tStem = tStem
+        .replace(/\.(test|spec)$/i, "")
+        .replace(/_test$/i, "")
+        .replace(/^test_/i, "");
+    return tStem.length > 0 && tStem.toLowerCase() === sStem.toLowerCase();
 }
 /**
  * Deterministic stable tie-break: primary score DESC, secondary path ASC.
@@ -95,6 +124,30 @@ function toSignal(s) {
         matchingPaths: [...s.matching_paths],
         triggerPatterns: [...s.trigger_patterns],
     };
+}
+/**
+ * P2-5 — set of files within ONE resolved import hop of any seed path. ONLY
+ * `basis:"parsed"` edges are followed (unresolved/external edges carry no in-repo
+ * target, so they can never contribute a ranking signal — by construction they
+ * cannot outrank an honest path-token). Returns seed → reachable-file map for WHY.
+ */
+function resolvedImportNeighbors(edges, seedPaths) {
+    const out = new Map();
+    if (!edges)
+        return out;
+    for (const e of edges) {
+        if (e.basis !== "parsed")
+            continue; // resolved-only
+        if (seedPaths.has(e.from) && !seedPaths.has(e.to)) {
+            if (!out.has(e.to))
+                out.set(e.to, "imported-by"); // seed imports `to`
+        }
+        if (seedPaths.has(e.to) && !seedPaths.has(e.from)) {
+            if (!out.has(e.from))
+                out.set(e.from, "imports"); // `from` imports a seed
+        }
+    }
+    return out;
 }
 // ---------------------------------------------------------------------------
 // Seed resolution — maps a selector onto a set of "seed" file paths
@@ -173,9 +226,13 @@ function scoreFiles(map, selector, seedPaths, seedComponents) {
         for (const mp of sig.matching_paths)
             blastPaths.add(mp);
     }
+    // P2-5 — resolved 1-hop import neighbors of the seed set (parsed edges only).
+    const importNeighbors = resolvedImportNeighbors(map.edges, seedPaths);
     for (const file of map.files) {
         let score = 0;
         const whyParts = [];
+        // P2-8 — did this file earn HARD coupling (resolved import / symbol match)?
+        let coupled = false;
         if (selector.kind === "file") {
             const target = toPosix(selector.value);
             if (file.path === target) {
@@ -222,11 +279,34 @@ function scoreFiles(map, selector, seedPaths, seedComponents) {
                     break; // one bonus per file
                 }
             }
+            // P2-5 — query keyword matches an EXPORTED symbol name (parsed evidence).
+            if (file.symbols) {
+                for (const sym of file.symbols) {
+                    if (containsCI(sym.name, kw)) {
+                        score += WEIGHTS.symbolNameMatch;
+                        whyParts.push(`exports symbol "${sym.name}" matching query "${kw}"`);
+                        coupled = true;
+                        break; // one bonus per file
+                    }
+                }
+            }
             // Also give sibling bonus if adjacent to seed component.
             if (score === 0 && file.component && seedComponents.has(file.component)) {
                 score += WEIGHTS.siblingComponent;
                 whyParts.push(`same component (${file.component}) as query-matched files`);
             }
+        }
+        // P2-5 — RESOLVED 1-hop import proximity (parsed edges only). Hard coupling
+        // evidence; ranks ABOVE siblingComponent. A file already scored as an exact/seed
+        // match keeps its higher score; a non-seed neighbour gets this bonus so a
+        // tightly-coupled importer outranks a merely-same-component sibling.
+        const neighbor = importNeighbors.get(file.path);
+        if (neighbor && !seedPaths.has(file.path)) {
+            score += WEIGHTS.importProximity;
+            coupled = true;
+            whyParts.push(neighbor === "imports"
+                ? "imports a selected file (resolved import edge)"
+                : "imported by a selected file (resolved import edge)");
         }
         // Blast-radius bonus (applies across all selector kinds).
         if (blastPaths.has(file.path) && score > 0) {
@@ -243,9 +323,53 @@ function scoreFiles(map, selector, seedPaths, seedComponents) {
             if (score < WEIGHTS.testRelated)
                 score = Math.max(score, WEIGHTS.testRelated);
         }
+        // P2-6 — mechanical file→test mapping. A test file is linked to a seed SOURCE
+        // file by any of: (a) name convention foo↔foo.test, (b) a resolved test→source
+        // import edge, (c) a shared REQ-ID. Each link is labelled in the WHY (the
+        // confidence tier is implicit in the basis: import/name/req).
+        if (file.is_test && !seedPaths.has(file.path)) {
+            const linkReasons = [];
+            // (a) name convention.
+            for (const seed of seedPaths) {
+                if (seed === file.path)
+                    continue;
+                if (testMatchesSourceByName(file.path, seed)) {
+                    linkReasons.push(`name convention links it to ${seed}`);
+                    break;
+                }
+            }
+            // (b) resolved import edge from this test to a seed.
+            if (map.edges) {
+                for (const e of map.edges) {
+                    if (e.basis === "parsed" && e.from === file.path && seedPaths.has(e.to)) {
+                        linkReasons.push(`imports selected file ${e.to} (resolved edge)`);
+                        break;
+                    }
+                }
+            }
+            // (c) shared REQ-ID with a seed file.
+            if (linkReasons.length === 0) {
+                const seedReqs = new Set();
+                for (const sf of map.files) {
+                    if (seedPaths.has(sf.path))
+                        for (const r of sf.req_ids)
+                            seedReqs.add(r);
+                }
+                const shared = file.req_ids.find((r) => seedReqs.has(r));
+                if (shared)
+                    linkReasons.push(`covers REQ-ID ${shared} shared with a selected file`);
+            }
+            if (linkReasons.length > 0) {
+                score = Math.max(score, WEIGHTS.testRelated);
+                whyParts.push(linkReasons[0]);
+                // A resolved import link (reason mentions "resolved edge") is hard coupling.
+                if (linkReasons[0].includes("resolved edge"))
+                    coupled = true;
+            }
+        }
         if (score > 0) {
             const why = whyParts.join("; ");
-            scored.push({ file, score, why });
+            scored.push({ file, score, why, coupled });
         }
     }
     return scored;
@@ -329,6 +453,21 @@ function computeRelevance(map, selector, opts = {}) {
         .map(toSignal);
     // Step 9: verifyCandidates — inert only (RULE-004); take from candidate_commands.
     const verifyCandidates = map.candidate_commands.map(toCmd);
+    // Step 10 (P2-8): precision telemetry over the EMITTED related set. A related
+    // item is "zero-coupling" when it rests only on a path-token/component heuristic
+    // (no resolved import / symbol match). This count is the validation gate before
+    // any regex/unresolved edge may be promoted above path-token (rev 2 S1).
+    const emittedRelated = relatedCandidates.slice(0, related.length);
+    let relatedCoupled = 0;
+    for (const sf of emittedRelated)
+        if (sf.coupled)
+            relatedCoupled++;
+    const precision = {
+        relatedZeroCoupling: emittedRelated.length - relatedCoupled,
+        relatedCoupled,
+    };
+    // P4-4 — partial-scan marker from the loaded map's persisted scanReport.
+    const partial = map.scanReport.capHit !== null;
     return {
         selectorKind: selector.kind,
         selectorValue: selector.value,
@@ -340,6 +479,9 @@ function computeRelevance(map, selector, opts = {}) {
         risks,
         verifyCandidates,
         truncated,
+        precision,
+        partial,
+        scanIncomplete: partial,
     };
 }
 /**
@@ -396,6 +538,12 @@ function computeImpact(map, selector) {
             artifactStageImplications: [],
             riskFlags: [],
             verifyCandidates: map.candidate_commands.map(toCmd),
+            directImpact: [],
+            possibleImpact: [],
+            caveat: false,
+            // P4-4 — even a no-match result reflects the scan completeness of the loaded map.
+            partial: map.scanReport.capHit !== null,
+            scanIncomplete: map.scanReport.capHit !== null,
         };
     }
     // Step 2: collect all impacted files — the seed set itself + files in seed components.
@@ -501,6 +649,55 @@ function computeImpact(map, selector) {
         .map(toSignal);
     // Step 9: verifyCandidates — inert only (RULE-004).
     const verifyCandidates = map.candidate_commands.map(toCmd);
+    // Step 10 (P2-7): split DIRECT impact (seed + 1-hop resolved importers) from
+    // POSSIBLE impact (same-component siblings, path-token). Per-edge basis+confidence.
+    const directImpact = [];
+    const directSeen = new Set();
+    for (const sp of sortedUniq([...seedPaths])) {
+        directImpact.push({
+            path: sp,
+            why: selector.kind === "file"
+                ? "selected file (seed)"
+                : `in selected component (seed)`,
+            basis: selector.kind === "file" ? "parsed" : "component",
+            confidence: selector.kind === "file" ? "high" : "medium",
+        });
+        directSeen.add(sp);
+    }
+    // 1-hop RESOLVED importers of any seed (parsed edges only — hard evidence).
+    let hadResolvedImporter = false;
+    if (map.edges) {
+        for (const e of map.edges) {
+            if (e.basis !== "parsed")
+                continue;
+            if (seedPaths.has(e.to) && !directSeen.has(e.from)) {
+                directSeen.add(e.from);
+                hadResolvedImporter = true;
+                directImpact.push({
+                    path: e.from,
+                    why: `imports ${e.to} (resolved import edge)`,
+                    basis: "parsed",
+                    confidence: "high",
+                });
+            }
+        }
+    }
+    // POSSIBLE: same-component files not already in directImpact (path-token heuristic).
+    const possibleImpact = [];
+    for (const fp of sortedUniq([...impactedFilePaths])) {
+        if (directSeen.has(fp))
+            continue;
+        possibleImpact.push({
+            path: fp,
+            why: "same component as the impact scope (path-token heuristic — verify)",
+            basis: "path-token",
+            confidence: "low",
+        });
+    }
+    // Caveat: the impact rests on heuristics when there were NO resolved importers
+    // beyond the seed, OR when any edge touching a seed was unresolved/external.
+    const hadUnresolvedSeedEdge = map.edges?.some((e) => e.basis === "unresolved" && seedPaths.has(e.from)) ?? false;
+    const caveat = !hadResolvedImporter || hadUnresolvedSeedEdge || possibleImpact.length > 0;
     return {
         selectorKind: selector.kind,
         selectorValue: selector.value,
@@ -511,5 +708,11 @@ function computeImpact(map, selector) {
         artifactStageImplications,
         riskFlags,
         verifyCandidates,
+        directImpact,
+        possibleImpact,
+        caveat,
+        // P4-4 — partial-scan marker from the loaded map's persisted scanReport.
+        partial: map.scanReport.capHit !== null,
+        scanIncomplete: map.scanReport.capHit !== null,
     };
 }

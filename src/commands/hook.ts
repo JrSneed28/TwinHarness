@@ -357,6 +357,47 @@ export function extractBashWriteTargets(command: string): string[] {
 }
 
 /**
+ * P6-7 (#18) — honesty signal for a write-SHAPED Bash command whose target token
+ * was DROPPED because it contained a shell metacharacter / variable (`$f`, a glob,
+ * a subshell). `extractBashWriteTargets` deliberately skips such tokens (they are
+ * not literal paths the gate can reason about), which means a redirection like
+ * `echo x > $f` silently produces NO target and the gate stays quiet — an honest
+ * but invisible blind spot.
+ *
+ * This predicate detects exactly that situation: the command LOOKS like a write
+ * (it has a redirection / tee / dd-of / sed -i / cp-mv-touch family head) but
+ * `extractBashWriteTargets` returned nothing because every candidate target was a
+ * metachar/variable token. Returns true only when there IS a write shape AND the
+ * target was metachar-obscured (so we don't fire on a pure read command). Under
+ * `write_gate: "strict"` the caller turns this into an `ask` (surface for a human)
+ * instead of a silent allow; default modes keep the historical silent allow so the
+ * existing M-4 contract (`echo hi > $f` → allow) is unchanged.
+ */
+export function bashWriteTargetWasDropped(command: string): boolean {
+  // If we already extracted a concrete target, nothing was (entirely) dropped.
+  if (extractBashWriteTargets(command).length > 0) return false;
+  const SHELL_METACHARS = /[$`*?(){}]/;
+  // Redirection / tee / dd-of with a metachar-bearing target.
+  const redirect = /(?:>>?)\s*("?)([^\s"'|;&<>]*[$`*?(){}][^\s"'|;&<>]*)\1/;
+  const tee = /\btee\b\s+(?:-a\s+)?("?)([^\s"'|;&<>]*[$`*?(){}][^\s"'|;&<>]*)\1/;
+  const dd = /\bof=("?)([^\s"'|;&<>]*[$`*?(){}][^\s"'|;&<>]*)\1/;
+  if (redirect.test(command) || tee.test(command) || dd.test(command)) return true;
+  // sed -i / cp-mv-install-rsync-touch family with a metachar-bearing operand.
+  if (/\bsed\b/.test(command) && /\s-i\b/.test(command)) {
+    const lastToken = /([^\s"'|;&<>]+)\s*$/.exec(command);
+    if (lastToken && lastToken[1] && SHELL_METACHARS.test(lastToken[1])) return true;
+  }
+  const WRITE_HEADS = new Set(["cp", "mv", "install", "rsync", "touch"]);
+  for (const segment of command.split(/[;&|]+/)) {
+    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    const head = tokens[0];
+    if (!head || !WRITE_HEADS.has(head)) continue;
+    if (tokens.slice(1).some((t) => !t.startsWith("-") && SHELL_METACHARS.test(t))) return true;
+  }
+  return false;
+}
+
+/**
  * Best-effort read of a top-level `write_gate: "strict"` opt-in from the RAW
  * (possibly schema-invalid) state.json bytes — used only on the invalid-state
  * fail-closed path (GOV-3). The state object failed schema validation, so we
@@ -477,7 +518,7 @@ function fireGateResult(decision: "ask" | "deny", reason: string): GateResult {
  * `gateMode` decision are identical to the prior inline block.
  */
 function phaseABashGate(
-  state: { implementation_allowed: boolean; current_stage: string },
+  state: { implementation_allowed: boolean; current_stage: string; write_gate?: string },
   bashCommand: string | undefined,
   input: PreToolHookInput | undefined,
   paths: ProjectPaths,
@@ -503,6 +544,23 @@ function phaseABashGate(
           `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision.`;
         return fireGateResult(gateMode, reason);
       }
+    }
+    // P6-7 (#18) — strict-only honesty signal: no concrete target was found, but the
+    // command is write-SHAPED with a metachar/variable-obscured target the matcher
+    // had to drop (e.g. `echo x > $f`). Under write_gate=strict we surface this as an
+    // `ask` instead of a silent allow, so a human sees the blind spot rather than the
+    // gate going quiet. Default modes keep the historical silent allow (M-4 contract).
+    if (state.write_gate === "strict" && bashWriteTargetWasDropped(bashCommand)) {
+      const reason =
+        `TwinHarness write-gate (strict mode — honesty signal) is ASKING about a Bash-mediated write ` +
+        `whose target it could not resolve (Phase A — pre-implementation). ` +
+        `The command looks like a write but its target is a shell variable/metacharacter ` +
+        `(e.g. \`$var\`, a glob, or a subshell), so the gate cannot confirm where it writes. ` +
+        `Under write_gate=strict this is surfaced for a human decision instead of silently allowed. ` +
+        `AGENT INSTRUCTION: do NOT retry blindly — confirm the resolved target with the human, ` +
+        `or use \`th state set implementation_allowed true\` once Phase A gates are cleared. ` +
+        `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1.`;
+      return fireGateResult("ask", reason);
     }
     // No offending target found → fall through (fail-open).
   }

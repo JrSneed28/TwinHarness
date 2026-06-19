@@ -16,7 +16,7 @@ import type { TwinHarnessState } from "../src/core/state-schema";
 import { runReviseBump } from "../src/commands/revise";
 import { runArtifactRegister } from "../src/commands/artifact";
 import { runSlicesSync } from "../src/commands/slices";
-import { runVerifyAdd, runVerifyRun } from "../src/commands/verify";
+import { runVerifyAdd, runVerifyRun, runVerifyApprove } from "../src/commands/verify";
 import { readVerifyReport, writeVerifyReport } from "../src/core/verify";
 import { runNext } from "../src/commands/next";
 import { runRepoMap } from "../src/commands/repo";
@@ -134,6 +134,7 @@ describe("REQ-NEXT-008: a failing suite routes to the Debugger before advancing"
     runInit(tp.paths, {});
     position(tp, { tier: "T2", interview_required: false });
     runVerifyAdd(tp.paths, "false");
+    runVerifyApprove(tp.paths, { as: "test" });
     runVerifyRun(tp.paths);
     expect(runNext(tp.paths).data?.kind).toBe("investigate-failure");
   });
@@ -272,6 +273,7 @@ describe("REQ-NEXT-011: final-verification mirrors the stop-gate verify-suite ch
       current_stage: "final-verification",
     });
     runVerifyAdd(tp.paths, "true");
+    runVerifyApprove(tp.paths, { as: "test" });
     runVerifyRun(tp.paths); // green (`true` exits 0)
     expect(runNext(tp.paths).data?.kind).not.toBe("run-verify");
   });
@@ -295,6 +297,7 @@ describe("REQ-NEXT-011: final-verification mirrors the stop-gate verify-suite ch
       current_stage: "final-verification",
     });
     runVerifyAdd(tp.paths, "true");
+    runVerifyApprove(tp.paths, { as: "test" });
     runVerifyRun(tp.paths); // green report on disk
 
     for (let i = 0; i < 50; i++) {
