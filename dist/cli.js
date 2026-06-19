@@ -34,7 +34,9 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.MIN_NODE_MAJOR = void 0;
 exports.parseArgs = parseArgs;
+exports.checkNodeVersion = checkNodeVersion;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const paths_1 = require("./core/paths");
@@ -445,6 +447,25 @@ function readCliVersion() {
         }
     }
     return "unknown";
+}
+/** The minimum Node major version TwinHarness supports (mirrors `th doctor`). */
+exports.MIN_NODE_MAJOR = 20;
+/**
+ * P0-4 (#20) — pure Node-version guard. Parses a `process.version`-shaped string
+ * (`"v20.11.0"`, also tolerates a bare `"18.0.0"`) and reports whether it meets
+ * the supported floor, plus a friendly, actionable message reusing the `th doctor`
+ * wording. Pure + exported so it is unit-testable without spawning a process;
+ * `main()` calls it with `process.version` and exits early when unsupported.
+ */
+function checkNodeVersion(version) {
+    const m = /^v?(\d+)\./.exec(version);
+    const major = m ? Number(m[1]) : 0;
+    const ok = major >= exports.MIN_NODE_MAJOR;
+    const message = ok
+        ? `${version} (>= ${exports.MIN_NODE_MAJOR})`
+        : `Unsupported Node ${version} — TwinHarness requires Node >= ${exports.MIN_NODE_MAJOR}. ` +
+            `Upgrade via nvm (\`nvm install ${exports.MIN_NODE_MAJOR}\`) or https://nodejs.org/, then re-run \`th\`.`;
+    return { ok, major, message };
 }
 function dispatch(parsed) {
     const paths = (0, paths_1.resolveProjectPaths)(parsed.flags.cwd);
@@ -956,6 +977,14 @@ function readHookStdin() {
     }
 }
 function main() {
+    // P0-4 (#20) — fail fast with a friendly, actionable message on an unsupported
+    // Node, BEFORE any command runs. A too-old runtime can otherwise surface as an
+    // opaque syntax/API error deep inside a command.
+    const node = checkNodeVersion(process.version);
+    if (!node.ok) {
+        process.stderr.write(node.message + "\n");
+        process.exit(1);
+    }
     const parsed = parseArgs(process.argv.slice(2));
     // Reject unknown flags / value-less flags up front (a typo'd flag must not be
     // silently swallowed as a positional, the old behavior).

@@ -23,7 +23,7 @@ import { resolveWithinRoot } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { structuredLog } from "../core/log";
 import { requireState } from "../core/guards";
-import { scanRepo } from "../core/repo-map/scanner";
+import { scanRepo, type ScanOptions } from "../core/repo-map/scanner";
 import { serializeRepoMap, renderRepoMapMarkdown, parseRepoMap, type RepoMap } from "../core/repo-map/schema";
 import { hashContent } from "../core/hash";
 import { atomicWriteFile } from "../core/atomic-io";
@@ -43,6 +43,12 @@ export interface RepoMapOptions {
   write?: boolean;
   /** Text rendering: summary (default) | json | md. */
   format?: string;
+  /**
+   * Optional scan caps passthrough (file-count / total-bytes). Defaults to the
+   * scanner's bounded-cost envelope (REQ-NFR-007); lowering a cap forces a partial
+   * scan, which the summary view then flags with a prominent banner (P0-2).
+   */
+  scanOptions?: ScanOptions;
 }
 
 /** Relative artifact paths (POSIX) reported in `data.artifacts`. */
@@ -76,7 +82,7 @@ export function runRepoMap(paths: ProjectPaths, opts: RepoMapOptions = {}): Comm
   }
 
   // Scan (best-effort; never throws on repo content — REQ-RU-090).
-  const map: RepoMap = scanRepo(paths.root);
+  const map: RepoMap = scanRepo(paths.root, opts.scanOptions ?? {});
 
   // DS-002 — Populate fileHashes: content-hash every tracked file within scope.
   // Read-only; NEVER execute scanned content (REQ-NFR-003). Unreadable files are
@@ -158,11 +164,19 @@ export function runRepoMap(paths: ProjectPaths, opts: RepoMapOptions = {}): Comm
   } else if (format === "json") {
     human = JSON.stringify(data, null, 2);
   } else {
-    const capLine =
-      map.scanReport.capHit === null
-        ? `scanned ${map.scanReport.filesScanned} file(s), skipped ${map.scanReport.filesSkipped}`
-        : `PARTIAL scan — cap hit: ${map.scanReport.capHit} (scanned ${map.scanReport.filesScanned})`;
+    // P0-2 — surface a PARTIAL scan prominently at scan time, not as a buried
+    // status line. A cap hit means the map is INCOMPLETE; every downstream
+    // consumer (relevance/impact/context pack) inherits that incompleteness, so
+    // the operator must see it the moment the map is produced.
+    const partial = map.scanReport.capHit !== null;
+    const banner = partial
+      ? `⚠ PARTIAL SCAN — cap hit: ${map.scanReport.capHit}. The repo map is INCOMPLETE (scanned ${map.scanReport.filesScanned} file(s)); relevance/impact/context results will be partial. Raise the scan caps and re-run \`th repo map\`.`
+      : null;
+    const capLine = partial
+      ? `cap hit: ${map.scanReport.capHit} (scanned ${map.scanReport.filesScanned})`
+      : `scanned ${map.scanReport.filesScanned} file(s), skipped ${map.scanReport.filesSkipped}`;
     human = [
+      ...(banner ? [banner, ""] : []),
       "Repo map:",
       `  languages: ${counts.languages}  package managers: ${counts.packageManagers}`,
       `  roots — source: ${counts.sourceRoots}  test: ${counts.testRoots}  docs: ${counts.docsRoots}`,

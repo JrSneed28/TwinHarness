@@ -281,11 +281,11 @@ describe("SLICE-1 / TASK-001 — repo-map schema (serialize / parse / render)", 
   it("REQ-RU-064 — schema_version is present and emitted first", () => {
     const s = serializeRepoMap(sampleMap());
     const obj = JSON.parse(s) as Record<string, unknown>;
-    expect(obj.schema_version).toBe(1);
+    expect(obj.schema_version).toBe(2);
     expect(Object.keys(obj)[0]).toBe("schema_version");
   });
 
-  it("REQ-RU-064 — extensions is reserved and NOT written in v1", () => {
+  it("REQ-RU-064 — extensions is reserved and NOT written", () => {
     const s = serializeRepoMap(sampleMap());
     const obj = JSON.parse(s) as Record<string, unknown>;
     expect("extensions" in obj).toBe(false);
@@ -350,7 +350,7 @@ describe("SLICE-1 / TASK-001 — repo-map schema (serialize / parse / render)", 
 
   it("REQ-RU-043 — parseRepoMap on a schema-invalid object returns map_schema (no throw)", () => {
     // Right version, wrong shape (languages must be an array).
-    const r = parseRepoMap(JSON.stringify({ schema_version: 1, languages: "nope" }));
+    const r = parseRepoMap(JSON.stringify({ schema_version: 2, languages: "nope" }));
     expect(r.ok).toBe(false);
     expect(r.error).toBe("map_schema");
   });
@@ -370,7 +370,7 @@ describe("SLICE-1 / TASK-001 — repo-map schema (serialize / parse / render)", 
     const s = serializeRepoMap(sampleMap());
     const r = parseRepoMap(s);
     expect(r.ok).toBe(true);
-    expect(r.map?.schema_version).toBe(1);
+    expect(r.map?.schema_version).toBe(2);
     // re-serializing the parsed map is byte-identical (determinism survives the round trip).
     expect(serializeRepoMap(r.map!)).toBe(s);
   });
@@ -677,7 +677,7 @@ describe("SLICE-1 / TASK-003 — runRepoMap handler + CLI dispatch + dual-artifa
     expect(res.status).toBe(0);
     const parsed = JSON.parse(res.stdout) as { ok: boolean; schemaVersion: number; counts: Record<string, number> };
     expect(parsed.ok).toBe(true);
-    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.schemaVersion).toBe(2);
     expect(typeof parsed.counts.files).toBe("number");
   });
 
@@ -894,6 +894,120 @@ describe("SLICE-1 / TASK-004 — acceptance battery (robustness, determinism, no
     const report = res.data?.scanReport as { capHit: unknown; filesScanned: number };
     expect(report).toBeDefined();
     expect(typeof report.filesScanned).toBe("number");
+  });
+
+  // ---- P0-2: partial-scan banner is prominent in the summary view -----------
+  it("P0-2 — a partial scan surfaces a prominent PARTIAL banner in the summary output", () => {
+    tp = makeTempProject();
+    writeTree(tp.root, {
+      "src/a.ts": "1\n",
+      "src/b.ts": "1\n",
+      "src/c.ts": "1\n",
+      "src/d.ts": "1\n",
+    });
+    const res = runRepoMap(tp.paths, { write: false, scanOptions: { fileCountCap: 2 } });
+    expect(res.ok).toBe(true);
+    expect(res.human).toContain("⚠ PARTIAL SCAN");
+    expect(res.human).toContain("cap hit: file-count");
+    expect(res.human).toContain("re-run `th repo map`");
+    // The banner leads the output (operator sees it first, not buried).
+    expect(res.human!.startsWith("⚠ PARTIAL SCAN")).toBe(true);
+  });
+
+  it("P0-2 — a complete scan shows NO partial banner", () => {
+    tp = makeTempProject();
+    writeTree(tp.root, { "src/a.ts": "1\n", "src/b.ts": "1\n" });
+    const res = runRepoMap(tp.paths, { write: false });
+    expect(res.ok).toBe(true);
+    expect(res.human).not.toContain("PARTIAL SCAN");
+  });
+
+  // ---- P1-2: the partial marker is PERSISTED deterministically --------------
+  it("P1-2 — a partial scan persists a deterministic capHit + partial marker (no run-varying counts)", () => {
+    tp = makeTempProject();
+    writeTree(tp.root, {
+      "src/a.ts": "1\n",
+      "src/b.ts": "1\n",
+      "src/c.ts": "1\n",
+    });
+    const m = scanRepo(tp.root, { fileCountCap: 2 });
+    const obj = JSON.parse(serializeRepoMap(m)) as Record<string, unknown>;
+    expect(obj.capHit).toBe("file-count");
+    expect(obj.partial).toBe(true);
+    // The run-varying counts are NEVER persisted (would break the byte-identical
+    // golden — REQ-NFR-001).
+    expect(JSON.stringify(obj)).not.toContain("filesScanned");
+    expect(JSON.stringify(obj)).not.toContain("filesSkipped");
+  });
+
+  it("P1-2 — a complete scan persists capHit:null + partial:false", () => {
+    tp = makeTempProject();
+    writeTree(tp.root, { "src/a.ts": "1\n", "src/b.ts": "1\n" });
+    const obj = JSON.parse(serializeRepoMap(scanRepo(tp.root))) as Record<string, unknown>;
+    expect(obj.capHit).toBeNull();
+    expect(obj.partial).toBe(false);
+  });
+
+  it("P1-2 — the partial marker round-trips through parseRepoMap (capHit restored)", () => {
+    tp = makeTempProject();
+    writeTree(tp.root, { "src/a.ts": "1\n", "src/b.ts": "1\n", "src/c.ts": "1\n" });
+    const serialized = serializeRepoMap(scanRepo(tp.root, { fileCountCap: 2 }));
+    const parsed = parseRepoMap(serialized);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.map?.scanReport.capHit).toBe("file-count");
+    // Re-serializing is byte-identical (the marker survives the round trip).
+    expect(serializeRepoMap(parsed.map!)).toBe(serialized);
+  });
+
+  // ---- P1-3: every inferred fact carries a basis + confidence ---------------
+  it("P1-3 — scanned components/ownership/blast-radius carry path-token provenance", () => {
+    tp = makeTempProject();
+    writeTree(tp.root, {
+      "src/auth/login.ts": "// authentication\nexport const a = 1;\n",
+      "src/core/b.ts": "export const b = 2;\n",
+    });
+    const m = scanRepo(tp.root);
+    expect(m.components.length).toBeGreaterThan(0);
+    for (const c of m.components) {
+      expect(c.provenance).toEqual({ basis: "path-token", confidence: "medium" });
+    }
+    for (const o of m.ownership_hints) {
+      expect(o.provenance).toEqual({ basis: "path-token", confidence: "medium" });
+    }
+    for (const s of m.blast_radius_signals) {
+      expect(s.provenance).toEqual({ basis: "path-token", confidence: "medium" });
+    }
+  });
+
+  it("P1-3 — manifest entrypoints are high-confidence; convention ones are name-basis", () => {
+    tp = makeTempProject();
+    writeTree(tp.root, {
+      "package.json": JSON.stringify({ bin: { th: "dist/cli.js" }, exports: { ".": "./i.js" } }),
+      "main.go": "package main\n",
+    });
+    const m = scanRepo(tp.root);
+    const manifestEp = m.entrypoints.find((e) => e.source.startsWith("package.json"));
+    const conventionEp = m.entrypoints.find((e) => e.source === "convention");
+    expect(manifestEp?.provenance).toEqual({ basis: "manifest", confidence: "high" });
+    expect(conventionEp?.provenance).toEqual({ basis: "name", confidence: "medium" });
+    // public_api keeps its legacy literal AND carries a generalised provenance.
+    expect(m.public_api?.confidence).toBe("heuristic");
+    expect(m.public_api?.provenance).toEqual({ basis: "manifest", confidence: "medium" });
+  });
+
+  it("P1-3 — provenance survives a serialize → parse round-trip and is validated", () => {
+    tp = makeTempProject();
+    writeTree(tp.root, { "src/core/b.ts": "export const b = 2;\n" });
+    const serialized = serializeRepoMap(scanRepo(tp.root));
+    const parsed = parseRepoMap(serialized);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.map?.components[0]?.provenance?.basis).toBe("path-token");
+    // A bad provenance value is rejected as map_schema (no throw).
+    const bad = JSON.parse(serialized) as Record<string, unknown>;
+    (bad.components as Array<Record<string, unknown>>)[0].provenance = { basis: "bogus", confidence: "high" };
+    const r = parseRepoMap(JSON.stringify(bad));
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("map_schema");
   });
 
   // ---- Golden double-run byte-stability (REQ-NFR-001) ----------------------
@@ -1400,7 +1514,7 @@ describe("SLICE-2 / TASK-006 — runRepoRelevant handler + CLI relevant dispatch
     fs.mkdirSync(tp.paths.stateDir, { recursive: true });
     fs.writeFileSync(
       path.join(tp.paths.stateDir, "repo-map.json"),
-      JSON.stringify({ schema_version: 1, languages: "not-an-array" }),
+      JSON.stringify({ schema_version: 2, languages: "not-an-array" }),
       "utf8",
     );
     const res = runRepoRelevant(tp.paths, { req: "REQ-001" });

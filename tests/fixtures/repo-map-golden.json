@@ -1,5 +1,7 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "capHit": null,
+  "partial": false,
   "languages": [
     {
       "name": "Go",
@@ -82,34 +84,58 @@
     {
       "name": "src/auth",
       "path": "src/auth",
-      "file_count": 1
+      "file_count": 1,
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
     },
     {
       "name": "src/commands",
       "path": "src/commands",
-      "file_count": 1
+      "file_count": 1,
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
     },
     {
       "name": "src/core",
       "path": "src/core",
-      "file_count": 2
+      "file_count": 2,
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
     }
   ],
   "entrypoints": [
     {
       "name": "th",
       "path": "dist/cli.js",
-      "source": "package.json:bin"
+      "source": "package.json:bin",
+      "provenance": {
+        "basis": "manifest",
+        "confidence": "high"
+      }
     },
     {
       "name": "main",
       "path": "dist/index.js",
-      "source": "package.json:main"
+      "source": "package.json:main",
+      "provenance": {
+        "basis": "manifest",
+        "confidence": "high"
+      }
     },
     {
       "name": "main.go",
       "path": "main.go",
-      "source": "convention"
+      "source": "convention",
+      "provenance": {
+        "basis": "name",
+        "confidence": "medium"
+      }
     }
   ],
   "public_api": {
@@ -119,20 +145,36 @@
         "source": "package.json:exports"
       }
     ],
-    "confidence": "heuristic"
+    "confidence": "heuristic",
+    "provenance": {
+      "basis": "manifest",
+      "confidence": "medium"
+    }
   },
   "ownership_hints": [
     {
       "path_prefix": "src/auth",
-      "component": "src/auth"
+      "component": "src/auth",
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
     },
     {
       "path_prefix": "src/commands",
-      "component": "src/commands"
+      "component": "src/commands",
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
     },
     {
       "path_prefix": "src/core",
-      "component": "src/core"
+      "component": "src/core",
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
     }
   ],
   "files": [
@@ -279,7 +321,11 @@
       "trigger_patterns": [
         "auth",
         "login"
-      ]
+      ],
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
     }
   ]
 }

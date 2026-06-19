@@ -13,7 +13,7 @@
  * never in the scanner (ADR-003). The in-memory `RepoMap` carries `repoRoot` +
  * `scanReport`; the serializer STRIPS both — they never appear on disk. NO
  * timestamp, absolute path, PID, or nonce is ever emitted. The reserved
- * `extensions` slot is NEVER written in v1 (RULE-012, REQ-RU-064).
+ * `extensions` slot is NEVER written (RULE-012, REQ-RU-064).
  */
 
 import { REQ_ID_PATTERN } from "../anchors";
@@ -21,14 +21,49 @@ import { BLAST_RADIUS_FLAGS, type BlastRadiusFlag } from "../state-schema";
 
 /**
  * Current repo-map schema version (REQ-RU-064). Emitted FIRST in the JSON.
- * Mirrors `CURRENT_SCHEMA_VERSION` (`src/core/state-schema.ts:15`). Bump (and add
- * a migration step / golden case) on any breaking shape change; consumers reject
- * an unrecognized value cleanly (`map_version`).
+ * Mirrors `CURRENT_SCHEMA_VERSION` (`src/core/state-schema.ts:15`). Bump on any
+ * breaking shape change; consumers reject an unrecognized value cleanly
+ * (`map_version`).
+ *
+ * v1 → v2 (P1-1/P1-4, INVESTIGATION-FIXES-PLAN Phase 1): adds the deterministic
+ * partial-scan marker (`capHit` + `partial`) and the per-fact `Provenance`
+ * (basis + confidence) model. The repo-map is a DERIVED artifact — there is no
+ * in-place migration: a version mismatch is detected by `parseRepoMap`
+ * (`map_version`) and consumers REGENERATE via `th repo map` (RULE-006). Old (v1)
+ * maps therefore fail CLOSED rather than being silently read as stale.
  */
-export const REPO_MAP_SCHEMA_VERSION = 1;
+export const REPO_MAP_SCHEMA_VERSION = 2;
 
 /** Source of a language detection. */
 export type LanguageSource = "extension" | "manifest" | "both";
+
+/**
+ * Provenance (P1-3) — the BASIS + CONFIDENCE of an inferred fact. Generalises the
+ * lone `public_api.confidence` so every derived signal (component, entrypoint,
+ * ownership hint, blast-radius signal, public-API surface) carries an HONEST
+ * record of HOW it was inferred and HOW MUCH to trust it.
+ *
+ *   basis — the kind of evidence:
+ *     "exact"      a direct, unambiguous fact (e.g. a file that literally exists)
+ *     "manifest"   declared in a package/build manifest (package.json, etc.)
+ *     "parsed"     extracted by parsing source (import/symbol — Phase 2)
+ *     "path-token" inferred from a directory/path token (a heuristic)
+ *     "name"       inferred from a file/dir name convention (a heuristic)
+ *     "component"  inferred from the derived component grouping
+ *   confidence — "high" | "medium" | "low" (consumers downgrade low to "verify").
+ */
+export type ProvenanceBasis =
+  | "exact"
+  | "manifest"
+  | "parsed"
+  | "path-token"
+  | "name"
+  | "component";
+export type ConfidenceTier = "high" | "medium" | "low";
+export interface Provenance {
+  basis: ProvenanceBasis;
+  confidence: ConfidenceTier;
+}
 
 /** Classification of a discovered (inert) candidate command. */
 export type CandidateCommandKind = "build" | "test" | "lint" | "other";
@@ -62,6 +97,8 @@ export interface Component {
   name: string;
   path: string;
   file_count: number;
+  /** P1-3 — basis+confidence; additive, omit-when-absent. */
+  provenance?: Provenance;
 }
 
 export interface Entrypoint {
@@ -69,6 +106,8 @@ export interface Entrypoint {
   path: string;
   /** e.g. "package.json:bin" | "package.json:main" | "convention". */
   source: string;
+  /** P1-3 — basis+confidence; additive, omit-when-absent. */
+  provenance?: Provenance;
 }
 
 export interface ApiHint {
@@ -80,6 +119,8 @@ export interface PublicApiSurface {
   /** Sorted by name by the serializer. */
   hints: ApiHint[];
   confidence: "heuristic";
+  /** P1-3 — basis+confidence; additive, omit-when-absent. Generalises `confidence`. */
+  provenance?: Provenance;
 }
 
 export interface OwnershipHint {
@@ -87,6 +128,8 @@ export interface OwnershipHint {
   path_prefix: string;
   /** Component.name. */
   component: string;
+  /** P1-3 — basis+confidence; additive, omit-when-absent. */
+  provenance?: Provenance;
 }
 
 export interface FileEntry {
@@ -114,6 +157,8 @@ export interface BlastRadiusSignal {
   matching_paths: string[];
   /** Sorted by the serializer. */
   trigger_patterns: string[];
+  /** P1-3 — basis+confidence; additive, omit-when-absent. */
+  provenance?: Provenance;
 }
 
 /**
@@ -212,6 +257,15 @@ function byKey<T>(arr: T[], key: (t: T) => string): T[] {
 }
 
 /**
+ * P1-3 — emit a `Provenance` object (fixed key order: basis, confidence) ONLY
+ * when present (omit-when-absent — REQ-NFR-004). Returned as a spreadable
+ * fragment so callers append it as the LAST key of each structure deterministically.
+ */
+function provenanceFragment(p: Provenance | undefined): { provenance?: Provenance } {
+  return p ? { provenance: { basis: p.basis, confidence: p.confidence } } : {};
+}
+
+/**
  * Deterministic serialization of a RepoMap to the persisted on-disk form
  * (IF-004). THE single enforcement point for determinism (ADR-003):
  *
@@ -227,6 +281,13 @@ function byKey<T>(arr: T[], key: (t: T) => string): T[] {
 export function serializeRepoMap(map: RepoMap): string {
   const ordered = {
     schema_version: map.schema_version,
+    // P1-2 — deterministic partial-scan marker (the #5 root cause). We persist
+    // ONLY the bounded, traversal-order-independent `capHit` enum and the derived
+    // `partial` boolean. The run-varying counts (`filesScanned`/`filesSkipped`)
+    // are NEVER persisted — they depend on `readdir` order and would break the
+    // byte-identical golden (REQ-NFR-001). A `null` capHit ⇒ a complete scan.
+    capHit: map.scanReport.capHit,
+    partial: map.scanReport.capHit !== null,
     languages: byKey(
       map.languages.map((l) => ({
         name: l.name,
@@ -261,6 +322,7 @@ export function serializeRepoMap(map: RepoMap): string {
         name: toPosix(c.name),
         path: toPosix(c.path),
         file_count: c.file_count,
+        ...provenanceFragment(c.provenance),
       })),
       (c) => toPosix(c.name),
     ),
@@ -269,6 +331,7 @@ export function serializeRepoMap(map: RepoMap): string {
         name: e.name,
         path: toPosix(e.path),
         source: e.source,
+        ...provenanceFragment(e.provenance),
       })),
       (e) => `${toPosix(e.path)} ${e.source} ${e.name}`,
     ),
@@ -279,12 +342,14 @@ export function serializeRepoMap(map: RepoMap): string {
             (h) => `${h.name} ${h.source}`,
           ),
           confidence: map.public_api.confidence,
+          ...provenanceFragment(map.public_api.provenance),
         }
       : null,
     ownership_hints: byKey(
       map.ownership_hints.map((o) => ({
         path_prefix: toPosix(o.path_prefix),
         component: toPosix(o.component),
+        ...provenanceFragment(o.provenance),
       })),
       (o) => toPosix(o.path_prefix),
     ),
@@ -310,6 +375,7 @@ export function serializeRepoMap(map: RepoMap): string {
         flag: s.flag,
         matching_paths: sortStrings(s.matching_paths),
         trigger_patterns: sortStrings(s.trigger_patterns),
+        ...provenanceFragment(s.provenance),
       })),
       (s) => s.flag,
     ),
@@ -362,6 +428,33 @@ const LANGUAGE_SOURCES: readonly string[] = ["extension", "manifest", "both"];
 const COMMAND_KINDS: readonly string[] = ["build", "test", "lint", "other"];
 const SCAN_CAPS: readonly (string | null)[] = [null, "file-count", "total-bytes"];
 
+// P1-3 — provenance vocabulary, mirrored from the `ProvenanceBasis`/`ConfidenceTier`
+// unions above so the defensive parser can validate an on-disk value.
+const PROVENANCE_BASES: readonly string[] = [
+  "exact",
+  "manifest",
+  "parsed",
+  "path-token",
+  "name",
+  "component",
+];
+const CONFIDENCE_TIERS: readonly string[] = ["high", "medium", "low"];
+
+/**
+ * Validate an optional `provenance` value (P1-3). Absent ⇒ valid (omit-when-absent).
+ * Present ⇒ must be a plain object with a known `basis` + `confidence`.
+ */
+function isValidProvenance(v: unknown): boolean {
+  if (v === undefined) return true;
+  return (
+    isPlainObject(v) &&
+    typeof v.basis === "string" &&
+    PROVENANCE_BASES.includes(v.basis) &&
+    typeof v.confidence === "string" &&
+    CONFIDENCE_TIERS.includes(v.confidence)
+  );
+}
+
 /**
  * Parse + validate a `repo-map.json` blob. Returns a TAGGED result and NEVER
  * throws (REQ-RU-043). Mirrors `validateState`: the success path produces a fully
@@ -403,10 +496,15 @@ export function parseRepoMap(raw: string | null | undefined): RepoMapParseResult
   }
 
   const p = parsed as Record<string, unknown>;
+  // P1-2 — reconstruct the partial-scan marker. The run-varying counts are not
+  // persisted, so they default to 0; only `capHit` (and the derived `partial`)
+  // survive a round-trip. `partial` is purely derived from `capHit`, so we trust
+  // `capHit` as the canonical signal (validated by `validateRepoMapShape`).
+  const persistedCap = (p.capHit ?? null) as ScanReport["capHit"];
   const map: RepoMap = {
     schema_version: ver,
     repoRoot: "",
-    scanReport: { filesScanned: 0, filesSkipped: 0, capHit: null },
+    scanReport: { filesScanned: 0, filesSkipped: 0, capHit: persistedCap },
     languages: p.languages as Language[],
     package_managers: p.package_managers as PackageManager[],
     candidate_commands: p.candidate_commands as CandidateCommand[],
@@ -431,6 +529,13 @@ export function parseRepoMap(raw: string | null | undefined): RepoMapParseResult
 
 /** Structural validation of an already-version-checked plain object. */
 function validateRepoMapShape(v: Record<string, unknown>): boolean {
+  // P1-2 — partial-scan marker. `capHit` (when present) must be a known cap enum
+  // and `partial` (when present) a boolean. Both are absent on a hand-built v1
+  // shape but always emitted in v2; tolerated-when-absent so a future reader stays
+  // permissive (REQ-NFR-004).
+  if (v.capHit !== undefined && !SCAN_CAPS.includes(v.capHit as string | null)) return false;
+  if (v.partial !== undefined && typeof v.partial !== "boolean") return false;
+
   if (!Array.isArray(v.languages) ||
     !v.languages.every((l) =>
       isPlainObject(l) &&
@@ -467,7 +572,8 @@ function validateRepoMapShape(v: Record<string, unknown>): boolean {
       typeof c.path === "string" &&
       typeof c.file_count === "number" &&
       Number.isInteger(c.file_count) &&
-      (c.file_count as number) >= 0)
+      (c.file_count as number) >= 0 &&
+      isValidProvenance(c.provenance))
   ) return false;
 
   if (!Array.isArray(v.entrypoints) ||
@@ -475,13 +581,15 @@ function validateRepoMapShape(v: Record<string, unknown>): boolean {
       isPlainObject(e) &&
       typeof e.name === "string" &&
       typeof e.path === "string" &&
-      typeof e.source === "string")
+      typeof e.source === "string" &&
+      isValidProvenance(e.provenance))
   ) return false;
 
   if (v.public_api !== null && v.public_api !== undefined) {
     const pa = v.public_api;
     if (!isPlainObject(pa)) return false;
     if (pa.confidence !== "heuristic") return false;
+    if (!isValidProvenance(pa.provenance)) return false;
     if (!Array.isArray(pa.hints) ||
       !pa.hints.every((h) =>
         isPlainObject(h) && typeof h.name === "string" && typeof h.source === "string")
@@ -490,7 +598,10 @@ function validateRepoMapShape(v: Record<string, unknown>): boolean {
 
   if (!Array.isArray(v.ownership_hints) ||
     !v.ownership_hints.every((o) =>
-      isPlainObject(o) && typeof o.path_prefix === "string" && typeof o.component === "string")
+      isPlainObject(o) &&
+      typeof o.path_prefix === "string" &&
+      typeof o.component === "string" &&
+      isValidProvenance(o.provenance))
   ) return false;
 
   if (!Array.isArray(v.files) ||
@@ -519,7 +630,8 @@ function validateRepoMapShape(v: Record<string, unknown>): boolean {
       typeof s.flag === "string" &&
       flags.includes(s.flag) &&
       isStringArray(s.matching_paths) &&
-      isStringArray(s.trigger_patterns))
+      isStringArray(s.trigger_patterns) &&
+      isValidProvenance(s.provenance))
   ) return false;
 
   // DS-002: fileHashes is optional. When present, every value must be a 64-char

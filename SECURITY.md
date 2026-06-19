@@ -42,8 +42,10 @@ a security sandbox. The orchestrator can legitimately:
   not see directly (only the Bash heuristic applies). That heuristic is
   intentionally conservative and **fail-open**: it is a regex over the literal
   command string, so it does not parse here-documents (`cat <<EOF > file`),
-  subshells / command substitution, variable indirection, shell globbing, or
-  writes performed by an invoked program (`printf`, `python -c`, `node -e`).
+  subshells / command substitution, variable indirection, shell globbing,
+  patch-application tools (`patch`, `git apply`), shell interpreters invoked by
+  name (`powershell -Command`, `pwsh -c`), or writes performed by an invoked
+  program (`printf`, `python -c`, `node -e`).
   `write_gate: "strict"` extends the heuristic into Phase B but does **not**
   change this fundamental gap — it narrows the common accidental-redirection
   cases, it does not close the Bash bypass. A determined or non-compliant agent

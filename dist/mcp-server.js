@@ -18002,7 +18002,7 @@ var fs16 = __toESM(require("node:fs"));
 var path14 = __toESM(require("node:path"));
 
 // src/core/repo-map/schema.ts
-var REPO_MAP_SCHEMA_VERSION = 1;
+var REPO_MAP_SCHEMA_VERSION = 2;
 function emptyRepoMap(repoRoot) {
   return {
     schema_version: REPO_MAP_SCHEMA_VERSION,
@@ -18038,9 +18038,19 @@ function byKey(arr, key) {
     return ka < kb ? -1 : ka > kb ? 1 : 0;
   });
 }
+function provenanceFragment(p) {
+  return p ? { provenance: { basis: p.basis, confidence: p.confidence } } : {};
+}
 function serializeRepoMap(map) {
   const ordered = {
     schema_version: map.schema_version,
+    // P1-2 — deterministic partial-scan marker (the #5 root cause). We persist
+    // ONLY the bounded, traversal-order-independent `capHit` enum and the derived
+    // `partial` boolean. The run-varying counts (`filesScanned`/`filesSkipped`)
+    // are NEVER persisted — they depend on `readdir` order and would break the
+    // byte-identical golden (REQ-NFR-001). A `null` capHit ⇒ a complete scan.
+    capHit: map.scanReport.capHit,
+    partial: map.scanReport.capHit !== null,
     languages: byKey(
       map.languages.map((l) => ({
         name: l.name,
@@ -18074,7 +18084,8 @@ function serializeRepoMap(map) {
       map.components.map((c) => ({
         name: toPosix(c.name),
         path: toPosix(c.path),
-        file_count: c.file_count
+        file_count: c.file_count,
+        ...provenanceFragment(c.provenance)
       })),
       (c) => toPosix(c.name)
     ),
@@ -18082,7 +18093,8 @@ function serializeRepoMap(map) {
       map.entrypoints.map((e) => ({
         name: e.name,
         path: toPosix(e.path),
-        source: e.source
+        source: e.source,
+        ...provenanceFragment(e.provenance)
       })),
       (e) => `${toPosix(e.path)}\0${e.source}\0${e.name}`
     ),
@@ -18091,12 +18103,14 @@ function serializeRepoMap(map) {
         map.public_api.hints.map((h) => ({ name: h.name, source: h.source })),
         (h) => `${h.name}\0${h.source}`
       ),
-      confidence: map.public_api.confidence
+      confidence: map.public_api.confidence,
+      ...provenanceFragment(map.public_api.provenance)
     } : null,
     ownership_hints: byKey(
       map.ownership_hints.map((o) => ({
         path_prefix: toPosix(o.path_prefix),
-        component: toPosix(o.component)
+        component: toPosix(o.component),
+        ...provenanceFragment(o.provenance)
       })),
       (o) => toPosix(o.path_prefix)
     ),
@@ -18121,7 +18135,8 @@ function serializeRepoMap(map) {
       map.blast_radius_signals.map((s) => ({
         flag: s.flag,
         matching_paths: sortStrings(s.matching_paths),
-        trigger_patterns: sortStrings(s.trigger_patterns)
+        trigger_patterns: sortStrings(s.trigger_patterns),
+        ...provenanceFragment(s.provenance)
       })),
       (s) => s.flag
     ),
@@ -18145,6 +18160,20 @@ function isStringArray(v) {
 }
 var LANGUAGE_SOURCES = ["extension", "manifest", "both"];
 var COMMAND_KINDS = ["build", "test", "lint", "other"];
+var SCAN_CAPS = [null, "file-count", "total-bytes"];
+var PROVENANCE_BASES = [
+  "exact",
+  "manifest",
+  "parsed",
+  "path-token",
+  "name",
+  "component"
+];
+var CONFIDENCE_TIERS = ["high", "medium", "low"];
+function isValidProvenance(v) {
+  if (v === void 0) return true;
+  return isPlainObject5(v) && typeof v.basis === "string" && PROVENANCE_BASES.includes(v.basis) && typeof v.confidence === "string" && CONFIDENCE_TIERS.includes(v.confidence);
+}
 function parseRepoMap(raw) {
   if (raw === null || raw === void 0) {
     return { ok: false, error: "map_missing" };
@@ -18169,10 +18198,11 @@ function parseRepoMap(raw) {
     return { ok: false, error: "map_schema" };
   }
   const p = parsed;
+  const persistedCap = p.capHit ?? null;
   const map = {
     schema_version: ver,
     repoRoot: "",
-    scanReport: { filesScanned: 0, filesSkipped: 0, capHit: null },
+    scanReport: { filesScanned: 0, filesSkipped: 0, capHit: persistedCap },
     languages: p.languages,
     package_managers: p.package_managers,
     candidate_commands: p.candidate_commands,
@@ -18193,6 +18223,8 @@ function parseRepoMap(raw) {
   return { ok: true, map };
 }
 function validateRepoMapShape(v) {
+  if (v.capHit !== void 0 && !SCAN_CAPS.includes(v.capHit)) return false;
+  if (v.partial !== void 0 && typeof v.partial !== "boolean") return false;
   if (!Array.isArray(v.languages) || !v.languages.every((l) => isPlainObject5(l) && typeof l.name === "string" && isStringArray(l.evidence) && typeof l.source === "string" && LANGUAGE_SOURCES.includes(l.source))) return false;
   if (!Array.isArray(v.package_managers) || !v.package_managers.every((pm) => isPlainObject5(pm) && typeof pm.name === "string" && isStringArray(pm.manifest_paths))) return false;
   if (!Array.isArray(v.candidate_commands) || !v.candidate_commands.every((c) => isPlainObject5(c) && typeof c.label === "string" && typeof c.raw === "string" && typeof c.source_file === "string" && typeof c.kind === "string" && COMMAND_KINDS.includes(c.kind))) return false;
@@ -18200,20 +18232,21 @@ function validateRepoMapShape(v) {
   if (!isStringArray(v.test_roots)) return false;
   if (!isStringArray(v.docs_roots)) return false;
   if (!isStringArray(v.generated_paths)) return false;
-  if (!Array.isArray(v.components) || !v.components.every((c) => isPlainObject5(c) && typeof c.name === "string" && typeof c.path === "string" && typeof c.file_count === "number" && Number.isInteger(c.file_count) && c.file_count >= 0)) return false;
-  if (!Array.isArray(v.entrypoints) || !v.entrypoints.every((e) => isPlainObject5(e) && typeof e.name === "string" && typeof e.path === "string" && typeof e.source === "string")) return false;
+  if (!Array.isArray(v.components) || !v.components.every((c) => isPlainObject5(c) && typeof c.name === "string" && typeof c.path === "string" && typeof c.file_count === "number" && Number.isInteger(c.file_count) && c.file_count >= 0 && isValidProvenance(c.provenance))) return false;
+  if (!Array.isArray(v.entrypoints) || !v.entrypoints.every((e) => isPlainObject5(e) && typeof e.name === "string" && typeof e.path === "string" && typeof e.source === "string" && isValidProvenance(e.provenance))) return false;
   if (v.public_api !== null && v.public_api !== void 0) {
     const pa = v.public_api;
     if (!isPlainObject5(pa)) return false;
     if (pa.confidence !== "heuristic") return false;
+    if (!isValidProvenance(pa.provenance)) return false;
     if (!Array.isArray(pa.hints) || !pa.hints.every((h) => isPlainObject5(h) && typeof h.name === "string" && typeof h.source === "string")) return false;
   }
-  if (!Array.isArray(v.ownership_hints) || !v.ownership_hints.every((o) => isPlainObject5(o) && typeof o.path_prefix === "string" && typeof o.component === "string")) return false;
+  if (!Array.isArray(v.ownership_hints) || !v.ownership_hints.every((o) => isPlainObject5(o) && typeof o.path_prefix === "string" && typeof o.component === "string" && isValidProvenance(o.provenance))) return false;
   if (!Array.isArray(v.files) || !v.files.every((f) => isPlainObject5(f) && typeof f.path === "string" && (f.component === null || typeof f.component === "string") && (f.language === null || typeof f.language === "string") && typeof f.is_test === "boolean" && isStringArray(f.req_ids))) return false;
   const reqIdRe = new RegExp(`^${REQ_ID_PATTERN}$`);
   if (!Array.isArray(v.req_anchors) || !v.req_anchors.every((r) => isPlainObject5(r) && typeof r.req_id === "string" && reqIdRe.test(r.req_id) && isStringArray(r.locations))) return false;
   const flags = BLAST_RADIUS_FLAGS;
-  if (!Array.isArray(v.blast_radius_signals) || !v.blast_radius_signals.every((s) => isPlainObject5(s) && typeof s.flag === "string" && flags.includes(s.flag) && isStringArray(s.matching_paths) && isStringArray(s.trigger_patterns))) return false;
+  if (!Array.isArray(v.blast_radius_signals) || !v.blast_radius_signals.every((s) => isPlainObject5(s) && typeof s.flag === "string" && flags.includes(s.flag) && isStringArray(s.matching_paths) && isStringArray(s.trigger_patterns) && isValidProvenance(s.provenance))) return false;
   if (v.fileHashes !== void 0 && v.fileHashes !== null) {
     if (!isPlainObject5(v.fileHashes)) return false;
     const hexRe = /^[0-9a-f]{64}$/;
@@ -18624,23 +18657,35 @@ function scanRepo(root, opts = {}) {
   map.test_roots = [...testRoots];
   map.docs_roots = [...docsRoots];
   map.generated_paths = [...generatedPaths];
+  const PROV_PATH_TOKEN = { basis: "path-token", confidence: "medium" };
+  const entrypointProvenance = (source) => source.startsWith("package.json") ? { basis: "manifest", confidence: "high" } : { basis: "name", confidence: "medium" };
   map.components = [...componentFileCounts.entries()].map(([name, file_count]) => ({
     name,
     path: name,
-    file_count
+    file_count,
+    provenance: PROV_PATH_TOKEN
   }));
-  map.entrypoints = entrypoints;
-  map.public_api = apiHints.length > 0 ? { hints: apiHints, confidence: "heuristic" } : null;
+  map.entrypoints = entrypoints.map((e) => ({
+    ...e,
+    provenance: entrypointProvenance(e.source)
+  }));
+  map.public_api = apiHints.length > 0 ? {
+    hints: apiHints,
+    confidence: "heuristic",
+    provenance: { basis: "manifest", confidence: "medium" }
+  } : null;
   map.ownership_hints = [...ownershipHints.entries()].map(([prefix, component]) => ({
     path_prefix: prefix,
-    component
+    component,
+    provenance: PROV_PATH_TOKEN
   }));
   map.files = files;
   map.req_anchors = reqAnchors;
   map.blast_radius_signals = [...blastMatches.entries()].map(([flag, m]) => ({
     flag,
     matching_paths: [...m.paths],
-    trigger_patterns: [...m.triggers]
+    trigger_patterns: [...m.triggers],
+    provenance: PROV_PATH_TOKEN
   }));
   map.scanReport = {
     filesScanned: st.filesScanned,
@@ -19129,7 +19174,7 @@ function runRepoMap(paths, opts = {}) {
       data: { error: "bad_format", format: opts.format }
     });
   }
-  const map = scanRepo(paths.root);
+  const map = scanRepo(paths.root, opts.scanOptions ?? {});
   {
     const hashes = {};
     for (const f of map.files) {
@@ -19193,8 +19238,11 @@ function runRepoMap(paths, opts = {}) {
   } else if (format === "json") {
     human = JSON.stringify(data, null, 2);
   } else {
-    const capLine = map.scanReport.capHit === null ? `scanned ${map.scanReport.filesScanned} file(s), skipped ${map.scanReport.filesSkipped}` : `PARTIAL scan \u2014 cap hit: ${map.scanReport.capHit} (scanned ${map.scanReport.filesScanned})`;
+    const partial2 = map.scanReport.capHit !== null;
+    const banner = partial2 ? `\u26A0 PARTIAL SCAN \u2014 cap hit: ${map.scanReport.capHit}. The repo map is INCOMPLETE (scanned ${map.scanReport.filesScanned} file(s)); relevance/impact/context results will be partial. Raise the scan caps and re-run \`th repo map\`.` : null;
+    const capLine = partial2 ? `cap hit: ${map.scanReport.capHit} (scanned ${map.scanReport.filesScanned})` : `scanned ${map.scanReport.filesScanned} file(s), skipped ${map.scanReport.filesSkipped}`;
     human = [
+      ...banner ? [banner, ""] : [],
       "Repo map:",
       `  languages: ${counts.languages}  package managers: ${counts.packageManagers}`,
       `  roots \u2014 source: ${counts.sourceRoots}  test: ${counts.testRoots}  docs: ${counts.docsRoots}`,

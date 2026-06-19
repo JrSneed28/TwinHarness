@@ -39,6 +39,7 @@ import {
   type BlastRadiusSignal,
   type OwnershipHint,
   type PublicApiSurface,
+  type Provenance,
   emptyRepoMap,
 } from "./schema";
 
@@ -580,22 +581,42 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
   map.docs_roots = [...docsRoots];
   map.generated_paths = [...generatedPaths];
 
+  // P1-3 — fixed provenance per derived structure. These are HONEST self-labels:
+  // components/ownership/blast-radius are directory/path-token heuristics (medium);
+  // an entrypoint declared in a manifest is high-confidence, a convention-derived
+  // one only a name heuristic; the public-API surface here comes from manifest
+  // `exports` so it is manifest-basis (medium until Phase 2 adds parsed evidence).
+  const PROV_PATH_TOKEN: Provenance = { basis: "path-token", confidence: "medium" };
+  const entrypointProvenance = (source: string): Provenance =>
+    source.startsWith("package.json")
+      ? { basis: "manifest", confidence: "high" }
+      : { basis: "name", confidence: "medium" };
+
   map.components = [...componentFileCounts.entries()].map(([name, file_count]) => ({
     name,
     path: name,
     file_count,
+    provenance: PROV_PATH_TOKEN,
   })) as Component[];
 
-  map.entrypoints = entrypoints;
+  map.entrypoints = entrypoints.map((e) => ({
+    ...e,
+    provenance: entrypointProvenance(e.source),
+  }));
 
   map.public_api =
     apiHints.length > 0
-      ? ({ hints: apiHints, confidence: "heuristic" } as PublicApiSurface)
+      ? ({
+          hints: apiHints,
+          confidence: "heuristic",
+          provenance: { basis: "manifest", confidence: "medium" },
+        } as PublicApiSurface)
       : null;
 
   map.ownership_hints = [...ownershipHints.entries()].map(([prefix, component]) => ({
     path_prefix: prefix,
     component,
+    provenance: PROV_PATH_TOKEN,
   })) as OwnershipHint[];
 
   map.files = files;
@@ -605,6 +626,7 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
     flag,
     matching_paths: [...m.paths],
     trigger_patterns: [...m.triggers],
+    provenance: PROV_PATH_TOKEN,
   })) as BlastRadiusSignal[];
 
   map.scanReport = {

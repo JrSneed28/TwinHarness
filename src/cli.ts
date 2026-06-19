@@ -538,6 +538,27 @@ function readCliVersion(): string {
   return "unknown";
 }
 
+/** The minimum Node major version TwinHarness supports (mirrors `th doctor`). */
+export const MIN_NODE_MAJOR = 20;
+
+/**
+ * P0-4 (#20) — pure Node-version guard. Parses a `process.version`-shaped string
+ * (`"v20.11.0"`, also tolerates a bare `"18.0.0"`) and reports whether it meets
+ * the supported floor, plus a friendly, actionable message reusing the `th doctor`
+ * wording. Pure + exported so it is unit-testable without spawning a process;
+ * `main()` calls it with `process.version` and exits early when unsupported.
+ */
+export function checkNodeVersion(version: string): { ok: boolean; major: number; message: string } {
+  const m = /^v?(\d+)\./.exec(version);
+  const major = m ? Number(m[1]) : 0;
+  const ok = major >= MIN_NODE_MAJOR;
+  const message = ok
+    ? `${version} (>= ${MIN_NODE_MAJOR})`
+    : `Unsupported Node ${version} — TwinHarness requires Node >= ${MIN_NODE_MAJOR}. ` +
+      `Upgrade via nvm (\`nvm install ${MIN_NODE_MAJOR}\`) or https://nodejs.org/, then re-run \`th\`.`;
+  return { ok, major, message };
+}
+
 function dispatch(parsed: ParsedArgs): CommandResult {
   const paths = resolveProjectPaths(parsed.flags.cwd);
   const [group, sub, ...rest] = parsed.positionals;
@@ -1047,6 +1068,15 @@ function readHookStdin<T extends object>(): T | undefined {
 }
 
 function main(): void {
+  // P0-4 (#20) — fail fast with a friendly, actionable message on an unsupported
+  // Node, BEFORE any command runs. A too-old runtime can otherwise surface as an
+  // opaque syntax/API error deep inside a command.
+  const node = checkNodeVersion(process.version);
+  if (!node.ok) {
+    process.stderr.write(node.message + "\n");
+    process.exit(1);
+  }
+
   const parsed = parseArgs(process.argv.slice(2));
 
   // Reject unknown flags / value-less flags up front (a typo'd flag must not be

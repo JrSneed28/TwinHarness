@@ -146,6 +146,25 @@ describe("DOC-TRUTH: docs match mechanical reality", () => {
   });
 
   // -------------------------------------------------------------------------
+  // EXACT TEST-COUNT BAN (P0-1): the test suite grows constantly, so any exact
+  // 4-digit "NNNN tests" literal in the shipped marketing docs (README/CHANGELOG)
+  // is stale the moment it is written. Enforce the soft-floor phrasing ("1000+
+  // tests", "1100+ tests" — the trailing "+" breaks the `\d{4} tests` pattern)
+  // instead. Scoped to README + CHANGELOG; the spec/ plan deliberately discusses
+  // the old "1672 tests" literal as the thing being removed, so it is not scanned.
+  // -------------------------------------------------------------------------
+  it.each(["README.md", "CHANGELOG.md"])(
+    "%s: contains no exact 4-digit 'NNNN tests' literal (use the soft '1000+' floor)",
+    (rel) => {
+      const m = read(rel).match(/\b\d{4} tests\b/);
+      expect(
+        m,
+        `${rel} contains an exact test-count literal "${m?.[0]}" — replace with the soft-floor phrasing (e.g. "1000+ tests")`,
+      ).toBeNull();
+    },
+  );
+
+  // -------------------------------------------------------------------------
   // DERIVED FILE-COUNT GUARD (P1-2 / TEST-001): any "N test files" literal in
   // README must equal the mechanical *.test.ts count. Defensive — README
   // currently states "1100+ tests" (no exact file-count literal, by design, so

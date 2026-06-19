@@ -59,6 +59,21 @@ describe("GOV-2 (P3-1b): the gate-ledger is re-elevated to tamper-evident", () =
   });
 });
 
+describe("P0-3 (#18): the write-gate Bash-bypass list documents the known gaps", () => {
+  // The Bash heuristic is fail-open; SECURITY.md must enumerate the constructs it
+  // cannot parse so operators are not misled into treating it as a sandbox. P0-3
+  // adds PowerShell and patch/git-apply to the previously-incomplete list.
+  it("CONTAINS the patch-application bypass (patch / git apply)", () => {
+    expect(security).toContain("patch");
+    expect(security).toContain("git apply");
+  });
+
+  it("CONTAINS the PowerShell interpreter bypass (powershell / pwsh)", () => {
+    expect(security).toContain("powershell -Command");
+    expect(security).toContain("pwsh -c");
+  });
+});
+
 describe("GOV-3 (P2-5): the strict fail-closed-on-invalid-state behaviour is documented", () => {
   it("CONTAINS the default fail-open-on-invalid-state description", () => {
     expect(security).toContain("fails open on a **present-but-invalid**");
