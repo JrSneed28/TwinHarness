@@ -561,6 +561,155 @@ export function resolveAliasTsJs(
   return candidates[0]!.resolved;
 }
 
+/* ------------------------------------------------------------------ *
+ * Workspace bare-package alias resolution (DEFERRED #1b) — PURE.      *
+ * ------------------------------------------------------------------ */
+
+/**
+ * A discovered in-repo package: its POSIX-relative root dir and its declared `name`
+ * (from the manifest), plus the manifest's `main`/`module` entry hints (used to land
+ * a bare `import "pkg"` on the package entry file).
+ */
+export interface PackageInfo {
+  /** POSIX-relative dir of the package's manifest ("" = repo root). */
+  root: string;
+  /** Declared package name (manifest `name`). */
+  name: string;
+  /** Manifest `main` (POSIX-relative to root), if a string. */
+  main?: string;
+  /** Manifest `module` (POSIX-relative to root), if a string. */
+  module?: string;
+}
+
+/**
+ * Expand a workspace glob pattern (e.g. "packages/*", "apps/**", "libs/foo") against
+ * a set of candidate package-root dirs. PURE + deterministic — operates over the
+ * provided dir set, never readdir order. A trailing `/*` matches one path segment; a
+ * trailing `/**` matches one-or-more; an exact pattern matches that dir verbatim.
+ * Returns the subset of `roots` that the pattern selects.
+ */
+export function matchWorkspacePattern(pattern: string, roots: Iterable<string>): string[] {
+  const norm = pattern.replace(/\/+$/, ""); // trim trailing slash
+  const out: string[] = [];
+  for (const r of roots) {
+    if (norm.endsWith("/**")) {
+      const base = norm.slice(0, -3);
+      if (r === base || r.startsWith(base + "/")) out.push(r);
+    } else if (norm.endsWith("/*")) {
+      const base = norm.slice(0, -2);
+      // Exactly one segment under base.
+      if (r.startsWith(base + "/")) {
+        const rest = r.slice(base.length + 1);
+        if (!rest.includes("/")) out.push(r);
+      }
+    } else if (norm === "*") {
+      if (!r.includes("/") && r !== "") out.push(r);
+    } else {
+      if (r === norm) out.push(r);
+    }
+  }
+  return out;
+}
+
+/**
+ * Build a deterministic package-name → `PackageInfo` map from discovered manifests.
+ *
+ * DETERMINISM + tie-break (REQ-NFR-001): manifests are considered in POSIX-sorted
+ * root order; the FIRST occurrence of a duplicate name wins (later duplicates are
+ * ignored). `workspacePatterns` (when non-empty) restricts membership: only the
+ * repo-root package and packages under a matching workspace pattern are included.
+ * When NO workspace patterns are declared, ALL discovered named packages are mapped
+ * (a plain multi-package repo without a formal workspace declaration).
+ */
+export function buildPackageNameMap(
+  manifests: PackageInfo[],
+  workspacePatterns: string[],
+): Map<string, PackageInfo> {
+  const sorted = [...manifests].sort((a, b) => (a.root < b.root ? -1 : a.root > b.root ? 1 : 0));
+  const allRoots = sorted.map((m) => m.root);
+  let eligible: Set<string>;
+  if (workspacePatterns.length > 0) {
+    eligible = new Set<string>([""]); // repo root always eligible
+    for (const pat of workspacePatterns) {
+      for (const r of matchWorkspacePattern(pat, allRoots)) eligible.add(r);
+    }
+  } else {
+    eligible = new Set<string>(allRoots);
+  }
+  const map = new Map<string, PackageInfo>();
+  for (const m of sorted) {
+    if (!eligible.has(m.root)) continue;
+    if (!m.name) continue;
+    if (!map.has(m.name)) map.set(m.name, m); // first-wins (sorted root order)
+  }
+  return map;
+}
+
+/**
+ * Resolve a BARE TS/JS specifier through the workspace package-name map. Returns an
+ * in-repo POSIX path IFF the specifier's package head matches a known package AND a
+ * candidate lands on a real file in `fileSet`; otherwise null (→ unresolved, never
+ * guessed).
+ *
+ * Deterministic tie-break (REQ-NFR-001): when the specifier head matches multiple
+ * package names (e.g. "@scope/a" vs "@scope/a/sub" both being package names), the
+ * LONGEST package name wins, then POSIX-sorted first. The subpath after the package
+ * name is resolved within the package root (with `TS_RESOLVE_EXTS`); a bare package
+ * import (no subpath) resolves to the manifest `main`/`module` entry or an index.
+ */
+export function resolveWorkspaceBare(
+  specifier: string,
+  pkgMap: Map<string, PackageInfo>,
+  fileSet: Set<string>,
+): string | null {
+  if (specifier.startsWith(".")) return null; // relative handled elsewhere
+
+  // Find all package names that are a "head" of the specifier (name === spec, or
+  // spec starts with name + "/").
+  const matches: PackageInfo[] = [];
+  for (const [name, info] of pkgMap.entries()) {
+    if (specifier === name || specifier.startsWith(name + "/")) matches.push(info);
+  }
+  if (matches.length === 0) return null;
+  // Longest package name wins; ties → POSIX-sorted root first.
+  matches.sort((a, b) =>
+    b.name.length - a.name.length ||
+    (a.root < b.root ? -1 : a.root > b.root ? 1 : 0),
+  );
+
+  const joinPosix = (dir: string, rel: string): string => {
+    const j = path.posix.normalize(path.posix.join(dir === "" ? "." : dir, rel));
+    return j === "." ? "" : j;
+  };
+  const probe = (cand: string): string | null => {
+    if (cand.startsWith("..")) return null;
+    if (fileSet.has(cand)) return cand;
+    for (const suf of TS_RESOLVE_EXTS) {
+      if (fileSet.has(cand + suf)) return cand + suf;
+    }
+    return null;
+  };
+
+  for (const info of matches) {
+    const subpath = specifier === info.name ? "" : specifier.slice(info.name.length + 1);
+    if (subpath) {
+      const r = probe(joinPosix(info.root, subpath));
+      if (r) return r;
+    } else {
+      // Bare package import → manifest entry (main/module), then index fallback.
+      for (const entry of [info.main, info.module]) {
+        if (typeof entry === "string" && entry.length > 0) {
+          const r = probe(joinPosix(info.root, entry));
+          if (r) return r;
+        }
+      }
+      const idx = probe(info.root === "" ? "index" : info.root);
+      if (idx) return idx;
+    }
+  }
+  return null;
+}
+
 /**
  * Resolve a Python relative import (leading dots) against the importing file's
  * package directory. Only DOTTED (relative) specifiers are resolvable; absolute

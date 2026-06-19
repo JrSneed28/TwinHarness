@@ -208,6 +208,73 @@ describe("DEFERRED #1a — tsconfig/jsconfig paths+baseUrl alias edges (basis: a
   });
 });
 
+describe("DEFERRED #1b — workspace bare-package alias edges (basis: alias)", () => {
+  it("resolves a bare workspace-package import onto an in-repo file with basis:alias", () => {
+    tp = makeTempProject();
+    write(tp.root, {
+      "package.json": '{ "name": "root", "private": true, "workspaces": ["packages/*"] }\n',
+      "packages/lib/package.json": '{ "name": "@acme/lib", "main": "src/index.ts" }\n',
+      "packages/lib/src/index.ts": "export const lib = 1;\n",
+      "packages/app/package.json": '{ "name": "@acme/app" }\n',
+      "packages/app/src/main.ts": "import { lib } from '@acme/lib';\nexport const app = 1;\n",
+    });
+    const map = scanRepo(tp.root);
+    const edge = (map.edges ?? []).find(
+      (e) => e.from === "packages/app/src/main.ts" && e.to === "packages/lib/src/index.ts",
+    );
+    expect(edge).toBeDefined();
+    expect(edge!.basis).toBe("alias");
+    expect(edge!.external).toBeUndefined();
+  });
+
+  it("resolves a workspace subpath import within the package root", () => {
+    tp = makeTempProject();
+    write(tp.root, {
+      "package.json": '{ "name": "root", "workspaces": ["packages/*"] }\n',
+      "packages/lib/package.json": '{ "name": "@acme/lib" }\n',
+      "packages/lib/src/util.ts": "export const u = 1;\n",
+      "packages/app/package.json": '{ "name": "@acme/app" }\n',
+      "packages/app/main.ts": "import { u } from '@acme/lib/src/util';\nexport const a = 1;\n",
+    });
+    const map = scanRepo(tp.root);
+    const edge = (map.edges ?? []).find(
+      (e) => e.from === "packages/app/main.ts" && e.to === "packages/lib/src/util.ts",
+    );
+    expect(edge).toBeDefined();
+    expect(edge!.basis).toBe("alias");
+  });
+
+  it("a bare import to an unknown package stays unresolved (never guessed)", () => {
+    tp = makeTempProject();
+    write(tp.root, {
+      "package.json": '{ "name": "root", "workspaces": ["packages/*"] }\n',
+      "packages/app/package.json": '{ "name": "@acme/app" }\n',
+      "packages/app/main.ts": "import x from 'react';\nexport const a = 1;\n",
+    });
+    const map = scanRepo(tp.root);
+    const edge = (map.edges ?? []).find((e) => e.to === "react");
+    expect(edge!.basis).toBe("unresolved");
+    expect(edge!.external).toBe(true);
+    expect((map.edges ?? []).some((e) => e.basis === "alias")).toBe(false);
+  });
+
+  it("pnpm-workspace.yaml drives workspace membership", () => {
+    tp = makeTempProject();
+    write(tp.root, {
+      "package.json": '{ "name": "root" }\n',
+      "pnpm-workspace.yaml": "packages:\n  - 'packages/*'\n",
+      "packages/lib/package.json": '{ "name": "@acme/lib", "main": "index.ts" }\n',
+      "packages/lib/index.ts": "export const lib = 1;\n",
+      "packages/app/package.json": '{ "name": "@acme/app" }\n',
+      "packages/app/main.ts": "import { lib } from '@acme/lib';\nexport const a = 1;\n",
+    });
+    const map = scanRepo(tp.root);
+    const edge = (map.edges ?? []).find((e) => e.to === "packages/lib/index.ts");
+    expect(edge).toBeDefined();
+    expect(edge!.basis).toBe("alias");
+  });
+});
+
 describe("P2-3 — public API beyond manifest (parsed barrels)", () => {
   it("an index barrel with exported symbols yields a parsed public-API surface", () => {
     tp = makeTempProject();

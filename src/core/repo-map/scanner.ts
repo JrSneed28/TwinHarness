@@ -55,8 +55,11 @@ import {
   parseJsonc,
   buildAliasTable,
   resolveAliasTsJs,
+  buildPackageNameMap,
+  resolveWorkspaceBare,
   type RawImport,
   type AliasTable,
+  type PackageInfo,
 } from "./extract";
 
 /** Scan caps (TD §Internal — ODQ-001..003; internal tuning, reversible). */
@@ -415,6 +418,12 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
   // Content is INERT text — never require()'d/executed (RULE-004, fail-closed).
   const tsConfigText = new Map<string, string>();
 
+  // DEFERRED #1b — discovered in-repo package manifests (name + entry hints) and the
+  // declared workspace glob patterns. Built PURELY in-memory after the walk into a
+  // package-name -> root map; manifests are INERT JSON (never require()'d).
+  const packageManifests: PackageInfo[] = [];
+  const workspacePatterns: string[] = [];
+
   // Accumulators (deduped by key, unsorted — the serializer sorts).
   const langs = new Map<string, { evidence: Set<string>; sources: Set<string> }>();
   const pms = new Map<string, Set<string>>();
@@ -744,6 +753,62 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
           if (json.exports !== undefined) {
             apiHints.push({ name: path.basename(rel), source: "package.json:exports" });
           }
+          // DEFERRED #1b — record this manifest's name + entry hints for the
+          // package-name -> root map. `dir` (computed above) ends with "/" or is "".
+          const pkgRoot = dir.endsWith("/") ? dir.slice(0, -1) : dir; // "" = repo root
+          if (typeof json.name === "string" && json.name.length > 0) {
+            packageManifests.push({
+              root: pkgRoot,
+              name: json.name,
+              ...(typeof json.main === "string" ? { main: json.main } : {}),
+              ...(typeof json.module === "string" ? { module: json.module } : {}),
+            });
+          }
+          // DEFERRED #1b — workspace glob patterns from `workspaces` (array form OR
+          // the yarn `{ packages: [...] }` object form). Patterns are repo-root-
+          // relative; prefixed with the manifest dir for nested workspace roots.
+          const collectPatterns = (raw: unknown): void => {
+            if (!Array.isArray(raw)) return;
+            for (const p of raw) {
+              if (typeof p === "string" && p.length > 0) {
+                workspacePatterns.push(pkgRoot === "" ? p : `${pkgRoot}/${p}`);
+              }
+            }
+          };
+          if (Array.isArray(json.workspaces)) collectPatterns(json.workspaces);
+          else if (
+            typeof json.workspaces === "object" && json.workspaces !== null &&
+            Array.isArray((json.workspaces as Record<string, unknown>).packages)
+          ) {
+            collectPatterns((json.workspaces as Record<string, unknown>).packages);
+          }
+        }
+      } else if ((nameLower === "pnpm-workspace.yaml" || nameLower === "pnpm-workspace.yml") && content !== undefined) {
+        // DEFERRED #1b — pnpm declares workspace globs as a YAML `packages:` list. We
+        // read it as INERT text with a minimal line scanner (never a YAML executor):
+        // `packages:` followed by `- 'glob'` items. Patterns are repo-root-relative.
+        const dir = path.posix.dirname(rel);
+        const base = dir === "." ? "" : dir;
+        let inPackages = false;
+        for (const line of content.split(/\r?\n/)) {
+          if (/^packages\s*:/.test(line)) { inPackages = true; continue; }
+          if (inPackages) {
+            const m = /^\s*-\s*['"]?([^'"\s#]+)['"]?/.exec(line);
+            if (m && m[1]) workspacePatterns.push(base === "" ? m[1] : `${base}/${m[1]}`);
+            else if (/^\S/.test(line)) inPackages = false; // dedented → end of list
+          }
+        }
+      } else if (nameLower === "lerna.json" && content !== undefined) {
+        // DEFERRED #1b — lerna declares workspace globs in a JSON `packages` array.
+        const json = safeParseJson(content);
+        const dir = path.posix.dirname(rel);
+        const base = dir === "." ? "" : dir;
+        if (json && Array.isArray(json.packages)) {
+          for (const p of json.packages) {
+            if (typeof p === "string" && p.length > 0) {
+              workspacePatterns.push(base === "" ? p : `${base}/${p}`);
+            }
+          }
         }
       } else if (nameLower === "makefile" && content !== undefined) {
         // Makefile targets → candidate commands (RECORDED, NEVER EXECUTED). Reuses
@@ -813,6 +878,12 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
     if (table) aliasTables.push(table);
   }
 
+  // DEFERRED #1b — build the workspace package-name -> root map PURELY in-memory from
+  // the discovered manifests + declared workspace glob patterns. Deterministic:
+  // first-wins over POSIX-sorted roots; membership restricted to matched workspace
+  // members when patterns are declared (else all named packages).
+  const packageNameMap = buildPackageNameMap(packageManifests, workspacePatterns);
+
   const edges: ImportEdge[] = [];
   const edgeSeen = new Set<string>();
   outer: for (const [from, { ext, imports }] of rawImportsByFile.entries()) {
@@ -839,6 +910,13 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
       let aliasTo: string | null = null;
       if (isTsJs && aliasTables.length > 0) {
         aliasTo = resolveAliasTsJs(from, imp.specifier, aliasTables, fileSet);
+      }
+      // DEFERRED #1b — tsconfig aliases failed: try workspace bare-package resolution
+      // for a TS/JS bare specifier whose head matches an in-repo package name. A
+      // landing candidate is recorded basis:"alias"; a non-landing specifier falls
+      // through to `unresolved` (never guessed).
+      if (aliasTo === null && isTsJs && packageNameMap.size > 0) {
+        aliasTo = resolveWorkspaceBare(imp.specifier, packageNameMap, fileSet);
       }
       if (aliasTo !== null) {
         const key = `${from}\0${aliasTo}\0alias`;

@@ -18965,6 +18965,87 @@ function resolveAliasTsJs(fromRel, specifier, tables, fileSet) {
   );
   return candidates[0].resolved;
 }
+function matchWorkspacePattern(pattern, roots) {
+  const norm = pattern.replace(/\/+$/, "");
+  const out = [];
+  for (const r of roots) {
+    if (norm.endsWith("/**")) {
+      const base = norm.slice(0, -3);
+      if (r === base || r.startsWith(base + "/")) out.push(r);
+    } else if (norm.endsWith("/*")) {
+      const base = norm.slice(0, -2);
+      if (r.startsWith(base + "/")) {
+        const rest = r.slice(base.length + 1);
+        if (!rest.includes("/")) out.push(r);
+      }
+    } else if (norm === "*") {
+      if (!r.includes("/") && r !== "") out.push(r);
+    } else {
+      if (r === norm) out.push(r);
+    }
+  }
+  return out;
+}
+function buildPackageNameMap(manifests, workspacePatterns) {
+  const sorted = [...manifests].sort((a, b) => a.root < b.root ? -1 : a.root > b.root ? 1 : 0);
+  const allRoots = sorted.map((m) => m.root);
+  let eligible;
+  if (workspacePatterns.length > 0) {
+    eligible = /* @__PURE__ */ new Set([""]);
+    for (const pat of workspacePatterns) {
+      for (const r of matchWorkspacePattern(pat, allRoots)) eligible.add(r);
+    }
+  } else {
+    eligible = new Set(allRoots);
+  }
+  const map = /* @__PURE__ */ new Map();
+  for (const m of sorted) {
+    if (!eligible.has(m.root)) continue;
+    if (!m.name) continue;
+    if (!map.has(m.name)) map.set(m.name, m);
+  }
+  return map;
+}
+function resolveWorkspaceBare(specifier, pkgMap, fileSet) {
+  if (specifier.startsWith(".")) return null;
+  const matches = [];
+  for (const [name, info] of pkgMap.entries()) {
+    if (specifier === name || specifier.startsWith(name + "/")) matches.push(info);
+  }
+  if (matches.length === 0) return null;
+  matches.sort(
+    (a, b) => b.name.length - a.name.length || (a.root < b.root ? -1 : a.root > b.root ? 1 : 0)
+  );
+  const joinPosix = (dir, rel) => {
+    const j = path14.posix.normalize(path14.posix.join(dir === "" ? "." : dir, rel));
+    return j === "." ? "" : j;
+  };
+  const probe = (cand) => {
+    if (cand.startsWith("..")) return null;
+    if (fileSet.has(cand)) return cand;
+    for (const suf of TS_RESOLVE_EXTS) {
+      if (fileSet.has(cand + suf)) return cand + suf;
+    }
+    return null;
+  };
+  for (const info of matches) {
+    const subpath = specifier === info.name ? "" : specifier.slice(info.name.length + 1);
+    if (subpath) {
+      const r = probe(joinPosix(info.root, subpath));
+      if (r) return r;
+    } else {
+      for (const entry of [info.main, info.module]) {
+        if (typeof entry === "string" && entry.length > 0) {
+          const r = probe(joinPosix(info.root, entry));
+          if (r) return r;
+        }
+      }
+      const idx = probe(info.root === "" ? "index" : info.root);
+      if (idx) return idx;
+    }
+  }
+  return null;
+}
 function resolveRelativePython(fromRel, specifier, fileSet) {
   if (!specifier.startsWith(".")) return null;
   const dots = /^\.+/.exec(specifier)[0].length;
@@ -19197,6 +19278,8 @@ function scanRepo(root, opts = {}) {
   const rawImportsByFile = /* @__PURE__ */ new Map();
   let symbolTotal = 0;
   const tsConfigText = /* @__PURE__ */ new Map();
+  const packageManifests = [];
+  const workspacePatterns = [];
   const langs = /* @__PURE__ */ new Map();
   const pms = /* @__PURE__ */ new Map();
   const commands = [];
@@ -19420,6 +19503,53 @@ function scanRepo(root, opts = {}) {
           if (json.exports !== void 0) {
             apiHints.push({ name: path15.basename(rel), source: "package.json:exports" });
           }
+          const pkgRoot = dir.endsWith("/") ? dir.slice(0, -1) : dir;
+          if (typeof json.name === "string" && json.name.length > 0) {
+            packageManifests.push({
+              root: pkgRoot,
+              name: json.name,
+              ...typeof json.main === "string" ? { main: json.main } : {},
+              ...typeof json.module === "string" ? { module: json.module } : {}
+            });
+          }
+          const collectPatterns = (raw) => {
+            if (!Array.isArray(raw)) return;
+            for (const p of raw) {
+              if (typeof p === "string" && p.length > 0) {
+                workspacePatterns.push(pkgRoot === "" ? p : `${pkgRoot}/${p}`);
+              }
+            }
+          };
+          if (Array.isArray(json.workspaces)) collectPatterns(json.workspaces);
+          else if (typeof json.workspaces === "object" && json.workspaces !== null && Array.isArray(json.workspaces.packages)) {
+            collectPatterns(json.workspaces.packages);
+          }
+        }
+      } else if ((nameLower === "pnpm-workspace.yaml" || nameLower === "pnpm-workspace.yml") && content !== void 0) {
+        const dir = path15.posix.dirname(rel);
+        const base = dir === "." ? "" : dir;
+        let inPackages = false;
+        for (const line of content.split(/\r?\n/)) {
+          if (/^packages\s*:/.test(line)) {
+            inPackages = true;
+            continue;
+          }
+          if (inPackages) {
+            const m = /^\s*-\s*['"]?([^'"\s#]+)['"]?/.exec(line);
+            if (m && m[1]) workspacePatterns.push(base === "" ? m[1] : `${base}/${m[1]}`);
+            else if (/^\S/.test(line)) inPackages = false;
+          }
+        }
+      } else if (nameLower === "lerna.json" && content !== void 0) {
+        const json = safeParseJson2(content);
+        const dir = path15.posix.dirname(rel);
+        const base = dir === "." ? "" : dir;
+        if (json && Array.isArray(json.packages)) {
+          for (const p of json.packages) {
+            if (typeof p === "string" && p.length > 0) {
+              workspacePatterns.push(base === "" ? p : `${base}/${p}`);
+            }
+          }
         }
       } else if (nameLower === "makefile" && content !== void 0) {
         for (const line of content.split(/\r?\n/)) {
@@ -19461,6 +19591,7 @@ function scanRepo(root, opts = {}) {
     const table = buildAliasTable(dir, parsed);
     if (table) aliasTables.push(table);
   }
+  const packageNameMap = buildPackageNameMap(packageManifests, workspacePatterns);
   const edges = [];
   const edgeSeen = /* @__PURE__ */ new Set();
   outer: for (const [from, { ext, imports }] of rawImportsByFile.entries()) {
@@ -19482,6 +19613,9 @@ function scanRepo(root, opts = {}) {
       let aliasTo = null;
       if (isTsJs && aliasTables.length > 0) {
         aliasTo = resolveAliasTsJs(from, imp.specifier, aliasTables, fileSet);
+      }
+      if (aliasTo === null && isTsJs && packageNameMap.size > 0) {
+        aliasTo = resolveWorkspaceBare(imp.specifier, packageNameMap, fileSet);
       }
       if (aliasTo !== null) {
         const key2 = `${from}\0${aliasTo}\0alias`;

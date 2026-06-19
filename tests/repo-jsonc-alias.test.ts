@@ -17,7 +17,11 @@ import {
   parseJsonc,
   buildAliasTable,
   resolveAliasTsJs,
+  matchWorkspacePattern,
+  buildPackageNameMap,
+  resolveWorkspaceBare,
   type AliasTable,
+  type PackageInfo,
 } from "../src/core/repo-map/extract";
 
 describe("DEFERRED #1a — parseJsonc (RULE-004: pure, fail-closed JSONC reader)", () => {
@@ -173,5 +177,104 @@ describe("DEFERRED #1a — resolveAliasTsJs (in-memory, deterministic, never gue
     expect(resolveAliasTsJs("packages/app/src/main.ts", "@/a", [scoped], fileSet)).toBe(
       "packages/app/src/a.ts",
     );
+  });
+});
+
+describe("DEFERRED #1b — matchWorkspacePattern (pure glob over an in-memory dir set)", () => {
+  const roots = ["packages/a", "packages/b", "packages/nested/c", "apps/web", "libs/x"];
+  it("expands a trailing /* to exactly one segment", () => {
+    expect(matchWorkspacePattern("packages/*", roots).sort()).toEqual(["packages/a", "packages/b"]);
+  });
+  it("expands a trailing /** to one-or-more segments", () => {
+    expect(matchWorkspacePattern("packages/**", roots).sort()).toEqual([
+      "packages/a",
+      "packages/b",
+      "packages/nested/c",
+    ]);
+  });
+  it("matches an exact dir verbatim", () => {
+    expect(matchWorkspacePattern("apps/web", roots)).toEqual(["apps/web"]);
+  });
+});
+
+describe("DEFERRED #1b — buildPackageNameMap (deterministic, first-wins)", () => {
+  it("first-wins on duplicate names over POSIX-sorted roots", () => {
+    const manifests: PackageInfo[] = [
+      { root: "packages/z", name: "dup" },
+      { root: "packages/a", name: "dup" },
+    ];
+    const m = buildPackageNameMap(manifests, []);
+    // POSIX-sorted: packages/a before packages/z → packages/a wins.
+    expect(m.get("dup")!.root).toBe("packages/a");
+  });
+
+  it("restricts membership to matched workspace patterns (+ repo root)", () => {
+    const manifests: PackageInfo[] = [
+      { root: "", name: "root-pkg" },
+      { root: "packages/a", name: "a" },
+      { root: "vendored/b", name: "b" }, // NOT under a workspace pattern
+    ];
+    const m = buildPackageNameMap(manifests, ["packages/*"]);
+    expect(m.has("root-pkg")).toBe(true);
+    expect(m.has("a")).toBe(true);
+    expect(m.has("b")).toBe(false);
+  });
+
+  it("maps all named packages when no workspace patterns are declared", () => {
+    const manifests: PackageInfo[] = [
+      { root: "x", name: "x" },
+      { root: "y", name: "y" },
+    ];
+    const m = buildPackageNameMap(manifests, []);
+    expect([...m.keys()].sort()).toEqual(["x", "y"]);
+  });
+});
+
+describe("DEFERRED #1b — resolveWorkspaceBare (in-memory, never guesses)", () => {
+  const fileSet = new Set([
+    "packages/a/src/index.ts",
+    "packages/a/src/sub.ts",
+    "packages/a/dist/index.js",
+    "packages/scoped/index.ts",
+    "packages/scoped-extra/index.ts",
+  ]);
+
+  it("resolves a bare package import to its manifest main entry", () => {
+    const m = new Map<string, PackageInfo>([
+      ["@scope/a", { root: "packages/a", name: "@scope/a", main: "src/index.ts" }],
+    ]);
+    expect(resolveWorkspaceBare("@scope/a", m, fileSet)).toBe("packages/a/src/index.ts");
+  });
+
+  it("resolves a subpath import within the package root", () => {
+    const m = new Map<string, PackageInfo>([
+      ["@scope/a", { root: "packages/a", name: "@scope/a" }],
+    ]);
+    expect(resolveWorkspaceBare("@scope/a/src/sub", m, fileSet)).toBe("packages/a/src/sub.ts");
+  });
+
+  it("returns null (→ unresolved) when the head matches no package name", () => {
+    const m = new Map<string, PackageInfo>([
+      ["@scope/a", { root: "packages/a", name: "@scope/a" }],
+    ]);
+    expect(resolveWorkspaceBare("react", m, fileSet)).toBeNull();
+  });
+
+  it("returns null when a matched package's candidate lands on no in-repo file", () => {
+    const m = new Map<string, PackageInfo>([
+      ["@scope/a", { root: "packages/a", name: "@scope/a", main: "missing.ts" }],
+    ]);
+    expect(resolveWorkspaceBare("@scope/a/nope", m, fileSet)).toBeNull();
+  });
+
+  it("deterministic tie-break: LONGEST matching package name wins", () => {
+    // Both "p" and "p-extra" could be heads of "p-extra/index" but only the longer
+    // is the correct package; "p" must not greedily win.
+    const fs2 = new Set(["pkgs/short/index.ts", "pkgs/long/index.ts"]);
+    const m = new Map<string, PackageInfo>([
+      ["p", { root: "pkgs/short", name: "p", main: "index.ts" }],
+      ["p-extra", { root: "pkgs/long", name: "p-extra", main: "index.ts" }],
+    ]);
+    expect(resolveWorkspaceBare("p-extra", m, fs2)).toBe("pkgs/long/index.ts");
   });
 });
