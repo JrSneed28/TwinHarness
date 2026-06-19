@@ -286,6 +286,18 @@ export interface RepoMap {
    */
   edges?: ImportEdge[];
   /**
+   * DEFERRED #2 — lcov-derived coverage signal: the SORTED, bounded set of
+   * in-repo POSIX-relative source files an lcov report covers (contained via
+   * `parseLcovContained`). Additive, omit-when-absent (REQ-NFR-004): emitted ONLY
+   * when an lcov report is present, so no-coverage repos (incl. the golden fixture)
+   * stay byte-identical. Rides on the v3 schema; absent == legacy. The serializer
+   * emits this key only when present and non-empty, sorted. Used as a NON-`parsed`
+   * relevance signal (basis "coverage"), weighted below the lowest path-token
+   * signal so it can never outrank a resolved edge or path-token, and EXCLUDED from
+   * the P2-8 precision base.
+   */
+  coverage?: string[];
+  /**
    * DS-002 — POSIX-relative path → SHA-256 hex (64-char lowercase).
    * Additive, omit-when-absent (REQ-NFR-004). Populated by `runRepoMap` after
    * scanning; absent on pre-epic maps. `serializeRepoMap` emits this key ONLY
@@ -498,6 +510,13 @@ export function serializeRepoMap(map: RepoMap): string {
           ),
         }
       : {}),
+    // DEFERRED #2: emit `coverage` ONLY when present and non-empty (omit-when-absent
+    // — REQ-NFR-004). Sorted POSIX paths for byte-stable output (ADR-003). Placed
+    // after `edges` and before `fileHashes` (fixed contract order). A repo with no
+    // lcov report omits this key entirely → byte-identical to a legacy v3 map.
+    ...(map.coverage && map.coverage.length > 0
+      ? { coverage: sortStrings(map.coverage) }
+      : {}),
     // DS-002: emit fileHashes ONLY when present and non-empty (omit-when-absent —
     // REQ-NFR-004). Keys are sorted for byte-stable output (REQ-NFR-002).
     // Anchor: REQ-NFR-002 — deterministic: sorted keys, CRLF-normalized values (via hashContent).
@@ -670,6 +689,10 @@ export function parseRepoMap(raw: string | null | undefined): RepoMapParseResult
     ...(p.edges !== undefined && p.edges !== null
       ? { edges: p.edges as ImportEdge[] }
       : {}),
+    // DEFERRED #2: carry coverage when present (validated above).
+    ...(p.coverage !== undefined && p.coverage !== null
+      ? { coverage: p.coverage as string[] }
+      : {}),
     // DS-002: carry fileHashes when present (validated above).
     ...(p.fileHashes !== undefined && p.fileHashes !== null
       ? { fileHashes: p.fileHashes as Record<string, string> }
@@ -800,6 +823,12 @@ function validateRepoMapShape(v: Record<string, unknown>): boolean {
       isStringArray(s.trigger_patterns) &&
       isValidProvenance(s.provenance))
   ) return false;
+
+  // DEFERRED #2: coverage is optional. When present it must be a string array
+  // (POSIX-relative in-repo paths). Any other shape → map_schema (REQ-NFR-004).
+  if (v.coverage !== undefined && v.coverage !== null) {
+    if (!isStringArray(v.coverage)) return false;
+  }
 
   // DS-002: fileHashes is optional. When present, every value must be a 64-char
   // lowercase hex string (SHA-256). Any invalid value → map_schema (REQ-NFR-004).

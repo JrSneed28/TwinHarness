@@ -63,6 +63,14 @@ const WEIGHTS = {
     blastRadius: 30,
     /** Related test file for a selected source file. */
     testRelated: 50,
+    /**
+     * DEFERRED #2 — lcov coverage association (basis "coverage"). Weighted STRICTLY
+     * BELOW `siblingComponent` (40) — the lowest path-token/component signal — so a
+     * coverage-only item can NEVER outrank a resolved edge or a path-token. It is a
+     * soft "exercised by the same suite" hint, not coupling evidence: coverage-only
+     * items are excluded from the P2-8 precision base (REQ-NFR-004 / rev 2 S1).
+     */
+    coverageSignal: 20,
 };
 // ---------------------------------------------------------------------------
 // Helper utilities (pure)
@@ -228,11 +236,19 @@ function scoreFiles(map, selector, seedPaths, seedComponents) {
     }
     // P2-5 — resolved 1-hop import neighbors of the seed set (parsed edges only).
     const importNeighbors = resolvedImportNeighbors(map.edges, seedPaths);
+    // DEFERRED #2 — lcov coverage set + whether any SEED is covered. The coverage
+    // association only fires when a seed source file is itself in the coverage report
+    // (so we relate it to OTHER files the same suite exercises). Absent coverage ⇒
+    // empty set ⇒ the signal never fires (byte-identical to a no-coverage map).
+    const coverageSet = new Set(map.coverage ?? []);
+    const anySeedCovered = [...seedPaths].some((p) => coverageSet.has(p));
     for (const file of map.files) {
         let score = 0;
         const whyParts = [];
         // P2-8 — did this file earn HARD coupling (resolved import / symbol match)?
         let coupled = false;
+        // DEFERRED #2 — track whether the ONLY signal so far is the coverage association.
+        let coverageOnly = false;
         if (selector.kind === "file") {
             const target = toPosix(selector.value);
             if (file.path === target) {
@@ -367,9 +383,24 @@ function scoreFiles(map, selector, seedPaths, seedComponents) {
                     coupled = true;
             }
         }
+        // DEFERRED #2 — lcov coverage association (basis "coverage"). Fires ONLY when a
+        // seed source file is itself covered AND this file is also in the coverage set,
+        // is NOT a seed, and has earned NO stronger signal yet (score === 0). It is a
+        // soft "exercised by the same coverage report" hint, weighted below the lowest
+        // path-token signal so it can never outrank a resolved edge or path-token. A file
+        // whose only signal is this is flagged `coverageOnly` and excluded from the P2-8
+        // precision base.
+        if (score === 0 &&
+            anySeedCovered &&
+            !seedPaths.has(file.path) &&
+            coverageSet.has(file.path)) {
+            score += WEIGHTS.coverageSignal;
+            coverageOnly = true;
+            whyParts.push("exercised by the same lcov coverage report as a selected file (coverage association)");
+        }
         if (score > 0) {
             const why = whyParts.join("; ");
-            scored.push({ file, score, why, coupled });
+            scored.push({ file, score, why, coupled, ...(coverageOnly ? { coverageOnly: true } : {}) });
         }
     }
     return scored;
@@ -457,7 +488,15 @@ function computeRelevance(map, selector, opts = {}) {
     // item is "zero-coupling" when it rests only on a path-token/component heuristic
     // (no resolved import / symbol match). This count is the validation gate before
     // any regex/unresolved edge may be promoted above path-token (rev 2 S1).
-    const emittedRelated = relatedCandidates.slice(0, related.length);
+    // DEFERRED #2 — coverage-only items are EXCLUDED from BOTH the numerator
+    // (`relatedCoupled`) AND the denominator (`emittedRelated` / precision base), so a
+    // soft coverage association introduces NO new inflation and the EXISTING P2-8
+    // semantics (path-token/name-convention items already zero-coupling by design) are
+    // preserved unchanged. `relatedZeroCoupling` stays the derived complement over the
+    // coverage-free base.
+    const emittedRelated = relatedCandidates
+        .slice(0, related.length)
+        .filter((sf) => !sf.coverageOnly);
     let relatedCoupled = 0;
     for (const sf of emittedRelated)
         if (sf.coupled)

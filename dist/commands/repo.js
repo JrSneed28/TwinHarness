@@ -67,6 +67,7 @@ const guards_1 = require("../core/guards");
 const scanner_1 = require("../core/repo-map/scanner");
 const schema_1 = require("../core/repo-map/schema");
 const hash_1 = require("../core/hash");
+const lcov_1 = require("../core/repo-map/lcov");
 const atomic_io_1 = require("../core/atomic-io");
 const query_1 = require("../core/repo-map/query");
 const freshness_1 = require("../core/repo-map/freshness");
@@ -76,6 +77,22 @@ Object.defineProperty(exports, "REPO_NO_MAP_EXIT", { enumerable: true, get: func
 const freshness_cache_1 = require("../core/repo-map/freshness-cache");
 /** `--format` text-rendering values (distinct from the global `--json` envelope). */
 const FORMATS = ["summary", "json", "md"];
+/**
+ * DEFERRED #2 — conventional lcov report locations probed (POSIX-relative to root),
+ * in a FIXED order so resolution is deterministic. The FIRST existing readable file
+ * wins. lcov is UNTRUSTED text: read-only, never executed (RULE-004, fail-closed).
+ */
+const LCOV_CANDIDATES = [
+    "lcov.info",
+    "coverage/lcov.info",
+    "coverage/lcov/lcov.info",
+];
+/**
+ * Cost cap on the persisted `coverage` set (REQ-NFR-007). A pathological lcov file
+ * cannot blow the serialized-map envelope: at most this many covered paths persist
+ * (deterministically the POSIX-sorted-first slice).
+ */
+const MAX_COVERAGE_FILES = 50_000;
 /** Relative artifact paths (POSIX) reported in `data.artifacts`. */
 const REPO_MAP_JSON_REL = ".twinharness/repo-map.json";
 const REPO_MAP_MD_REL = "docs/00-repo-map.md";
@@ -131,6 +148,37 @@ function runRepoMap(paths, opts = {}) {
         }
         if (Object.keys(hashes).length > 0) {
             map.fileHashes = hashes;
+        }
+    }
+    // DEFERRED #2 — lcov coverage wiring. When a conventional lcov report exists, parse
+    // it (PURE text → contained in-repo paths via `parseLcovContained`, restricted to
+    // files the scanner saw) and persist a bounded, SORTED `coverage` set. Emitted ONLY
+    // when a report is present → no-coverage repos (incl. the golden fixture) stay
+    // byte-identical (REQ-NFR-004). The lcov is UNTRUSTED text: read-only, never
+    // executed (RULE-004); an unreadable/empty report yields no coverage (fail-closed).
+    // Anchor: REQ-NFR-004 — coverage absent on no-lcov repos → byte-backward-compatible.
+    // Anchor: REQ-NFR-007 — coverage set is capped (MAX_COVERAGE_FILES) + sorted-bounded.
+    {
+        const knownFiles = new Set(map.files.map((f) => f.path));
+        for (const candidate of LCOV_CANDIDATES) {
+            const abs = path.join(paths.root, candidate);
+            let text;
+            try {
+                if (!fs.statSync(abs).isFile())
+                    continue;
+                text = fs.readFileSync(abs, "utf8");
+            }
+            catch {
+                continue; // not present / unreadable → try the next candidate (fail-closed).
+            }
+            const lcovDirRel = path.posix.dirname(candidate) === "." ? "" : path.posix.dirname(candidate);
+            const contained = (0, lcov_1.parseLcovContained)(text, path.resolve(paths.root), lcovDirRel, knownFiles);
+            if (contained.length > 0) {
+                // Deterministic bounded slice: POSIX-sort then cap (the serializer re-sorts).
+                const sorted = [...contained].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+                map.coverage = sorted.length > MAX_COVERAGE_FILES ? sorted.slice(0, MAX_COVERAGE_FILES) : sorted;
+            }
+            break; // first existing report wins (deterministic)
         }
     }
     const json = (0, schema_1.serializeRepoMap)(map);
