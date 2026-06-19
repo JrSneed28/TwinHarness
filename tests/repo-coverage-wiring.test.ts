@@ -92,6 +92,44 @@ describe("DEFERRED #2 — scanner persists a bounded, sorted coverage field", ()
     const map = buildMap(tp.root);
     expect(map.coverage).toBeUndefined();
   });
+
+  // REGRESSION (code-review): coverage tools overwhelmingly write a `coverage/lcov.info`
+  // whose SF paths are relative to the REPO ROOT, not to the report directory. The
+  // report-dir-only base silently dropped every entry, no-op'ing the whole #2 signal for
+  // the most common real-world layout. Resolution must recover the root-relative case.
+  it("resolves root-relative SF paths in coverage/lcov.info (not just report-dir-relative)", () => {
+    tp = makeTempProject();
+    write(tp.root, {
+      "src/a.ts": "export const a = 1;\n",
+      "src/b.ts": "export const b = 2;\n",
+      // SF paths relative to the repo root, inside a non-root report dir.
+      "coverage/lcov.info": [
+        "SF:src/b.ts",
+        "end_of_record",
+        "SF:src/a.ts",
+        "end_of_record",
+      ].join("\n"),
+    });
+    const map = buildMap(tp.root);
+    expect(map.coverage).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  // REGRESSION (code-review): the candidate loop used to `break` after the first EXISTING
+  // report even when it yielded zero contained paths, so a stray/stale top-level
+  // lcov.info permanently shadowed a valid coverage/lcov.info. A present-but-empty report
+  // must fall through to the next candidate.
+  it("a present-but-stale lcov.info does not shadow a valid later coverage report", () => {
+    tp = makeTempProject();
+    write(tp.root, {
+      "src/a.ts": "export const a = 1;\n",
+      // Earlier candidate exists but every entry is stale/escaping → zero contained.
+      "lcov.info": ["SF:src/deleted.ts", "end_of_record", "SF:../../etc/passwd", "end_of_record"].join("\n"),
+      // Later candidate has the real coverage.
+      "coverage/lcov.info": ["SF:src/a.ts", "end_of_record"].join("\n"),
+    });
+    const map = buildMap(tp.root);
+    expect(map.coverage).toEqual(["src/a.ts"]);
+  });
 });
 
 describe("DEFERRED #2 — coverage signal weight + P2-8 integrity", () => {

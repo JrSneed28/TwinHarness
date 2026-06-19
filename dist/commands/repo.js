@@ -177,8 +177,10 @@ function runRepoMap(paths, opts = {}) {
                 // Deterministic bounded slice: POSIX-sort then cap (the serializer re-sorts).
                 const sorted = [...contained].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
                 map.coverage = sorted.length > MAX_COVERAGE_FILES ? sorted.slice(0, MAX_COVERAGE_FILES) : sorted;
+                break; // first report that yields in-repo coverage wins (deterministic)
             }
-            break; // first existing report wins (deterministic)
+            // Present but empty/stale (no contained paths) → do NOT let it shadow a valid
+            // later candidate; fall through and try the next report in LCOV_CANDIDATES order.
         }
     }
     const json = (0, schema_1.serializeRepoMap)(map);

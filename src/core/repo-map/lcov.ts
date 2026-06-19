@@ -61,13 +61,25 @@ export function parseLcovContained(
   knownFiles?: Set<string>,
 ): string[] {
   const out = new Set<string>();
+  // Coverage tools disagree on the base for a RELATIVE SF path: most (jest/c8/nyc and
+  // `lcov -c -d .`) emit it relative to the repo ROOT, a few relative to the report
+  // directory. Try the report dir first (documented intent), then the repo root, and
+  // accept the FIRST base that lands on a KNOWN in-repo file. Absolute SF paths ignore
+  // the base. Because every candidate is gated by `knownFiles`, the extra base can never
+  // grant a false edge — it only recovers the common `coverage/lcov.info` + root-relative
+  // layout that the report-dir-only base silently dropped.
+  const bases = lcovDirRel === "" ? [""] : [lcovDirRel, ""];
   for (const line of lcovText.split(/\r?\n/)) {
     const m = /^SF:(.*)$/.exec(line.trim());
     if (!m) continue;
-    const contained = containLcovPath(absRoot, lcovDirRel, m[1]!.trim());
-    if (contained === null) continue; // escaping path — never grant an edge
-    if (knownFiles && !knownFiles.has(contained)) continue;
-    out.add(contained);
+    const sf = m[1]!.trim();
+    for (const base of bases) {
+      const contained = containLcovPath(absRoot, base, sf);
+      if (contained === null) continue; // escaping path under this base — try the next
+      if (knownFiles && !knownFiles.has(contained)) continue; // unknown under this base
+      out.add(contained);
+      break; // first base that yields a (known) contained path wins
+    }
   }
   return [...out];
 }

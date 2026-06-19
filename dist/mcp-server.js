@@ -19731,13 +19731,18 @@ function containLcovPath(absRoot, lcovDirRel, sfPath) {
 }
 function parseLcovContained(lcovText, absRoot, lcovDirRel, knownFiles) {
   const out = /* @__PURE__ */ new Set();
+  const bases = lcovDirRel === "" ? [""] : [lcovDirRel, ""];
   for (const line of lcovText.split(/\r?\n/)) {
     const m = /^SF:(.*)$/.exec(line.trim());
     if (!m) continue;
-    const contained = containLcovPath(absRoot, lcovDirRel, m[1].trim());
-    if (contained === null) continue;
-    if (knownFiles && !knownFiles.has(contained)) continue;
-    out.add(contained);
+    const sf = m[1].trim();
+    for (const base of bases) {
+      const contained = containLcovPath(absRoot, base, sf);
+      if (contained === null) continue;
+      if (knownFiles && !knownFiles.has(contained)) continue;
+      out.add(contained);
+      break;
+    }
   }
   return [...out];
 }
@@ -20484,8 +20489,8 @@ function runRepoMap(paths, opts = {}) {
       if (contained.length > 0) {
         const sorted = [...contained].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
         map.coverage = sorted.length > MAX_COVERAGE_FILES ? sorted.slice(0, MAX_COVERAGE_FILES) : sorted;
+        break;
       }
-      break;
     }
   }
   const json = serializeRepoMap(map);
