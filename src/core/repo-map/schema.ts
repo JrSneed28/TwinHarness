@@ -487,7 +487,9 @@ export function serializeRepoMap(map: RepoMap): string {
           edges: byKey(
             map.edges.map((e) => ({
               from: toPosix(e.from),
-              to: e.basis === "parsed" ? toPosix(e.to) : e.to,
+              // "parsed"/"alias" carry an in-repo path → POSIX-normalize; "unresolved"
+              // carries the RAW specifier text → leave verbatim.
+              to: e.basis === "unresolved" ? e.to : toPosix(e.to),
               kind: e.kind,
               basis: e.basis,
               ...(e.external ? { external: true } : {}),

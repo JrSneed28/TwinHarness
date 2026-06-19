@@ -49,6 +49,9 @@ exports.isParseableExt = isParseableExt;
 exports.extractSymbols = extractSymbols;
 exports.extractImports = extractImports;
 exports.resolveRelativeTsJs = resolveRelativeTsJs;
+exports.parseJsonc = parseJsonc;
+exports.buildAliasTable = buildAliasTable;
+exports.resolveAliasTsJs = resolveAliasTsJs;
 exports.resolveRelativePython = resolveRelativePython;
 const path = __importStar(require("node:path"));
 /** Binary sniff: a NUL byte in the first chunk ⇒ treat as binary (skip extraction). */
@@ -333,6 +336,254 @@ function resolveRelativeTsJs(fromRel, specifier, fileSet) {
             return cand;
     }
     return null;
+}
+/* ------------------------------------------------------------------ *
+ * JSONC reader (DEFERRED #1a) — PURE, deterministic, fail-closed.     *
+ * ------------------------------------------------------------------ */
+/**
+ * Parse a JSON-with-comments string (tsconfig/jsconfig style) into a plain object.
+ *
+ * NET-NEW, PURE, DETERMINISTIC (RULE-004): this is a minimal text transform —
+ * strip `//` line comments and `/* *\/` block comments and trailing commas, then
+ * `JSON.parse`. The content is NEVER `require()`'d or executed (a tsconfig may be
+ * arbitrary untrusted repo data). On ANY parse failure (or a non-object / array
+ * top level) it returns `undefined` — the caller then yields NO aliases and falls
+ * back to `unresolved` (fail-closed). String/regex scanning only; no FS, no eval.
+ *
+ * Comment stripping is string-literal aware so a `//`, `/*`, or comma INSIDE a JSON
+ * string is preserved verbatim. The transform is a pure function of its input, so a
+ * given config always produces the same object (determinism — REQ-NFR-001).
+ */
+function parseJsonc(text) {
+    let out = "";
+    let inString = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        const next = i + 1 < text.length ? text[i + 1] : "";
+        if (inLineComment) {
+            if (c === "\n") {
+                inLineComment = false;
+                out += c;
+            }
+            continue;
+        }
+        if (inBlockComment) {
+            if (c === "*" && next === "/") {
+                inBlockComment = false;
+                i++;
+            }
+            continue;
+        }
+        if (inString) {
+            out += c;
+            if (c === "\\") {
+                // Preserve the escaped char verbatim (e.g. \" \\ \/).
+                if (next) {
+                    out += next;
+                    i++;
+                }
+            }
+            else if (c === '"') {
+                inString = false;
+            }
+            continue;
+        }
+        // Not in a string or comment.
+        if (c === '"') {
+            inString = true;
+            out += c;
+            continue;
+        }
+        if (c === "/" && next === "/") {
+            inLineComment = true;
+            i++;
+            continue;
+        }
+        if (c === "/" && next === "*") {
+            inBlockComment = true;
+            i++;
+            continue;
+        }
+        out += c;
+    }
+    // Strip trailing commas (e.g. `[1,2,]` / `{"a":1,}`) — comment-free now, and the
+    // regex only matches OUTSIDE strings because we operate on the stripped text and
+    // a `,]`/`,}` sequence cannot legally appear inside a JSON string after a value.
+    // To stay string-safe we re-scan: only collapse a comma followed by optional
+    // whitespace then a closing bracket/brace when NOT inside a string.
+    out = stripTrailingCommas(out);
+    try {
+        const v = JSON.parse(out);
+        return typeof v === "object" && v !== null && !Array.isArray(v)
+            ? v
+            : undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
+/** String-aware trailing-comma stripper (a `,` before `]`/`}`, ignoring whitespace). */
+function stripTrailingCommas(text) {
+    let out = "";
+    let inString = false;
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (inString) {
+            out += c;
+            if (c === "\\") {
+                if (i + 1 < text.length) {
+                    out += text[i + 1];
+                    i++;
+                }
+            }
+            else if (c === '"') {
+                inString = false;
+            }
+            continue;
+        }
+        if (c === '"') {
+            inString = true;
+            out += c;
+            continue;
+        }
+        if (c === ",") {
+            // Look ahead past whitespace for a closing bracket/brace.
+            let j = i + 1;
+            while (j < text.length && /\s/.test(text[j]))
+                j++;
+            if (j < text.length && (text[j] === "]" || text[j] === "}")) {
+                // Drop this comma (do not append it); whitespace is re-emitted by the loop.
+                continue;
+            }
+        }
+        out += c;
+    }
+    return out;
+}
+/**
+ * Build an `AliasTable` from a parsed tsconfig/jsconfig object. Returns `undefined`
+ * when there is no usable `baseUrl`/`paths` (so the caller records nothing). PURE.
+ *
+ * Note: `paths` REQUIRES a `baseUrl` in classic resolution, but modern TS resolves
+ * `paths` relative to the config file when `baseUrl` is absent. We mirror the modern
+ * behaviour: `baseDir = configDir + (baseUrl ?? ".")`.
+ */
+function buildAliasTable(configDir, parsed) {
+    const co = parsed.compilerOptions;
+    const opts = typeof co === "object" && co !== null && !Array.isArray(co)
+        ? co
+        : {};
+    const baseUrlRaw = typeof opts.baseUrl === "string" ? opts.baseUrl : undefined;
+    const pathsRaw = typeof opts.paths === "object" && opts.paths !== null && !Array.isArray(opts.paths)
+        ? opts.paths
+        : undefined;
+    if (baseUrlRaw === undefined && pathsRaw === undefined)
+        return undefined;
+    const joinPosix = (dir, rel) => {
+        const j = path.posix.normalize(path.posix.join(dir === "" ? "." : dir, rel));
+        return j === "." ? "" : j;
+    };
+    const baseDir = joinPosix(configDir, baseUrlRaw ?? ".");
+    const patterns = [];
+    if (pathsRaw) {
+        for (const [pattern, targetsRaw] of Object.entries(pathsRaw)) {
+            if (typeof pattern !== "string")
+                continue;
+            if (!Array.isArray(targetsRaw))
+                continue;
+            const targets = targetsRaw.filter((t) => typeof t === "string");
+            if (targets.length > 0)
+                patterns.push({ pattern, targets });
+        }
+    }
+    return { configDir, baseDir, hasBaseUrl: baseUrlRaw !== undefined, patterns };
+}
+/**
+ * Resolve a NON-relative TS/JS specifier through tsconfig/jsconfig alias tables.
+ * Returns the in-repo POSIX path IFF a candidate lands on a file in `fileSet`;
+ * otherwise null (the caller then records `unresolved` — NEVER guesses).
+ *
+ * Deterministic tie-break (REQ-NFR-001):
+ *   1. Consider ALL tables whose `configDir` is an ancestor of (or equal to) the
+ *      importing file's directory (a config governs files under it). Tables are
+ *      examined in a fixed order: the candidate with the LONGEST non-wildcard
+ *      pattern prefix wins; ties broken by POSIX-sorted resolved path.
+ *   2. For each matching pattern, each target template is expanded and probed
+ *      against `fileSet` using `TS_RESOLVE_EXTS` (same order as relative resolution).
+ *   3. A `baseUrl`-relative bare specifier (no matching pattern) is tried last.
+ * Any candidate that escapes the repo (normalizes to a `..` prefix) is rejected.
+ *
+ * `fromRel` is the importing file's POSIX path; `tables` is the full set; ALL
+ * resolution is over the in-memory SORTED `fileSet` — never readdir order.
+ */
+function resolveAliasTsJs(fromRel, specifier, tables, fileSet) {
+    if (specifier.startsWith("."))
+        return null; // relative handled elsewhere
+    const fromDir = path.posix.dirname(fromRel);
+    const governs = (configDir) => configDir === "" || fromDir === configDir || fromDir.startsWith(configDir + "/");
+    // Collect ranked candidates: { prefixLen, resolvedPath }.
+    const candidates = [];
+    const probe = (baseDir, relTarget) => {
+        const joined = path.posix.normalize(path.posix.join(baseDir === "" ? "." : baseDir, relTarget));
+        const norm = joined === "." ? "" : joined;
+        if (norm.startsWith(".."))
+            return null; // escapes the repo — never guess
+        if (fileSet.has(norm))
+            return norm;
+        for (const suf of TS_RESOLVE_EXTS) {
+            const cand = norm + suf;
+            if (fileSet.has(cand))
+                return cand;
+        }
+        return null;
+    };
+    for (const table of tables) {
+        if (!governs(table.configDir))
+            continue;
+        for (const { pattern, targets } of table.patterns) {
+            const starIdx = pattern.indexOf("*");
+            if (starIdx === -1) {
+                // Exact (non-wildcard) pattern — must match the specifier verbatim.
+                if (pattern !== specifier)
+                    continue;
+                for (const t of targets) {
+                    const r = probe(table.baseDir, t);
+                    if (r)
+                        candidates.push({ prefixLen: pattern.length, resolved: r });
+                }
+            }
+            else {
+                const prefix = pattern.slice(0, starIdx);
+                const suffix = pattern.slice(starIdx + 1);
+                if (!specifier.startsWith(prefix) || !specifier.endsWith(suffix))
+                    continue;
+                if (specifier.length < prefix.length + suffix.length)
+                    continue;
+                const captured = specifier.slice(prefix.length, specifier.length - suffix.length);
+                for (const t of targets) {
+                    const target = t.includes("*") ? t.replace("*", captured) : t;
+                    const r = probe(table.baseDir, target);
+                    // Non-wildcard prefix length is the tie-break key (longer = more specific).
+                    if (r)
+                        candidates.push({ prefixLen: prefix.length, resolved: r });
+                }
+            }
+        }
+        // baseUrl-relative bare specifier (only when the table declares a baseUrl).
+        if (table.hasBaseUrl) {
+            const r = probe(table.baseDir, specifier);
+            if (r)
+                candidates.push({ prefixLen: 0, resolved: r });
+        }
+    }
+    if (candidates.length === 0)
+        return null;
+    // Longest non-wildcard prefix wins; ties → POSIX-sorted resolved path first.
+    candidates.sort((a, b) => b.prefixLen - a.prefixLen ||
+        (a.resolved < b.resolved ? -1 : a.resolved > b.resolved ? 1 : 0));
+    return candidates[0].resolved;
 }
 /**
  * Resolve a Python relative import (leading dots) against the importing file's

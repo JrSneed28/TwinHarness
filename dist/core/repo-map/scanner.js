@@ -372,6 +372,11 @@ function scanRepo(root, opts = {}) {
     // memory; no extra FS access). `symbolTotal` enforces the whole-graph cost cap.
     const rawImportsByFile = new Map();
     let symbolTotal = 0;
+    // DEFERRED #1a — raw tsconfig/jsconfig text captured during the walk (keyed by the
+    // config's POSIX-relative DIRECTORY; "" = repo root). Parsed into alias tables AFTER
+    // the walk so resolution sees the complete in-memory fileSet (no extra FS access).
+    // Content is INERT text — never require()'d/executed (RULE-004, fail-closed).
+    const tsConfigText = new Map();
     // Accumulators (deduped by key, unsorted — the serializer sorts).
     const langs = new Map();
     const pms = new Map();
@@ -710,6 +715,13 @@ function scanRepo(root, opts = {}) {
                     }
                 }
             }
+            // DEFERRED #1a — capture tsconfig/jsconfig raw text for post-walk alias-table
+            // construction. Stored by the config's directory; a later config at the same
+            // dir (impossible — one file per name) would not occur. Reuses the single read.
+            if ((nameLower === "tsconfig.json" || nameLower === "jsconfig.json") && content !== undefined) {
+                const dir = path.posix.dirname(rel);
+                tsConfigText.set(dir === "." ? "" : dir, content);
+            }
             // Conventional entry-file detection (REQ-RU-008).
             if (ENTRY_FILES.has(nameLower)) {
                 entrypoints.push({ name: entry.name, path: rel, source: "convention" });
@@ -747,6 +759,19 @@ function scanRepo(root, opts = {}) {
     // recorded as `unresolved`/`external` (Phase 2B does full module resolution). The
     // whole-graph edge cap bounds cost (REQ-NFR-007).
     const fileSet = new Set(files.map((f) => f.path));
+    // DEFERRED #1a — build tsconfig/jsconfig alias tables from the captured raw text.
+    // PURE + in-memory: each config is parsed by the fail-closed JSONC reader; a parse
+    // failure (or no baseUrl/paths) simply yields no table (fall back to unresolved).
+    // Tables are sorted by POSIX configDir for deterministic candidate ordering.
+    const aliasTables = [];
+    for (const [dir, text] of [...tsConfigText.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+        const parsed = (0, extract_1.parseJsonc)(text);
+        if (!parsed)
+            continue;
+        const table = (0, extract_1.buildAliasTable)(dir, parsed);
+        if (table)
+            aliasTables.push(table);
+    }
     const edges = [];
     const edgeSeen = new Set();
     outer: for (const [from, { ext, imports }] of rawImportsByFile.entries()) {
@@ -767,15 +792,31 @@ function scanRepo(root, opts = {}) {
                     continue;
                 edgeSeen.add(key);
                 edges.push({ from, to, kind: "import", basis: "parsed" });
+                continue;
             }
-            else {
-                // Honest unresolved label — NEVER guessed into an in-repo path (RULE / S1).
-                const key = `${from}\0${imp.specifier}\0unresolved`;
+            // DEFERRED #1a — relative resolution failed: try tsconfig/jsconfig aliases for
+            // a TS/JS specifier. A successful alias lands on an in-repo file and is recorded
+            // with basis:"alias" (DISTINCT from parsed — inspection/telemetry only). Counts
+            // against MAX_TOTAL_EDGES (REQ-NFR-007). Never guessed: a non-landing specifier
+            // falls through to the honest `unresolved` label below.
+            let aliasTo = null;
+            if (isTsJs && aliasTables.length > 0) {
+                aliasTo = (0, extract_1.resolveAliasTsJs)(from, imp.specifier, aliasTables, fileSet);
+            }
+            if (aliasTo !== null) {
+                const key = `${from}\0${aliasTo}\0alias`;
                 if (edgeSeen.has(key))
                     continue;
                 edgeSeen.add(key);
-                edges.push({ from, to: imp.specifier, kind: "import", basis: "unresolved", external: true });
+                edges.push({ from, to: aliasTo, kind: "import", basis: "alias" });
+                continue;
             }
+            // Honest unresolved label — NEVER guessed into an in-repo path (RULE / S1).
+            const key = `${from}\0${imp.specifier}\0unresolved`;
+            if (edgeSeen.has(key))
+                continue;
+            edgeSeen.add(key);
+            edges.push({ from, to: imp.specifier, kind: "import", basis: "unresolved", external: true });
         }
     }
     // --- REQ anchors (REQ-RU-011, REQ-NFR-003) ----------------------------------

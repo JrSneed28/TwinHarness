@@ -18338,7 +18338,9 @@ function serializeRepoMap(map) {
       edges: byKey(
         map.edges.map((e) => ({
           from: toPosix(e.from),
-          to: e.basis === "parsed" ? toPosix(e.to) : e.to,
+          // "parsed"/"alias" carry an in-repo path → POSIX-normalize; "unresolved"
+          // carries the RAW specifier text → leave verbatim.
+          to: e.basis === "unresolved" ? e.to : toPosix(e.to),
           kind: e.kind,
           basis: e.basis,
           ...e.external ? { external: true } : {}
@@ -18797,6 +18799,172 @@ function resolveRelativeTsJs(fromRel, specifier, fileSet) {
   }
   return null;
 }
+function parseJsonc(text) {
+  let out = "";
+  let inString = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const next = i + 1 < text.length ? text[i + 1] : "";
+    if (inLineComment) {
+      if (c === "\n") {
+        inLineComment = false;
+        out += c;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (c === "*" && next === "/") {
+        inBlockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (inString) {
+      out += c;
+      if (c === "\\") {
+        if (next) {
+          out += next;
+          i++;
+        }
+      } else if (c === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      out += c;
+      continue;
+    }
+    if (c === "/" && next === "/") {
+      inLineComment = true;
+      i++;
+      continue;
+    }
+    if (c === "/" && next === "*") {
+      inBlockComment = true;
+      i++;
+      continue;
+    }
+    out += c;
+  }
+  out = stripTrailingCommas(out);
+  try {
+    const v = JSON.parse(out);
+    return typeof v === "object" && v !== null && !Array.isArray(v) ? v : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function stripTrailingCommas(text) {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      out += c;
+      if (c === "\\") {
+        if (i + 1 < text.length) {
+          out += text[i + 1];
+          i++;
+        }
+      } else if (c === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      out += c;
+      continue;
+    }
+    if (c === ",") {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j])) j++;
+      if (j < text.length && (text[j] === "]" || text[j] === "}")) {
+        continue;
+      }
+    }
+    out += c;
+  }
+  return out;
+}
+function buildAliasTable(configDir, parsed) {
+  const co = parsed.compilerOptions;
+  const opts = typeof co === "object" && co !== null && !Array.isArray(co) ? co : {};
+  const baseUrlRaw = typeof opts.baseUrl === "string" ? opts.baseUrl : void 0;
+  const pathsRaw = typeof opts.paths === "object" && opts.paths !== null && !Array.isArray(opts.paths) ? opts.paths : void 0;
+  if (baseUrlRaw === void 0 && pathsRaw === void 0) return void 0;
+  const joinPosix = (dir, rel) => {
+    const j = path14.posix.normalize(path14.posix.join(dir === "" ? "." : dir, rel));
+    return j === "." ? "" : j;
+  };
+  const baseDir = joinPosix(configDir, baseUrlRaw ?? ".");
+  const patterns = [];
+  if (pathsRaw) {
+    for (const [pattern, targetsRaw] of Object.entries(pathsRaw)) {
+      if (typeof pattern !== "string") continue;
+      if (!Array.isArray(targetsRaw)) continue;
+      const targets = targetsRaw.filter((t) => typeof t === "string");
+      if (targets.length > 0) patterns.push({ pattern, targets });
+    }
+  }
+  return { configDir, baseDir, hasBaseUrl: baseUrlRaw !== void 0, patterns };
+}
+function resolveAliasTsJs(fromRel, specifier, tables, fileSet) {
+  if (specifier.startsWith(".")) return null;
+  const fromDir = path14.posix.dirname(fromRel);
+  const governs = (configDir) => configDir === "" || fromDir === configDir || fromDir.startsWith(configDir + "/");
+  const candidates = [];
+  const probe = (baseDir, relTarget) => {
+    const joined = path14.posix.normalize(
+      path14.posix.join(baseDir === "" ? "." : baseDir, relTarget)
+    );
+    const norm = joined === "." ? "" : joined;
+    if (norm.startsWith("..")) return null;
+    if (fileSet.has(norm)) return norm;
+    for (const suf of TS_RESOLVE_EXTS) {
+      const cand = norm + suf;
+      if (fileSet.has(cand)) return cand;
+    }
+    return null;
+  };
+  for (const table of tables) {
+    if (!governs(table.configDir)) continue;
+    for (const { pattern, targets } of table.patterns) {
+      const starIdx = pattern.indexOf("*");
+      if (starIdx === -1) {
+        if (pattern !== specifier) continue;
+        for (const t of targets) {
+          const r = probe(table.baseDir, t);
+          if (r) candidates.push({ prefixLen: pattern.length, resolved: r });
+        }
+      } else {
+        const prefix = pattern.slice(0, starIdx);
+        const suffix = pattern.slice(starIdx + 1);
+        if (!specifier.startsWith(prefix) || !specifier.endsWith(suffix)) continue;
+        if (specifier.length < prefix.length + suffix.length) continue;
+        const captured = specifier.slice(prefix.length, specifier.length - suffix.length);
+        for (const t of targets) {
+          const target = t.includes("*") ? t.replace("*", captured) : t;
+          const r = probe(table.baseDir, target);
+          if (r) candidates.push({ prefixLen: prefix.length, resolved: r });
+        }
+      }
+    }
+    if (table.hasBaseUrl) {
+      const r = probe(table.baseDir, specifier);
+      if (r) candidates.push({ prefixLen: 0, resolved: r });
+    }
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort(
+    (a, b) => b.prefixLen - a.prefixLen || (a.resolved < b.resolved ? -1 : a.resolved > b.resolved ? 1 : 0)
+  );
+  return candidates[0].resolved;
+}
 function resolveRelativePython(fromRel, specifier, fileSet) {
   if (!specifier.startsWith(".")) return null;
   const dots = /^\.+/.exec(specifier)[0].length;
@@ -19028,6 +19196,7 @@ function scanRepo(root, opts = {}) {
   const excludeSet = new Set(opts.excludePaths ?? []);
   const rawImportsByFile = /* @__PURE__ */ new Map();
   let symbolTotal = 0;
+  const tsConfigText = /* @__PURE__ */ new Map();
   const langs = /* @__PURE__ */ new Map();
   const pms = /* @__PURE__ */ new Map();
   const commands = [];
@@ -19260,6 +19429,10 @@ function scanRepo(root, opts = {}) {
           }
         }
       }
+      if ((nameLower === "tsconfig.json" || nameLower === "jsconfig.json") && content !== void 0) {
+        const dir = path15.posix.dirname(rel);
+        tsConfigText.set(dir === "." ? "" : dir, content);
+      }
       if (ENTRY_FILES.has(nameLower)) {
         entrypoints.push({ name: entry.name, path: rel, source: "convention" });
       }
@@ -19281,6 +19454,13 @@ function scanRepo(root, opts = {}) {
     }
   }
   const fileSet = new Set(files.map((f) => f.path));
+  const aliasTables = [];
+  for (const [dir, text] of [...tsConfigText.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+    const parsed = parseJsonc(text);
+    if (!parsed) continue;
+    const table = buildAliasTable(dir, parsed);
+    if (table) aliasTables.push(table);
+  }
   const edges = [];
   const edgeSeen = /* @__PURE__ */ new Set();
   outer: for (const [from, { ext, imports }] of rawImportsByFile.entries()) {
@@ -19293,16 +19473,27 @@ function scanRepo(root, opts = {}) {
       if (isTsJs) to = resolveRelativeTsJs(from, imp.specifier, fileSet);
       else if (isPy) to = resolveRelativePython(from, imp.specifier, fileSet);
       if (to !== null) {
-        const key = `${from}\0${to}\0parsed`;
-        if (edgeSeen.has(key)) continue;
-        edgeSeen.add(key);
+        const key2 = `${from}\0${to}\0parsed`;
+        if (edgeSeen.has(key2)) continue;
+        edgeSeen.add(key2);
         edges.push({ from, to, kind: "import", basis: "parsed" });
-      } else {
-        const key = `${from}\0${imp.specifier}\0unresolved`;
-        if (edgeSeen.has(key)) continue;
-        edgeSeen.add(key);
-        edges.push({ from, to: imp.specifier, kind: "import", basis: "unresolved", external: true });
+        continue;
       }
+      let aliasTo = null;
+      if (isTsJs && aliasTables.length > 0) {
+        aliasTo = resolveAliasTsJs(from, imp.specifier, aliasTables, fileSet);
+      }
+      if (aliasTo !== null) {
+        const key2 = `${from}\0${aliasTo}\0alias`;
+        if (edgeSeen.has(key2)) continue;
+        edgeSeen.add(key2);
+        edges.push({ from, to: aliasTo, kind: "import", basis: "alias" });
+        continue;
+      }
+      const key = `${from}\0${imp.specifier}\0unresolved`;
+      if (edgeSeen.has(key)) continue;
+      edgeSeen.add(key);
+      edges.push({ from, to: imp.specifier, kind: "import", basis: "unresolved", external: true });
     }
   }
   const reqAnchors = [];

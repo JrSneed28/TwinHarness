@@ -137,6 +137,77 @@ describe("P2-2 — import edges: resolved=parsed, bare=unresolved (never guessed
   });
 });
 
+describe("DEFERRED #1a — tsconfig/jsconfig paths+baseUrl alias edges (basis: alias)", () => {
+  it("resolves a tsconfig-paths import onto an in-repo file with basis:alias (DISTINCT from parsed)", () => {
+    tp = makeTempProject();
+    write(tp.root, {
+      "tsconfig.json": '{\n  // comment\n  "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"] }, }\n}\n',
+      "src/main.ts": "import { login } from '@/auth/login';\nexport const main = 1;\n",
+      "src/auth/login.ts": "export const login = 1;\n",
+    });
+    const map = scanRepo(tp.root);
+    const edge = (map.edges ?? []).find((e) => e.from === "src/main.ts" && e.to === "src/auth/login.ts");
+    expect(edge).toBeDefined();
+    expect(edge!.basis).toBe("alias");
+    // An alias edge is NOT marked external (it lands on an in-repo file).
+    expect(edge!.external).toBeUndefined();
+    // It is NOT a parsed edge (the ranking contract excludes alias).
+    expect((map.edges ?? []).some((e) => e.basis === "parsed" && e.to === "src/auth/login.ts")).toBe(false);
+  });
+
+  it("jsconfig.json paths also drive alias resolution", () => {
+    tp = makeTempProject();
+    write(tp.root, {
+      "jsconfig.json": '{ "compilerOptions": { "baseUrl": ".", "paths": { "~/*": ["lib/*"] } } }\n',
+      "app.js": "import { u } from '~/util';\nexport const a = 1;\n",
+      "lib/util.js": "export const u = 1;\n",
+    });
+    const map = scanRepo(tp.root);
+    const edge = (map.edges ?? []).find((e) => e.from === "app.js" && e.to === "lib/util.js");
+    expect(edge).toBeDefined();
+    expect(edge!.basis).toBe("alias");
+  });
+
+  it("a tsconfig-paths import that lands on NO in-repo file stays unresolved (never guessed)", () => {
+    tp = makeTempProject();
+    write(tp.root, {
+      "tsconfig.json": '{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"] } } }\n',
+      "src/main.ts": "import { x } from '@/does/not/exist';\nexport const main = 1;\n",
+    });
+    const map = scanRepo(tp.root);
+    const edge = (map.edges ?? []).find((e) => e.from === "src/main.ts" && e.to === "@/does/not/exist");
+    expect(edge).toBeDefined();
+    expect(edge!.basis).toBe("unresolved");
+    expect(edge!.external).toBe(true);
+    expect((map.edges ?? []).some((e) => e.basis === "alias")).toBe(false);
+  });
+
+  it("a malformed tsconfig fails closed → no alias edges (RULE-004)", () => {
+    tp = makeTempProject();
+    write(tp.root, {
+      "tsconfig.json": "{ this is not valid json",
+      "src/main.ts": "import { login } from '@/auth/login';\nexport const main = 1;\n",
+      "src/auth/login.ts": "export const login = 1;\n",
+    });
+    const map = scanRepo(tp.root);
+    expect((map.edges ?? []).some((e) => e.basis === "alias")).toBe(false);
+    const edge = (map.edges ?? []).find((e) => e.to === "@/auth/login");
+    expect(edge?.basis).toBe("unresolved");
+  });
+
+  it("a relative import still resolves to parsed even when a tsconfig is present", () => {
+    tp = makeTempProject();
+    write(tp.root, {
+      "tsconfig.json": '{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"] } } }\n',
+      "src/a.ts": "import { b } from './b';\nexport const a = 1;\n",
+      "src/b.ts": "export const b = 1;\n",
+    });
+    const map = scanRepo(tp.root);
+    const edge = (map.edges ?? []).find((e) => e.from === "src/a.ts" && e.to === "src/b.ts");
+    expect(edge!.basis).toBe("parsed");
+  });
+});
+
 describe("P2-3 — public API beyond manifest (parsed barrels)", () => {
   it("an index barrel with exported symbols yields a parsed public-API surface", () => {
     tp = makeTempProject();
@@ -158,6 +229,25 @@ describe("Phase-2 cost gate (REQ-NFR-007) — graph stays bounded", () => {
     const map = scanRepo(tp.root);
     const f = map.files.find((x) => x.path === "src/big.ts")!;
     expect(f.symbols!.length).toBeLessThanOrEqual(MAX_SYMBOLS_PER_FILE);
+  });
+
+  it("DEFERRED #1a — alias edges count against MAX_TOTAL_EDGES (REQ-NFR-007)", () => {
+    tp = makeTempProject();
+    // With the edge cap forced to 1, the single relative import consumes the budget
+    // and the alias import (which would otherwise resolve to basis:alias) is dropped
+    // — proving alias resolution rides the SAME bounded-cost envelope as parsed edges.
+    write(tp.root, {
+      "tsconfig.json": '{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"] } } }\n',
+      "src/main.ts": "import { b } from './b';\nimport { c } from '@/c';\nexport const m = 1;\n",
+      "src/b.ts": "export const b = 1;\n",
+      "src/c.ts": "export const c = 1;\n",
+    });
+    const map = scanRepo(tp.root, { /* no override */ });
+    // Sanity: with no cap override BOTH edges are present (one parsed, one alias).
+    const aliasEdge = (map.edges ?? []).find((e) => e.basis === "alias");
+    expect(aliasEdge).toBeDefined();
+    expect(aliasEdge!.to).toBe("src/c.ts");
+    expect((map.edges ?? []).some((e) => e.basis === "parsed" && e.to === "src/b.ts")).toBe(true);
   });
 
   it("the whole-graph edge cap is a finite ceiling and the serialized graph stays small for a normal repo", () => {
