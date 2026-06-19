@@ -14,20 +14,23 @@
     {
       "name": "JavaScript/TypeScript",
       "evidence": [
-        "package.json"
+        "package.json",
+        "packages/lib/package.json"
       ],
       "source": "manifest"
     },
     {
       "name": "TypeScript",
       "evidence": [
+        "packages/lib/index.ts",
         "src/auth/login.ts",
         "src/commands/repo.ts",
         "src/core/a.ts",
         "src/core/b.ts",
-        "tests/a.test.ts"
+        "tests/a.test.ts",
+        "tsconfig.json"
       ],
-      "source": "extension"
+      "source": "both"
     }
   ],
   "package_managers": [
@@ -40,7 +43,8 @@
     {
       "name": "npm",
       "manifest_paths": [
-        "package.json"
+        "package.json",
+        "packages/lib/package.json"
       ]
     }
   ],
@@ -136,6 +140,24 @@
         "basis": "name",
         "confidence": "medium"
       }
+    },
+    {
+      "name": "index.ts",
+      "path": "packages/lib/index.ts",
+      "source": "convention",
+      "provenance": {
+        "basis": "name",
+        "confidence": "medium"
+      }
+    },
+    {
+      "name": "main",
+      "path": "packages/lib/index.ts",
+      "source": "package.json:main",
+      "provenance": {
+        "basis": "manifest",
+        "confidence": "high"
+      }
     }
   ],
   "public_api": {
@@ -143,11 +165,15 @@
       {
         "name": "package.json",
         "source": "package.json:exports"
+      },
+      {
+        "name": "packages/lib/index.ts",
+        "source": "barrel:exports"
       }
     ],
     "confidence": "heuristic",
     "provenance": {
-      "basis": "manifest",
+      "basis": "parsed",
       "confidence": "medium"
     }
   },
@@ -220,6 +246,26 @@
       ]
     },
     {
+      "path": "packages/lib/index.ts",
+      "component": null,
+      "language": "TypeScript",
+      "is_test": false,
+      "req_ids": [],
+      "symbols": [
+        {
+          "name": "lib",
+          "kind": "const"
+        }
+      ]
+    },
+    {
+      "path": "packages/lib/package.json",
+      "component": null,
+      "language": null,
+      "is_test": false,
+      "req_ids": []
+    },
+    {
       "path": "src/auth/login.ts",
       "component": "src/auth",
       "language": "TypeScript",
@@ -229,7 +275,7 @@
       ],
       "symbols": [
         {
-          "name": "d",
+          "name": "login",
           "kind": "const"
         }
       ]
@@ -288,6 +334,13 @@
       "req_ids": [
         "REQ-RU-001"
       ]
+    },
+    {
+      "path": "tsconfig.json",
+      "component": null,
+      "language": null,
+      "is_test": false,
+      "req_ids": []
     }
   ],
   "req_anchors": [
@@ -350,6 +403,33 @@
         "basis": "path-token",
         "confidence": "medium"
       }
+    }
+  ],
+  "edges": [
+    {
+      "from": "src/commands/repo.ts",
+      "to": "packages/lib/index.ts",
+      "kind": "import",
+      "basis": "alias"
+    },
+    {
+      "from": "src/commands/repo.ts",
+      "to": "react",
+      "kind": "import",
+      "basis": "unresolved",
+      "external": true
+    },
+    {
+      "from": "src/core/a.ts",
+      "to": "src/auth/login.ts",
+      "kind": "import",
+      "basis": "alias"
+    },
+    {
+      "from": "src/core/a.ts",
+      "to": "src/core/b.ts",
+      "kind": "import",
+      "basis": "parsed"
     }
   ]
 }

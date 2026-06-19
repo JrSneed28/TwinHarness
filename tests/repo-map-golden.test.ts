@@ -32,6 +32,7 @@ import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { scanRepo } from "../src/core/repo-map/scanner";
 import { serializeRepoMap } from "../src/core/repo-map/schema";
+import { computeRelevance, computeImpact } from "../src/core/repo-map/query";
 
 // Per-path readFileSync tally, populated by the mocked node:fs below. `null` =
 // not counting (the factory then just delegates, adding no observation overhead).
@@ -75,7 +76,19 @@ function writeTree(root: string, tree: Record<string, string>): void {
   }
 }
 
-/** The FIXED golden fixture — identical shape to the captured golden. */
+/**
+ * The FIXED golden fixture — identical shape to the captured golden.
+ *
+ * DEFERRED #1 — the fixture now exercises every import-edge basis so the golden pins
+ * the resolution contract byte-for-byte:
+ *   - `src/core/a.ts` imports `./b`             → basis "parsed"  (relative)
+ *   - `src/core/a.ts` imports `@/auth/login`    → basis "alias"   (tsconfig paths)
+ *   - `src/commands/repo.ts` imports `@pkg/lib` → basis "alias"   (workspace-bare)
+ *   - `src/commands/repo.ts` imports `react`    → basis "unresolved"/external
+ * The workspace declaration + tsconfig live at the repo root; a child package under
+ * `packages/lib` supplies the bare-package target. Alias edges earn NO
+ * importProximity and are absent from resolvedImportNeighbors (asserted below).
+ */
 function buildGoldenFixture(root: string): void {
   writeTree(root, {
     "package.json": JSON.stringify({
@@ -85,12 +98,18 @@ function buildGoldenFixture(root: string): void {
       bin: { th: "dist/cli.js" },
       main: "dist/index.js",
       exports: { ".": "./index.js" },
+      workspaces: ["packages/*"],
     }),
+    "tsconfig.json": '{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"] } } }\n',
     "Makefile": "# REQ-RU-051 anchor in a Makefile\nbuild:\n\ttsc\ntest:\n\tvitest\n",
-    "src/core/a.ts": "// Anchor: REQ-RU-001\nexport const a = 1;\n",
+    "src/core/a.ts":
+      "// Anchor: REQ-RU-001\nimport { b } from './b';\nimport { login } from '@/auth/login';\nexport const a = 1;\n",
     "src/core/b.ts": "// Anchor: REQ-RU-002 and REQ-RU-001\nexport const b = 2;\n",
-    "src/commands/repo.ts": "// REQ-RU-003\nexport const c = 3;\n",
-    "src/auth/login.ts": "// authentication concern, REQ-RU-013\nexport const d = 4;\n",
+    "src/commands/repo.ts":
+      "// REQ-RU-003\nimport { lib } from '@pkg/lib';\nimport React from 'react';\nexport const c = 3;\n",
+    "src/auth/login.ts": "// authentication concern, REQ-RU-013\nexport const login = 4;\n",
+    "packages/lib/package.json": JSON.stringify({ name: "@pkg/lib", main: "index.ts" }),
+    "packages/lib/index.ts": "export const lib = 5;\n",
     "tests/a.test.ts": "// Anchor: REQ-RU-001\n",
     "docs/x.md": "# doc REQ-RU-099\n",
     "go.mod": "module x\n",
@@ -185,5 +204,49 @@ describe("P3-1 — single-walk scanner: read-once + byte-stability", () => {
     const a = serializeRepoMap(scanRepo(tp.root));
     const b = serializeRepoMap(scanRepo(tp.root));
     expect(a).toBe(b);
+  });
+
+  // ---- DEFERRED #1 — import-edge bases pinned on the golden fixture ----------
+  it("the golden fixture exercises parsed + alias + unresolved import bases", () => {
+    tp = makeTempProject();
+    buildGoldenFixture(tp.root);
+    const map = scanRepo(tp.root);
+    const edges = map.edges ?? [];
+    // Relative → parsed.
+    expect(
+      edges.some((e) => e.from === "src/core/a.ts" && e.to === "src/core/b.ts" && e.basis === "parsed"),
+    ).toBe(true);
+    // tsconfig paths → alias.
+    expect(
+      edges.some((e) => e.from === "src/core/a.ts" && e.to === "src/auth/login.ts" && e.basis === "alias"),
+    ).toBe(true);
+    // workspace bare → alias.
+    expect(
+      edges.some(
+        (e) => e.from === "src/commands/repo.ts" && e.to === "packages/lib/index.ts" && e.basis === "alias",
+      ),
+    ).toBe(true);
+    // non-resolvable bare → unresolved/external.
+    expect(
+      edges.some((e) => e.to === "react" && e.basis === "unresolved" && e.external === true),
+    ).toBe(true);
+  });
+
+  it("alias edges earn NO importProximity and are ABSENT from resolvedImportNeighbors", () => {
+    tp = makeTempProject();
+    buildGoldenFixture(tp.root);
+    const map = scanRepo(tp.root);
+    // Seed on the alias TARGET (src/auth/login.ts). Its alias importer (src/core/a.ts)
+    // must NOT be pulled in as a resolved import neighbor (alias is telemetry-only).
+    const rel = computeRelevance(map, { kind: "file", value: "src/auth/login.ts" });
+    const importer = rel.related.find((r) => r.path === "src/core/a.ts");
+    // src/core/a.ts shares no component with src/auth/login.ts and is coupled ONLY by
+    // an alias edge → it earns no importProximity → it is not in `related`.
+    if (importer) {
+      expect(importer.why.join(" ")).not.toMatch(/resolved import edge/);
+    }
+    // The same holds for impact: no alias-only directImpact importer.
+    const imp = computeImpact(map, { kind: "file", value: "src/auth/login.ts" });
+    expect(imp.directImpact.some((d) => d.path === "src/core/a.ts")).toBe(false);
   });
 });

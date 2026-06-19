@@ -70,4 +70,45 @@ describe("PERF-001 — scanRepo never reads a file larger than the per-file byte
     //    (reading 30 MB into a UTF-8 string + regex-scanning it would be far slower).
     expect(elapsedMs).toBeLessThan(5_000);
   });
+
+  it("DEFERRED #1 — alias edges (tsconfig/workspace) ride the same bounded-cost envelope", () => {
+    tp = makeTempProject();
+    const root = tp.root;
+    // A many-file repo where EVERY importer uses a tsconfig-paths alias + a workspace
+    // bare import. Alias resolution must stay bounded (no quadratic blow-up) and the
+    // serialized graph must stay well under the 64 MB envelope (REQ-NFR-007).
+    const tree: Record<string, string> = {
+      "tsconfig.json": '{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"] } } }\n',
+      "package.json": '{ "name": "root", "workspaces": ["packages/*"] }\n',
+      "packages/lib/package.json": '{ "name": "@w/lib", "main": "index.ts" }\n',
+      "packages/lib/index.ts": "export const lib = 1;\n",
+      "src/target.ts": "export const t = 1;\n",
+    };
+    const N = 300;
+    for (let i = 0; i < N; i++) {
+      tree[`src/m${i}.ts`] =
+        `import { t } from '@/target';\nimport { lib } from '@w/lib';\nexport const m${i} = ${i};\n`;
+    }
+    fs.mkdirSync(path.join(root, "src"), { recursive: true });
+    for (const [rel, content] of Object.entries(tree)) {
+      const abs = path.join(root, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content, "utf8");
+    }
+
+    const start = Date.now();
+    const map = scanRepo(root);
+    const elapsedMs = Date.now() - start;
+
+    const aliasEdges = (map.edges ?? []).filter((e) => e.basis === "alias");
+    // Every importer produced TWO alias edges (tsconfig + workspace) — proving alias
+    // resolution scaled with the file set and counted as real edges.
+    expect(aliasEdges.length).toBe(N * 2);
+    // No alias edge is marked external (each lands on an in-repo file).
+    expect(aliasEdges.every((e) => e.external === undefined)).toBe(true);
+    // Bounded: serialized graph stays far under the envelope and the scan is fast.
+    const serialized = JSON.stringify(map.edges);
+    expect(serialized.length).toBeLessThan(64 * 1024 * 1024);
+    expect(elapsedMs).toBeLessThan(5_000);
+  });
 });
