@@ -52,6 +52,8 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GENESIS_PREV_HASH = void 0;
 exports.decisionsPath = decisionsPath;
+exports.approvalAuditPath = approvalAuditPath;
+exports.appendApprovalAudit = appendApprovalAudit;
 exports.canonicalText = canonicalText;
 exports.computeRecordHash = computeRecordHash;
 exports.computeKeyedHash = computeKeyedHash;
@@ -80,6 +82,32 @@ const APPROVAL_TRANSITIONS = new Set(["approved", "rejected", "superseded"]);
 function decisionsPath(paths) {
     return path.join(paths.stateDir, "decisions.jsonl");
 }
+/**
+ * `<stateDir>/approval-audit.jsonl` — the DURABLE approval-attempt audit log
+ * (#17, D3). The structured approval log used to be stderr-only and silenceable
+ * (`TH_NO_LOG=1`); a forensic record of who approved (or attempted to approve)
+ * what must survive a silenced stderr. This file records EVERY `th decision
+ * approve` invocation — including ones blocked at the TTY barrier (which never
+ * reach decisions.jsonl) — with the observed provenance, so a blocked or declined
+ * approval attempt is auditable too. Append-only, gitignored under `.twinharness/`.
+ */
+function approvalAuditPath(paths) {
+    return path.join(paths.stateDir, "approval-audit.jsonl");
+}
+/**
+ * Append one approval-attempt record to the durable audit log. Best-effort and
+ * never throws — an unwritable audit file must never break (or silently abort) an
+ * approval/governance flow; it is a forensic aid, not a gate.
+ */
+function appendApprovalAudit(paths, record) {
+    try {
+        fs.mkdirSync(paths.stateDir, { recursive: true });
+        fs.appendFileSync(approvalAuditPath(paths), JSON.stringify(record) + "\n", "utf8");
+    }
+    catch {
+        // Audit logging must never crash or abort a command.
+    }
+}
 // ---------------------------------------------------------------------------
 // Canonical text + hashing (DS-001) — the tamper-evidence core
 // ---------------------------------------------------------------------------
@@ -100,8 +128,29 @@ const CANONICAL_FIELD_ORDER = [
     "proposedAt",
     "approver",
     "approvedAt",
+    "provenance",
     "prevHash",
 ];
+/**
+ * Canonical key order for an {@link ApprovalProvenance} object so its
+ * `JSON.stringify` form is byte-stable inside the sealed canonical text (the
+ * field-order discipline that keeps the chain deterministic — REQ-NFR-001).
+ */
+const PROVENANCE_FIELD_ORDER = [
+    "isTTY",
+    "ppid",
+    "parentComm",
+    "hostname",
+    "pid",
+    "attributionSuspect",
+];
+/** Re-emit a provenance object in the fixed canonical key order (deterministic JSON). */
+function canonicalProvenance(p) {
+    const out = {};
+    for (const key of PROVENANCE_FIELD_ORDER)
+        out[key] = p[key];
+    return out;
+}
 /**
  * Deterministic canonical text of an event for hashing (DS-001). Field order is
  * fixed; `undefined` keys and `recordHash` are dropped; `links` is sorted
@@ -117,6 +166,10 @@ function canonicalText(event) {
         if (key === "links") {
             // Sort a COPY lexicographically; never mutate the caller's array.
             ordered[key] = [...val].sort();
+        }
+        else if (key === "provenance") {
+            // Re-emit in the fixed provenance key order so the sealed text is byte-stable.
+            ordered[key] = canonicalProvenance(val);
         }
         else {
             ordered[key] = val;
@@ -158,6 +211,8 @@ function isValidEvent(parsed) {
     if (e.links !== undefined && !Array.isArray(e.links))
         return false;
     if (e.keyedHash !== undefined && typeof e.keyedHash !== "string")
+        return false;
+    if (e.provenance !== undefined && (typeof e.provenance !== "object" || e.provenance === null))
         return false;
     return true;
 }
@@ -356,6 +411,8 @@ function reduceDecisions(events) {
             d.approvedAt = e.approvedAt;
         if (e.supersededBy !== undefined)
             d.supersededBy = e.supersededBy;
+        if (e.provenance !== undefined)
+            d.provenance = e.provenance;
     }
     return [...byId.values()];
 }

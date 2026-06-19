@@ -1,5 +1,7 @@
 {
-  "schema_version": 1,
+  "schema_version": 3,
+  "capHit": null,
+  "partial": false,
   "languages": [
     {
       "name": "Go",
@@ -12,20 +14,23 @@
     {
       "name": "JavaScript/TypeScript",
       "evidence": [
-        "package.json"
+        "package.json",
+        "packages/lib/package.json"
       ],
       "source": "manifest"
     },
     {
       "name": "TypeScript",
       "evidence": [
+        "packages/lib/index.ts",
         "src/auth/login.ts",
         "src/commands/repo.ts",
         "src/core/a.ts",
         "src/core/b.ts",
-        "tests/a.test.ts"
+        "tests/a.test.ts",
+        "tsconfig.json"
       ],
-      "source": "extension"
+      "source": "both"
     }
   ],
   "package_managers": [
@@ -38,7 +43,8 @@
     {
       "name": "npm",
       "manifest_paths": [
-        "package.json"
+        "package.json",
+        "packages/lib/package.json"
       ]
     }
   ],
@@ -82,34 +88,76 @@
     {
       "name": "src/auth",
       "path": "src/auth",
-      "file_count": 1
+      "file_count": 1,
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
     },
     {
       "name": "src/commands",
       "path": "src/commands",
-      "file_count": 1
+      "file_count": 1,
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
     },
     {
       "name": "src/core",
       "path": "src/core",
-      "file_count": 2
+      "file_count": 2,
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
     }
   ],
   "entrypoints": [
     {
       "name": "th",
       "path": "dist/cli.js",
-      "source": "package.json:bin"
+      "source": "package.json:bin",
+      "provenance": {
+        "basis": "manifest",
+        "confidence": "high"
+      }
     },
     {
       "name": "main",
       "path": "dist/index.js",
-      "source": "package.json:main"
+      "source": "package.json:main",
+      "provenance": {
+        "basis": "manifest",
+        "confidence": "high"
+      }
     },
     {
       "name": "main.go",
       "path": "main.go",
-      "source": "convention"
+      "source": "convention",
+      "provenance": {
+        "basis": "name",
+        "confidence": "medium"
+      }
+    },
+    {
+      "name": "index.ts",
+      "path": "packages/lib/index.ts",
+      "source": "convention",
+      "provenance": {
+        "basis": "name",
+        "confidence": "medium"
+      }
+    },
+    {
+      "name": "main",
+      "path": "packages/lib/index.ts",
+      "source": "package.json:main",
+      "provenance": {
+        "basis": "manifest",
+        "confidence": "high"
+      }
     }
   ],
   "public_api": {
@@ -117,22 +165,42 @@
       {
         "name": "package.json",
         "source": "package.json:exports"
+      },
+      {
+        "name": "packages/lib/index.ts",
+        "source": "barrel:exports"
       }
     ],
-    "confidence": "heuristic"
+    "confidence": "heuristic",
+    "provenance": {
+      "basis": "parsed",
+      "confidence": "medium"
+    }
   },
   "ownership_hints": [
     {
       "path_prefix": "src/auth",
-      "component": "src/auth"
+      "component": "src/auth",
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
     },
     {
       "path_prefix": "src/commands",
-      "component": "src/commands"
+      "component": "src/commands",
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
     },
     {
       "path_prefix": "src/core",
-      "component": "src/core"
+      "component": "src/core",
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
     }
   ],
   "files": [
@@ -178,12 +246,38 @@
       ]
     },
     {
+      "path": "packages/lib/index.ts",
+      "component": null,
+      "language": "TypeScript",
+      "is_test": false,
+      "req_ids": [],
+      "symbols": [
+        {
+          "name": "lib",
+          "kind": "const"
+        }
+      ]
+    },
+    {
+      "path": "packages/lib/package.json",
+      "component": null,
+      "language": null,
+      "is_test": false,
+      "req_ids": []
+    },
+    {
       "path": "src/auth/login.ts",
       "component": "src/auth",
       "language": "TypeScript",
       "is_test": false,
       "req_ids": [
         "REQ-RU-013"
+      ],
+      "symbols": [
+        {
+          "name": "login",
+          "kind": "const"
+        }
       ]
     },
     {
@@ -193,6 +287,12 @@
       "is_test": false,
       "req_ids": [
         "REQ-RU-003"
+      ],
+      "symbols": [
+        {
+          "name": "c",
+          "kind": "const"
+        }
       ]
     },
     {
@@ -202,6 +302,12 @@
       "is_test": false,
       "req_ids": [
         "REQ-RU-001"
+      ],
+      "symbols": [
+        {
+          "name": "a",
+          "kind": "const"
+        }
       ]
     },
     {
@@ -212,6 +318,12 @@
       "req_ids": [
         "REQ-RU-001",
         "REQ-RU-002"
+      ],
+      "symbols": [
+        {
+          "name": "b",
+          "kind": "const"
+        }
       ]
     },
     {
@@ -222,6 +334,13 @@
       "req_ids": [
         "REQ-RU-001"
       ]
+    },
+    {
+      "path": "tsconfig.json",
+      "component": null,
+      "language": null,
+      "is_test": false,
+      "req_ids": []
     }
   ],
   "req_anchors": [
@@ -279,7 +398,38 @@
       "trigger_patterns": [
         "auth",
         "login"
-      ]
+      ],
+      "provenance": {
+        "basis": "path-token",
+        "confidence": "medium"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "src/commands/repo.ts",
+      "to": "packages/lib/index.ts",
+      "kind": "import",
+      "basis": "alias"
+    },
+    {
+      "from": "src/commands/repo.ts",
+      "to": "react",
+      "kind": "import",
+      "basis": "unresolved",
+      "external": true
+    },
+    {
+      "from": "src/core/a.ts",
+      "to": "src/auth/login.ts",
+      "kind": "import",
+      "basis": "alias"
+    },
+    {
+      "from": "src/core/a.ts",
+      "to": "src/core/b.ts",
+      "kind": "import",
+      "basis": "parsed"
     }
   ]
 }

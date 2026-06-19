@@ -118,9 +118,35 @@ export function hashDir(absDir: string, limits: HashLimits = DEFAULT_HASH_LIMITS
   return hashContent(entries.join("\n"));
 }
 
+/**
+ * P2-4 (#6) — content hash of a SINGLE file from its RAW bytes, with NO utf8
+ * decode and NO CRLF normalization.
+ *
+ * The freshness layer (`repo-map.json fileHashes` store path + `th repo check`
+ * re-scan path) previously did `hashContent(fs.readFileSync(abs, "utf8"))`. For
+ * BINARY files that round-trip is LOSSY: invalid byte sequences collapse to the
+ * replacement char U+FFFD and CR bytes are stripped, so two DISTINCT binaries can
+ * hash IDENTICALLY — a real edit then reads as `fresh` (silently missed
+ * staleness). Hashing the raw `Buffer` removes both lossy steps so every distinct
+ * byte sequence has a distinct digest.
+ *
+ * This is the BUFFER side of the all-or-nothing fix (P2-4 / rev 2 B3): it MUST be
+ * used by BOTH the store path (`repo.ts` fileHashes) and the re-check path
+ * (`runRepoCheck`) together. Using it on only one side would flip every binary to
+ * permanently-`modified`. For TEXT content the two paths still agree because the
+ * stored hash and the re-check hash are produced by the SAME function here.
+ *
+ * NOTE: this is intentionally NOT CRLF-normalized — it is byte-exact. The
+ * markdown/JSON artifact hashing (`hashContent`) stays CRLF-normalized; only the
+ * per-file freshness hashes move to byte-exact via this function.
+ */
+export function hashFileBytes(abs: string): string {
+  return createHash("sha256").update(fs.readFileSync(abs)).digest("hex");
+}
+
 /** Full hash of a path that may be a file OR a directory (artifact registration §12/§18). */
 export function hashPathContent(abs: string): string {
-  return fs.statSync(abs).isDirectory() ? hashDir(abs) : hashContent(fs.readFileSync(abs, "utf8"));
+  return fs.statSync(abs).isDirectory() ? hashDir(abs) : hashFileBytes(abs);
 }
 
 /** Short 12-hex form of {@link hashPathContent} — used for both file and directory artifacts. */

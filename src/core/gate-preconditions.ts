@@ -35,7 +35,7 @@ import { artifactIntegrity, reviseEscalations, sliceProgress, type ReviseEscalat
 import { computeBreakdown } from "./coverage";
 import { readVerifyConfig, readVerifyReport } from "./verify";
 import { gatingObligations, reduceDecisions, readDecisionEvents } from "./decisions";
-import { runRepoCheck, REPO_NO_MAP_EXIT } from "../commands/repo";
+import { runRepoCheckCached, repoMapPartialMarker, REPO_NO_MAP_EXIT } from "../commands/repo";
 import { interviewReady } from "../commands/interview";
 
 /**
@@ -102,10 +102,37 @@ export function checkTierSet(state: TwinHarnessState): GateResult {
   return PASS;
 }
 
-/** Rung f (next.ts:170) — brownfield repo-map freshness before implementation unlock. */
+/**
+ * Rung f (next.ts:170) — brownfield repo-map freshness before implementation unlock.
+ *
+ * P4-10: uses the cached freshness check so this hot gate path does not re-hash the
+ * whole tree on every `th next` / unlock attempt.
+ *
+ * P4-5: a PARTIAL map (a capped/incomplete scan) is no longer silently treated as
+ * fresh. A brownfield unlock rests on the repo-map being a TRUSTWORTHY picture of the
+ * codebase; an incomplete scan means whole regions of the repo were never seen, so
+ * unlocking implementation on it is exactly the "silent partial" failure #5 warns
+ * about. We therefore BLOCK unlock on a partial map (distinct `repo_map_partial`
+ * code, so the operator is told to raise the caps and re-scan rather than chase a
+ * phantom staleness diff). Staleness (added/removed/modified/absent) still blocks via
+ * `repo_map_stale` as before.
+ */
 export function checkRepoMap(paths: ProjectPaths, state: TwinHarnessState): GateResult {
   if (state.project_mode === "brownfield" && !state.implementation_allowed) {
-    const check = runRepoCheck(paths);
+    // P4-5 — a PARTIAL (capped) map is incomplete: whole regions of the repo were
+    // never seen, so unlocking on it repeats the silent-partial failure #5. This is
+    // checked FIRST and independently of staleness — a partial map's drift diff (a
+    // default-cap re-scan would flag the unscanned files as "added") is a red herring;
+    // the real fix is to raise the caps and complete the scan, which `repo_map_partial`
+    // tells the operator to do. The partial marker is read from the PERSISTED map (the
+    // deterministic `capHit`), not from a re-scan, so it is cheap and cap-agnostic.
+    const marker = repoMapPartialMarker(paths);
+    if (marker.partial) {
+      return { ok: false, error: "repo_map_partial", detail: { capHit: marker.capHit } };
+    }
+    // Otherwise enforce freshness (added/removed/modified/absent) via the cached check
+    // (P4-10) so this hot gate path does not re-hash the whole tree on every attempt.
+    const check = runRepoCheckCached(paths);
     if (check.exitCode !== 0) {
       const absent = check.exitCode === REPO_NO_MAP_EXIT;
       const shape = (check.data as { shape?: string } | undefined)?.shape ?? "stale";

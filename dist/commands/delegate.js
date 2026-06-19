@@ -124,11 +124,13 @@ function runDelegatePack(paths, opts) {
         return (0, output_1.failure)({ human: parsed.error, data: { error: "unknown_intent", intent: opts.intent } });
     }
     // Reuse `th context pack` for slice framing + artifact Summary blocks when a
-    // slice is given. Propagate its failure (no state / unknown slice) so the
-    // caller fixes the precondition instead of getting a half-built handoff.
+    // slice/REQ/file selector is given. Propagate its failure (no state / unknown
+    // slice) so the caller fixes the precondition instead of getting a half-built
+    // handoff. P4-7 — REQ- and file-specific packs give per-agent views (a Debugger
+    // gets a failure/file pack; a Spec agent gets a REQ pack).
     let contextPack = null;
-    if (opts.slice) {
-        const pack = (0, context_1.runContextPack)(paths, { slice: opts.slice });
+    if (opts.slice || opts.req || opts.file) {
+        const pack = (0, context_1.runContextPack)(paths, { slice: opts.slice, req: opts.req, file: opts.file });
         if (!pack.ok)
             return pack;
         contextPack = pack.human ?? null;
@@ -139,7 +141,15 @@ function runDelegatePack(paths, opts) {
         `Task: ${opts.task ?? "(describe the task)"}`,
         `Intent: ${parsed.intent ?? "(read|write|debug|review|artifact|repo-analysis)"}`,
         `Slice: ${opts.slice ?? "(none)"}`,
-        `Allowed scope: ${opts.slice ? `the components of ${opts.slice}; do not edit outside them` : "(state the file/dir/component boundary)"}`,
+        ...(opts.req ? [`REQ: ${opts.req}`] : []),
+        ...(opts.file ? [`File: ${opts.file}`] : []),
+        `Allowed scope: ${opts.slice
+            ? `the components of ${opts.slice}; do not edit outside them`
+            : opts.file
+                ? `${opts.file} and its direct neighbors; do not edit outside them`
+                : opts.req
+                    ? `the files anchored to ${opts.req}; do not edit outside them`
+                    : "(state the file/dir/component boundary)"}`,
         "",
         "Context pack:",
         contextPack ?? "(run `th context pack` for approved-artifact Summary blocks)",

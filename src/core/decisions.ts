@@ -32,6 +32,42 @@ export { GENESIS_PREV_HASH };
 /** A decision's lifecycle event type. */
 export type DecisionEventType = "proposed" | "approved" | "rejected" | "superseded";
 
+/**
+ * Invocation provenance for a HUMAN-gated approval transition (#17, D3).
+ *
+ * This is the real, observed source of the `th decision approve` invocation — NOT
+ * a self-asserted "human" string. It records what the process could actually see
+ * about its environment at the moment of approval: whether stdin was a TTY, the
+ * parent process id + command name, the hostname, and this process's pid. None of
+ * it is cryptographic (D3 — the TTY gate stays a compliant-agent guardrail, not a
+ * sandbox); it is forensic metadata so an after-the-fact reviewer can distinguish
+ * a genuine interactive approval from an agent-driven one that forged a fake TTY,
+ * and so an `approver` left at the default is marked SUSPECT rather than silently
+ * trusted as "human".
+ *
+ * Sealed into the hash chain like every other field (it appears in
+ * CANONICAL_FIELD_ORDER), so a reviewer who edits the recorded provenance breaks
+ * the chain detectably.
+ */
+export interface ApprovalProvenance {
+  /** `process.stdin.isTTY` at approval time — the gate's structural signal. */
+  isTTY: boolean;
+  /** Parent process id (`process.ppid`), or 0 when unavailable. */
+  ppid: number;
+  /** Parent process command name (best-effort; "unknown" when unreadable). */
+  parentComm: string;
+  /** os.hostname() at approval time. */
+  hostname: string;
+  /** This process's pid (`process.pid`). */
+  pid: number;
+  /**
+   * True when the approver attribution was NOT explicitly supplied (no `--as`,
+   * no TH_APPROVAL_ACTOR) and fell back to the "human" default — i.e. the
+   * approval is UNATTRIBUTED and should be treated as suspect by reviewers.
+   */
+  attributionSuspect: boolean;
+}
+
 /** A decision's reduced status (latest-event-wins). Mirrors the event types. */
 export type DecisionStatus = "proposed" | "approved" | "rejected" | "superseded";
 
@@ -52,6 +88,13 @@ export interface DecisionEvent {
   proposedAt?: string; // ISO-8601 UTC — set on "proposed"
   approver?: string; // set on "approved" / "rejected" / "superseded"
   approvedAt?: string; // ISO-8601 UTC — set on "approved" / "rejected" / "superseded"
+  /**
+   * Invocation provenance (#17, D3) — present ONLY on approval-transition events.
+   * The real observed source of the approval (TTY/ppid/host/pid + an
+   * attribution-suspect flag), sealed into the hash chain. Omit-when-absent on
+   * `proposed` and on legacy events written before this field existed.
+   */
+  provenance?: ApprovalProvenance;
   prevHash: string; // SHA-256 hex (64) of prior line's canonical text, or GENESIS for first
   recordHash: string; // SHA-256 hex (64) of THIS event's canonical text (computed before set)
   /**
@@ -78,6 +121,8 @@ export interface Decision {
   approver?: string;
   approvedAt?: string;
   supersededBy?: string;
+  /** Invocation provenance from the approval transition (#17, D3); omit on proposed. */
+  provenance?: ApprovalProvenance;
 }
 
 /** A single gating obligation: a decision that blocks the current stage. */
@@ -89,6 +134,44 @@ export interface GatingObligation {
 /** `<stateDir>/decisions.jsonl` — the decision ledger's location. */
 export function decisionsPath(paths: ProjectPaths): string {
   return path.join(paths.stateDir, "decisions.jsonl");
+}
+
+/**
+ * `<stateDir>/approval-audit.jsonl` — the DURABLE approval-attempt audit log
+ * (#17, D3). The structured approval log used to be stderr-only and silenceable
+ * (`TH_NO_LOG=1`); a forensic record of who approved (or attempted to approve)
+ * what must survive a silenced stderr. This file records EVERY `th decision
+ * approve` invocation — including ones blocked at the TTY barrier (which never
+ * reach decisions.jsonl) — with the observed provenance, so a blocked or declined
+ * approval attempt is auditable too. Append-only, gitignored under `.twinharness/`.
+ */
+export function approvalAuditPath(paths: ProjectPaths): string {
+  return path.join(paths.stateDir, "approval-audit.jsonl");
+}
+
+/** One durable approval-audit record (#17, D3). */
+export interface ApprovalAuditRecord {
+  ts: string;
+  id?: string;
+  disposition: "approve" | "reject" | "supersede";
+  /** "appended" when the transition was sealed; otherwise the failure error code. */
+  outcome: string;
+  approver?: string;
+  provenance: ApprovalProvenance;
+}
+
+/**
+ * Append one approval-attempt record to the durable audit log. Best-effort and
+ * never throws — an unwritable audit file must never break (or silently abort) an
+ * approval/governance flow; it is a forensic aid, not a gate.
+ */
+export function appendApprovalAudit(paths: ProjectPaths, record: ApprovalAuditRecord): void {
+  try {
+    fs.mkdirSync(paths.stateDir, { recursive: true });
+    fs.appendFileSync(approvalAuditPath(paths), JSON.stringify(record) + "\n", "utf8");
+  } catch {
+    // Audit logging must never crash or abort a command.
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -112,8 +195,30 @@ const CANONICAL_FIELD_ORDER: ReadonlyArray<keyof DecisionEvent> = [
   "proposedAt",
   "approver",
   "approvedAt",
+  "provenance",
   "prevHash",
 ];
+
+/**
+ * Canonical key order for an {@link ApprovalProvenance} object so its
+ * `JSON.stringify` form is byte-stable inside the sealed canonical text (the
+ * field-order discipline that keeps the chain deterministic — REQ-NFR-001).
+ */
+const PROVENANCE_FIELD_ORDER: ReadonlyArray<keyof ApprovalProvenance> = [
+  "isTTY",
+  "ppid",
+  "parentComm",
+  "hostname",
+  "pid",
+  "attributionSuspect",
+];
+
+/** Re-emit a provenance object in the fixed canonical key order (deterministic JSON). */
+function canonicalProvenance(p: ApprovalProvenance): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of PROVENANCE_FIELD_ORDER) out[key] = p[key];
+  return out;
+}
 
 /**
  * Deterministic canonical text of an event for hashing (DS-001). Field order is
@@ -129,6 +234,9 @@ export function canonicalText(event: Omit<DecisionEvent, "recordHash">): string 
     if (key === "links") {
       // Sort a COPY lexicographically; never mutate the caller's array.
       ordered[key] = [...(val as string[])].sort();
+    } else if (key === "provenance") {
+      // Re-emit in the fixed provenance key order so the sealed text is byte-stable.
+      ordered[key] = canonicalProvenance(val as ApprovalProvenance);
     } else {
       ordered[key] = val;
     }
@@ -168,6 +276,7 @@ function isValidEvent(parsed: unknown): parsed is DecisionEvent {
   if (typeof e.recordHash !== "string" || !HEX64.test(e.recordHash)) return false;
   if (e.links !== undefined && !Array.isArray(e.links)) return false;
   if (e.keyedHash !== undefined && typeof e.keyedHash !== "string") return false;
+  if (e.provenance !== undefined && (typeof e.provenance !== "object" || e.provenance === null)) return false;
   return true;
 }
 
@@ -383,6 +492,7 @@ export function reduceDecisions(events: DecisionEvent[]): Decision[] {
     if (e.approver !== undefined) d.approver = e.approver;
     if (e.approvedAt !== undefined) d.approvedAt = e.approvedAt;
     if (e.supersededBy !== undefined) d.supersededBy = e.supersededBy;
+    if (e.provenance !== undefined) d.provenance = e.provenance;
   }
   return [...byId.values()];
 }

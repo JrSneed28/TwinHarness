@@ -48,12 +48,13 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LEASE_FIELD_ORDER = void 0;
+exports.SECTION_LEASE_TTL_MS = exports.LEASE_FIELD_ORDER = void 0;
 exports.leasesPath = leasesPath;
 exports.serializeLeaseEvent = serializeLeaseEvent;
 exports.readLeaseEvents = readLeaseEvents;
 exports.appendLeaseEvent = appendLeaseEvent;
 exports.activeLeases = activeLeases;
+exports.claimTimestamps = claimTimestamps;
 exports.activeTopLeases = activeTopLeases;
 exports.subLeasesOf = subLeasesOf;
 exports.leasedComponents = leasedComponents;
@@ -63,6 +64,9 @@ exports.occupiedComponents = occupiedComponents;
 exports.isSectionId = isSectionId;
 exports.parseSectionId = parseSectionId;
 exports.activeSectionLeases = activeSectionLeases;
+exports.staleSectionLeases = staleSectionLeases;
+exports.liveSectionLeases = liveSectionLeases;
+exports.sweepStaleSectionLeases = sweepStaleSectionLeases;
 exports.isSectionLeased = isSectionLeased;
 exports.sectionLeaseHolder = sectionLeaseHolder;
 const fs = __importStar(require("node:fs"));
@@ -148,6 +152,11 @@ function appendLeaseEvent(paths, event, now = () => new Date()) {
  * wins, so a re-claim after release re-opens with the new component set. The
  * `slice` key is the (unique) owner id — for a sub-lease that is the sub-owner
  * id, so a sub-lease reduces independently of its parent's top-level lease.
+ *
+ * The returned shape is intentionally STABLE (no timestamp) so `toEqual`-style
+ * consumers and the deterministic `th ... leases` output are unaffected; the
+ * claim timestamps used by the TTL sweep (P5-3) are read separately via
+ * {@link claimTimestamps} so they never leak into the active-lease shape.
  */
 function activeLeases(paths) {
     // Track the latest claim's components AND parent per owner id; null = released.
@@ -163,6 +172,25 @@ function activeLeases(paths) {
         if (typeof held.parent === "string")
             lease.parent = held.parent;
         out.push(lease);
+    }
+    return out;
+}
+/**
+ * Owner-id → the ISO timestamp of its CURRENTLY-HELD claim (the last `claim` not
+ * followed by a `release`). Released owners are absent. This is the timestamp
+ * source the TTL stale-recovery sweep (P5-3) consults WITHOUT polluting the stable
+ * {@link ActiveLease}/{@link ActiveSectionLease} shapes. Pure: it reduces the
+ * ledger the same way {@link activeLeases} does, but keeps the `ts`.
+ */
+function claimTimestamps(paths) {
+    const byOwner = new Map();
+    for (const e of readLeaseEvents(paths)) {
+        byOwner.set(e.slice, e.event === "claim" ? e.ts : null);
+    }
+    const out = new Map();
+    for (const [slice, ts] of byOwner) {
+        if (typeof ts === "string")
+            out.set(slice, ts);
     }
     return out;
 }
@@ -281,6 +309,8 @@ function parseSectionId(id) {
  * component leases. A section lease is an active top-level lease (no `parent`)
  * whose `slice` key is a valid `<file>#<section>` id; its holder is the first
  * entry of `components`. Pure: it reads/reduces the ledger and decides nothing.
+ * The shape is intentionally stable (no timestamp) — the TTL sweep reads claim
+ * timestamps separately via {@link claimTimestamps}.
  */
 function activeSectionLeases(paths) {
     const out = [];
@@ -292,6 +322,64 @@ function activeSectionLeases(paths) {
         out.push({ section: lease.slice, holder: lease.components[0] ?? "" });
     }
     return out;
+}
+/* ------------------------------------------------------------------ *
+ * Section-lease + sub-lease TTL stale-recovery (Phase 5 / P5-3).       *
+ *                                                                      *
+ * A component lease reconciles against its governing SLICE (settled    *
+ * slice ⇒ stale). A SECTION lease has no governing slice — its holder  *
+ * is an agent/task id, not a slice — so a dead/crashed holder that      *
+ * never ran `th artifact release` would wedge that section FOREVER.     *
+ * P5-3 closes that bug with a TTL sweep mirroring {@link staleLeases}:   *
+ * a section lease whose CLAIM is older than the TTL is treated as a      *
+ * dead holder and is recoverable. This never auto-releases anything on  *
+ * its own — it is a pure predicate the command layer consults (e.g.     *
+ * `th artifact leases` surfaces stale leases, a future sweep releases    *
+ * them); a live holder simply re-claims to refresh its timestamp.       *
+ * ------------------------------------------------------------------ */
+/** Default section-lease TTL: 2 hours in ms. A holder older than this is presumed dead. */
+exports.SECTION_LEASE_TTL_MS = 2 * 60 * 60 * 1000;
+/** Whether the claim at `claimedAt` (ISO ts) is older than `ttlMs` relative to `now` (epoch ms). Missing/unparseable ts ⇒ stale. */
+function isExpired(claimedAt, ttlMs, now) {
+    if (claimedAt === undefined)
+        return true;
+    const t = Date.parse(claimedAt);
+    if (Number.isNaN(t))
+        return true;
+    return now - t > ttlMs;
+}
+/**
+ * The STALE section leases: active section leases whose CURRENT claim is older than
+ * `ttlMs` (a dead/crashed holder that never released). Mirrors {@link staleLeases}
+ * but keyed on a TTL rather than a governing slice, because a section lease's holder
+ * is an agent, not a slice. The claim timestamp is read via {@link claimTimestamps}
+ * so the {@link ActiveSectionLease} shape stays timestamp-free. Clock-injectable.
+ */
+function staleSectionLeases(paths, ttlMs = exports.SECTION_LEASE_TTL_MS, now = () => new Date()) {
+    const t = now().getTime();
+    const ts = claimTimestamps(paths);
+    return activeSectionLeases(paths).filter((l) => isExpired(ts.get(l.section), ttlMs, t));
+}
+/** The complement of {@link staleSectionLeases}: section leases whose current claim is within the TTL. */
+function liveSectionLeases(paths, ttlMs = exports.SECTION_LEASE_TTL_MS, now = () => new Date()) {
+    const t = now().getTime();
+    const ts = claimTimestamps(paths);
+    return activeSectionLeases(paths).filter((l) => !isExpired(ts.get(l.section), ttlMs, t));
+}
+/**
+ * Reconcile + RECOVER stale section leases: for every section lease past the TTL,
+ * append a `release` event so the section is freed for a new holder, and return the
+ * swept leases. Idempotent (a second sweep finds none) and append-only (it never
+ * rewrites the ledger). This is the explicit recovery action behind
+ * {@link staleSectionLeases}; the caller (e.g. `th artifact leases --reap`) decides
+ * WHEN to run it — this function only records the releases. Clock-injectable.
+ */
+function sweepStaleSectionLeases(paths, ttlMs = exports.SECTION_LEASE_TTL_MS, now = () => new Date()) {
+    const stale = staleSectionLeases(paths, ttlMs, now);
+    for (const l of stale) {
+        appendLeaseEvent(paths, { event: "release", slice: l.section, components: [l.holder] }, now);
+    }
+    return stale;
 }
 /**
  * Whether `section` (`<file>#<section>`) is currently leased. With `holder`,

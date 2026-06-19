@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.openHumanObligations = openHumanObligations;
 exports.runNext = runNext;
 const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
@@ -8,6 +9,23 @@ const health_1 = require("../core/health");
 const leases_1 = require("../core/leases");
 const wave_1 = require("../core/wave");
 const gate_preconditions_1 = require("../core/gate-preconditions");
+/**
+ * Compute the unified {@link OpenHumanObligations} summary from durable state +
+ * on-disk anchors, reusing the SAME predicates the individual rungs consult (no
+ * second source of truth): `checkBlockingDrift`, `checkDebate`,
+ * `checkDecisionObligations`. Each `ok` rung contributes 0. The decision count is
+ * 1 when a gating decision is unmet (the predicate surfaces the first blocker, the
+ * unit the rung acts on), else 0 — drift/debate carry their exact open counts.
+ */
+function openHumanObligations(paths, s) {
+    const driftR = (0, gate_preconditions_1.checkBlockingDrift)(s);
+    const drift = driftR.ok ? 0 : (s.drift_open_blocking ?? 0);
+    const debateR = (0, gate_preconditions_1.checkDebate)(s);
+    const debate = debateR.ok ? 0 : (s.debate_open_blocking ?? 0);
+    const decR = (0, gate_preconditions_1.checkDecisionObligations)(paths, s);
+    const decision = decR.ok ? 0 : 1;
+    return { drift, debate, decision, total: drift + debate + decision };
+}
 function runNext(paths, opts = {}) {
     const explain = opts.explain === true;
     const r = (0, state_store_1.readState)(paths);
@@ -31,14 +49,19 @@ function runNext(paths, opts = {}) {
     // `src/core/gate-preconditions.ts` (consumed by both this oracle and the typed
     // MCP gate tools so they can never drift); runNext renders the matching action.
     // The short-circuit ORDER below is the contract pinned by next-characterization.
+    // The unified "open human obligation" view (P5-5): drift + debate + decision
+    // counted once behind one abstraction. Mechanics unchanged — each obligation
+    // still has its own rung below; this only attaches the unified summary to those
+    // rungs' data so a consumer sees one class of obligation, not three counters.
+    const obligations = openHumanObligations(paths, s);
     // 1. Blocking drift outranks stage progress — the stop-gate will refuse completion.
     const driftR = (0, gate_preconditions_1.checkBlockingDrift)(s);
     if (!driftR.ok) {
         return emit({
             kind: "resolve-blocking-drift",
-            action: `${s.drift_open_blocking} blocking drift entr${s.drift_open_blocking === 1 ? "y is" : "ies are"} open — resolve or escalate before completion (\`th drift list\` / \`th drift resolve <DRIFT-NNN>\`).`,
+            action: `${s.drift_open_blocking} blocking drift entr${s.drift_open_blocking === 1 ? "y is" : "ies are"} open — resolve or escalate before completion (\`th drift list\` / \`th drift resolve <DRIFT-NNN>\`).${obligationSuffix(obligations)}`,
             why: "Open requirement-layer drift is a human-only escalation that the stop-gate already blocks completion on, so it outranks every stage advance — no later work can be certified while it stands.",
-            data: { drift_open_blocking: s.drift_open_blocking },
+            data: { drift_open_blocking: s.drift_open_blocking, obligations },
         }, explain);
     }
     // 2. A revise loop at its cap owes a human decision (§18 — stop looping).
@@ -106,6 +129,18 @@ function runNext(paths, opts = {}) {
     //     (`runRepoCheck`, via checkRepoMap) — no duplicate hashing.
     const repoR = (0, gate_preconditions_1.checkRepoMap)(paths, s);
     if (!repoR.ok) {
+        // P4-5: a PARTIAL map (a capped/incomplete scan) blocks unlock distinctly from a
+        // stale/absent one — the fix is to raise the scan caps and re-scan, not to chase a
+        // drift diff. `repo_map_partial` carries `capHit` instead of `absent`.
+        if (repoR.error === "repo_map_partial") {
+            const capHit = repoR.detail.capHit;
+            return emit({
+                kind: "refresh-repo-map",
+                action: `Brownfield repo-map is PARTIAL (scan cap hit: ${capHit}) — raise the scan caps (\`th repo map --max-files\`/\`--max-bytes\`) and re-run \`th repo map\` so the whole codebase is mapped before tiering or planning proceeds.`,
+                why: "A partial scan means whole regions of the repo were never seen; tiering and planning on a half-mapped codebase repeats the silent-partial failure mode, so completing the scan outranks stage work.",
+                data: { shape: "partial", capHit },
+            }, explain);
+        }
         const absent = repoR.detail.absent;
         return emit({
             kind: "refresh-repo-map",
@@ -127,9 +162,9 @@ function runNext(paths, opts = {}) {
         const titlePart = title ? ` (title: "${title}")` : "";
         return emit({
             kind: "resolve-decision-obligation",
-            action: `Approve ${decisionId}${titlePart} — it blocks stage '${blockedStage}' from proceeding.`,
+            action: `Approve ${decisionId}${titlePart} — it blocks stage '${blockedStage}' from proceeding.${obligationSuffix(obligations)}`,
             why: `Decision ${decisionId} is linked to stage '${blockedStage}' and is not yet approved; no stage work can proceed while a gating decision is unmet (RULE-007).`,
-            data: { decisionId, blockedStage },
+            data: { decisionId, blockedStage, obligations },
         }, explain);
     }
     // 4c. Open BLOCKING debate (NEW rung — AC-B15). The stop-gate already refuses
@@ -145,9 +180,9 @@ function runNext(paths, opts = {}) {
         const n = debateR.detail.debate_open_blocking;
         return emit({
             kind: "resolve-debate",
-            action: `${n} open BLOCKING debate${n === 1 ? "" : "s"} must be reconciled before advancing — resolve or escalate (\`th debate resolve\`).`,
+            action: `${n} open BLOCKING debate${n === 1 ? "" : "s"} must be reconciled before advancing — resolve or escalate (\`th debate resolve\`).${obligationSuffix(obligations)}`,
             why: "An open blocking debate is a Pattern-B reconciliation obligation that the stop-gate already refuses completion on, so it outranks stage work — the run cannot advance past an unresolved debate.",
-            data: { debate_open_blocking: n },
+            data: { debate_open_blocking: n, obligations },
         }, explain);
     }
     // 5. Stage-specific obligations for the current stage. Canonicalize ONCE so the
@@ -335,6 +370,24 @@ function coverageBlocker(paths) {
  * both the JSON `data.why` and the human line; otherwise it is omitted entirely
  * so the default output is unchanged.
  */
+/**
+ * The unified "open human obligation" suffix (P5-5): when MORE THAN ONE class of
+ * obligation is open at once (e.g. blocking drift AND an open debate), append a
+ * single line naming the full set so the operator sees the whole human-owed
+ * backlog from any one rung — instead of discovering each only after clearing the
+ * last. Empty when ≤1 class is open, so the common single-obligation output is
+ * unchanged. Mechanics are untouched; this is surface only.
+ */
+function obligationSuffix(o) {
+    const open = [
+        o.drift > 0 ? `${o.drift} blocking drift` : null,
+        o.debate > 0 ? `${o.debate} open debate${o.debate === 1 ? "" : "s"}` : null,
+        o.decision > 0 ? `${o.decision} unapproved gating decision` : null,
+    ].filter((x) => x !== null);
+    if (open.length <= 1)
+        return "";
+    return ` (open human obligations: ${o.total} total — ${open.join(", ")}; clear all before completion).`;
+}
 function emit(next, explain = false) {
     const data = { kind: next.kind, action: next.action, ...(next.data ?? {}) };
     if (explain && next.why)

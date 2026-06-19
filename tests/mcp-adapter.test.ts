@@ -671,6 +671,9 @@ describe("MCP coordination tools delegate to their handlers (locked, real state)
   it("th_debate_add increments open_blocking, th_debate_list reflects it, th_debate_resolve clears it", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
+    // P5-2: the debate ledger is an advanced feature, off below T2 — record T2 so
+    // the runtime tier gate lets these MCP wrappers reach their handlers.
+    runStateSet(tp.paths, "tier", "T2", { emergency: true });
 
     const added = defFor("th_debate_add").run(tp.paths, {
       topic: "queue vs. stream",
@@ -700,6 +703,8 @@ describe("MCP coordination tools delegate to their handlers (locked, real state)
   it("th_collab_fragment writes an anchored fragment, th_collab_list returns it", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
+    // P5-2: blackboard collab is an advanced feature, off below T2 — record T2.
+    runStateSet(tp.paths, "tier", "T2", { emergency: true });
 
     const frag = defFor("th_collab_fragment").run(tp.paths, {
       stage: "architecture",
@@ -707,6 +712,7 @@ describe("MCP coordination tools delegate to their handlers (locked, real state)
       name: "builder-a.md",
       // The fragment carries a REQ-ID anchor so it would survive a merge (§17).
       text: "## REQ-001\nProposal: bound the queue depth.\n",
+      confirm: true, // Deferred #3: destructive-op ack gate.
     });
     expect(frag.ok).toBe(true);
     expect(frag.data?.name).toBe("builder-a.md");
@@ -720,6 +726,8 @@ describe("MCP coordination tools delegate to their handlers (locked, real state)
   it("th_artifact_leases is empty (ok) on a fresh project; claim then leases lists the lease", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
+    // P5-2: section leases are an advanced feature, off below T2 — record T2.
+    runStateSet(tp.paths, "tier", "T2", { emergency: true });
 
     // Empty list on a fresh project.
     const empty = defFor("th_artifact_leases").run(tp.paths, {});
@@ -791,7 +799,7 @@ describe("Interview/init MCP tools: th_interview_* + th_init (store-only, idempo
     tp = makeTempProject();
     runInit(tp.paths, {});
 
-    const start = defFor("th_interview_start").run(tp.paths, { idea: "build a CLI", cutoff: 0.8 });
+    const start = defFor("th_interview_start").run(tp.paths, { idea: "build a CLI", cutoff: 0.8, confirm: true }); // Deferred #3: ack gate.
     expect(start.ok).toBe(true);
 
     // A low-confidence round: not yet ready.

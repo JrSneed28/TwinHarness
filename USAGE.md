@@ -1305,7 +1305,179 @@ Pre-edit blast-radius analysis over the persisted `repo-map.json`. Reads no stat
 | `th_budget_check` | `th budget check` | `max`, `filesRead`, `slicesBuilt`, `toolCalls`, `artifacts` inputs; deterministic estimate |
 | `th_handoff_write` | `th handoff write` | no inputs; writes `.twinharness/HANDOFF.md` |
 
-All MCP tool schemas are strict and closed (`additionalProperties: false`). Output mirrors the CLI structured payload (`result.data`) as `structuredContent` plus the human text block. Compact by default — the full `repo-map.json` is never dumped into a prompt (REQ-NFR-004).
+All MCP tool schemas are strict and closed (`additionalProperties: false`). Output mirrors the CLI structured payload (`result.data`) as `structuredContent` plus the human text block. Compact by default — the full `repo-map.json` is never dumped into a prompt (REQ-NFR-004), and the heavy oracle tools (`th_coverage_report`, `th_doctor`, `th_scorecard`) return a one-line headline unless called with `verbose: true` (full data is always in `structuredContent`). Each tool advertises MCP behavior hints (`readOnlyHint`/`destructiveHint`/`idempotentHint`) and a grouping `category` (in `_meta`).
+
+<!-- BEGIN AUTO-GENERATED: command-reference (scripts/gen-command-reference.ts) -->
+
+#### Generated command reference
+
+This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **89 CLI command leaves** and **62 MCP tools**.
+
+| CLI command | MCP tool | Status |
+|---|---|---|
+| `th init` | `th_init` | mirrored |
+| `th state get` | `th_state_get` | mirrored |
+| `th state set` | `th_state_set` | mirrored |
+| `th state status` | — (CLI-only) | Human-readable snapshot; agents read th_state_get / th_scorecard structurally. |
+| `th state verify` | — (CLI-only) | CLI/CI exit-code gate; agents read th_doctor for validity posture. |
+| `th revise bump` | — (CLI-only) | Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface. |
+| `th revise status` | — (CLI-only) | Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface. |
+| `th revise reset` | — (CLI-only) | Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface. |
+| `th tier classify` | — (CLI-only) | Advisory brief classifier (reads a brief.json file); the gated th_tier_record is the MCP write path. |
+| `th tier veto-check` | — (CLI-only) | CLI/CI exit-code veto gate; the gated th_tier_record enforces the veto on the MCP write path. |
+| `th tier record` | `th_tier_record` | mirrored |
+| `th tier features` | — (CLI-only) | Operator inspection of the feature-activation layer; the MCP gate enforces it inline (tier_locked). |
+| `th stage advance` | `th_stage_advance` | mirrored |
+| `th stage current` | `th_stage_current` | mirrored |
+| `th stage describe` | `th_stage_describe` | mirrored |
+| `th stage list` | `th_stage_list` | mirrored |
+| `th implementation unlock` | `th_implementation_unlock` | mirrored |
+| `th artifact register` | `th_artifact_register` | mirrored |
+| `th artifact list` | `th_artifact_list` | mirrored |
+| `th artifact claim` | `th_artifact_claim` | mirrored |
+| `th artifact release` | `th_artifact_release` | mirrored |
+| `th artifact leases` | `th_artifact_leases` | mirrored |
+| `th coverage check` | `th_coverage_check` | mirrored |
+| `th coverage report` | `th_coverage_report` | mirrored |
+| `th verify add` | `th_verify_add` | mirrored |
+| `th verify list` | `th_verify_list` | mirrored |
+| `th verify approve` | — (CLI-only) | Human-confirms a verify command SET for execution (provenance gate); CLI/human-only. |
+| `th verify clear` | `th_verify_clear` | mirrored |
+| `th verify run` | `th_verify_run` | mirrored |
+| `th build plan` | `th_build_plan` | mirrored |
+| `th build next-wave` | `th_build_next_wave` | mirrored |
+| `th build dispatch` | `th_build_dispatch` | mirrored |
+| `th build claim` | `th_build_claim` | mirrored |
+| `th build release` | `th_build_release` | mirrored |
+| `th build sub-claim` | `th_build_sub_claim` | mirrored |
+| `th build sub-release` | `th_build_sub_release` | mirrored |
+| `th build leases` | — (CLI-only) | Lease inspection convenience; agents read th_build_dispatch / th_build_next_wave. |
+| `th debug pack` | — (CLI-only) | Debugger evidence-bundle CLI surface (read-first orientation); not an MCP coordination tool. |
+| `th debug log add` | — (CLI-only) | Debugger evidence ledger; not an MCP coordination tool. |
+| `th debug log list` | — (CLI-only) | Debugger evidence ledger; not an MCP coordination tool. |
+| `th anchors scan` | — (CLI-only) | REQ-anchor/CI exit-code surface; not an MCP coordination tool. |
+| `th trace render` | — (CLI-only) | On-demand traceability render; not an MCP coordination tool. |
+| `th stale` | — (CLI-only) | Diff-scoped staleness CLI surface; not an MCP coordination tool. |
+| `th slices sync` | `th_slices_sync` | mirrored |
+| `th slice set-status` | `th_slice_set_status` | mirrored |
+| `th drift add` | `th_drift_add` | mirrored |
+| `th drift list` | `th_drift_list` | mirrored |
+| `th drift resolve` | `th_drift_resolve` | mirrored |
+| `th collab init` | `th_collab_init` | mirrored |
+| `th collab fragment` | `th_collab_fragment` | mirrored |
+| `th collab list` | `th_collab_list` | mirrored |
+| `th collab merge` | `th_collab_merge` | mirrored |
+| `th debate add` | `th_debate_add` | mirrored |
+| `th debate list` | `th_debate_list` | mirrored |
+| `th debate resolve` | `th_debate_resolve` | mirrored |
+| `th hook stop-gate` | — (CLI-only) | Claude Code Stop-hook protocol; not an agent tool. |
+| `th hook pretool-gate` | — (CLI-only) | Claude Code PreToolUse write-gate protocol; not an agent tool. |
+| `th hook subagent-stop` | — (CLI-only) | Claude Code SubagentStop-hook protocol; not an agent tool. |
+| `th migrate` | — (CLI-only) | Destructive state schema rewrite; CLI/human-only (th_init is the safe idempotent MCP entry). |
+| `th doctor` | `th_doctor` | mirrored |
+| `th next` | `th_next` | mirrored |
+| `th preview` | — (CLI-only) | Pre-run pipeline preview (operator orientation); the MCP th_stage_* tools expose stage contracts. |
+| `th scorecard` | `th_scorecard` | mirrored |
+| `th route` | `th_route` | mirrored |
+| `th telemetry on` | — (CLI-only) | Local-only operator opt-in; not an agent capability. |
+| `th telemetry off` | — (CLI-only) | Local-only operator opt-in; not an agent capability. |
+| `th telemetry status` | — (CLI-only) | Local-only operator opt-in; not an agent capability. |
+| `th context estimate` | — (CLI-only) | Prompt-surface estimator (operator sizing); th_context_pack/th_budget_check are the MCP context surfaces. |
+| `th context pack` | `th_context_pack` | mirrored |
+| `th budget check` | `th_budget_check` | mirrored |
+| `th handoff write` | `th_handoff_write` | mirrored |
+| `th handoff verify` | — (CLI-only) | Resume-integrity CLI check; th_handoff_write is the MCP handoff surface. |
+| `th resume` | — (CLI-only) | Resume detector (prints th next); agents call th_next directly. |
+| `th delegate plan` | `th_delegate_plan` | mirrored |
+| `th delegate pack` | `th_delegate_pack` | mirrored |
+| `th delegate capsule` | — (CLI-only) | Prints a blank capsule skeleton; a static template, not a coordination tool. |
+| `th delegate check` | `th_delegate_check` | mirrored |
+| `th repo map` | `th_repo_map` | mirrored |
+| `th repo check` | `th_repo_check` | mirrored |
+| `th repo relevant` | `th_repo_relevant` | mirrored |
+| `th repo impact` | `th_repo_impact` | mirrored |
+| `th decision detect` | `th_decision_detect` | mirrored |
+| `th decision add` | `th_decision_add` | mirrored |
+| `th decision approve` | — (CLI-only) | HUMAN-ONLY TTY-gated transition (RULE-011); permanently absent from MCP. |
+| `th decision check` | `th_decision_check` | mirrored |
+| `th decision list` | `th_decision_list` | mirrored |
+| `th manifest export` | — (CLI-only) | Deterministic run-snapshot CLI surface; agents read th_scorecard / th_state_get. |
+| `th version` | — (CLI-only) | CLI meta; the MCP server advertises version via the protocol. |
+| `th help` | — (CLI-only) | CLI meta; MCP clients read tool descriptions, not `th help`. |
+| `th_blast_radius_record` | — (MCP-only) | Typed gate setter; the CLI reaches blast_radius only via `th state set ... --emergency`. |
+| `th_write_gate_set` | — (MCP-only) | Typed gate setter; the CLI reaches write_gate only via `th state set write_gate ... --emergency`. |
+| `th_interview_start` | — (MCP-only) | MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment). |
+| `th_interview_record` | — (MCP-only) | MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment). |
+| `th_interview_status` | — (MCP-only) | MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment). |
+
+#### MCP tool roster (exhaustive — all 62)
+
+Every registered MCP tool name, in registry order. The CLI↔MCP parity test pins this list against `TOOL_DEFS.map(t => t.name)`, so a tool added/removed/renamed without updating this roster fails CI.
+
+- `th_state_get`
+- `th_state_set`
+- `th_tier_record`
+- `th_stage_advance`
+- `th_implementation_unlock`
+- `th_write_gate_set`
+- `th_blast_radius_record`
+- `th_drift_add`
+- `th_drift_list`
+- `th_drift_resolve`
+- `th_build_next_wave`
+- `th_build_claim`
+- `th_build_release`
+- `th_build_dispatch`
+- `th_build_plan`
+- `th_route`
+- `th_coverage_check`
+- `th_coverage_report`
+- `th_next`
+- `th_delegate_plan`
+- `th_delegate_pack`
+- `th_delegate_check`
+- `th_repo_map`
+- `th_repo_relevant`
+- `th_repo_impact`
+- `th_context_pack`
+- `th_build_sub_claim`
+- `th_build_sub_release`
+- `th_repo_check`
+- `th_decision_detect`
+- `th_decision_add`
+- `th_decision_check`
+- `th_decision_list`
+- `th_artifact_register`
+- `th_artifact_list`
+- `th_artifact_claim`
+- `th_artifact_release`
+- `th_artifact_leases`
+- `th_collab_init`
+- `th_collab_fragment`
+- `th_collab_list`
+- `th_collab_merge`
+- `th_debate_add`
+- `th_debate_list`
+- `th_debate_resolve`
+- `th_verify_add`
+- `th_verify_list`
+- `th_verify_clear`
+- `th_verify_run`
+- `th_stage_current`
+- `th_stage_describe`
+- `th_stage_list`
+- `th_doctor`
+- `th_scorecard`
+- `th_slices_sync`
+- `th_slice_set_status`
+- `th_interview_start`
+- `th_interview_record`
+- `th_interview_status`
+- `th_init`
+- `th_budget_check`
+- `th_handoff_write`
+
+<!-- END AUTO-GENERATED: command-reference -->
 
 #### Brownfield workflow (REQ-RU-060/062)
 

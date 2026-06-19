@@ -43,6 +43,7 @@ const state_store_1 = require("../core/state-store");
 const hash_1 = require("../core/hash");
 const log_1 = require("../core/log");
 const guards_1 = require("../core/guards");
+const summary_1 = require("../core/summary");
 /**
  * `th artifact` — content-hash and record an approved, versioned artifact
  * (spec §12: "each artifact is versioned with a content hash referenced by
@@ -108,6 +109,25 @@ function runArtifactRegisterLocked(paths, file, version) {
         throw e;
     }
     const relKey = toRelKey(paths.root, file);
+    // P4-7 — validate the Summary block at register time to bound head-fallback bloat.
+    // `th context pack` routes the artifact's `## Summary` block as the handoff currency;
+    // when it is ABSENT the pack falls back to the file HEAD. For a markdown artifact
+    // missing a Summary block we surface a non-blocking warning so the author adds a tight
+    // Summary rather than letting the pack inject the document head. Never blocks
+    // registration (registration is a mechanical hash record); directories have no single
+    // Summary block and are exempt.
+    let summaryWarning = null;
+    if (stat.isFile() && /\.(md|markdown)$/i.test(relKey)) {
+        try {
+            const { summary } = (0, summary_1.extractSummary)(fs.readFileSync(abs, "utf8"));
+            if (summary === null) {
+                summaryWarning = `no \`## Summary\` block — \`th context pack\` will fall back to the file head; add a Summary block to keep the handoff tight.`;
+            }
+        }
+        catch {
+            /* unreadable as text — leave unvalidated (best-effort). */
+        }
+    }
     const entry = { file: relKey, version, hash };
     const next = { ...r.state, approved_artifacts: [...r.state.approved_artifacts] };
     const idx = next.approved_artifacts.findIndex((a) => a.file === relKey);
@@ -116,10 +136,12 @@ function runArtifactRegisterLocked(paths, file, version) {
     else
         next.approved_artifacts.push(entry);
     (0, state_store_1.writeState)(paths, next);
-    (0, log_1.structuredLog)({ cmd: "artifact register", file: relKey, version, hash });
+    (0, log_1.structuredLog)({ cmd: "artifact register", file: relKey, version, hash, summaryWarning: summaryWarning !== null });
     return (0, output_1.success)({
-        data: { file: relKey, version, hash },
-        human: `registered ${relKey} v${version} (${hash})`,
+        data: { file: relKey, version, hash, summaryWarning },
+        human: summaryWarning
+            ? `registered ${relKey} v${version} (${hash})\n  ⚠ ${summaryWarning}`
+            : `registered ${relKey} v${version} (${hash})`,
     });
 }
 /** `th artifact list` — list every recorded approved artifact. */

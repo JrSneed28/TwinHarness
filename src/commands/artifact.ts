@@ -8,6 +8,7 @@ import { type ApprovedArtifact } from "../core/state-schema";
 import { shortHashPath, HashLimitError } from "../core/hash";
 import { structuredLog } from "../core/log";
 import { NOT_INIT, formatIssues } from "../core/guards";
+import { extractSummary } from "../core/summary";
 
 /**
  * `th artifact` — content-hash and record an approved, versioned artifact
@@ -86,6 +87,25 @@ function runArtifactRegisterLocked(
   }
   const relKey = toRelKey(paths.root, file);
 
+  // P4-7 — validate the Summary block at register time to bound head-fallback bloat.
+  // `th context pack` routes the artifact's `## Summary` block as the handoff currency;
+  // when it is ABSENT the pack falls back to the file HEAD. For a markdown artifact
+  // missing a Summary block we surface a non-blocking warning so the author adds a tight
+  // Summary rather than letting the pack inject the document head. Never blocks
+  // registration (registration is a mechanical hash record); directories have no single
+  // Summary block and are exempt.
+  let summaryWarning: string | null = null;
+  if (stat.isFile() && /\.(md|markdown)$/i.test(relKey)) {
+    try {
+      const { summary } = extractSummary(fs.readFileSync(abs, "utf8"));
+      if (summary === null) {
+        summaryWarning = `no \`## Summary\` block — \`th context pack\` will fall back to the file head; add a Summary block to keep the handoff tight.`;
+      }
+    } catch {
+      /* unreadable as text — leave unvalidated (best-effort). */
+    }
+  }
+
   const entry: ApprovedArtifact = { file: relKey, version, hash };
   const next = { ...r.state, approved_artifacts: [...r.state.approved_artifacts] };
   const idx = next.approved_artifacts.findIndex((a) => a.file === relKey);
@@ -93,10 +113,12 @@ function runArtifactRegisterLocked(
   else next.approved_artifacts.push(entry);
 
   writeState(paths, next);
-  structuredLog({ cmd: "artifact register", file: relKey, version, hash });
+  structuredLog({ cmd: "artifact register", file: relKey, version, hash, summaryWarning: summaryWarning !== null });
   return success({
-    data: { file: relKey, version, hash },
-    human: `registered ${relKey} v${version} (${hash})`,
+    data: { file: relKey, version, hash, summaryWarning },
+    human: summaryWarning
+      ? `registered ${relKey} v${version} (${hash})\n  ⚠ ${summaryWarning}`
+      : `registered ${relKey} v${version} (${hash})`,
   });
 }
 

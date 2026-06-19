@@ -59,6 +59,21 @@ describe("GOV-2 (P3-1b): the gate-ledger is re-elevated to tamper-evident", () =
   });
 });
 
+describe("P0-3 (#18): the write-gate Bash-bypass list documents the known gaps", () => {
+  // The Bash heuristic is fail-open; SECURITY.md must enumerate the constructs it
+  // cannot parse so operators are not misled into treating it as a sandbox. P0-3
+  // adds PowerShell and patch/git-apply to the previously-incomplete list.
+  it("CONTAINS the patch-application bypass (patch / git apply)", () => {
+    expect(security).toContain("patch");
+    expect(security).toContain("git apply");
+  });
+
+  it("CONTAINS the PowerShell interpreter bypass (powershell / pwsh)", () => {
+    expect(security).toContain("powershell -Command");
+    expect(security).toContain("pwsh -c");
+  });
+});
+
 describe("GOV-3 (P2-5): the strict fail-closed-on-invalid-state behaviour is documented", () => {
   it("CONTAINS the default fail-open-on-invalid-state description", () => {
     expect(security).toContain("fails open on a **present-but-invalid**");
@@ -67,5 +82,25 @@ describe("GOV-3 (P2-5): the strict fail-closed-on-invalid-state behaviour is doc
   it("CONTAINS the strict opt-in fail-closed description", () => {
     expect(security).toContain("opt into fail-closed");
     expect(security).toContain('write_gate: "strict"');
+  });
+});
+
+describe("SEC-017 (P6-1): the human-only TTY gate is documented as a guardrail, not a sandbox", () => {
+  it("CONTAINS the guardrail-not-sandbox framing for th decision approve", () => {
+    expect(security).toContain("human-only guardrail, not a sandbox");
+    expect(security).toContain("records the real, observed invocation provenance");
+    expect(security).toContain("attributionSuspect");
+    expect(security).toContain("approval-audit.jsonl");
+  });
+});
+
+describe("SEC-019 (P6-2/3/4/5): verify hardening boundaries are documented", () => {
+  it("CONTAINS the approve-before-first-run, curated-env, redaction, tree-kill, and read-only claims", () => {
+    expect(security).toContain("Approve-before-first-run");
+    expect(security).toContain("unapproved_command_set");
+    expect(security).toContain("Curated child environment");
+    expect(security).toContain("Output redaction");
+    expect(security).toContain("Process-tree kill on timeout");
+    expect(security).toContain("Optional read-only mode");
   });
 });

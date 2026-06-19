@@ -185,9 +185,19 @@ function runStateSetLocked(paths, key, rawValue, opts = {}) {
     const warning = emergency && gateOwned
         ? `⚠️  EMERGENCY raw gate write — set gate-owned field "${firstSegment}" directly, bypassing the typed gate ladder (no precondition check). This override is audit-ledgered.\n`
         : "";
+    // P6-7 (#18) — write-gate honesty signal: at the strict opt-in, state plainly
+    // that the gate is a GUARDRAIL for a compliant agent, not a security sandbox.
+    // strict narrows common accidental Bash redirections but does NOT close the Bash
+    // bypass (here-docs/subshells/variable indirection/program-mediated writes).
+    const strictCaveat = firstSegment === "write_gate" && value === "strict"
+        ? `\nNote: write_gate=strict is a GUARDRAIL for a compliant agent, not a security sandbox. ` +
+            `It narrows accidental Bash redirections but does NOT close the Bash bypass ` +
+            `(here-docs, subshells, variable indirection, \`python -c\`/\`node -e\`). ` +
+            `Do not rely on it as containment for untrusted repos.`
+        : "";
     return (0, output_1.success)({
-        data: { key, value, ...(emergency && gateOwned ? { emergency: true } : {}) },
-        human: `${warning}Set ${key} = ${JSON.stringify(value)}`,
+        data: { key, value, ...(emergency && gateOwned ? { emergency: true } : {}), ...(strictCaveat ? { writeGateCaveat: true } : {}) },
+        human: `${warning}Set ${key} = ${JSON.stringify(value)}${strictCaveat}`,
     });
 }
 /**

@@ -5,7 +5,7 @@ import { type CommandResult, success, failure } from "../core/output";
 import { readState } from "../core/state-store";
 import { extractSummary } from "../core/summary";
 import { structuredLog } from "../core/log";
-import { runRepoRelevant } from "./repo";
+import { runRepoRelevant, repoFreshnessSummary } from "./repo";
 
 // Anchor: REQ-RU-061
 // Anchor: REQ-RU-095
@@ -107,6 +107,17 @@ export function runContextEstimate(): CommandResult {
 export interface ContextPackOptions {
   /** Limit/annotate the pack for a specific slice (SLICE-ID). */
   slice?: string;
+  /** P4-7 — frame the repo-relevant layer for a specific REQ-ID. */
+  req?: string;
+  /** P4-7 — frame the repo-relevant layer for a specific file path. */
+  file?: string;
+  /**
+   * P4-6 — token budget for the assembled pack. When set (>0), the pack ranks its
+   * artifact Summary blocks and DROPS the lowest-value ones until the total fits,
+   * reporting which were omitted and why. ≤0 / undefined ⇒ no budget (current
+   * behavior). The number is RAW tokens (not thousands).
+   */
+  maxTokens?: number;
 }
 
 interface PackedArtifact {
@@ -182,8 +193,19 @@ export function runContextPack(paths: ProjectPaths, opts: ContextPackOptions = {
   let repoRelevantFiles: Array<{ path: string; why: string; kind: "readFirst" | "related" | "tests" }> = [];
   let repoRelevantNote: string | null = null;
 
-  if (opts.slice && sliceBlock) {
-    const relResult = runRepoRelevant(paths, { slice: opts.slice });
+  // P4-7 — the repo-relevant layer accepts a slice, REQ, or file selector (mirrors
+  // `runRepoRelevant`'s selectors). The pack frames whichever ONE is given.
+  const relSelector: { slice?: string; req?: string; file?: string } | null =
+    opts.slice && sliceBlock
+      ? { slice: opts.slice }
+      : opts.req
+        ? { req: opts.req }
+        : opts.file
+          ? { file: opts.file }
+          : null;
+
+  if (relSelector) {
+    const relResult = runRepoRelevant(paths, relSelector);
     if (relResult.ok && relResult.data) {
       const d = relResult.data as {
         readFirst?: Array<{ path: string; why: string }>;
@@ -199,12 +221,66 @@ export function runContextPack(paths: ProjectPaths, opts: ContextPackOptions = {
     }
   }
 
-  const totalTokens = packed.reduce((sum, p) => sum + p.tokens, 0);
-  structuredLog({ cmd: "context pack", slice: opts.slice ?? null, artifacts: packed.length, tokens: totalTokens, repoRelevantFiles: repoRelevantFiles.length });
+  // P4-1/P4-4 — freshness + partial-scan status of the persisted repo-map. The pack
+  // injects repo intelligence from that map, so a STALE or INCOMPLETE map must be
+  // labelled inline (the agents consuming this pack — librarian/orchestrator — act on
+  // `repoMapFresh`). Read-only; uses the cached freshness check (P4-10). When NO repo
+  // intelligence layer was requested (no selector) we still report the map's status so
+  // the consumer knows the substrate it would draw on.
+  const freshness = repoFreshnessSummary(paths);
+  const repoMapFresh = freshness.fresh && !freshness.partial;
 
-  const header = opts.slice
-    ? `Context pack for ${opts.slice} — ${packed.length} artifact summary block(s), ~${totalTokens} tokens`
-    : `Context pack — ${packed.length} artifact summary block(s), ~${totalTokens} tokens`;
+  // P4-6 — token budget. When `maxTokens > 0`, rank the artifact Summary blocks
+  // (registered order is the proxy for priority — earliest-approved artifacts are the
+  // load-bearing spec/req docs) and DROP the lowest-priority blocks until the kept set
+  // fits the budget. Dropped blocks are reported ("omitted N items, why"). The
+  // `truncated` flag (P4-6: surface the dropped state) is true iff anything was omitted.
+  // ≤0 / undefined ⇒ keep everything (current behavior).
+  const budget = typeof opts.maxTokens === "number" && opts.maxTokens > 0 ? opts.maxTokens : null;
+  let kept = packed;
+  const omitted: Array<{ file: string; version: number; tokens: number; reason: string }> = [];
+  if (budget !== null) {
+    kept = [];
+    let running = 0;
+    for (const p of packed) {
+      if (running + p.tokens <= budget) {
+        kept.push(p);
+        running += p.tokens;
+      } else {
+        omitted.push({
+          file: p.file,
+          version: p.version,
+          tokens: p.tokens,
+          reason: `would exceed --max-tokens budget (${budget}); ${running}+${p.tokens} > ${budget}`,
+        });
+      }
+    }
+  }
+  const truncated = omitted.length > 0;
+
+  const totalTokens = kept.reduce((sum, p) => sum + p.tokens, 0);
+  structuredLog({
+    cmd: "context pack",
+    slice: opts.slice ?? null,
+    artifacts: kept.length,
+    tokens: totalTokens,
+    repoRelevantFiles: repoRelevantFiles.length,
+    repoMapFresh,
+    truncated,
+    omitted: omitted.length,
+  });
+
+  // P4-1/P4-4 — STALE / PARTIAL labels prepended so a consumer cannot miss them.
+  const staleLabel = !repoMapFresh
+    ? freshness.partial
+      ? `⚠ PARTIAL repo-map — the scan hit cap "${freshness.capHit}"; the repo-relevant layer below is INCOMPLETE. Raise the scan caps and re-run \`th repo map\`.`
+      : `⚠ STALE repo-map — ${freshness.mapPresent ? `the working tree drifted from the map (${freshness.shape})` : "no repo-map.json on disk"}; the repo-relevant layer below may be wrong. Run \`th repo map\` to refresh.`
+    : null;
+
+  const selectorLabel = opts.slice ?? (opts.req ? opts.req : opts.file ? opts.file : null);
+  const header = selectorLabel
+    ? `Context pack for ${selectorLabel} — ${kept.length} artifact summary block(s), ~${totalTokens} tokens${truncated ? ` (${omitted.length} omitted for budget)` : ""}`
+    : `Context pack — ${kept.length} artifact summary block(s), ~${totalTokens} tokens${truncated ? ` (${omitted.length} omitted for budget)` : ""}`;
 
   const sliceLines = sliceBlock
     ? [
@@ -218,12 +294,12 @@ export function runContextPack(paths: ProjectPaths, opts: ContextPackOptions = {
 
   // REQ-RU-061: repo-relevant section in human text.
   const repoRelevantLines: string[] = [];
-  if (opts.slice) {
+  if (relSelector) {
     repoRelevantLines.push("");
     if (repoRelevantNote) {
       repoRelevantLines.push(`Repo-relevant files: ${repoRelevantNote}`);
     } else if (repoRelevantFiles.length === 0) {
-      repoRelevantLines.push("Repo-relevant files: (none matched — repo-map may be empty for this slice)");
+      repoRelevantLines.push("Repo-relevant files: (none matched — repo-map may be empty for this selector)");
     } else {
       repoRelevantLines.push(`Repo-relevant files (${repoRelevantFiles.length} from repo-understanding layer):`);
       for (const f of repoRelevantFiles) {
@@ -233,21 +309,44 @@ export function runContextPack(paths: ProjectPaths, opts: ContextPackOptions = {
   }
 
   const artifactLines =
-    packed.length === 0
-      ? ["", "(no approved artifacts yet — nothing to pack)"]
-      : packed.flatMap((p) => [
+    kept.length === 0
+      ? ["", omitted.length > 0 ? "(all artifacts omitted for budget — see omissions below)" : "(no approved artifacts yet — nothing to pack)"]
+      : kept.flatMap((p) => [
           "",
           `### ${p.file} (v${p.version})${p.exists ? "" : " — MISSING ON DISK"}${p.summary === null && p.exists && !p.isDir ? " — no Summary block (head shown)" : ""}`,
           p.text || "(empty)",
         ]);
 
-  const human = [header, ...sliceLines, ...repoRelevantLines, ...artifactLines].join("\n");
+  // P4-6 — omission report: "omitted N items, why".
+  const omissionLines: string[] =
+    omitted.length > 0
+      ? ["", `Omitted ${omitted.length} item(s) to fit --max-tokens=${budget}:`, ...omitted.map((o) => `  - ${o.file} (v${o.version}, ~${o.tokens} tok): ${o.reason}`)]
+      : [];
+
+  const human = [
+    ...(staleLabel ? [staleLabel, ""] : []),
+    header,
+    ...sliceLines,
+    ...repoRelevantLines,
+    ...artifactLines,
+    ...omissionLines,
+  ].join("\n");
 
   return success({
     data: {
       slice: sliceBlock ?? null,
-      artifacts: packed,
+      artifacts: kept,
       totalTokens,
+      // P4-1/P4-4 — freshness + partial status of the repo-map this pack draws on.
+      repoMapFresh,
+      repoMapFreshness: freshness,
+      partial: freshness.partial,
+      scanIncomplete: freshness.scanIncomplete,
+      // P4-6 — budget + omission report (additive; omit-when-absent is not needed —
+      // these are always present so the contract test can pin them).
+      maxTokens: budget,
+      truncated,
+      omitted,
       // REQ-RU-061: repo-relevant data included in structured response.
       repoRelevantFiles,
       repoRelevantNote: repoRelevantNote ?? null,

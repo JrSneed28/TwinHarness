@@ -22,6 +22,7 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
@@ -31,6 +32,8 @@ import { withStateLock } from "../core/state-store";
 import {
   type Decision,
   type DecisionEvent,
+  type ApprovalProvenance,
+  appendApprovalAudit,
   appendDecisionEvent,
   readDecisionEvents,
   reduceDecisions,
@@ -117,10 +120,24 @@ export function runDecisionAdd(paths: ProjectPaths, opts: DecisionAddOptions = {
     });
   });
 
+  // P6-6 (#16) — discourage `stage:` links on reversible choices. A `stage:` link
+  // makes the decision GATE that stage until it is approved (and it keeps gating
+  // even if later rejected/superseded — only approve clears it). For a reversible
+  // choice that doesn't truly need to block a stage, prefer a traceability link
+  // (REQ-/ADR-) instead. Surfaced as an advisory `stageLink` warning at the add
+  // surface; never blocks (the operator may legitimately want the gate).
+  const stageLinks = links.filter((l) => l.startsWith("stage:"));
+  const stageWarning =
+    stageLinks.length > 0
+      ? ` (advisory: ${stageLinks.join(", ")} will GATE that stage until this decision is APPROVED — ` +
+        `rejecting/superseding does NOT clear the gate. Use a stage link only for a choice that must ` +
+        `block the stage; for a reversible choice prefer a REQ-/ADR- traceability link.)`
+      : "";
+
   structuredLog({ cmd: "decision add", id: sealed.id, status: "proposed", links: links.length });
   return success({
-    data: { id: sealed.id, status: "proposed", links },
-    human: `Recorded ${sealed.id} (proposed).`,
+    data: { id: sealed.id, status: "proposed", links, stageLinks },
+    human: `Recorded ${sealed.id} (proposed).${stageWarning}`,
   });
 }
 
@@ -267,6 +284,9 @@ function listShape(d: Decision): Record<string, unknown> {
   if (d.status !== "proposed") {
     if (d.approver !== undefined) out.approver = d.approver;
     if (d.approvedAt !== undefined) out.approvedAt = d.approvedAt;
+    // Provenance (#17, D3) — the observed source of the approval. Surfaced so a
+    // reviewer can see an UNATTRIBUTED (attributionSuspect) approval at a glance.
+    if (d.provenance !== undefined) out.provenance = d.provenance;
   }
   if (d.status === "superseded" && d.supersededBy !== undefined) out.supersededBy = d.supersededBy;
   return out;
@@ -296,13 +316,33 @@ export function runDecisionList(paths: ProjectPaths, _opts: DecisionListOptions 
   const reduced = sortDecisions(reduceDecisions(events));
   const decisions = reduced.map(listShape);
   const seal = sealWarningData(events);
+
+  // P6-6 (#16) — Decision-UX clarity: rejected/superseded decisions STILL GATE
+  // (only `approved` clears the gate — DQ-002 / gatingObligations). A reviewer
+  // scanning the list might assume a `rejected` decision is "handled"; surface a
+  // one-line caveat whenever a stage-linked decision is in a non-approved terminal
+  // status, so the still-gating semantics are visible at the read surface.
+  const stillGating = reduced.filter(
+    (d) =>
+      (d.status === "rejected" || d.status === "superseded") &&
+      d.links.some((l) => canonicalizeLink(l).startsWith("stage:")),
+  );
+  const gatingNote =
+    stillGating.length > 0
+      ? "\n\nNote: only an APPROVED decision clears its stage gate. The following are in a " +
+        "non-approved terminal status but their stage link STILL GATES (rejection/supersession does " +
+        `not clear the gate — supersede-then-approve or approve the replacement to advance): ${stillGating
+          .map((d) => `${d.id} [${d.status}]`)
+          .join(", ")}.`
+      : "";
+
   structuredLog({ cmd: "decision list", decisions: decisions.length });
   return success({
-    data: { decisions, ...seal },
+    data: { decisions, stillGating: stillGating.map((d) => d.id), ...seal },
     human:
       decisions.length === 0
         ? "No decisions recorded."
-        : reduced.map((d) => `${d.id}  [${d.status}]  ${d.title}`).join("\n"),
+        : reduced.map((d) => `${d.id}  [${d.status}]  ${d.title}`).join("\n") + gatingNote,
   });
 }
 
@@ -364,6 +404,53 @@ export function requireTTYConfirmation(
   return { ok: false, error: "confirmation_declined" };
 }
 
+/**
+ * Best-effort parent-process command name (#17, D3). On Linux reads
+ * `/proc/<ppid>/comm` (the kernel-maintained command name); elsewhere, or on any
+ * read failure, returns "unknown". Never throws — provenance is forensic metadata,
+ * not a gate, so an unreadable parent must never break an approval.
+ */
+function readParentComm(ppid: number): string {
+  if (!ppid || ppid <= 0) return "unknown";
+  try {
+    const comm = fs.readFileSync(`/proc/${ppid}/comm`, "utf8").trim();
+    return comm || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * Capture the REAL invocation provenance of an approval (#17, D3): the observed
+ * TTY state, parent pid + command, hostname, and pid, plus whether the approver
+ * attribution was explicit or a suspect default. This is forensic metadata
+ * (NOT cryptographic — D3), sealed into the decision hash chain so a reviewer can
+ * tell a genuine interactive approval from a forged one after the fact. `deps` is
+ * injectable so tests get a deterministic, host-independent record.
+ */
+export interface ProvenanceDeps {
+  isTTY?: boolean;
+  ppid?: number;
+  parentComm?: string;
+  hostname?: string;
+  pid?: number;
+}
+
+export function captureApprovalProvenance(
+  attributionSuspect: boolean,
+  deps: ProvenanceDeps = {},
+): ApprovalProvenance {
+  const ppid = deps.ppid ?? process.ppid ?? 0;
+  return {
+    isTTY: deps.isTTY ?? Boolean(process.stdin.isTTY),
+    ppid,
+    parentComm: deps.parentComm ?? readParentComm(ppid),
+    hostname: deps.hostname ?? os.hostname(),
+    pid: deps.pid ?? process.pid,
+    attributionSuspect,
+  };
+}
+
 export interface DecisionApproveOptions {
   reject?: boolean;
   supersede?: string;
@@ -372,6 +459,12 @@ export interface DecisionApproveOptions {
   tty?: TTYConfirmationOpts;
   /** Injectable clock for deterministic audit timestamps (REQ-NFR-002). */
   now?: () => Date;
+  /**
+   * Injectable invocation-provenance source (tests). Defaults to the real
+   * process environment (isTTY/ppid/parentComm/hostname/pid). For a deterministic
+   * provenance record, the test path is `{ isTTY: ... }` mirroring the TTY barrier.
+   */
+  provenance?: ProvenanceDeps;
 }
 
 /** The transition event type for a disposition. */
@@ -423,10 +516,31 @@ export function runDecisionApprove(
       ? "reject"
       : "approve";
 
+  // Attribution (NOT a barrier — D3): an EXPLICIT actor comes from `--as` or
+  // TH_APPROVAL_ACTOR. We STOP silently trusting an unattributed approval as
+  // "human": when neither is supplied, the approver still defaults to "human" (so
+  // the state machine and existing read model are unchanged) but the provenance
+  // record is marked `attributionSuspect: true` — an unattributed approval is
+  // forensically flagged, not laundered into a confident human claim (#17).
+  //
+  // Provenance/attribution are resolved BEFORE the barrier (they perform no store
+  // read/write — like the disposition above) so a BLOCKED attempt (no-tty /
+  // declined) is recorded in the durable approval-audit log too. The audit log
+  // (#17, D3) survives a silenced stderr (`TH_NO_LOG=1`), so every approval attempt
+  // — sealed or blocked — leaves a forensic record.
+  const explicitActor = (opts.as ?? process.env.TH_APPROVAL_ACTOR)?.trim();
+  const attributionSuspect = !explicitActor;
+  const approver = explicitActor || "human";
+  const provenance = captureApprovalProvenance(attributionSuspect, opts.provenance ?? { isTTY: opts.tty?.isTTY });
+  const now = opts.now ?? (() => new Date());
+  const toEvent = dispositionEvent(reject, supersede);
+  const auditTs = now().toISOString();
+
   // ---- BARRIER (runs FIRST, before any read or write) -----------------------
   const confirm = requireTTYConfirmation(id ?? "(unknown)", disposition, opts.tty);
   if (!confirm.ok) {
     structuredLog({ cmd: "decision approve", error: confirm.error, id });
+    appendApprovalAudit(paths, { ts: auditTs, id, disposition, outcome: confirm.error, approver, provenance });
     return failure({
       human:
         confirm.error === "no_tty"
@@ -438,15 +552,12 @@ export function runDecisionApprove(
 
   if (!id) {
     structuredLog({ cmd: "decision approve", error: "unknown_decision", id });
+    appendApprovalAudit(paths, { ts: auditTs, id, disposition, outcome: "unknown_decision", approver, provenance });
     return failure({
       human: "usage: th decision approve <DECISION-ID> [--reject | --supersede <id>]",
       data: { error: "unknown_decision", id },
     });
   }
-
-  const approver = (opts.as ?? process.env.TH_APPROVAL_ACTOR ?? "human").trim() || "human";
-  const now = opts.now ?? (() => new Date());
-  const toEvent = dispositionEvent(reject, supersede);
 
   // Read-modify-append serialized via withStateLock. All further failure paths
   // return BEFORE the append, so the file is never touched on failure.
@@ -493,20 +604,41 @@ export function runDecisionApprove(
     }
 
     // Append the transition event (a NEW event; the prior event is preserved).
+    // The real invocation provenance (#17, D3) is sealed onto the transition so an
+    // after-the-fact reviewer sees the observed source (TTY/ppid/host/pid) and the
+    // attribution-suspect flag — not just a self-asserted "human".
     const event: Omit<DecisionEvent, "prevHash" | "recordHash"> = {
       id,
       event: toEvent,
       approver,
-      approvedAt: now().toISOString(),
+      approvedAt: auditTs,
+      provenance,
     };
     if (supersede) event.supersededBy = supersedeTarget;
     // Seal the approval transition with the opt-in key when one is explicitly set
     // (C-3b). resolveDecisionKey() returns null by default → no seal, no behavior change.
     appendDecisionEvent(paths, event, resolveDecisionKey());
 
-    const data: Record<string, unknown> = { id, to: toEvent, approver };
+    const data: Record<string, unknown> = { id, to: toEvent, approver, provenance };
     if (supersede) data.supersededBy = supersedeTarget;
-    return success({ data, human: `${id} → ${toEvent} (by ${approver}).` });
+    const suspectNote = attributionSuspect
+      ? ` [UNATTRIBUTED — no --as/TH_APPROVAL_ACTOR; marked suspect in audit provenance]`
+      : "";
+    return success({ data, human: `${id} → ${toEvent} (by ${approver}).${suspectNote}` });
+  });
+
+  // Durable audit (#17, D3): record the post-lock outcome — "appended" when the
+  // transition was sealed, else the failure error code (chain_broken /
+  // unknown_decision / illegal_transition / unknown_superseding_id). Survives a
+  // silenced stderr; complements the hash-chained decisions.jsonl with a record of
+  // EVERY approval attempt and its observed provenance.
+  appendApprovalAudit(paths, {
+    ts: auditTs,
+    id,
+    disposition,
+    outcome: result.ok ? "appended" : ((result.data?.error as string | undefined) ?? "failed"),
+    approver,
+    provenance,
   });
 
   // Exactly one structuredLog per invocation, after the locked section.
@@ -573,7 +705,17 @@ export function runDecisionCheck(paths: ProjectPaths, _opts: DecisionCheckOption
       data: { ok: false, error: "unapproved_gating", gating, ...seal },
       human: [
         "Unapproved decisions gate the current stage:",
-        ...gating.map((g) => `  ${g.decisionId} blocks stage '${g.blockedStage}'`),
+        ...gating.map((g) => {
+          const d = decisions.find((x) => x.id === g.decisionId);
+          const status = d ? d.status : "proposed";
+          // P6-6 (#16): a rejected/superseded decision STILL GATES — make that explicit
+          // in the per-line reason so a reviewer doesn't assume it's already handled.
+          const stillNote =
+            status === "rejected" || status === "superseded"
+              ? ` (status ${status} — still gating; only APPROVED clears the gate)`
+              : "";
+          return `  ${g.decisionId} blocks stage '${g.blockedStage}'${stillNote}`;
+        }),
       ].join("\n"),
     };
   }

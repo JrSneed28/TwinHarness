@@ -8,7 +8,7 @@ import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runSlicesSync } from "../src/commands/slices";
-import { runVerifyAdd, runVerifyRun } from "../src/commands/verify";
+import { runVerifyAdd, runVerifyRun, runVerifyApprove } from "../src/commands/verify";
 import { runDebugPack, runDebugLogAdd, runDebugLogList } from "../src/commands/debug";
 import { formatDebugEntry, parseDebugEntries, nextDebugId } from "../src/core/debug-log";
 
@@ -63,6 +63,7 @@ describe("REQ-DEBUG-002: debug pack assembles failing-suite + slice evidence", (
     writeFile(tp, "docs/09-implementation-plan.md", "### SLICE-1\nComponents touched: export, store\n");
     runSlicesSync(tp.paths, { planFile: "docs/09-implementation-plan.md" });
     runVerifyAdd(tp.paths, "false");
+    runVerifyApprove(tp.paths, { as: "test" });
     runVerifyRun(tp.paths);
 
     const res = runDebugPack(tp.paths, { slice: "SLICE-1" });

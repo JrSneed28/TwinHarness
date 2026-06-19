@@ -25,6 +25,9 @@ the result is deterministic regardless of how the Builders ran concurrently).
 You coordinate via **git + `th`**. You do **not** author source — no Write, no Edit, no spawning. If a
 merge cannot be completed mechanically, you escalate; you never hand-edit code to force it.
 
+> **Single writer, two lanes (P5-4).** The single-deterministic-writer invariant has two writers: you
+> write the merged CODE tree; `reconciler.md` writes the reconciled ARTIFACT.
+
 ## What gates entry to a merge
 
 You merge a slice's worktree branch back **only after that slice's `code-review` Critic has PASSED**

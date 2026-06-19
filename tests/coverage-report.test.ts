@@ -8,7 +8,7 @@ import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runCoverageReport } from "../src/commands/coverage";
-import { runVerifyAdd, runVerifyRun } from "../src/commands/verify";
+import { runVerifyAdd, runVerifyRun, runVerifyApprove } from "../src/commands/verify";
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
@@ -77,6 +77,7 @@ describe("REQ-COVERAGE-REPORT-002: passing is whole-suite, sourced from the veri
     writeFile(tp, "docs/01-requirements.md", "REQ-001 and REQ-002.\n");
     writeFile(tp, "tests/a.test.ts", "// REQ-001 tested\n");
     runVerifyAdd(tp.paths, PASS_CMD);
+    runVerifyApprove(tp.paths, { as: "test" });
     runVerifyRun(tp.paths);
 
     const res = runCoverageReport(tp.paths);
@@ -91,6 +92,7 @@ describe("REQ-COVERAGE-REPORT-002: passing is whole-suite, sourced from the veri
     writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
     writeFile(tp, "tests/a.test.ts", "// REQ-001\n");
     runVerifyAdd(tp.paths, FAIL_CMD);
+    runVerifyApprove(tp.paths, { as: "test" });
     runVerifyRun(tp.paths);
 
     const res = runCoverageReport(tp.paths);

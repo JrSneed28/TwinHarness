@@ -3,7 +3,7 @@ import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { resolveWithinRoot } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
-import { type ValidationIssue } from "../core/state-schema";
+import { type ValidationIssue, type Tier, type TwinHarnessState, TIERS } from "../core/state-schema";
 import { loadBriefFromFile, type TaskBrief } from "../core/brief";
 import { structuredLog } from "../core/log";
 import { NOT_INIT, formatIssues } from "../core/guards";
@@ -11,6 +11,184 @@ import { readState } from "../core/state-store";
 import { runRepoCheck, REPO_NO_MAP_EXIT } from "./repo";
 import { validateTierTransition } from "../core/gate-preconditions";
 import { applyGateMutation } from "./state";
+
+/* ------------------------------------------------------------------ *
+ * Feature-activation layer (Phase 5 / P5-1, plan §D2, REQ-PCO-060).   *
+ *                                                                      *
+ * Advanced coordination machinery (multi-writer collaboration, the    *
+ * debate ledger, fine-grained section/sub-leases) is OFF by default    *
+ * and only activates for a tier that actually needs it — tier ≥ T2 —   *
+ * OR when the run is already doing parallel authorship (a live build    *
+ * with >1 slice in flight), which is itself proof the coordination is  *
+ * warranted regardless of the recorded tier. The default is            *
+ * deliberately CONSERVATIVE: a T0/T1 single-writer run never loads the *
+ * coordination plane, but an existing T2/T3 run keeps every capability *
+ * it has today (no silent capability loss).                            *
+ *                                                                      *
+ * This catalog is the single source of truth for "what is advanced and *
+ * when does it turn on". `th tier features` renders it; the MCP server  *
+ * reads {@link featureActiveForState} to gate the matching tools at     *
+ * runtime (P5-2). Pure: it reads state and decides nothing about the    *
+ * run — it only reports which capability set is active.                 *
+ * ------------------------------------------------------------------ */
+
+/**
+ * The advanced coordination features Phase 5 gates. Each value is also the stable
+ * machine token surfaced by `th tier features` and the `feature` key the MCP
+ * runtime gate keys on, so callers can map a `tier_locked` refusal back to the
+ * exact capability that was off.
+ */
+export type AdvancedFeature = "collab" | "debate" | "section-lease" | "sub-lease";
+
+/** Every gated feature, in stable catalog order. */
+export const ADVANCED_FEATURES: readonly AdvancedFeature[] = [
+  "collab",
+  "debate",
+  "section-lease",
+  "sub-lease",
+];
+
+/** A catalog entry: the feature, a one-line title, and a clear "use when". */
+export interface FeatureSpec {
+  feature: AdvancedFeature;
+  /** Short human title. */
+  title: string;
+  /** The "use when" guidance (plan §D2 — every advanced feature documents this). */
+  useWhen: string;
+}
+
+/**
+ * The feature catalog (P5-1). Order is stable so `th tier features` output and the
+ * tests that pin it stay deterministic. The minimum tier and the
+ * parallel-authorship escape hatch are uniform across every advanced feature
+ * (≥T2 OR live parallel authorship), so they live in {@link featureActive} rather
+ * than per-entry — keeping the activation rule a single mechanical predicate.
+ */
+export const FEATURE_CATALOG: readonly FeatureSpec[] = [
+  {
+    feature: "collab",
+    title: "Blackboard collaboration (fragments + reconcile-merge)",
+    useWhen:
+      "Use when ≥2 agents author the SAME stage's artifact in parallel and a Reconciler merges their fragments. A single-writer T0/T1 stage never needs it.",
+  },
+  {
+    feature: "debate",
+    title: "Debate ledger (competing-producer adjudication)",
+    useWhen:
+      "Use when competing producers must argue positions that a human/Reconciler adjudicates before completion (Pattern B). A linear single-author run records no debates.",
+  },
+  {
+    feature: "section-lease",
+    title: "Artifact section leases (<file>#<section>)",
+    useWhen:
+      "Use when ≥2 agents co-edit DIFFERENT sections of the SAME artifact and must not collide on one section. A lone writer owns the whole file and needs no section lease.",
+  },
+  {
+    feature: "sub-lease",
+    title: "Sub-Builder component sub-leases",
+    useWhen:
+      "Use when a scoped sub-Builder takes a SUBSET of a parent slice's components in parallel. A single Builder per slice never opens a sub-lease.",
+  },
+];
+
+/** Lookup the catalog entry for a feature (undefined for an unknown token). */
+export function featureSpec(feature: string): FeatureSpec | undefined {
+  return FEATURE_CATALOG.find((f) => f.feature === feature);
+}
+
+/** A tier ranks ≥T2 iff it is T2 or T3 (the advanced-coordination floor). */
+function tierRankAtLeastT2(tier: Tier | null): boolean {
+  return tier === "T2" || tier === "T3";
+}
+
+/**
+ * Whether a run is ALREADY doing parallel authorship: a live build with more than
+ * one slice in flight (in-progress) is concurrent multi-writer work by definition,
+ * so the coordination machinery is warranted even if the recorded tier is below
+ * T2. This is the "parallel-authorship detection" escape hatch (plan §D2): it
+ * never turns features OFF (a high tier still activates them), it only turns them
+ * ON when the run's own shape proves it needs them. Conservative: a single
+ * in-flight slice (or none) is single-writer and does NOT trip it.
+ */
+export function parallelAuthorshipDetected(state: Pick<TwinHarnessState, "slices">): boolean {
+  const inFlight = state.slices.filter((s) => s.status === "in-progress").length;
+  return inFlight > 1;
+}
+
+/**
+ * The activation predicate (P5-1): an advanced feature is active iff the tier is
+ * ≥T2 OR the run is already doing parallel authorship. Uniform across every
+ * feature in {@link FEATURE_CATALOG} — there is one mechanical rule, not a
+ * per-feature matrix — so the gate is easy to reason about and impossible to
+ * drift between the `th tier features` view and the MCP runtime gate.
+ *
+ * CONSERVATIVE DEFAULT: with no parallel authorship, T0/T1 ⇒ OFF, T2/T3 ⇒ ON. An
+ * unclassified tier (`null`) is OFF unless parallel authorship is live, so a
+ * pre-tier run never silently loads the coordination plane.
+ */
+export function featureActive(
+  _feature: AdvancedFeature,
+  tier: Tier | null,
+  state: Pick<TwinHarnessState, "slices">,
+): boolean {
+  return tierRankAtLeastT2(tier) || parallelAuthorshipDetected(state);
+}
+
+/**
+ * Convenience over {@link featureActive} that reads tier + slices straight off a
+ * whole state object — the shape the MCP runtime gate and `th tier features` both
+ * already hold. The MCP gate resolves the active tier via this same plain state
+ * read (`requireState(paths).state.tier`), NOT a re-classification (plan §P5-2).
+ */
+export function featureActiveForState(feature: AdvancedFeature, state: TwinHarnessState): boolean {
+  return featureActive(feature, state.tier, state);
+}
+
+/**
+ * `th tier features` — render the feature-activation layer for the current run:
+ * each advanced feature, whether it is ACTIVE for the resolved tier (+ parallel
+ * authorship), and its "use when". Read-only; never mutates state. Tolerant of an
+ * absent/invalid state.json — it reports the conservative default (everything OFF
+ * for an unclassified, single-writer run) rather than erroring, so an operator can
+ * always ask "what is on?".
+ */
+export function runTierFeatures(paths: ProjectPaths): CommandResult {
+  const r = readState(paths);
+  // Resolve tier + slices from a plain state read; fall back to the conservative
+  // default shape (no tier, no slices) when state is absent/invalid so the command
+  // always answers.
+  const tier: Tier | null = r.state ? r.state.tier : null;
+  const slices = r.state ? r.state.slices : [];
+  const parallel = parallelAuthorshipDetected({ slices });
+
+  const features = FEATURE_CATALOG.map((spec) => ({
+    feature: spec.feature,
+    title: spec.title,
+    active: featureActive(spec.feature, tier, { slices }),
+    useWhen: spec.useWhen,
+  }));
+
+  structuredLog({ cmd: "tier features", tier: tier ?? "unclassified", parallel });
+
+  const tierLabel = tier ?? "unclassified";
+  const lines: string[] = [
+    `Feature activation (tier ${tierLabel}${parallel ? ", parallel authorship LIVE" : ""}):`,
+    "Advanced coordination is OFF by default; it activates at tier ≥T2 or when >1 slice is in flight.",
+    "",
+  ];
+  for (const f of features) {
+    lines.push(`  [${f.active ? "ON " : "off"}] ${f.feature} — ${f.title}`);
+    lines.push(`        use when: ${f.useWhen}`);
+  }
+
+  return success({
+    data: { tier: tierLabel, parallel_authorship: parallel, features },
+    human: lines.join("\n"),
+  });
+}
+
+// Re-export so `TIERS` stays available to callers importing from this module.
+export { TIERS };
 
 /**
  * `th tier` — the Tier-0 classifier (spec §5).
