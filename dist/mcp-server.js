@@ -23882,6 +23882,15 @@ function assertTierAllows(paths, feature) {
     human: `Advanced feature "${feature}" is locked at tier ${tierLabel} \u2014 it activates at tier \u2265T2 or when >1 slice is in flight. Enable via \`th tier record <T2|T3>\` (or run \`th tier features\` to see what is active).` + (spec ? ` Use when: ${spec.useWhen}` : "")
   });
 }
+function assertDestructiveAck(args) {
+  if (optBool(args, "confirm") === true) return void 0;
+  return failure({
+    data: {
+      error: "confirmation_required"
+    },
+    human: "This is a destructive operation that may overwrite or delete data. Re-issue the call with `confirm:true` to acknowledge and proceed."
+  });
+}
 function withFreshness(paths, result) {
   if (!result.ok || !result.data) return result;
   const f = repoFreshnessSummary(paths);
@@ -24602,18 +24611,23 @@ var TOOL_DEFS = [
         round: stringProp("Round bucket within the stage."),
         name: stringProp("Fragment file name, unique within the round (a single path component)."),
         text: stringProp("Fragment body (must carry \u22651 REQ-ID anchor to survive a merge)."),
-        force: boolProp("Overwrite an existing fragment of the same name (default false).")
+        force: boolProp("Overwrite an existing fragment of the same name (default false)."),
+        confirm: boolProp("Acknowledge this destructive write (Deferred #3 ack gate); required to proceed.")
       },
       required: ["stage", "round", "name"],
       additionalProperties: false
     },
-    run: (paths, args) => assertTierAllows(paths, "collab") ?? runCollabFragment(paths, {
-      stage: optString(args, "stage"),
-      round: optString(args, "round"),
-      name: optString(args, "name"),
-      text: optString(args, "text"),
-      force: optBool(args, "force")
-    })
+    run: (paths, args) => (
+      // Deferred #3: ack (data-loss) gate composed with the existing tier
+      // (availability) gate. Both must pass; ack checked first.
+      assertDestructiveAck(args) ?? assertTierAllows(paths, "collab") ?? runCollabFragment(paths, {
+        stage: optString(args, "stage"),
+        round: optString(args, "round"),
+        name: optString(args, "name"),
+        text: optString(args, "text"),
+        force: optBool(args, "force")
+      })
+    )
   },
   {
     name: "th_collab_list",
@@ -24706,8 +24720,15 @@ var TOOL_DEFS = [
   {
     name: "th_verify_clear",
     description: "Remove all configured verify commands.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    run: (paths) => runVerifyClear(paths)
+    inputSchema: {
+      type: "object",
+      properties: {
+        confirm: boolProp("Acknowledge this destructive op (Deferred #3 ack gate); required to proceed.")
+      },
+      additionalProperties: false
+    },
+    // Deferred #3: data-loss ack gate (tier-independent; T0/T1 with confirm proceed).
+    run: (paths, args) => assertDestructiveAck(args) ?? runVerifyClear(paths)
   },
   {
     name: "th_verify_run",
@@ -24811,12 +24832,14 @@ var TOOL_DEFS = [
       type: "object",
       properties: {
         idea: stringProp("The initial idea/brief to interview against (required)."),
-        cutoff: numberProp("Confidence-gate cutoff in [0,1] (default 0.80); ready when confidence \u2265 cutoff.")
+        cutoff: numberProp("Confidence-gate cutoff in [0,1] (default 0.80); ready when confidence \u2265 cutoff."),
+        confirm: boolProp("Acknowledge this destructive op \u2014 overwrites any prior interview (Deferred #3 ack gate); required to proceed.")
       },
       required: ["idea"],
       additionalProperties: false
     },
-    run: (paths, args) => runInterviewStart(paths, { idea: optString(args, "idea"), cutoff: optNumber(args, "cutoff") })
+    // Deferred #3: data-loss ack gate (tier-independent; T0/T1 with confirm proceed).
+    run: (paths, args) => assertDestructiveAck(args) ?? runInterviewStart(paths, { idea: optString(args, "idea"), cutoff: optNumber(args, "cutoff") })
   },
   {
     name: "th_interview_record",

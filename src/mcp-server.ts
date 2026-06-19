@@ -170,6 +170,45 @@ function assertTierAllows(paths: ProjectPaths, feature: AdvancedFeature): Comman
   });
 }
 
+/* ------------------------------------------------------------------ *
+ * Deferred #3 — destructive-op confirmation gate.                     *
+ * A SECOND, distinct gate from {@link assertTierAllows}: that one is  *
+ * a feature-AVAILABILITY gate keyed on the run's tier; this one is a  *
+ * data-LOSS confirmation gate keyed ONLY on the caller's explicit     *
+ * `confirm:true` arg. It is tier-INDEPENDENT by construction (it      *
+ * never reads state/tier), so a legitimate T0/T1 caller that passes   *
+ * `confirm:true` always proceeds — the exact lock-out the PR wanted   *
+ * to avoid. Applied to the `destructiveHint:true` tools (th_verify_   *
+ * clear, th_interview_start, th_collab_fragment). th_collab_fragment  *
+ * keeps BOTH gates (tier for availability, ack for data-loss).        *
+ * ------------------------------------------------------------------ */
+
+/**
+ * Deferred #3 — the destructive-op confirmation gate. Returns `undefined` when the
+ * caller passed an explicit `confirm:true` (the closure proceeds), or a structured
+ * `confirmation_required` {@link CommandResult} when `confirm` is absent/falsy (the
+ * closure returns it instead of running). MIRRORS the `tier_locked` refusal shape
+ * (`failure({ data: { error, ... }, human })`) so adapters render it identically.
+ *
+ * Takes ONLY `args` — never reads state, tier, or paths — so it is tier-independent:
+ * a T0/T1 caller with `confirm:true` is NEVER locked out. Never throws; a missing
+ * acknowledgement is a clean refusal, not a crash (the parity-compatible contract).
+ *
+ * Composes with the tier gate via nullish-coalescing:
+ * `run: (paths, args) => assertDestructiveAck(args) ?? <existing guards> ?? actualRun(...)`.
+ */
+function assertDestructiveAck(args: ToolArgs): CommandResult | undefined {
+  if (optBool(args, "confirm") === true) return undefined;
+  return failure({
+    data: {
+      error: "confirmation_required",
+    },
+    human:
+      "This is a destructive operation that may overwrite or delete data. " +
+      "Re-issue the call with `confirm:true` to acknowledge and proceed.",
+  });
+}
+
 /**
  * P4-3 — attach repo-map freshness/partial status to a repo-query tool result so an
  * MCP agent sees staleness INLINE (it cannot run `th repo check` between tool calls
@@ -1100,11 +1139,15 @@ export const TOOL_DEFS: readonly ToolDef[] = [
         name: stringProp("Fragment file name, unique within the round (a single path component)."),
         text: stringProp("Fragment body (must carry ≥1 REQ-ID anchor to survive a merge)."),
         force: boolProp("Overwrite an existing fragment of the same name (default false)."),
+        confirm: boolProp("Acknowledge this destructive write (Deferred #3 ack gate); required to proceed."),
       },
       required: ["stage", "round", "name"],
       additionalProperties: false,
     },
     run: (paths, args) =>
+      // Deferred #3: ack (data-loss) gate composed with the existing tier
+      // (availability) gate. Both must pass; ack checked first.
+      assertDestructiveAck(args) ??
       assertTierAllows(paths, "collab") ??
       runCollabFragment(paths, {
         stage: optString(args, "stage"),
@@ -1217,8 +1260,15 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_verify_clear",
     description: "Remove all configured verify commands.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    run: (paths) => runVerifyClear(paths),
+    inputSchema: {
+      type: "object",
+      properties: {
+        confirm: boolProp("Acknowledge this destructive op (Deferred #3 ack gate); required to proceed."),
+      },
+      additionalProperties: false,
+    },
+    // Deferred #3: data-loss ack gate (tier-independent; T0/T1 with confirm proceed).
+    run: (paths, args) => assertDestructiveAck(args) ?? runVerifyClear(paths),
   },
   {
     name: "th_verify_run",
@@ -1331,11 +1381,14 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       properties: {
         idea: stringProp("The initial idea/brief to interview against (required)."),
         cutoff: numberProp("Confidence-gate cutoff in [0,1] (default 0.80); ready when confidence ≥ cutoff."),
+        confirm: boolProp("Acknowledge this destructive op — overwrites any prior interview (Deferred #3 ack gate); required to proceed."),
       },
       required: ["idea"],
       additionalProperties: false,
     },
+    // Deferred #3: data-loss ack gate (tier-independent; T0/T1 with confirm proceed).
     run: (paths, args) =>
+      assertDestructiveAck(args) ??
       runInterviewStart(paths, { idea: optString(args, "idea"), cutoff: optNumber(args, "cutoff") }),
   },
   {

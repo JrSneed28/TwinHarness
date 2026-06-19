@@ -29,7 +29,9 @@ const GATED_TOOLS: ReadonlyArray<{ name: string; args: Record<string, unknown> }
   { name: "th_artifact_leases", args: {} },
   // collab
   { name: "th_collab_init", args: { stage: "architecture" } },
-  { name: "th_collab_fragment", args: { stage: "architecture", round: "r1", name: "a.md", text: "REQ-001 x" } },
+  // Deferred #3: th_collab_fragment also carries the destructive-op ack gate (composed
+  // FIRST). Pass confirm:true here so this suite exercises the TIER gate specifically.
+  { name: "th_collab_fragment", args: { stage: "architecture", round: "r1", name: "a.md", text: "REQ-001 x", confirm: true } },
   { name: "th_collab_list", args: { stage: "architecture" } },
   { name: "th_collab_merge", args: { stage: "architecture", round: "r1" } },
   // debate

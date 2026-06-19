@@ -712,6 +712,7 @@ describe("MCP coordination tools delegate to their handlers (locked, real state)
       name: "builder-a.md",
       // The fragment carries a REQ-ID anchor so it would survive a merge (§17).
       text: "## REQ-001\nProposal: bound the queue depth.\n",
+      confirm: true, // Deferred #3: destructive-op ack gate.
     });
     expect(frag.ok).toBe(true);
     expect(frag.data?.name).toBe("builder-a.md");
@@ -798,7 +799,7 @@ describe("Interview/init MCP tools: th_interview_* + th_init (store-only, idempo
     tp = makeTempProject();
     runInit(tp.paths, {});
 
-    const start = defFor("th_interview_start").run(tp.paths, { idea: "build a CLI", cutoff: 0.8 });
+    const start = defFor("th_interview_start").run(tp.paths, { idea: "build a CLI", cutoff: 0.8, confirm: true }); // Deferred #3: ack gate.
     expect(start.ok).toBe(true);
 
     // A low-confidence round: not yet ready.
