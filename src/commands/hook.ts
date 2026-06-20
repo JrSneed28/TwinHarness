@@ -478,6 +478,20 @@ function isAllowedDocOrStatePath(relFwd: string): boolean {
 }
 
 /**
+ * R-02 / R-19: is `relFwd` (a root-relative, forward-slash path) one of the verify
+ * approval trust anchors — `verify.json` or `verify-approvals.jsonl` under the state
+ * dir? These records authorize which commands `th verify run` executes, so they are
+ * NEVER silently writable by a tool call. Derived from `paths.stateDir`, so it holds
+ * for `.twinharness` AND the legacy `.agentic-sdlc`. This is the SINGLE source of the
+ * anchor names, shared by step e2 (file_path Write/Edit) and step c1 (Bash).
+ */
+function isVerifyAnchorPath(relFwd: string, paths: ProjectPaths): boolean {
+  const stateRel = toRootRelative(paths.stateDir, paths.root);
+  if (stateRel === null) return false;
+  return relFwd === `${stateRel}/verify.json` || relFwd === `${stateRel}/verify-approvals.jsonl`;
+}
+
+/**
  * Phase B ownership: a component token is path-like if it contains "/" OR it
  * exists on disk relative to the project root. Abstract tokens are ignored.
  */
@@ -807,6 +821,39 @@ export function runHookPretoolGate(
   // to phaseABashGate — fires the gate on the first offending Phase-A Bash target,
   // or returns null to fall through. Behavior identical to the prior inline block.
   const bashCommand = input?.tool_input?.command;
+
+  // Step c1 (R-19): the verify approval trust anchors (verify.json /
+  // verify-approvals.jsonl) are NEVER writable by a Bash-mediated tool call — in ANY
+  // phase and ANY write_gate mode. (The sole bypass is step b's `write_gate==="off"`
+  // above — a deliberate full disable, A1.) Step e2 below closes the SAME forge vector
+  // for file_path Write/Edit, but a Bash tool call carries `command` and no `file_path`,
+  // so it would short-circuit at step d (`!filePath → allow`) before ever reaching e2 —
+  // and the doc/state allowlist otherwise blanket-allows the whole `.twinharness/` dir
+  // for Bash (phaseABashGate / phaseBStrictBashGate). There is NO legitimate Bash writer
+  // of these anchors (the `th verify` data layer writes via atomicWriteFile, not a shell),
+  // so this is a HARD `deny` regardless of gateMode — there is nothing to "ask" about.
+  // This runs UNCONDITIONALLY (not nested in phaseA/phaseBStrictBashGate, which are
+  // phase/strict-gated) so the deny truly holds across all phases and modes.
+  // Closure scope: this catches PARSEABLE write targets; an obfuscated target (heredoc,
+  // `> $var`, `python -c`, process substitution) is dropped by extractBashWriteTargets
+  // and remains a tracked follow-up — a green test here is NOT total Bash-forge closure.
+  if (bashCommand) {
+    const baseC1 = input?.cwd ?? paths.root;
+    for (const token of extractBashWriteTargets(bashCommand)) {
+      const absC1 = path.isAbsolute(token) ? token : path.resolve(baseC1, token);
+      const relC1 = toRootRelative(absC1, paths.root);
+      if (relC1 !== null && isVerifyAnchorPath(relC1, paths)) {
+        const reason =
+          `TwinHarness write-gate (R-19) hard-blocked a Bash-mediated write to a verify approval anchor (${relC1}). ` +
+          `This file authorizes which commands \`th verify run\` will execute; a shell redirection (echo/tee/sed >) could forge an approval around the gate. ` +
+          `There is NO legitimate Bash writer of this file — use \`th verify add\` / \`th verify approve\` (approve requires an interactive human TTY) instead. ` +
+          `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1. ` +
+          `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision.`;
+        return fireGate("deny", reason);
+      }
+    }
+  }
+
   const c2 = phaseABashGate(state, bashCommand, input, paths, gateMode);
   if (c2) return c2;
 
@@ -837,11 +884,8 @@ export function runHookPretoolGate(
   // and the legacy `.agentic-sdlc`. The CLI/MCP `th verify` data layer writes these
   // through atomicWriteFile (not a tool call), so legitimate flows are unaffected —
   // the only path to an approval is `th verify approve`, which itself requires a TTY.
-  const stateRel = toRootRelative(paths.stateDir, paths.root);
-  if (
-    stateRel !== null &&
-    (relFwd === `${stateRel}/verify.json` || relFwd === `${stateRel}/verify-approvals.jsonl`)
-  ) {
+  // Shares isVerifyAnchorPath with step c1 (R-19) — the single source of the anchor names.
+  if (isVerifyAnchorPath(relFwd, paths)) {
     const reason =
       `TwinHarness write-gate gated a direct write to a verify approval anchor (${relFwd}). ` +
       `This file authorizes which commands \`th verify run\` will execute; a direct tool write could forge an approval. ` +

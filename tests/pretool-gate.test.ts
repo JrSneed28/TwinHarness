@@ -778,6 +778,84 @@ describe("REQ-WGATE-010: verify approval anchors are gated, not allowlisted", ()
 });
 
 // ---------------------------------------------------------------------------
+// REQ-WGATE-011 (R-19): a BASH-mediated write to a verify approval anchor is
+// HARD-denied in EVERY phase and EVERY write_gate mode (off excepted by A1). Step
+// e2 (REQ-WGATE-010) closes the SAME forge vector for file_path Write/Edit, but a
+// Bash tool call carries `command` (no file_path) and short-circuits at step d before
+// e2 — and the doc/state allowlist blanket-allows `.twinharness/` for Bash. Step c1
+// closes that residual hole. Closure is PARSEABLE targets only (metachar-obscured
+// targets are dropped by extractBashWriteTargets — a tracked follow-up, NOT total closure).
+// ---------------------------------------------------------------------------
+
+describe("REQ-WGATE-011: Bash writes to verify anchors are hard-denied in all phases/modes (R-19)", () => {
+  const anchors = [".twinharness/verify.json", ".twinharness/verify-approvals.jsonl"] as const;
+  const modes = [undefined, "ask", "deny", "strict"] as const;
+
+  function bashInput(command: string, cwd?: string): PreToolHookInput {
+    return { tool_name: "Bash", tool_input: { command }, cwd };
+  }
+
+  for (const anchor of anchors) {
+    for (const mode of modes) {
+      const label = mode ?? "default";
+      it(`Phase A (pre-impl), write_gate=${label}: bash write to ${anchor} → DENY`, () => {
+        tp = makeTempProject();
+        writePreImplState(tp.paths, mode ? { write_gate: mode } : {});
+        const out = runHookPretoolGate(tp.paths, bashInput(`echo x > ${anchor}`, tp.root));
+        expect(permissionDecision(out)).toBe("deny");
+      });
+      it(`Phase B (post-impl), write_gate=${label}: bash append to ${anchor} → DENY`, () => {
+        tp = makeTempProject();
+        writePostImplState(tp.paths, mode ? { write_gate: mode } : {});
+        const out = runHookPretoolGate(tp.paths, bashInput(`echo x >> ${anchor}`, tp.root));
+        expect(permissionDecision(out)).toBe("deny");
+      });
+    }
+  }
+
+  it("a RELATIVE anchor token resolved against cwd=stateDir → DENY (the realistic agent shape)", () => {
+    tp = makeTempProject();
+    writePostImplState(tp.paths);
+    const out = runHookPretoolGate(
+      tp.paths,
+      bashInput("echo x > verify-approvals.jsonl", tp.paths.stateDir),
+    );
+    expect(permissionDecision(out)).toBe("deny");
+  });
+
+  it("a same-basename file OUTSIDE the state dir (docs/verify.json) is NOT denied by c1 (no false-positive)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths);
+    const out = runHookPretoolGate(tp.paths, bashInput("echo x > docs/verify.json", tp.root));
+    expect(permissionDecision(out)).not.toBe("deny");
+    expect(isAllow(out)).toBe(true); // docs/ is doc-allowlisted
+  });
+
+  it("write_gate=off BYPASSES the anchor deny by design (A1: off = deliberate full disable)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { write_gate: "off" });
+    const out = runHookPretoolGate(tp.paths, bashInput(`echo x > ${anchors[0]}`, tp.root));
+    expect(isAllow(out)).toBe(true);
+  });
+
+  it("the legacy .agentic-sdlc anchor is denied too (derived from paths.stateDir)", () => {
+    tp = makeTempProject();
+    writePostImplState(tp.paths);
+    const stateRel = path.basename(tp.paths.stateDir);
+    const out = runHookPretoolGate(tp.paths, bashInput(`echo x > ${stateRel}/verify-approvals.jsonl`, tp.root));
+    expect(permissionDecision(out)).toBe("deny");
+  });
+
+  it("the deny reason names R-19 and instructs the agent not to retry", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths);
+    const out = runHookPretoolGate(tp.paths, bashInput(`echo x > ${anchors[0]}`, tp.root));
+    expect(permissionReason(out)).toContain("R-19");
+    expect(permissionReason(out)).toMatch(/do NOT retry/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // REQ-WGATE-011 (R-13 regression): a NON-CANONICAL cwd alias must not disarm
 // the gate.
 //
