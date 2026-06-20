@@ -61,6 +61,7 @@ exports.appendTelemetry = appendTelemetry;
 exports.readTelemetryLog = readTelemetryLog;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+const paths_1 = require("./paths");
 const atomic_io_1 = require("./atomic-io");
 const jsonl_1 = require("./jsonl");
 /** `<stateDir>/telemetry.json` — the opt-in switch. */
@@ -99,7 +100,7 @@ function readTelemetryConfig(paths) {
 function writeTelemetryConfig(paths, cfg) {
     const serialized = JSON.stringify({ enabled: cfg.enabled }, null, 2) + "\n";
     // atomicWriteFile creates parent dirs and uses temp+rename with bounded retry (C-2 / S-C).
-    (0, atomic_io_1.atomicWriteFile)(telemetryConfigPath(paths), serialized);
+    (0, atomic_io_1.atomicWriteFile)(telemetryConfigPath(paths), serialized, { root: paths.root });
 }
 /**
  * Append one record (as a single JSON line) to the local log — but ONLY when
@@ -112,6 +113,10 @@ function appendTelemetry(paths, record) {
     if (!readTelemetryConfig(paths).enabled)
         return;
     try {
+        // AC#1 write-surface chokepoint (defense-in-depth, INSIDE the best-effort try):
+        // a non-governed target is PREVENTED without crashing — the (opt-in, local)
+        // telemetry path must never crash the command. telemetryLogPath is under stateDir.
+        (0, paths_1.assertGovernedWriteSurface)(paths.root, telemetryLogPath(paths));
         fs.mkdirSync(paths.stateDir, { recursive: true });
         fs.appendFileSync(telemetryLogPath(paths), JSON.stringify(record) + "\n", "utf8");
     }

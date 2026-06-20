@@ -24,11 +24,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   TOOL_DEFS,
+  TOOL_ANNOTATIONS,
   MCP_EXCLUDED,
   MCP_ONLY_TOOLS,
   CLI_COMMAND_LEAVES,
   cliCommandToToolName,
 } from "../src/mcp-server";
+import { GATE_OWNED } from "../src/core/state-fields";
 
 const ROOT = path.resolve(__dirname, "..");
 const TOOL_NAMES = new Set(TOOL_DEFS.map((t) => t.name));
@@ -157,4 +159,151 @@ describe("REQ-PCO-070: MCP thinness guard (handlers delegate, never re-implement
       expect(REIMPL_RE.test(body), `${def.name} must not do raw state/disk I/O (delegate to the handler)`).toBe(false);
     });
   }
+});
+
+/* ------------------------------------------------------------------ *
+ * AC#5 — CLI/MCP asymmetry drift-guard (REQ-PCO-070).                  *
+ *                                                                      *
+ * The CLI↔MCP divergence is INTENTIONAL policy, not accident: the MCP  *
+ * surface is deliberately narrower (no raw gate flips, tighten-only    *
+ * write-gate, ack-gated data-loss ops) AND deliberately wider in a few *
+ * agent-only spots (the typed gate setters + the scored interview).    *
+ * These tests PIN that asymmetry so it cannot drift silently — a       *
+ * change to the policy surface must update a pinned number here and be *
+ * reviewed, never slip through unnoticed.                              *
+ * ------------------------------------------------------------------ */
+describe("REQ-PCO-070: CLI/MCP asymmetry is pinned (intentional, not accidental drift)", () => {
+  const TOOL_NAMES_SET = new Set(TOOL_DEFS.map((t) => t.name));
+  const mcpSrc = fs.readFileSync(path.join(ROOT, "src", "mcp-server.ts"), "utf8");
+
+  it("AC#5: the MCP-only tool count is pinned to 5", () => {
+    // MCP-only = tools with NO mirroring CLI leaf (the typed gate setters
+    // th_blast_radius_record/th_write_gate_set + the agent-only interview trio).
+    // A new MCP-only tool must bump this number AND be justified in MCP_ONLY_TOOLS.
+    expect(Object.keys(MCP_ONLY_TOOLS).length).toBe(5);
+    // Every MCP-only entry is a real registered tool (no ghosts) — re-pinned here
+    // so this guard travels with the asymmetry count it protects.
+    for (const name of Object.keys(MCP_ONLY_TOOLS)) {
+      expect(TOOL_NAMES_SET.has(name), `MCP_ONLY_TOOLS lists unregistered tool ${name}`).toBe(true);
+    }
+  });
+
+  it("AC#5: the mutating-tool count is pinned to 30 (beside the 62-tool parity count)", () => {
+    // Mutating = NOT readOnlyHint. This is the write-surface size: every one of
+    // these is exercised by the write-surface audit harness (AC#1). Pinning it
+    // means a new mutating tool can never be added without this suite noticing.
+    const mutating = TOOL_DEFS.filter((t) => TOOL_ANNOTATIONS[t.name]?.readOnlyHint === false);
+    expect(mutating.length).toBe(30);
+    // Cross-check against the existing 62-tool parity count: read-only + mutating
+    // partition the whole registry exactly (no tool is un-annotated).
+    const readOnly = TOOL_DEFS.filter((t) => TOOL_ANNOTATIONS[t.name]?.readOnlyHint === true);
+    expect(readOnly.length + mutating.length).toBe(TOOL_DEFS.length);
+    expect(TOOL_DEFS.length).toBe(62);
+  });
+
+  it("AC#5: th_state_set refuses every GATE_OWNED field over MCP (no raw gate flip)", () => {
+    // The MCP raw setter must refuse to move any gate-security field; the typed
+    // gate tools are the only MCP path to them. We assert the refusal is wired to
+    // the canonical GATE_OWNED set (state-fields.ts), not a stale local copy, by
+    // pinning that the th_state_set closure consults GATE_OWNED, and that the set
+    // is non-empty and contains the four governing fields it is meant to cover.
+    const stateSet = TOOL_DEFS.find((t) => t.name === "th_state_set");
+    expect(stateSet, "th_state_set must be registered").toBeTruthy();
+    expect(stateSet!.run.toString()).toMatch(/GATE_OWNED/);
+    expect(GATE_OWNED.size).toBeGreaterThan(0);
+    for (const field of ["implementation_allowed", "tier", "current_stage", "write_gate"]) {
+      expect(GATE_OWNED.has(field), `GATE_OWNED must cover ${field}`).toBe(true);
+    }
+  });
+
+  it("AC#5: th_write_gate_set is tighten-only over MCP (cannot loosen the write-gate)", () => {
+    // The closure must compare ranks and refuse a strictly-lower target with the
+    // stable would_loosen_write_gate error — the pinned proof that an agent can
+    // raise but never lower the PreToolUse gate.
+    const wgs = TOOL_DEFS.find((t) => t.name === "th_write_gate_set");
+    expect(wgs, "th_write_gate_set must be registered").toBeTruthy();
+    const body = wgs!.run.toString();
+    expect(body, "th_write_gate_set must rank-compare to enforce tighten-only").toMatch(/WRITE_GATE_RANK/);
+    expect(body, "th_write_gate_set must refuse with would_loosen_write_gate").toMatch(/would_loosen_write_gate/);
+  });
+
+  it("AC#5: the destructive-ack tool set EXACTLY equals the destructiveHint:true set", () => {
+    // Two independent signals must agree: (a) the runtime data-loss gate
+    // (assertDestructiveAck in the closure) and (b) the advertised destructiveHint
+    // annotation. If a tool is annotated destructive it MUST carry the ack gate,
+    // and a tool carrying the ack gate MUST be annotated destructive — no silent
+    // drift between "what we tell the agent" and "what we actually enforce".
+    const ackGated = new Set(
+      TOOL_DEFS.filter((t) => {
+        const body = t.run.toString() + (t.runAsync ? t.runAsync.toString() : "");
+        return /assertDestructiveAck/.test(body);
+      }).map((t) => t.name),
+    );
+    const destructiveAnnotated = new Set(
+      TOOL_DEFS.filter((t) => TOOL_ANNOTATIONS[t.name]?.destructiveHint === true).map((t) => t.name),
+    );
+    expect([...ackGated].sort()).toEqual([...destructiveAnnotated].sort());
+    // Pin the current membership so this can't drift to the empty set on both sides
+    // (which would vacuously pass the equality above).
+    expect([...destructiveAnnotated].sort()).toEqual([
+      "th_collab_fragment",
+      "th_interview_start",
+      "th_verify_clear",
+    ]);
+  });
+
+  it("AC#5: CLI `state set <gate-field>` requires --emergency (the escape boundary is pinned)", () => {
+    // The CLI keeps gate-owned fields settable, but ONLY behind the explicit
+    // --emergency escape (audit #11) — the human override the MCP surface lacks.
+    // Assert the CLI surface wires this: the dispatcher passes the parsed
+    // --emergency flag into runStateSet, and HELP documents the requirement.
+    const cliSrc = fs.readFileSync(path.join(ROOT, "src", "cli.ts"), "utf8");
+    // The call spans nested parens (rest.slice(1).join(" ")), so match loosely up
+    // to the emergency option, bounded to a single runStateSet(...) statement.
+    expect(cliSrc, "cli.ts must pass the --emergency flag into runStateSet").toMatch(
+      /runStateSet\([^;]*emergency:\s*parsed\.flags\.emergency/,
+    );
+    expect(cliSrc, "cli.ts must register the --emergency flag alias").toMatch(/"--emergency":\s*"emergency"/);
+    expect(cliSrc, "cli.ts HELP must document that gate-owned fields require --emergency").toMatch(
+      /gate-owned fields require --emergency/,
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * AC#5 — th_repo_map annotation reconcile (Option A).                  *
+ *                                                                      *
+ * th_repo_map OVERWRITES its two generated artifacts on every write    *
+ * run. That overwrite is documented (so an agent is not surprised) but *
+ * is NOT flagged destructive: the artifacts are GENERATED_ARTIFACTS    *
+ * (derived, idempotently regenerated), so overwriting them is not the  *
+ * irreversible data-loss the ack gate guards against. Option B (a      *
+ * no-clobber sentinel) is deferred. These tests pin Option A.          *
+ * ------------------------------------------------------------------ */
+describe("AC#5: th_repo_map overwrite is documented and stays non-destructive (Option A)", () => {
+  const repoMap = TOOL_DEFS.find((t) => t.name === "th_repo_map");
+
+  it("AC#5: th_repo_map is a registered tool", () => {
+    expect(repoMap, "th_repo_map must be registered").toBeTruthy();
+  });
+
+  it("AC#5: the description documents that it OVERWRITES both repo-map artifacts", () => {
+    const desc = repoMap!.description ?? "";
+    expect(desc, "description must state it overwrites the artifacts").toMatch(/OVERWRIT/i);
+    expect(desc, "description must name repo-map.json").toMatch(/repo-map\.json/);
+    expect(desc, "description must name docs/00-repo-map.md").toMatch(/docs\/00-repo-map\.md/);
+  });
+
+  it("AC#5: th_repo_map stays destructiveHint:false (GENERATED_ARTIFACTS, idempotent regen)", () => {
+    // KEEP non-destructive on purpose: regenerating generated content is not
+    // data-loss, so th_repo_map deliberately does NOT join the ack-gated set
+    // above. This pins the Option-A decision against accidental flips in either
+    // direction (annotation flipped to destructive, or the ack gate wired in).
+    const ann = TOOL_ANNOTATIONS["th_repo_map"];
+    expect(ann, "th_repo_map must be annotated").toBeTruthy();
+    expect(ann!.readOnlyHint).toBe(false); // it does write
+    expect(ann!.destructiveHint).toBe(false); // but regen is idempotent, not data-loss
+    const body = repoMap!.run.toString();
+    expect(/assertDestructiveAck/.test(body), "th_repo_map must NOT carry the data-loss ack gate").toBe(false);
+  });
 });

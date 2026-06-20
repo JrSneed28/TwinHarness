@@ -189,7 +189,7 @@ function readVerifyReport(paths) {
  */
 function writeVerifyReport(paths, report) {
     fs.mkdirSync(paths.stateDir, { recursive: true });
-    (0, atomic_io_1.atomicWriteFile)(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n");
+    (0, atomic_io_1.atomicWriteFile)(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n", { root: paths.root });
 }
 // ---------------------------------------------------------------------------
 // Secret redaction (#19, P6-3) — scrub known secret shapes before persist/print

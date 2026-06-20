@@ -72,6 +72,7 @@ exports.gatingObligations = gatingObligations;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const node_crypto_1 = require("node:crypto");
+const paths_1 = require("./paths");
 const hash_1 = require("./hash");
 Object.defineProperty(exports, "GENESIS_PREV_HASH", { enumerable: true, get: function () { return hash_1.GENESIS_PREV_HASH; } });
 const jsonl_1 = require("./jsonl");
@@ -101,6 +102,11 @@ function approvalAuditPath(paths) {
  */
 function appendApprovalAudit(paths, record) {
     try {
+        // AC#1 write-surface chokepoint (defense-in-depth, INSIDE the best-effort try):
+        // a non-governed target is PREVENTED without crashing — this audit path must
+        // never abort a governance flow. approvalAuditPath is under stateDir; the
+        // propagating mechanical guard lives at appendDecisionEvent (below).
+        (0, paths_1.assertGovernedWriteSurface)(paths.root, approvalAuditPath(paths));
         fs.mkdirSync(paths.stateDir, { recursive: true });
         fs.appendFileSync(approvalAuditPath(paths), JSON.stringify(record) + "\n", "utf8");
     }
@@ -296,6 +302,9 @@ function mintNextId(events) {
  * is over the canonical text WITHOUT `recordHash`. Returns the sealed event.
  */
 function appendDecisionEvent(paths, event, key) {
+    // AC#1 write-surface chokepoint: decisionsPath is under stateDir; the guard fires
+    // here (not best-effort — this writer propagates) so a non-governed target throws.
+    (0, paths_1.assertGovernedWriteSurface)(paths.root, decisionsPath(paths));
     fs.mkdirSync(paths.stateDir, { recursive: true });
     const prevHash = readLastDecisionRecordHash(paths);
     const withPrev = { ...event, prevHash };

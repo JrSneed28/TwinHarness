@@ -183,7 +183,7 @@ function readInterview(paths) {
  * creates the parent dir, so no separate mkdir is needed).
  */
 function writeInterview(paths, state) {
-    (0, atomic_io_1.atomicWriteFile)(paths.interviewFile, JSON.stringify(state, null, 2) + "\n");
+    (0, atomic_io_1.atomicWriteFile)(paths.interviewFile, JSON.stringify(state, null, 2) + "\n", { root: paths.root });
 }
 /** `ready` is the ONLY computed value: the resolved confidence gate. */
 function computeReady(confidence, cutoff) {

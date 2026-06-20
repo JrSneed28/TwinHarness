@@ -165,8 +165,7 @@ is `done`, widening real parallelism when the interface is stable.
 - **The merge backstop catches a bad speculation.** If the upstream contract shifts, the divergence
   surfaces at merge-back as a conflict between plan-disjoint slices, and the Merge-Coordinator's
   "non-clean merge → BLOCKING drift" backstop opens `th drift add --layer requirement` rather than
-  hand-resolving. Speculation rides the existing merge-conflict-as-BLOCKING-drift guard — no new
-  failure path.
+  hand-resolving.
 
 ### Worktree isolation + merge-back protocol (§21)
 
@@ -211,10 +210,8 @@ disjoint slices it opens BLOCKING drift instead of hand-resolving.
    ```
    A **clean** merge → the Merge-Coordinator runs `th build release <SLICE-ID>` and continues.
 
-5. **Relationship to leases (useful redundancy).** The lease is the scheduler's live oracle
-   (`th build claim` / `th build next-wave` consult it, preventing collisions up front); worktrees add
-   filesystem-level enforcement; the merge adds a second after-the-fact conflict check for a coupling
-   the static plan never modeled. The lease is the primary guard; the merge is the backstop.
+5. **Relationship to leases (useful redundancy).** The lease is the primary guard; worktrees add
+   filesystem isolation; the merge is the after-the-fact backstop.
 
 ### Write-gate
 

@@ -88,7 +88,7 @@ export function writeState(paths: ProjectPaths, state: TwinHarnessState): void {
   // reader holding the file open → EPERM/EACCES/EBUSY on Windows) and, only if
   // the budget is exhausted, throws StateWriteContendedError — which the CLI
   // boundary turns into a clean structured failure (C-2).
-  atomicWriteFile(paths.stateFile, serializeState(state));
+  atomicWriteFile(paths.stateFile, serializeState(state), { root: paths.root });
 }
 
 /**

@@ -96,9 +96,11 @@ const MAX_COVERAGE_FILES = 50_000;
 /** Relative artifact paths (POSIX) reported in `data.artifacts`. */
 const REPO_MAP_JSON_REL = ".twinharness/repo-map.json";
 const REPO_MAP_MD_REL = "docs/00-repo-map.md";
-/** Atomic write: delegates to the shared atomic-io helper (C-2 / S-C). */
-function atomicWrite(absFile, content) {
-    (0, atomic_io_1.atomicWriteFile)(absFile, content);
+/** Atomic write: delegates to the shared atomic-io helper (C-2 / S-C). Threads the
+ *  governed `root` so the write-surface guard (AC#1) fires at the chokepoint —
+ *  both targets (`.twinharness/repo-map.json`, `docs/00-repo-map.md`) are governed. */
+function atomicWrite(root, absFile, content) {
+    (0, atomic_io_1.atomicWriteFile)(absFile, content, { root });
 }
 /**
  * `th repo map [--write|--no-write] [--format <summary|json|md>]` — scan, build
@@ -206,14 +208,14 @@ function runRepoMap(paths, opts = {}) {
         const jsonAbs = path.join(paths.stateDir, "repo-map.json");
         const mdAbs = path.join(paths.docsDir, "00-repo-map.md");
         try {
-            atomicWrite(jsonAbs, json);
+            atomicWrite(paths.root, jsonAbs, json);
         }
         catch {
             (0, log_1.structuredLog)({ cmd: "repo map", error: "write_failed", file: REPO_MAP_JSON_REL });
             return (0, output_1.failure)({ human: `failed to write ${REPO_MAP_JSON_REL}`, data: { error: "write_failed", file: REPO_MAP_JSON_REL } });
         }
         try {
-            atomicWrite(mdAbs, md);
+            atomicWrite(paths.root, mdAbs, md);
         }
         catch {
             (0, log_1.structuredLog)({ cmd: "repo map", error: "write_failed", file: REPO_MAP_MD_REL });

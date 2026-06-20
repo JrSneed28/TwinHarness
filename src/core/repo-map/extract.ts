@@ -475,6 +475,163 @@ export function buildAliasTable(
   return { configDir, baseDir, hasBaseUrl: baseUrlRaw !== undefined, patterns };
 }
 
+/** Bound on `extends` chain depth — defends against a pathological/cyclic chain. */
+const MAX_EXTENDS_DEPTH = 16;
+
+/**
+ * Read a config referenced by `extends` and return its POSIX-relative path, or null
+ * when the reference cannot be resolved to an in-repo-relative location WITHOUT
+ * guessing. Two forms are supported (TS semantics), both FAIL-SAFE on any miss:
+ *   1. A relative path (`./base`, `../tsconfig.base.json`) — resolved against the
+ *      EXTENDING config's directory; a `.json` suffix is implied when absent.
+ *   2. A BOUNDED single node_modules package hop (`@scope/pkg/tsconfig`, `pkg/base`)
+ *      — mapped to `node_modules/<spec>(.json)` at the repo root. Exactly ONE hop,
+ *      NO recursive node_modules walk, NO package.json "tsconfig" field lookup.
+ * A candidate that escapes the repo (`..` prefix after normalization) is rejected so
+ * the chain can never reach outside the scanned tree. Returns the POSIX path of the
+ * base config text key to look up via `readFile` (the caller owns the read).
+ */
+function resolveExtendsTarget(fromConfigDir: string, ref: string): string | null {
+  if (typeof ref !== "string" || ref.length === 0) return null;
+  const withJson = (p: string): string => (p.endsWith(".json") ? p : `${p}.json`);
+  const normPosix = (p: string): string | null => {
+    const j = path.posix.normalize(p);
+    if (j.startsWith("..") || j === ".." || path.posix.isAbsolute(j)) return null;
+    return j;
+  };
+  if (ref.startsWith("./") || ref.startsWith("../") || ref === "." || ref === "..") {
+    // Relative to the extending config's directory.
+    const joined = path.posix.join(fromConfigDir === "" ? "." : fromConfigDir, withJson(ref));
+    return normPosix(joined);
+  }
+  if (ref.startsWith("/") || /^[A-Za-z]:[\\/]/.test(ref)) return null; // absolute — never guess
+  // Bare specifier → a SINGLE node_modules package hop at the repo root. No walk.
+  return normPosix(`node_modules/${withJson(ref)}`);
+}
+
+/**
+ * DEFERRED #1a (AC#3) — resolve a tsconfig/jsconfig's `extends` chain into a single
+ * `AliasTable`, applying real TS inheritance, so aliases declared in a base config and
+ * inherited via `extends` resolve to `basis:"alias"` (not `unresolved`):
+ *   - `baseUrl` is child-wins (the NEAREST config in the chain that sets it).
+ *   - `paths` REPLACES wholesale — a child's `paths` shadows the base's entirely
+ *     (NO deep-merge); the effective `paths` resolve against the effective baseDir.
+ *   - the effective resolution `baseDir` is computed from whichever config DECLARED
+ *     `baseUrl` (classic TS) or, with no baseUrl, the config that declared `paths`
+ *     (modern TS) — correct even when the two come from DIFFERENT configs.
+ *   - the returned table's `configDir` is the ENTRY config's own dir (its GOVERNANCE
+ *     scope), so a child config that inherits a ROOT base does NOT govern the whole
+ *     repo — it only governs files under the child.
+ *   - bases are read lazily via `readFile` (a POSIX-path-keyed reader the scanner
+ *     supplies); a relative base OR a bounded single node_modules hop is followed.
+ * FAIL-SAFE: any miss (unreadable base, parse failure, cycle, depth overflow, escape)
+ * simply stops following that link — the result reflects only what was resolvable, and
+ * a config that yields no usable baseUrl/paths produces `undefined` (the caller then
+ * records `unresolved`, NEVER a guess). PURE given `readFile`: deduped + cycle-bounded
+ * + depth-bounded, so it is independent of FS iteration order (ADR-003 determinism).
+ * `readFile` reads are NOT surface-guarded (reading a base config under node_modules
+ * is a legitimate READ; only WRITES are surface-governed).
+ *
+ * `configPath` is the POSIX-relative path of the ENTRY config (e.g. `tsconfig.json`
+ * or `packages/app/tsconfig.json`). `parsed` is its already-parsed object (so the
+ * caller does not re-read/parse the entry). `readFile(posixPath)` returns the raw
+ * text of a base config or `undefined` when it cannot be read.
+ */
+export function resolveExtendsChain(
+  configPath: string,
+  parsed: Record<string, unknown>,
+  readFile: (posixPath: string) => string | undefined,
+): AliasTable | undefined {
+  const optsOf = (obj: Record<string, unknown>): Record<string, unknown> => {
+    const co = obj.compilerOptions;
+    return typeof co === "object" && co !== null && !Array.isArray(co)
+      ? (co as Record<string, unknown>)
+      : {};
+  };
+  const dirOf = (p: string): string => {
+    const d = path.posix.dirname(p);
+    return d === "." ? "" : d;
+  };
+
+  const joinPosix = (dir: string, rel: string): string => {
+    const j = path.posix.normalize(path.posix.join(dir === "" ? "." : dir, rel));
+    return j === "." ? "" : j;
+  };
+
+  // Effective accumulators. Each field takes its NEAREST (child-wins) declaration:
+  // we walk child→base and only fill an as-yet-unset value. `paths` REPLACE wholesale
+  // (no deep-merge). We track the DECLARING dir of `baseUrl` and of `paths` SEPARATELY
+  // so the final baseDir is correct even when they come from different configs.
+  let effBaseUrlVal: string | undefined;
+  let effBaseUrlDir = "";
+  let effPaths: Record<string, unknown> | undefined;
+  let effPathsDir = "";
+
+  const seen = new Set<string>();
+  // Walk child → base, taking the NEAREST declaration of each field (child-wins).
+  const visit = (cfgPath: string, cfgParsed: Record<string, unknown>, depth: number): void => {
+    if (depth > MAX_EXTENDS_DEPTH) return; // depth bound — fail-safe stop
+    if (seen.has(cfgPath)) return; // cycle / dedupe bound — fail-safe stop
+    seen.add(cfgPath);
+    const cfgDir = dirOf(cfgPath);
+    const opts = optsOf(cfgParsed);
+    if (effBaseUrlVal === undefined && typeof opts.baseUrl === "string") {
+      effBaseUrlVal = opts.baseUrl;
+      effBaseUrlDir = cfgDir;
+    }
+    if (
+      effPaths === undefined &&
+      typeof opts.paths === "object" && opts.paths !== null && !Array.isArray(opts.paths)
+    ) {
+      // `paths` REPLACE — the nearest config that declares them wins wholesale.
+      effPaths = opts.paths as Record<string, unknown>;
+      effPathsDir = cfgDir;
+    }
+    // Follow `extends` (string or array form — TS 5.0 allows an array; we visit in
+    // order and child-first semantics still hold via the `=== undefined` guards).
+    const ext = cfgParsed.extends;
+    const refs = typeof ext === "string" ? [ext] : Array.isArray(ext) ? ext : [];
+    for (const ref of refs) {
+      if (typeof ref !== "string") continue;
+      const basePath = resolveExtendsTarget(cfgDir, ref);
+      if (basePath === null) continue; // unresolvable ref — fail-safe skip
+      if (seen.has(basePath)) continue;
+      const text = readFile(basePath); // legitimate READ (not write-guarded)
+      if (text === undefined) continue; // unreadable base — fail-safe skip
+      const baseParsed = parseJsonc(text);
+      if (!baseParsed) continue; // parse failure — fail-safe skip
+      visit(basePath, baseParsed, depth + 1);
+    }
+  };
+  visit(configPath, parsed, 0);
+
+  if (effBaseUrlVal === undefined && effPaths === undefined) return undefined;
+
+  // Compute the resolution baseDir. With a baseUrl: it resolves relative to the config
+  // that DECLARED it (classic TS). Without one (modern TS): `paths` resolve relative to
+  // the config that declared the `paths`. `configDir` (the ENTRY config's own dir) is
+  // the GOVERNANCE scope — independent of baseDir — so a child inheriting a ROOT base
+  // governs only files under the child, while still resolving targets against the base.
+  const configDir = dirOf(configPath);
+  const baseDir = effBaseUrlVal !== undefined
+    ? joinPosix(effBaseUrlDir, effBaseUrlVal)
+    : effPathsDir;
+
+  // Compile the effective `paths` exactly as `buildAliasTable` does (verbatim targets,
+  // string-only, non-empty) so the produced table is interchangeable with a non-extends
+  // table in `resolveAliasTsJs` (same shape, same tie-break).
+  const patterns: { pattern: string; targets: string[] }[] = [];
+  if (effPaths) {
+    for (const [pattern, targetsRaw] of Object.entries(effPaths)) {
+      if (typeof pattern !== "string") continue;
+      if (!Array.isArray(targetsRaw)) continue;
+      const targets = targetsRaw.filter((t): t is string => typeof t === "string");
+      if (targets.length > 0) patterns.push({ pattern, targets });
+    }
+  }
+  return { configDir, baseDir, hasBaseUrl: effBaseUrlVal !== undefined, patterns };
+}
+
 /**
  * Resolve a NON-relative TS/JS specifier through tsconfig/jsconfig alias tables.
  * Returns the in-repo POSIX path IFF a candidate lands on a file in `fileSet`;
