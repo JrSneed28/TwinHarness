@@ -24,7 +24,7 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import { makeTempProject } from "./helpers";
-import { withStateLock, LockTimeoutError, STALE_MS, realLockOps, type LockOps } from "../src/core/state-store";
+import { withStateLock, LockTimeoutError, LockStampError, STALE_MS, realLockOps, type LockOps } from "../src/core/state-store";
 
 /** A node ErrnoException with a given `code`. */
 function errno(code: string): NodeJS.ErrnoException {
@@ -396,6 +396,49 @@ describe("R-08: an OWNER-LESS stale lock is NEVER stolen — only stamped locks 
     } finally {
       tpA.cleanup();
       tpB.cleanup();
+    }
+  });
+});
+
+describe("R-21: the owner stamp is MANDATORY — a held owner-less lock is never entered", () => {
+  it("acquire ok but writeOwner ALWAYS throws → releases each time and throws LockStampError at the cap (no 25s livelock, no owner-less-held lock)", () => {
+    const tp = lockableProject();
+    try {
+      const { state, ops } = makeFakeOps({ acquire: () => null }); // acquire always succeeds
+      ops.writeOwner = () => {
+        throw new Error("simulated EACCES on owner stamp (AV / read-only FS)");
+      };
+      // Fast-fail at MAX_STAMP_FAILS=3 — NOT a ~25s deadline livelock.
+      expect(() => withStateLock(tp.paths, () => 1, ops)).toThrow(LockStampError);
+      expect(state.attempts).toBe(3); // exactly the cap, not the hundreds a 25s deadline would take
+      expect(state.removes).toBe(3); // each acquired-but-unstamped lock is RELEASED (never held owner-less)
+      expect(state.sleeps.length).toBe(2); // backed off after fails 1 and 2; throws on fail 3 before backoff
+    } finally {
+      tp.cleanup();
+    }
+  });
+
+  it("a TRANSIENT stamp failure (throws once, then succeeds) recovers, stamps, and runs fn", () => {
+    const tp = lockableProject();
+    try {
+      const { state, ops } = makeFakeOps({ acquire: () => null });
+      let stampCalls = 0;
+      ops.writeOwner = () => {
+        stampCalls++;
+        if (stampCalls === 1) throw new Error("transient AV block");
+        // 2nd stamp succeeds.
+      };
+      let ran = false;
+      const out = withStateLock(tp.paths, () => {
+        ran = true;
+        return "ok";
+      }, ops);
+      expect(ran).toBe(true);
+      expect(out).toBe("ok");
+      expect(state.attempts).toBe(2); // released the unstamped lock, re-acquired, stamped, ran
+      expect(state.removes).toBe(2); // 1 release of the failed-stamp lock + 1 finally release
+    } finally {
+      tp.cleanup();
     }
   });
 });

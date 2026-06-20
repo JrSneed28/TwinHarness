@@ -291,7 +291,7 @@ function runDoctor(paths, opts = {}) {
             checks.push({
                 name: "state lock",
                 status: "warn",
-                detail: `${lockDir} present (${Math.round(age / 1000)}s old) — remove it if no \`th\` process is running`,
+                detail: `${lockDir} present (${Math.round(age / 1000)}s old) — if no \`th\` process is running, reclaim it with \`th state unlock\` (or \`th state unlock --force\` for a still-live-looking lock)`,
             });
         }
         // Gate-ledger audit (GOV-2) — "audit ledger" count + "ledger chain"

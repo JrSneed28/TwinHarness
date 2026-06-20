@@ -15969,8 +15969,17 @@ function serializeState(state) {
 var LockTimeoutError = class extends Error {
   code = "state_lock_timeout";
   constructor(lockDir) {
-    super(`state lock timeout: ${lockDir} is held; remove it if no \`th\` process is running.`);
+    super(`state lock timeout: ${lockDir} is held; if no \`th\` process is running, reclaim it with \`th state unlock\`.`);
     this.name = "LockTimeoutError";
+  }
+};
+var LockStampError = class extends Error {
+  code = "state_lock_stamp_failed";
+  constructor(lockDir) {
+    super(
+      `state lock owner-stamp failed: could not write the owner token under ${lockDir} (the filesystem may be read-only/full, or the lock dir is being blocked).`
+    );
+    this.name = "LockStampError";
   }
 };
 function readState(paths) {
@@ -16030,6 +16039,8 @@ function withStateLock(paths, fn, ops = realLockOps) {
   const BACKOFF_BASE_MS = 5;
   const BACKOFF_CAP_MS = 80;
   let attempt = 0;
+  const MAX_STAMP_FAILS = 3;
+  let stampFails = 0;
   const backoff = () => {
     const backoffCeil = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempt);
     attempt++;
@@ -16044,6 +16055,14 @@ function withStateLock(paths, fn, ops = realLockOps) {
       try {
         ops.writeOwner(ownerFile, myToken);
       } catch {
+        stampFails++;
+        try {
+          ops.remove(lockDir);
+        } catch {
+        }
+        if (stampFails >= MAX_STAMP_FAILS) throw new LockStampError(lockDir);
+        backoff();
+        continue;
       }
       break;
     } catch (e) {
@@ -23982,7 +24001,7 @@ function runDoctor(paths, opts = {}) {
       checks.push({
         name: "state lock",
         status: "warn",
-        detail: `${lockDir} present (${Math.round(age / 1e3)}s old) \u2014 remove it if no \`th\` process is running`
+        detail: `${lockDir} present (${Math.round(age / 1e3)}s old) \u2014 if no \`th\` process is running, reclaim it with \`th state unlock\` (or \`th state unlock --force\` for a still-live-looking lock)`
       });
     }
     checks.push(...ledgerChecks(paths, opts));
@@ -25642,6 +25661,7 @@ var MCP_EXCLUDED = {
   // adapter to the coordination/observability subset (plan boundary rule). ---
   "state status": "Human-readable snapshot; agents read th_state_get / th_scorecard structurally.",
   "state verify": "CLI/CI exit-code gate; agents read th_doctor for validity posture.",
+  "state unlock": "Local lock-recovery operator surface; destructive (removes the .state.lock dir), not agent-reachable (R-21; mirrors migrate / state status).",
   "revise bump": "Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface.",
   "revise status": "Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface.",
   "revise reset": "Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface.",
@@ -25676,6 +25696,7 @@ var CLI_COMMAND_LEAVES = [
   "state set",
   "state status",
   "state verify",
+  "state unlock",
   "revise bump",
   "revise status",
   "revise reset",

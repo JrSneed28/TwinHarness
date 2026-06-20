@@ -1,10 +1,46 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runStateGet = runStateGet;
 exports.runStateSet = runStateSet;
 exports.applyGateMutation = applyGateMutation;
 exports.runStateStatus = runStateStatus;
 exports.runStateVerify = runStateVerify;
+exports.runStateUnlock = runStateUnlock;
+const fs = __importStar(require("node:fs"));
+const path = __importStar(require("node:path"));
 const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const state_schema_1 = require("../core/state-schema");
@@ -370,4 +406,69 @@ function runStateVerify(paths) {
         });
     }
     return (0, output_1.success)({ data: { valid: true }, human: "state.json is valid." });
+}
+/**
+ * `th state unlock [--force]` (R-21) — reclaim a stale `.state.lock` directory.
+ *
+ * The recovery path for a lock left behind by a crashed `th` process — in particular an
+ * OWNER-LESS lock, which is never stealable (R-08) and which the acquire-loop timeout
+ * only throws on (never reclaims). R-21's mandatory owner-stamp makes that state
+ * transient going forward, but a repo bricked by a pre-R-21 crash still needs a manual
+ * reclaim, and this is it. By default this REFUSES to remove a lock that looks LIVE
+ * (stamped AND younger than STALE_MS) and prints the observed owner + age so the operator
+ * can decide; `--force` removes it unconditionally (last resort — only when no `th`
+ * process is running). `th doctor` detects the lock and points here. The age is computed
+ * identically to doctor's check (`Date.now() - statSync(lockDir).mtimeMs`) — though note
+ * doctor only WARNS on any present lock, whereas this applies the STALE_MS threshold to
+ * decide removal. This is the ONLY mutating `th state` verb that operates without the
+ * state lock (it is the lock's recovery tool) and tolerates a corrupt state.json.
+ */
+function runStateUnlock(paths, opts = {}) {
+    const lockDir = path.join(paths.stateDir, ".state.lock");
+    if (!fs.existsSync(lockDir)) {
+        (0, log_1.structuredLog)({ cmd: "state unlock", result: "no_lock" });
+        return (0, output_1.success)({ data: { removed: false, reason: "no_lock" }, human: "No state lock present — nothing to unlock." });
+    }
+    let ageMs = 0;
+    try {
+        ageMs = Date.now() - fs.statSync(lockDir).mtimeMs;
+    }
+    catch {
+        /* stat failed (vanished/denied) — leave age unknown (0); --force can still remove */
+    }
+    let owner = null;
+    try {
+        owner = fs.readFileSync(path.join(lockDir, "owner"), "utf8");
+    }
+    catch {
+        owner = null; // owner-less (a swallowed-stamp crash) or unreadable
+    }
+    const ageSec = Math.round(ageMs / 1000);
+    const staleSec = Math.round(state_store_1.STALE_MS / 1000);
+    const ownerLabel = owner === null ? "owner-less" : `owner ${owner}`;
+    const stale = owner === null || ageMs > state_store_1.STALE_MS;
+    const force = opts.force === true;
+    if (!force && !stale) {
+        (0, log_1.structuredLog)({ cmd: "state unlock", result: "refused_live", ageMs, ownerLess: owner === null });
+        return (0, output_1.failure)({
+            human: `Refusing to remove a lock that looks LIVE: ${lockDir} (${ownerLabel}, ${ageSec}s old, under the ${staleSec}s stale threshold). ` +
+                `A \`th\` process may be holding it. If you are CERTAIN no \`th\` process is running, re-run with --force.`,
+            data: { error: "lock_live", lockDir, ageMs, ownerLess: owner === null },
+        });
+    }
+    try {
+        fs.rmSync(lockDir, { recursive: true, force: true });
+    }
+    catch (e) {
+        return (0, output_1.failure)({
+            human: `Could not remove ${lockDir}: ${e.message}`,
+            data: { error: "unlock_failed", lockDir },
+        });
+    }
+    (0, log_1.structuredLog)({ cmd: "state unlock", result: "removed", forced: force, ageMs, ownerLess: owner === null });
+    return (0, output_1.success)({
+        data: { removed: true, lockDir, forced: force, ageMs, ownerLess: owner === null },
+        human: `Removed state lock ${lockDir} (${ownerLabel}, ${ageSec}s old${force ? ", forced" : ", stale"}). ` +
+            `State mutations can proceed again.`,
+    });
 }

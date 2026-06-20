@@ -1714,6 +1714,7 @@ export const MCP_EXCLUDED: Readonly<Record<string, string>> = {
   // adapter to the coordination/observability subset (plan boundary rule). ---
   "state status": "Human-readable snapshot; agents read th_state_get / th_scorecard structurally.",
   "state verify": "CLI/CI exit-code gate; agents read th_doctor for validity posture.",
+  "state unlock": "Local lock-recovery operator surface; destructive (removes the .state.lock dir), not agent-reachable (R-21; mirrors migrate / state status).",
   "revise bump": "Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface.",
   "revise status": "Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface.",
   "revise reset": "Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface.",
@@ -1765,7 +1766,7 @@ export const MCP_ONLY_TOOLS: Readonly<Record<string, string>> = {
  */
 export const CLI_COMMAND_LEAVES: readonly string[] = [
   "init",
-  "state get", "state set", "state status", "state verify",
+  "state get", "state set", "state status", "state verify", "state unlock",
   "revise bump", "revise status", "revise reset",
   "tier classify", "tier veto-check", "tier record", "tier features",
   "stage advance", "stage current", "stage describe", "stage list",

@@ -83,6 +83,7 @@ Usage:
   th state set <dotted.key> <value> Patch state.json (refuses invalid results; rejects unknown keys; gate-owned fields require --emergency — prefer the typed gate commands below)
   th state status                   Human-readable tier/stage/gate snapshot
   th state verify                   Validate state.json (exit 0 = valid)
+  th state unlock [--force]         Reclaim a stale .state.lock left by a crashed process (refuses a live lock unless --force; R-21 recovery)
   th revise bump <mode> [--cap N]   Increment revise-loop count (computes escalate = count >= cap)
   th revise status <mode> [--cap N] Report revise-loop count + cap (no mutation)
   th revise reset <mode>            Zero revise-loop count (stage passed / zero issues)
@@ -223,7 +224,7 @@ Global flags:
   --task <s>        (delegate) Free-text task label (echoed; not parsed)
   --agent <a>       (route, delegate pack) The agent being spawned / delegated to
   --capsule <path>  (delegate check) Capsule file to validate
-  --force           (init) Reset existing state.json; (collab fragment) overwrite an existing fragment; (repo map) overwrite a target registered as an approved artifact (R-14)
+  --force           (init) Reset existing state.json; (collab fragment) overwrite an existing fragment; (repo map) overwrite a target registered as an approved artifact (R-14); (state unlock) remove a lock that still looks live (R-21)
   --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)
   --max-tokens <k>  (init) Per-session context budget in THOUSANDS; persisted as max_tokens (×1000, e.g. 150 → 150000)
   --max <k>         (budget check) Budget override in THOUSANDS; default is state.max_tokens, else the tier-aware default
@@ -767,6 +768,8 @@ function dispatch(parsed) {
                     return (0, state_1.runStateStatus)(paths);
                 case "verify":
                     return (0, state_1.runStateVerify)(paths);
+                case "unlock":
+                    return (0, state_1.runStateUnlock)(paths, { force: parsed.flags.force });
                 default:
                     return (0, output_1.failure)({ human: `unknown 'state' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
