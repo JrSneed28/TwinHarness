@@ -44,13 +44,16 @@ interface FakeState {
  * Build a deterministic LockOps seam. `acquire(attempt)` returns the errno code to
  * THROW on the 1-based attempt, or null to ACQUIRE. `age` is the reported stale-age
  * (now − mtime); `owners` drives the TOCTOU owner-token read; `mtimeThrows` makes
- * the stat step throw (vanished / denied lock dir).
+ * the stat step throw (vanished / denied lock dir) — pass a string to throw that
+ * code on EVERY stat, or a `(attempt) => code | null` function to make the throw
+ * TRANSIENT (e.g. throw on attempt 1, succeed after), which models a stat that
+ * momentarily hits a half-replaced lock dir mid steal-churn.
  */
 function makeFakeOps(behavior: {
   acquire: (attempt: number) => string | null;
   age?: number;
   owners?: () => string | null;
-  mtimeThrows?: string;
+  mtimeThrows?: string | ((attempt: number) => string | null);
 }): { state: FakeState; ops: LockOps } {
   const state: FakeState = { now: 1_000_000, attempts: 0, sleeps: [], removes: 0 };
   const ops: LockOps = {
@@ -67,7 +70,11 @@ function makeFakeOps(behavior: {
       if (code) throw errno(code);
     },
     mtimeMs: () => {
-      if (behavior.mtimeThrows) throw errno(behavior.mtimeThrows);
+      // `mtimeThrows` keyed off the CURRENT acquire attempt (state.attempts): a
+      // string throws on every stat; a function may throw transiently then succeed.
+      const t = behavior.mtimeThrows;
+      const code = typeof t === "function" ? t(state.attempts) : t;
+      if (code) throw errno(code);
       return state.now - (behavior.age ?? 0); // default age 0 → fresh (never stale)
     },
     remove: () => {
@@ -205,18 +212,67 @@ describe("#3-pre: injected seam reproduces acquire / steal / timeout / rethrow i
     }
   });
 
-  it("EPERM during stat with the lock-dir gone → genuine permission error rethrows (not a steal)", () => {
-    const tp = lockableProject();
-    try {
-      // acquire throws EPERM (held on Windows), but the stat then throws too → the
-      // EPERM/EACCES branch treats it as a genuine permission error and rethrows.
-      const { ops } = makeFakeOps({ acquire: () => "EPERM", mtimeThrows: "EPERM" });
-      expect(() => withStateLock(tp.paths, () => 1, ops)).toThrow(/EPERM/);
-      expect(() => withStateLock(tp.paths, () => 1, makeFakeOps({ acquire: () => "EPERM", mtimeThrows: "EPERM" }).ops)).not.toThrow(LockTimeoutError);
-    } finally {
-      tp.cleanup();
+  // REQ-STATE-LOCK-003 — a PERSISTENT stat EPERM/EACCES (held + every stat throws) is
+  // NO LONGER rethrown as a raw errno. It is now treated as steal-churn and retried,
+  // so a genuinely permission-denied lock dir fails SAFE: a typed, bounded
+  // LockTimeoutError after the 25s deadline — never a raw EPERM crash. This is the
+  // deliberate fail-safe-over-fail-fast tradeoff (the symmetric counterpart to the
+  // ENOENT vanish path), and the regression guard for the steal-stat misclassification.
+  for (const statCode of ["EPERM", "EACCES"]) {
+    it(`persistent stat ${statCode} while held → BOUNDED LockTimeoutError, never a raw ${statCode}`, () => {
+      const tp = lockableProject();
+      try {
+        const { state, ops } = makeFakeOps({ acquire: () => statCode, mtimeThrows: statCode });
+        // The fix: a real permission fault is bounded by the deadline (typed error),
+        // not surfaced as a raw errno crash.
+        expect(() => withStateLock(tp.paths, () => 1, ops)).toThrow(LockTimeoutError);
+        // And specifically NOT the raw errno the old code rethrew.
+        expect(() => withStateLock(tp.paths, () => 1, makeFakeOps({ acquire: () => statCode, mtimeThrows: statCode }).ops))
+          .not.toThrow(new RegExp(`fake ${statCode}`));
+        expect(state.sleeps.length).toBeGreaterThan(0); // backed off, did not busy-spin
+        expect(state.attempts).toBeLessThan(5_000); // bounded — no infinite loop
+        expect(state.removes).toBe(0); // never acquired, so never released
+      } finally {
+        tp.cleanup();
+      }
+    });
+  }
+
+  // REQ-STATE-LOCK-003 — the core steal-stat-misclassification regression. Under heavy
+  // Windows contention a waiter's mkdir throws a contention code (EEXIST on POSIX,
+  // EPERM/EACCES on Windows) and its follow-up stat TRANSIENTLY throws EPERM/EACCES
+  // because ANOTHER waiter is concurrently rmdir+mkdir-ing the same lock dir mid-steal.
+  // The old code misclassified that transient stat error as a genuine permission fault
+  // and rethrew the original contention errno, crashing the caller with a raw
+  // `EEXIST/EPERM ... mkdir ...state.lock`. The fix treats it as churn → back off +
+  // retry, so a subsequent attempt where the lock is free acquires and runs fn.
+  for (const heldCode of ["EEXIST", "EPERM", "EACCES"]) {
+    for (const statCode of ["EPERM", "EACCES"]) {
+      it(`held ${heldCode} + TRANSIENT stat ${statCode} mid-steal → backs off, retries, then acquires (no raw errno)`, () => {
+        const tp = lockableProject();
+        try {
+          // attempt 1: lock held (heldCode); the follow-up stat throws statCode because a
+          // concurrent waiter is rmdir+mkdir-ing the lock dir → must NOT rethrow, must retry.
+          // attempt 2: lock is free → acquire, run fn, return.
+          const { state, ops } = makeFakeOps({
+            acquire: (n) => (n === 1 ? heldCode : null),
+            mtimeThrows: (n) => (n === 1 ? statCode : null),
+          });
+          let ran = false;
+          const out = withStateLock(tp.paths, () => {
+            ran = true;
+            return "acquired";
+          }, ops);
+          expect(ran).toBe(true);
+          expect(out).toBe("acquired");
+          expect(state.attempts).toBe(2); // churned once → retried → acquired
+          expect(state.sleeps.length).toBe(1); // backed off exactly once on the churn retry
+        } finally {
+          tp.cleanup();
+        }
+      });
     }
-  });
+  }
 
   it("EPERM acquire (Windows contention) + lock VANISHED mid-stat (ENOENT) → retries and acquires (REQ-STATE-LOCK-002)", () => {
     const tp = lockableProject();

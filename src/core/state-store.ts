@@ -263,9 +263,11 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T, ops: LockOps 
       const code = (e as NodeJS.ErrnoException).code;
       if (!isLockHeldError(code)) throw e;
       // Held: steal if stale, else wait. statSync doubles as the existence check and
-      // mtime fetch in one call. If it throws, the lock dir is absent or inaccessible:
-      // for EPERM/EACCES that means a genuine permission error (not contention) so we
-      // rethrow the original; for EEXIST the dir just vanished and we back off + retry.
+      // mtime fetch in one call. If it throws, the lock dir was momentarily absent or
+      // inaccessible BECAUSE the lock is under active contention/steal-churn — ANY
+      // such stat failure (ENOENT vanish or EPERM/EACCES half-replaced dir) is treated
+      // symmetrically: back off and retry, bounded by the loop-head deadline
+      // (REQ-STATE-LOCK-003).
       try {
         const ownerBefore = ops.readOwner(ownerFile);
         const age = ops.now() - ops.mtimeMs(lockDir);
@@ -280,23 +282,34 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T, ops: LockOps 
           backoff(); // bound the post-steal retry — re-checks the deadline at the head (#3)
           continue;
         }
-      } catch (statErr) {
-        // The lock was HELD (acquire threw a contention code) but the follow-up
-        // stat failed. WHY the STAT failed — not which code the acquire threw —
-        // decides recover-vs-rethrow:
+      } catch {
+        // The lock was HELD (acquire threw a contention code) but the follow-up stat
+        // failed. ANY stat failure here is the SAME steal-churn race — never a verdict
+        // on its own — so we back off and retry, bounded by the loop-head deadline
+        // (REQ-STATE-LOCK-003). Both stat-failure shapes are the contention we are
+        // already in the middle of waiting out:
         //   • stat ENOENT → the holder released the lock between our mkdir and the
-        //     stat (the textbook vanish race) → back off and retry. This is the
-        //     dominant Windows path: a *contention* EPERM from mkdir (see
-        //     isLockHeldError) immediately followed by the holder's release. The
-        //     old code keyed this branch off the ACQUIRE code, so a contention
-        //     EPERM + a vanished lock rethrew a raw EPERM and crashed the caller
-        //     (windows-latest flake, REQ-STATE-LOCK-002 — N writers under readers).
-        //   • stat EPERM/EACCES → the lock dir is genuinely inaccessible (a real
-        //     permission fault, not contention) → rethrow the original error.
-        const statCode = (statErr as NodeJS.ErrnoException).code;
-        if (statCode === "EPERM" || statCode === "EACCES") throw e; // genuine permission error
-        backoff(); // bound the vanished-lock retry (#3)
-        continue; // lock vanished between mkdir and stat — retry
+        //     stat (the textbook vanish race). The dominant Windows path: a
+        //     *contention* EPERM from mkdir (see isLockHeldError) immediately
+        //     followed by the holder's release (REQ-STATE-LOCK-002).
+        //   • stat EPERM/EACCES → ANOTHER waiter was concurrently rmdir+mkdir-ing this
+        //     same lock dir mid-steal, so the stat momentarily hit a half-replaced dir
+        //     and threw a TRANSIENT permission code. Because the acquire just threw a
+        //     contention code and we are still under the deadline, this is steal-churn,
+        //     NOT a genuine permission fault. The old code misclassified it and rethrew
+        //     the original EEXIST/EPERM, crashing the caller with a raw errno under load
+        //     (windows-latest flake lineage REQ-STATE-LOCK-001/-002, resurfaced under
+        //     the heavier contention the audit PR #20's fsync change induces).
+        // Deliberate tradeoff (fail-safe over fail-fast-but-crash): a state dir that is
+        // GENUINELY permission-denied no longer rethrows a raw errno immediately — it
+        // backs off until TIMEOUT_MS (25s) and then surfaces a TYPED, BOUNDED
+        // LockTimeoutError, the same well-typed boundary the CLI already maps to a clean
+        // `state_lock_timeout` failure. No separate retry counter is needed: the loop's
+        // existing "the deadline is the ultimate bound" philosophy means the same 25s
+        // deadline that already caps a genuinely-stuck holder also caps a genuinely-denied
+        // dir, applying the ENOENT path's treatment symmetrically to every stat failure.
+        backoff(); // bound the steal-churn retry (#3) — re-checks the deadline at the head
+        continue; // stat failed mid-steal-churn — back off and retry
       }
       // Plain wait path (held + not stale): back off, then retry from the loop head
       // (which enforces the deadline). The old `while`-spin pegged a core here.
