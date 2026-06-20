@@ -1,0 +1,5 @@
+{
+  // Package config with NO baseUrl/paths of its own — it inherits the `@app/*` alias
+  // entirely from the base via `extends` (a relative `../../configs/...` reference).
+  "extends": "../../configs/tsconfig.base.json"
+}

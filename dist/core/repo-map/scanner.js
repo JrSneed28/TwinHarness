@@ -70,11 +70,14 @@ exports.TOTAL_BYTES_CAP = 64 * 1024 * 1024; // 64 MB
 /**
  * P2 cost gate (REQ-NFR-007). The import/symbol graph is bounded INDEPENDENTLY of
  * the file/byte caps so it can never blow the 64 MB / 25k envelope: at 25k files
- * and these caps the serialized graph stays small. Reaching a cap stops graph
- * accumulation (it does NOT mark the scan partial — only file/byte caps do that).
+ * and these caps the serialized graph stays small. AC#4: reaching the whole-graph
+ * symbol or edge ceiling now ALSO marks the scan PARTIAL (`scanReport.capHit` ⇒
+ * `"symbol-cap"`/`"edge-cap"`, and the derived `partial:true` + banner) — consistent
+ * with the file/byte caps. The truncation is therefore declared, never silent.
  *   - MAX_SYMBOLS_PER_FILE: a single pathological file can't emit thousands of symbols.
+ *     This is a PER-FILE clamp only (it never sets `capHit` — the whole-graph ceilings do).
  *   - MAX_TOTAL_SYMBOLS / MAX_TOTAL_EDGES: whole-graph ceilings (benchmarked in
- *     repo-bounded-cost.test.ts).
+ *     repo-bounded-cost.test.ts). Hitting either declares the map partial (AC#4).
  */
 exports.MAX_SYMBOLS_PER_FILE = 200;
 exports.MAX_TOTAL_SYMBOLS = 100_000;
@@ -361,6 +364,9 @@ function scanRepo(root, opts = {}) {
     const map = (0, schema_1.emptyRepoMap)(absRoot);
     const fileCountCap = opts.fileCountCap ?? exports.FILE_COUNT_CAP;
     const totalBytesCap = opts.totalBytesCap ?? exports.TOTAL_BYTES_CAP;
+    // AC#4 — whole-graph ceilings (test-overridable, mirroring the file/byte caps).
+    const maxTotalSymbols = opts.maxTotalSymbols ?? exports.MAX_TOTAL_SYMBOLS;
+    const maxTotalEdges = opts.maxTotalEdges ?? exports.MAX_TOTAL_EDGES;
     if (!fs.existsSync(absRoot) || !fs.statSync(absRoot).isDirectory()) {
         return map; // empty-but-valid (REQ-RU-090).
     }
@@ -372,10 +378,12 @@ function scanRepo(root, opts = {}) {
     // memory; no extra FS access). `symbolTotal` enforces the whole-graph cost cap.
     const rawImportsByFile = new Map();
     let symbolTotal = 0;
-    // DEFERRED #1a — raw tsconfig/jsconfig text captured during the walk (keyed by the
-    // config's POSIX-relative DIRECTORY; "" = repo root). Parsed into alias tables AFTER
-    // the walk so resolution sees the complete in-memory fileSet (no extra FS access).
-    // Content is INERT text — never require()'d/executed (RULE-004, fail-closed).
+    // DEFERRED #1a / AC#3 — raw tsconfig/jsconfig text captured during the walk, keyed
+    // by the config's POSIX-relative FILE PATH (e.g. "tsconfig.json",
+    // "packages/app/tsconfig.json", "tsconfig.base.json"). Parsed into alias tables
+    // AFTER the walk so resolution sees the complete in-memory fileSet. An `extends`
+    // base not captured during the walk (e.g. under the excluded node_modules) is read
+    // lazily on demand. Content is INERT text — never require()'d/executed (RULE-004).
     const tsConfigText = new Map();
     // DEFERRED #1b — discovered in-repo package manifests (name + entry hints) and the
     // declared workspace glob patterns. Built PURELY in-memory after the walk into a
@@ -653,14 +661,24 @@ function scanRepo(root, opts = {}) {
             // text source files in the parse allowlist (never binary, never oversize). The
             // per-file symbol cap and the whole-graph symbol cap (REQ-NFR-007) bound cost.
             if (content !== undefined && (0, extract_1.isParseableExt)(ext)) {
-                if (symbolTotal < exports.MAX_TOTAL_SYMBOLS) {
+                if (symbolTotal < maxTotalSymbols) {
                     const syms = (0, extract_1.extractSymbols)(ext, content, exports.MAX_SYMBOLS_PER_FILE);
                     if (syms.length > 0) {
-                        const room = exports.MAX_TOTAL_SYMBOLS - symbolTotal;
+                        const room = maxTotalSymbols - symbolTotal;
                         const bounded = syms.length > room ? syms.slice(0, room) : syms;
                         fileEntry.symbols = bounded;
                         symbolTotal += bounded.length;
+                        // AC#4 — the whole-graph symbol ceiling truncated this file's symbols:
+                        // the symbol graph is now INCOMPLETE → declare the map partial (first-non-
+                        // null wins; `partial:true` + banner are derived from any non-null capHit).
+                        if (bounded.length < syms.length)
+                            st.capHit ??= "symbol-cap";
                     }
+                }
+                else {
+                    // AC#4 — already at the whole-graph symbol ceiling: this file's symbols are
+                    // dropped entirely. The symbol graph is incomplete → declare it partial.
+                    st.capHit ??= "symbol-cap";
                 }
                 const imports = (0, extract_1.extractImports)(ext, content);
                 if (imports.length > 0) {
@@ -783,12 +801,18 @@ function scanRepo(root, opts = {}) {
                     }
                 }
             }
-            // DEFERRED #1a — capture tsconfig/jsconfig raw text for post-walk alias-table
-            // construction. Stored by the config's directory; a later config at the same
-            // dir (impossible — one file per name) would not occur. Reuses the single read.
-            if ((nameLower === "tsconfig.json" || nameLower === "jsconfig.json") && content !== undefined) {
-                const dir = path.posix.dirname(rel);
-                tsConfigText.set(dir === "." ? "" : dir, content);
+            // DEFERRED #1a / AC#3 — capture tsconfig/jsconfig raw text for post-walk alias-
+            // table construction, keyed by the config's resolved POSIX FILE PATH (not its
+            // dir). Keying by path lets an `extends` base that is NOT named exactly
+            // `tsconfig.json` (e.g. `tsconfig.base.json`) be found in-memory, and is the
+            // stable key the extends-chain reader looks up. We capture the canonical entry
+            // names AND any `tsconfig*.json`/`jsconfig*.json` base variant; a base under
+            // `node_modules` (excluded from the walk) is read lazily on demand below.
+            // Reuses the single read; content is INERT text (RULE-004, never executed).
+            if (content !== undefined &&
+                (nameLower === "tsconfig.json" || nameLower === "jsconfig.json" ||
+                    /^(tsconfig|jsconfig)\..*\.json$/.test(nameLower))) {
+                tsConfigText.set(rel, content);
             }
             // Conventional entry-file detection (REQ-RU-008).
             if (ENTRY_FILES.has(nameLower)) {
@@ -827,16 +851,53 @@ function scanRepo(root, opts = {}) {
     // recorded as `unresolved`/`external` (Phase 2B does full module resolution). The
     // whole-graph edge cap bounds cost (REQ-NFR-007).
     const fileSet = new Set(files.map((f) => f.path));
-    // DEFERRED #1a — build tsconfig/jsconfig alias tables from the captured raw text.
-    // PURE + in-memory: each config is parsed by the fail-closed JSONC reader; a parse
-    // failure (or no baseUrl/paths) simply yields no table (fall back to unresolved).
-    // Tables are sorted by POSIX configDir for deterministic candidate ordering.
+    // DEFERRED #1a / AC#3 — build tsconfig/jsconfig alias tables from the captured raw
+    // text, resolving each config's `extends` chain FIRST so aliases declared in a base
+    // config (incl. a `tsconfig.base.json` or a node_modules base) and inherited via
+    // `extends` resolve to `basis:"alias"` (not `unresolved`). PURE + in-memory for the
+    // walked configs; an extends base NOT captured by the walk is read lazily ON DEMAND
+    // through `readExtendsBase` below. A parse failure (or no usable baseUrl/paths) simply
+    // yields no table (fall back to unresolved — never a guess). Configs are processed in
+    // POSIX-sorted FILE-PATH order for deterministic table ordering (ADR-003).
+    //
+    // `readExtendsBase` is the single, BOUNDED lazy reader the chain uses. It is keyed by
+    // POSIX path: it returns the in-memory text when the base was walked, else reads it
+    // ONCE from disk (under absRoot — `resolveExtendsTarget` already rejected `..`-escapes
+    // and absolute refs, so the key cannot leave the tree). Both hits AND misses are
+    // memoized so the reader is a pure function of its key set, independent of FS
+    // iteration / call order (ADR-003). These are legitimate READS (a base under the
+    // excluded node_modules is read here, never written) — only WRITES are surface-guarded.
+    const extendsReadCache = new Map();
+    const readExtendsBase = (posixKey) => {
+        const inMem = tsConfigText.get(posixKey);
+        if (inMem !== undefined)
+            return inMem;
+        if (extendsReadCache.has(posixKey))
+            return extendsReadCache.get(posixKey);
+        let text;
+        try {
+            const abs = path.join(absRoot, ...posixKey.split("/"));
+            const buf = fs.readFileSync(abs);
+            // Binary guard mirrors the main walk: a NUL byte ⇒ not a usable text config.
+            text = (0, extract_1.looksBinary)(buf) ? undefined : buf.toString("utf8");
+        }
+        catch {
+            text = undefined; // unreadable base — fail-safe (the chain records unresolved).
+        }
+        extendsReadCache.set(posixKey, text);
+        return text;
+    };
     const aliasTables = [];
-    for (const [dir, text] of [...tsConfigText.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    for (const [configPath, text] of [...tsConfigText.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
         const parsed = (0, extract_1.parseJsonc)(text);
         if (!parsed)
             continue;
-        const table = (0, extract_1.buildAliasTable)(dir, parsed);
+        // Resolve the `extends` chain into an alias table (real TS semantics: paths REPLACE,
+        // baseUrl child-wins, declaring-dir tracked, depth+cycle bounded, single node_modules
+        // hop, fail-safe). Returns undefined when the chain declares neither baseUrl nor paths
+        // (this config contributes no aliases — skip it). A config with no `extends` collapses
+        // to exactly the same table `buildAliasTable` would have produced for it alone.
+        const table = (0, extract_1.resolveExtendsChain)(configPath, parsed, readExtendsBase);
         if (table)
             aliasTables.push(table);
     }
@@ -852,8 +913,13 @@ function scanRepo(root, opts = {}) {
         const isTsJs = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"].includes(e);
         const isPy = e === "py";
         for (const imp of imports) {
-            if (edges.length >= exports.MAX_TOTAL_EDGES)
+            // AC#4 — the whole-graph edge ceiling truncates the import graph: declare the map
+            // partial (first-non-null wins) BEFORE stopping, so the truncation is never silent
+            // (`partial:true` + banner are derived from any non-null capHit).
+            if (edges.length >= maxTotalEdges) {
+                st.capHit ??= "edge-cap";
                 break outer;
+            }
             let to = null;
             if (isTsJs)
                 to = (0, extract_1.resolveRelativeTsJs)(from, imp.specifier, fileSet);

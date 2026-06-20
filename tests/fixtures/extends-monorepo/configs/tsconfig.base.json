@@ -1,0 +1,15 @@
+{
+  // Shared base config, deliberately placed OUTSIDE the package tree (under
+  // `configs/`) so its OWN alias table governs only `configs/**` and can NOT resolve
+  // the package import on its own. The `@app/*` alias is declared HERE and reaches the
+  // package import ONLY through `extends` (proving AC#3 inheritance, not incidental
+  // root-config governance). `baseUrl: ".."` makes the inherited paths resolve from the
+  // repo root, where `packages/app/src/*` lives. Before AC#3 this inherited alias
+  // degraded to `basis:"unresolved"`; now it resolves to `basis:"alias"`.
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@app/*": ["packages/app/src/*"]
+    }
+  }
+}

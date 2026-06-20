@@ -71,6 +71,7 @@ exports.isSectionLeased = isSectionLeased;
 exports.sectionLeaseHolder = sectionLeaseHolder;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+const paths_1 = require("./paths");
 /** `<stateDir>/build-leases.jsonl` — the lease ledger's location. */
 function leasesPath(paths) {
     return path.join(paths.stateDir, "build-leases.jsonl");
@@ -138,6 +139,9 @@ function readLeaseEvents(paths) {
 }
 /** Append one lease event. Clock-injectable for deterministic tests. */
 function appendLeaseEvent(paths, event, now = () => new Date()) {
+    // AC#1 write-surface chokepoint: leasesPath is under stateDir; the guard fires
+    // here (this writer propagates) so a non-governed target throws WriteSurfaceError.
+    (0, paths_1.assertGovernedWriteSurface)(paths.root, leasesPath(paths));
     fs.mkdirSync(paths.stateDir, { recursive: true });
     // Explicit canonical serialization (LEASE_FIELD_ORDER): drops `undefined`-valued
     // keys, so a top-level lease (no `parent`) serializes byte-identically to the

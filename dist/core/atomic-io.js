@@ -59,6 +59,78 @@ exports.readFileWithRetry = readFileWithRetry;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const sleep_1 = require("./sleep");
+const paths_1 = require("./paths");
+/** The production fsync shim — straight `node:fs`. */
+const REAL_FSYNC = {
+    openSync: (p, flags) => fs.openSync(p, flags),
+    fsyncFd: (fd) => fs.fsyncSync(fd),
+    closeSync: (fd) => fs.closeSync(fd),
+};
+/**
+ * Directory-fsync error codes that are genuinely NOT-APPLICABLE on win32, where
+ * the OS does not expose a directory handle that can be fsync'd. ONLY these are
+ * swallowed, and ONLY for the directory fsync (never the temp-fd content fsync) and
+ * ONLY on win32 — a real durability failure (ENOSPC, EIO, …) on any handle still
+ * propagates. Branch (a), committed: we do NOT blanket-swallow dir-fsync; the
+ * barrier stays honest.
+ */
+const WIN32_DIR_FSYNC_NA_CODES = new Set([
+    "EISDIR",
+    "EINVAL",
+    "EPERM",
+    "EACCES",
+]);
+/**
+ * fsync the FILE at `target` (temp fd) — content+metadata to the device — BEFORE
+ * the rename. Errors PROPAGATE (consistent with the non-transient throw below): a
+ * real ENOSPC/EIO on the content flush is a genuine durability failure the caller
+ * must see, not a swallowed surprise. Open r+ (the file exists; we only flush it).
+ */
+function fsyncFile(target, shim) {
+    const fd = shim.openSync(target, "r+");
+    try {
+        shim.fsyncFd(fd);
+    }
+    finally {
+        shim.closeSync(fd);
+    }
+}
+/**
+ * fsync the containing DIRECTORY after a successful rename so the rename itself is
+ * durable (the directory entry survives a crash). Genuine failures PROPAGATE
+ * (branch a). On win32 ONLY, a directory handle may not be fsync-able at all — the
+ * NOT-APPLICABLE codes in {@link WIN32_DIR_FSYNC_NA_CODES} are swallowed there (and
+ * only there) because they signal "this platform cannot fsync a dir handle", not a
+ * lost write. A non-N/A code (ENOSPC, EIO, …) still throws on every platform.
+ */
+function fsyncDir(dir, shim) {
+    let fd;
+    try {
+        fd = shim.openSync(dir, "r");
+    }
+    catch (e) {
+        if (process.platform === "win32" && isWin32DirFsyncNA(e.code)) {
+            return; // win32 cannot open a dir handle for fsync — genuinely N/A, not a lost write.
+        }
+        throw e;
+    }
+    try {
+        shim.fsyncFd(fd);
+    }
+    catch (e) {
+        if (process.platform === "win32" && isWin32DirFsyncNA(e.code)) {
+            return; // win32 dir-handle fsync is N/A — swallow ONLY here.
+        }
+        throw e;
+    }
+    finally {
+        shim.closeSync(fd);
+    }
+}
+/** Whether `code` is a genuinely-N/A win32 directory-fsync error (swallow-eligible). */
+function isWin32DirFsyncNA(code) {
+    return code !== undefined && WIN32_DIR_FSYNC_NA_CODES.has(code);
+}
 /** Transient, retryable I/O errors caused by concurrent access (not real faults). */
 function isTransientIoError(code) {
     return code === "EPERM" || code === "EACCES" || code === "EBUSY";
@@ -83,24 +155,44 @@ class StateWriteContendedError extends Error {
     }
 }
 exports.StateWriteContendedError = StateWriteContendedError;
-/**
- * Write `content` to `absPath` atomically (write temp, then rename over target),
- * creating parent directories as needed. Retries the rename on a transient
- * contention error with a short escalating backoff; throws
- * {@link StateWriteContendedError} only after the budget is exhausted, and a
- * non-transient error immediately. Never leaves the temp file behind on failure.
- *
- * `rename` is injectable so the retry path is unit-testable without mocking the
- * (non-configurable) `node:fs` module; production callers omit it.
- */
-function atomicWriteFile(absPath, content, rename = fs.renameSync) {
-    fs.mkdirSync(path.dirname(absPath), { recursive: true });
+function atomicWriteFile(absPath, content, 
+// Back-compat: the 3rd arg historically WAS the injectable `rename` function; it
+// is now the options bag (root / rename / fsync). A bare function is still
+// accepted and normalized to `{ rename }` so existing callers/tests that inject a
+// rename positionally keep working unchanged.
+optsOrRename = {}) {
+    const opts = typeof optsOrRename === "function" ? { rename: optsOrRename } : optsOrRename;
+    const rename = opts.rename ?? fs.renameSync;
+    const fsync = opts.fsync ?? REAL_FSYNC;
+    // AC#1: assert the target is a governed write surface BEFORE creating any file —
+    // a rejection must not leave a temp file behind. Only when a root is threaded.
+    if (opts.root !== undefined)
+        (0, paths_1.assertGovernedWriteSurface)(opts.root, absPath);
+    const dir = path.dirname(absPath);
+    fs.mkdirSync(dir, { recursive: true });
     const tmp = `${absPath}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
     fs.writeFileSync(tmp, content, "utf8");
+    // AC#2: durably flush the temp file's bytes to the device BEFORE the rename, so a
+    // crash in the rename window can never expose a zero/torn file. Errors propagate
+    // (a real ENOSPC on the content flush is a genuine failure) — but first clean the
+    // temp so a failed durability barrier never leaks a stray temp file.
+    try {
+        fsyncFile(tmp, fsync);
+    }
+    catch (e) {
+        try {
+            fs.rmSync(tmp, { force: true });
+        }
+        catch {
+            /* best-effort cleanup */
+        }
+        throw e;
+    }
     for (let attempt = 1;; attempt++) {
         try {
             rename(tmp, absPath);
-            return;
+            break; // renamed: the durable swap is done; fsync the dir below (outside the
+            // rename-retry loop so a dir-fsync failure is never mistaken for rename contention).
         }
         catch (e) {
             const code = e.code;
@@ -120,6 +212,12 @@ function atomicWriteFile(absPath, content, rename = fs.renameSync) {
             (0, sleep_1.sleepSync)(Math.min(4 * attempt, 40)); // ~4,8,…,40ms — total budget < ~1s (zero-CPU, PERF-007)
         }
     }
+    // AC#2: fsync the containing directory so the rename (the durable swap) itself
+    // survives a crash. The data is already safely renamed; a genuine dir-fsync
+    // failure here PROPAGATES (branch a), and win32 N/A dir-handle codes are swallowed
+    // inside fsyncDir. Outside the rename-retry loop so it is never confused with
+    // rename contention (no temp file remains to clean — the rename already consumed it).
+    fsyncDir(dir, fsync);
 }
 /**
  * Read a UTF-8 file, retrying a transient contention error (a reader that collided

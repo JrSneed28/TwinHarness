@@ -185,7 +185,7 @@ export function readVerifyReport(paths: ProjectPaths): VerifyReport | null {
  */
 export function writeVerifyReport(paths: ProjectPaths, report: VerifyReport): void {
   fs.mkdirSync(paths.stateDir, { recursive: true });
-  atomicWriteFile(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n");
+  atomicWriteFile(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n", { root: paths.root });
 }
 
 // ---------------------------------------------------------------------------

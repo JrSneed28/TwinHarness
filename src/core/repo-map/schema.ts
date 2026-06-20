@@ -240,7 +240,11 @@ export interface ExclusionEntry {
 export interface ScanReport {
   filesScanned: number;
   filesSkipped: number;
-  capHit: null | "file-count" | "total-bytes";
+  // AC#4 — `capHit` is the FIRST cap encountered (representative, not exhaustive). The
+  // file/byte caps mark the WALK partial; `"symbol-cap"`/`"edge-cap"` mark the import/
+  // symbol GRAPH partial (consistent with the file/byte caps). The derived `partial`
+  // (any non-null capHit) + the PARTIAL banner are the load-bearing exhaustive signal.
+  capHit: null | "file-count" | "total-bytes" | "symbol-cap" | "edge-cap";
   /**
    * P3-6 — set when files were scanned (> a small floor) but NO source roots and
    * NO components were derived: a likely-missed layout. Surfaced as a visible
@@ -564,7 +568,7 @@ function isStringArray(v: unknown): v is string[] {
 
 const LANGUAGE_SOURCES: readonly string[] = ["extension", "manifest", "both"];
 const COMMAND_KINDS: readonly string[] = ["build", "test", "lint", "other"];
-const SCAN_CAPS: readonly (string | null)[] = [null, "file-count", "total-bytes"];
+const SCAN_CAPS: readonly (string | null)[] = [null, "file-count", "total-bytes", "symbol-cap", "edge-cap"];
 
 // P1-3 — provenance vocabulary, mirrored from the `ProvenanceBasis`/`ConfidenceTier`
 // unions above so the defensive parser can validate an on-disk value.

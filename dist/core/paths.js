@@ -33,7 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PathContainmentError = void 0;
+exports.WriteSurfaceError = exports.PathContainmentError = void 0;
+exports.assertGovernedWriteSurface = assertGovernedWriteSurface;
 exports.resolveWithinRoot = resolveWithinRoot;
 exports.resolveProjectPaths = resolveProjectPaths;
 const fs = __importStar(require("node:fs"));
@@ -63,6 +64,83 @@ class PathContainmentError extends Error {
     }
 }
 exports.PathContainmentError = PathContainmentError;
+/**
+ * Thrown by {@link assertGovernedWriteSurface} when a write targets a path that is
+ * IN-ROOT but outside the governed write-surface allowlist
+ * (`.twinharness` / `.agentic-sdlc` / `docs/` / `drift-log.md`). Distinct from
+ * {@link PathContainmentError} (which is root ESCAPE): a write can be contained in
+ * the root yet still land somewhere TwinHarness must never write (e.g. a slice's
+ * `src/` implementation file). Mirrors `PathContainmentError`'s shape — a typed
+ * error with a stable `code` — so the single CLI boundary maps it to a structured
+ * `failure(...)` rather than letting a raw stack escape. This is the MECHANICAL
+ * write-surface invariant (AC#1): it fires at the shared `atomicWriteFile`/append
+ * chokepoint below every governed writer, so no control surface (CLI or MCP) can
+ * write outside the allowlist by convention alone.
+ */
+class WriteSurfaceError extends Error {
+    target;
+    /** Stable machine token surfaced in the `--json` failure envelope. */
+    code = "write_surface";
+    constructor(message, 
+    /** The offending absolute path, echoed into the structured failure data. */
+    target) {
+        super(message);
+        this.target = target;
+        this.name = "WriteSurfaceError";
+    }
+}
+exports.WriteSurfaceError = WriteSurfaceError;
+/**
+ * The governed write-surface allowlist: the FIRST path segment (under root) that a
+ * TwinHarness write is permitted to create/touch. `.twinharness` is the default
+ * state dir; `.agentic-sdlc` is the legacy fallback (kept FOREVER so pre-migration
+ * projects' legitimate writes are never false-rejected — pinned by test); `docs`
+ * holds generated docs; `drift-log.md` and `debate-log.md` are the two root-level
+ * append-only ledger files (the debate ledger mirrors the drift ledger,
+ * `core/debate-log.ts`). This is the set the write-gate hook already allows
+ * (`hook.ts` doc/state allowlist — which also permits any root-level `*.md`),
+ * expressed here as a chokepoint guard so it binds CLI and MCP writes uniformly, not
+ * just Claude-tool writes. Kept as an EXPLICIT list (not "any *.md") so the guard's
+ * write surface is a closed, auditable set rather than an open category.
+ */
+const GOVERNED_WRITE_SURFACES = new Set([
+    ".twinharness",
+    ".agentic-sdlc",
+    "docs",
+    "drift-log.md",
+    "debate-log.md",
+]);
+/**
+ * Assert that `absPath` is a GOVERNED write target under `root` (AC#1). Two checks,
+ * in order:
+ *   1. Root containment via {@link resolveWithinRoot} — a path that escapes the
+ *      root (absolute elsewhere, `..`, symlink/junction) throws (treated as a
+ *      surface violation; the offending path is echoed).
+ *   2. First-segment allowlist — the path's first component under root must be one
+ *      of {@link GOVERNED_WRITE_SURFACES}; otherwise throw {@link WriteSurfaceError}.
+ *
+ * The root itself (a write AT `root`, rel === "") is not a file write and is
+ * rejected. Called at the shared write chokepoint (`atomicWriteFile` + the four
+ * append sites), so it is surface-agnostic: every governed writer passes through
+ * it regardless of whether the caller is the CLI or the MCP adapter. Reads are
+ * never guarded — only writes (per the spec: extends-target reads, artifact reads,
+ * etc. are legitimate and bypass this).
+ */
+function assertGovernedWriteSurface(root, absPath) {
+    const contained = resolveWithinRoot(root, absPath);
+    if (contained === null) {
+        throw new WriteSurfaceError(`Refusing a write that escapes the project root: ${absPath}`, absPath);
+    }
+    const rel = path.relative(path.resolve(root), contained);
+    // A write AT the root (rel === "") is not a file write — reject it.
+    // The first path segment is the allowlist key; split on either separator so the
+    // check is identical on POSIX and Windows.
+    const firstSegment = rel.split(/[\\/]/)[0] ?? "";
+    if (firstSegment === "" || !GOVERNED_WRITE_SURFACES.has(firstSegment)) {
+        throw new WriteSurfaceError(`Refusing a write outside the governed write-surface ` +
+            `(${[...GOVERNED_WRITE_SURFACES].join(", ")}): ${rel || absPath}`, absPath);
+    }
+}
 /**
  * Resolve `p` (absolute, or relative to `root`) to an absolute path, but ONLY
  * if it stays within `root`. Returns null when the path escapes the project

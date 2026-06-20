@@ -170,7 +170,7 @@ function readInterview(paths: ProjectPaths): InterviewState | null {
  * creates the parent dir, so no separate mkdir is needed).
  */
 function writeInterview(paths: ProjectPaths, state: InterviewState): void {
-  atomicWriteFile(paths.interviewFile, JSON.stringify(state, null, 2) + "\n");
+  atomicWriteFile(paths.interviewFile, JSON.stringify(state, null, 2) + "\n", { root: paths.root });
 }
 
 /** `ready` is the ONLY computed value: the resolved confidence gate. */

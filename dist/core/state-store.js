@@ -104,7 +104,7 @@ function writeState(paths, state) {
     // reader holding the file open → EPERM/EACCES/EBUSY on Windows) and, only if
     // the budget is exhausted, throws StateWriteContendedError — which the CLI
     // boundary turns into a clean structured failure (C-2).
-    (0, atomic_io_1.atomicWriteFile)(paths.stateFile, (0, state_schema_1.serializeState)(state));
+    (0, atomic_io_1.atomicWriteFile)(paths.stateFile, (0, state_schema_1.serializeState)(state), { root: paths.root });
 }
 /**
  * Run `fn` while holding an exclusive, cross-process advisory lock on the state

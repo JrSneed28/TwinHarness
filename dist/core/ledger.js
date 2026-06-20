@@ -78,6 +78,7 @@ exports.verifyLedgerSeals = verifyLedgerSeals;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const node_crypto_1 = require("node:crypto");
+const paths_1 = require("./paths");
 const hash_1 = require("./hash");
 Object.defineProperty(exports, "GENESIS_PREV_HASH", { enumerable: true, get: function () { return hash_1.GENESIS_PREV_HASH; } });
 const jsonl_1 = require("./jsonl");
@@ -185,6 +186,13 @@ function readLastLedgerRecordHash(paths) {
  */
 function appendLedger(paths, entry) {
     try {
+        // AC#1 write-surface chokepoint (defense-in-depth, INSIDE the best-effort try):
+        // a non-governed target is PREVENTED (the append below never runs) without
+        // crashing — the audit path's contract is "never throw" (mirrors `structuredLog`).
+        // ledgerPath is always under stateDir, so this never false-rejects a legitimate
+        // append; the propagating mechanical guarantee lives at the non-best-effort sites
+        // (appendDecisionEvent / appendLeaseEvent / atomicWriteFile).
+        (0, paths_1.assertGovernedWriteSurface)(paths.root, ledgerPath(paths));
         fs.mkdirSync(paths.stateDir, { recursive: true });
         const prevHash = readLastLedgerRecordHash(paths);
         // Build the unsealed entry first (the ts captured here becomes sealed
