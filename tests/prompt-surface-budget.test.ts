@@ -9,7 +9,7 @@ import * as path from "node:path";
  * behavior-preserving trim pass so future edits cannot silently re-bloat the
  * orchestration prompt surface.
  *
- * It recomputes the SAME 45-file surface `th context estimate` measures —
+ * It recomputes the SAME 46-file surface `th context estimate` measures —
  * agents/*.md + skills/twinharness/**.md + commands/*.md — using the identical
  * char/4 heuristic (TOKENS_PER_CHAR = 1/4), and asserts the total stays at or
  * below the 20%-reduction target.
@@ -39,7 +39,7 @@ const TOKENS_PER_CHAR = 1 / 4;
  * raise it for ordinary edits — trim redundancy instead.
  */
 const BASELINE_TOKENS = 97_823;
-const BUDGET_TOKENS = 78_800; // SG3 interim re-baseline (ratcheted; finalized at P3-B)
+const BUDGET_TOKENS = 80_600; // SG3 interim re-baseline (P2-A: trimmed cheap redundancy, raised for the research-routing.md residual; finalized at P3-B)
 
 /** Recursively collect every *.md file under a directory (sorted, deterministic). */
 function listMd(dir: string): string[] {
@@ -66,7 +66,7 @@ function estimateTokens(content: string): number {
 }
 
 describe("prompt-surface budget: ≥20% reduction is locked in (Track C-2)", () => {
-  it("the 45-file prompt surface total stays within the 78,258-token budget", () => {
+  it("the 46-file prompt surface total stays within the SG3 re-baseline budget", () => {
     const files = surfaceFiles();
     const total = files.reduce(
       (sum, abs) => sum + estimateTokens(fs.readFileSync(abs, "utf8")),
@@ -82,7 +82,8 @@ describe("prompt-surface budget: ≥20% reduction is locked in (Track C-2)", () 
     ).toBeLessThanOrEqual(BUDGET_TOKENS);
   });
 
-  it("the measured surface is the expected 45 prompt files", () => {
-    expect(surfaceFiles().length).toBe(45);
+  it("the measured surface is the expected 46 prompt files", () => {
+    // SG3 P2-A adds skills/twinharness/reference/research-routing.md → 46.
+    expect(surfaceFiles().length).toBe(46);
   });
 });

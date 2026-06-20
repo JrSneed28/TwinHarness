@@ -36,7 +36,8 @@ export interface CommandResult {
    * SG3 P1-B — content-read receipts for governed readers. ADDITIVE: it rides in
    * the result and is also surfaced in `data.receipts` by the producing handler
    * (so the `--json` envelope carries it). Absent on every command that reads no
-   * governed content (the common case).
+   * governed content (the common case). P2-A's `th research write` also emits these
+   * to bind each written artifact to its content hash.
    */
   receipts?: ReadReceipt[];
 }

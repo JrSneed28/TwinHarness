@@ -1,0 +1,129 @@
+import * as path from "node:path";
+import type { ProjectPaths } from "../core/paths";
+import { type CommandResult, success, failure } from "../core/output";
+import { atomicWriteFile } from "../core/atomic-io";
+import { shortHashPath } from "../core/hash";
+import { structuredLog } from "../core/log";
+import { requireState } from "../core/guards";
+import { runArtifactRegister } from "./artifact";
+
+/**
+ * `th research write` (SG3 P2-A, resolves C-01) — the governed output path for the
+ * Researcher agent, which is read/web-only (`Write`/`Edit`/`Bash` disallowed) and so
+ * cannot author its own `docs/00-research/<topic>.md` artifact.
+ *
+ * Boundary rule (plan §3): the write target is HARD-PINNED in this handler to
+ * `docs/00-research/<topic>.md`. `<topic>` is sanitized to a single flat slug, and any
+ * path that does not match the pinned shape is refused HERE — BEFORE the governed-write
+ * chokepoint (`assertGovernedWriteSurface`, reached via `atomicWriteFile`). The
+ * chokepoint stays UNMODIFIED (its first-segment allow-set already admits `docs`); this
+ * handler pins the exact sub-path so the producer→file binding is explicit and SG4 can
+ * generalize it rather than retrofit it.
+ *
+ * After the write succeeds the artifact is auto-registered by calling the existing
+ * `runArtifactRegister` CORE function in-process (NOT by shelling out to another verb —
+ * the parity rule forbids verb-calls-verb). A read/write receipt `{file, hash}` is
+ * returned so a downstream gate can verify what was actually persisted.
+ */
+
+/** Reserved Windows device names that can never be a topic slug (defense-in-depth). */
+const WINDOWS_RESERVED = new Set([
+  "con", "prn", "aux", "nul",
+  "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+  "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+]);
+
+/**
+ * Validate `<topic>` and reduce it to a single flat slug. The slug becomes the file
+ * STEM under `docs/00-research/`, so it must contain NO path syntax at all: no slashes
+ * (`/` or `\`), no `..`, no absolute/drive/UNC prefix, no leading dot. We accept only
+ * `[A-Za-z0-9._-]` and forbid a leading `.` (so `.`/`..`/dotfiles can't slip through),
+ * a trailing `.md` is tolerated and stripped (callers may pass `auth-options` OR
+ * `auth-options.md`). Returns the bare stem (no extension) or an error reason.
+ */
+export function sanitizeTopic(topic: string): { stem: string } | { error: string } {
+  const raw = topic.trim();
+  if (raw === "") return { error: "empty topic" };
+  // Reject any path syntax outright — a topic is a flat name, never a path.
+  if (raw.includes("/") || raw.includes("\\")) return { error: "topic must not contain a path separator" };
+  if (path.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) return { error: "topic must not be an absolute or drive path" };
+  if (raw.includes("..")) return { error: "topic must not contain `..`" };
+  // Strip a redundant trailing extension so `auth-options.md` and `auth-options` agree.
+  const stem = raw.replace(/\.(md|markdown)$/i, "");
+  if (stem === "") return { error: "empty topic" };
+  if (stem.startsWith(".")) return { error: "topic must not start with `.`" };
+  if (!/^[A-Za-z0-9._-]+$/.test(stem)) {
+    return { error: "topic may contain only letters, digits, `.`, `_`, `-`" };
+  }
+  if (WINDOWS_RESERVED.has(stem.toLowerCase())) return { error: "topic is a reserved name" };
+  return { stem };
+}
+
+/** The pinned sub-directory every research artifact lives under (root-relative). */
+const RESEARCH_DIR = "docs/00-research";
+
+export function runResearchWrite(
+  paths: ProjectPaths,
+  opts: { topic?: string; markdown?: string },
+): CommandResult {
+  const topic = opts.topic;
+  const markdown = opts.markdown;
+  if (topic === undefined || topic === "") {
+    return failure({ human: "usage: th research write --topic <t> --markdown <content>", data: { error: "missing_topic" } });
+  }
+  if (markdown === undefined) {
+    return failure({ human: "usage: th research write --topic <t> --markdown <content>", data: { error: "missing_markdown" } });
+  }
+
+  // Sanitize + pin BEFORE touching the governed-write chokepoint. A bad topic is
+  // refused here, never reaching `assertGovernedWriteSurface`.
+  const sanitized = sanitizeTopic(topic);
+  if ("error" in sanitized) {
+    return failure({ human: `Refusing research write: ${sanitized.error}: ${topic}`, data: { error: "invalid_topic", reason: sanitized.error, topic } });
+  }
+  // The ONLY shape this handler will ever write: docs/00-research/<stem>.md.
+  const relTarget = `${RESEARCH_DIR}/${sanitized.stem}.md`;
+  const absTarget = path.resolve(paths.root, relTarget);
+
+  // Belt-and-braces: re-derive the relative target from the resolved absolute path and
+  // assert it is EXACTLY the pin. This catches any platform-specific normalization that
+  // could let a crafted stem escape `docs/00-research/` even after the slug checks.
+  const reRel = path.relative(paths.root, absTarget).split(path.sep).join("/");
+  if (reRel !== relTarget) {
+    return failure({ human: `Refusing research write outside ${RESEARCH_DIR}/: ${reRel}`, data: { error: "path_not_pinned", expected: relTarget, got: reRel } });
+  }
+
+  // Require an initialized run (matches the artifact-register guard) so the auto-register
+  // step below has a valid state.json; gives a clean NOT_INIT instead of a write+fail.
+  const st = requireState(paths);
+  if (st.result) return st.result;
+
+  // Write through the UNMODIFIED governed-write chokepoint. `atomicWriteFile` calls
+  // `assertGovernedWriteSurface(root, absTarget)` when a root is threaded; `docs` is an
+  // admitted first segment, so the pinned target passes.
+  atomicWriteFile(absTarget, markdown, { root: paths.root });
+
+  // Provenance receipt: content hash of what we just persisted (same short-hash form
+  // `th artifact register` records, so the receipt and the registered hash agree).
+  const hash = shortHashPath(absTarget);
+
+  // Auto-register the artifact IN-PROCESS via the core function (no verb-calls-verb).
+  // Version 1 mirrors the prompt's documented `--version 1` register step; re-running a
+  // topic replaces the entry (register is an upsert).
+  const reg = runArtifactRegister(paths, relTarget, 1);
+  if (!reg.ok) {
+    // The file is written but registration failed — surface it rather than reporting
+    // success. Carry the register failure payload so the caller sees the real cause.
+    return failure({
+      human: `Wrote ${relTarget} but failed to register it: ${reg.human ?? "register failed"}`,
+      data: { error: "register_failed", file: relTarget, hash, register: reg.data },
+    });
+  }
+
+  structuredLog({ cmd: "research write", file: relTarget, hash });
+  return success({
+    data: { file: relTarget, hash, registered: true, version: 1 },
+    human: `wrote ${relTarget} (${hash}) and registered it v1`,
+    receipts: [{ file: relTarget, hash }],
+  });
+}

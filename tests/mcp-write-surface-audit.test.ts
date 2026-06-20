@@ -141,6 +141,11 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   th_artifact_register: { path: CANARY_REL, version: 1 },
   th_artifact_claim: { section: `${SLICE_OWNED_REL}#s`, holder: "h" },
   th_artifact_release: { section: `${SLICE_OWNED_REL}#s`, holder: "h" },
+  // research writer (SG3 P2-A) — PATH-TAKING via `topic`. The handler sanitizes the
+  // topic to a flat slug and HARD-PINS the target under docs/00-research/, so a
+  // boundary-shaped topic is refused (writes nothing); a clean topic lands inside the
+  // governed `docs/` surface. Either way the snapshot proves it never escapes.
+  th_research_write: { topic: CANARY_REL, markdown: "probe" },
   // collab (tier-gated; writes under stateDir/collab)
   th_collab_init: { stage: "spec" },
   th_collab_fragment: { stage: "spec", round: 1, name: "n", text: "t", confirm: true },
@@ -244,6 +249,7 @@ describe("MCP write-surface audit — no mutating tool escapes the governed surf
       const pathTaking: Record<string, (v: string) => Record<string, unknown>> = {
         th_artifact_register: (v) => ({ path: v, version: 1 }),
         th_slices_sync: (v) => ({ planFile: v }),
+        th_research_write: (v) => ({ topic: v, markdown: "probe" }),
       };
       const mk = pathTaking[tool.name];
       if (mk) {

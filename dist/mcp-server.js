@@ -2985,7 +2985,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve18.call(this, root, ref);
+      let _sch = resolve19.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3012,7 +3012,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve18(root, ref) {
+    function resolve19(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3230,8 +3230,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path31) {
-      let input = path31;
+    function removeDotSegments(path32) {
+      let input = path32;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3483,8 +3483,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path31, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path31 && path31 !== "/" ? path31 : void 0;
+        const [path32, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path32 && path32 !== "/" ? path32 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -3643,55 +3643,55 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve18(baseURI, relativeURI, options) {
+    function resolve19(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative14, options, skipNormalization) {
+    function resolveComponent(base, relative15, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative14 = parse3(serialize(relative14, options), options);
+        relative15 = parse3(serialize(relative15, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative14.scheme) {
-        target.scheme = relative14.scheme;
-        target.userinfo = relative14.userinfo;
-        target.host = relative14.host;
-        target.port = relative14.port;
-        target.path = removeDotSegments(relative14.path || "");
-        target.query = relative14.query;
+      if (!options.tolerant && relative15.scheme) {
+        target.scheme = relative15.scheme;
+        target.userinfo = relative15.userinfo;
+        target.host = relative15.host;
+        target.port = relative15.port;
+        target.path = removeDotSegments(relative15.path || "");
+        target.query = relative15.query;
       } else {
-        if (relative14.userinfo !== void 0 || relative14.host !== void 0 || relative14.port !== void 0) {
-          target.userinfo = relative14.userinfo;
-          target.host = relative14.host;
-          target.port = relative14.port;
-          target.path = removeDotSegments(relative14.path || "");
-          target.query = relative14.query;
+        if (relative15.userinfo !== void 0 || relative15.host !== void 0 || relative15.port !== void 0) {
+          target.userinfo = relative15.userinfo;
+          target.host = relative15.host;
+          target.port = relative15.port;
+          target.path = removeDotSegments(relative15.path || "");
+          target.query = relative15.query;
         } else {
-          if (!relative14.path) {
+          if (!relative15.path) {
             target.path = base.path;
-            if (relative14.query !== void 0) {
-              target.query = relative14.query;
+            if (relative15.query !== void 0) {
+              target.query = relative15.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative14.path[0] === "/") {
-              target.path = removeDotSegments(relative14.path);
+            if (relative15.path[0] === "/") {
+              target.path = removeDotSegments(relative15.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative14.path;
+                target.path = "/" + relative15.path;
               } else if (!base.path) {
-                target.path = relative14.path;
+                target.path = relative15.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative14.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative15.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative14.query;
+            target.query = relative15.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3699,7 +3699,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative14.fragment;
+      target.fragment = relative15.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -3901,7 +3901,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve18,
+      resolve: resolve19,
       resolveComponent,
       equal,
       serialize,
@@ -7152,10 +7152,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path31) {
-  if (!path31)
+function getElementAtPath(obj, path32) {
+  if (!path32)
     return obj;
-  return path31.reduce((acc, key) => acc?.[key], obj);
+  return path32.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7564,11 +7564,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path31, issues) {
+function prefixIssues(path32, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path31);
+    iss.path.unshift(path32);
     return iss;
   });
 }
@@ -7715,16 +7715,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path31 = []) => {
+  const processError = (error3, path32 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path31, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path32, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path31, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path32, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path31, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path32, ...issue2.path]);
       } else {
-        const fullpath = [...path31, ...issue2.path];
+        const fullpath = [...path32, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -14230,7 +14230,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve18) => setTimeout(resolve18, pollInterval));
+        await new Promise((resolve19) => setTimeout(resolve19, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -14247,7 +14247,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve18, reject) => {
+    return new Promise((resolve19, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -14325,7 +14325,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve18(parseResult.data);
+            resolve19(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -14586,12 +14586,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve18, reject) => {
+    return new Promise((resolve19, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve18, interval);
+      const timeoutId = setTimeout(resolve19, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -15461,12 +15461,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve18) => {
+    return new Promise((resolve19) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve18();
+        resolve19();
       } else {
-        this._stdout.once("drain", resolve18);
+        this._stdout.once("drain", resolve19);
       }
     });
   }
@@ -15474,7 +15474,7 @@ var StdioServerTransport = class {
 
 // src/mcp-server.ts
 var fs33 = __toESM(require("node:fs"));
-var path30 = __toESM(require("node:path"));
+var path31 = __toESM(require("node:path"));
 
 // src/core/paths.ts
 var fs = __toESM(require("node:fs"));
@@ -16815,8 +16815,8 @@ function readDriftLog(paths) {
 function appendDriftLog(paths, block) {
   readDriftLog(paths);
   assertGovernedWriteSurface(paths.root, paths.driftLog);
-  const sep14 = endsWithNewline(paths.driftLog) ? "" : "\n";
-  fs7.appendFileSync(paths.driftLog, `${sep14}${block}`, "utf8");
+  const sep15 = endsWithNewline(paths.driftLog) ? "" : "\n";
+  fs7.appendFileSync(paths.driftLog, `${sep15}${block}`, "utf8");
 }
 function runDriftAdd(paths, opts) {
   return withStateLock(paths, () => runDriftAddLocked(paths, opts));
@@ -19028,9 +19028,9 @@ var path11 = __toESM(require("node:path"));
 function containLcovPath(absRoot, lcovDirRel, sfPath) {
   if (sfPath.length === 0) return null;
   const norm = sfPath.replace(/\\/g, "/");
-  const isAbsolute5 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
+  const isAbsolute6 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
   let abs;
-  if (isAbsolute5) {
+  if (isAbsolute6) {
     abs = path11.resolve(norm);
   } else {
     abs = path11.resolve(absRoot, lcovDirRel, norm);
@@ -23875,8 +23875,8 @@ function appendDebateLog(paths, block) {
   const file = debateLogPath(paths);
   readDebateLog(paths);
   assertGovernedWriteSurface(paths.root, file);
-  const sep14 = endsWithNewline(file) ? "" : "\n";
-  fs27.appendFileSync(file, `${sep14}${block}`, "utf8");
+  const sep15 = endsWithNewline(file) ? "" : "\n";
+  fs27.appendFileSync(file, `${sep15}${block}`, "utf8");
 }
 function runDebateAdd(paths, opts) {
   const locked = assertFeatureUnlocked(paths, "debate");
@@ -24302,6 +24302,86 @@ function runArtifactSection(paths, opts = {}) {
   });
 }
 
+// src/commands/research.ts
+var path28 = __toESM(require("node:path"));
+var WINDOWS_RESERVED = /* @__PURE__ */ new Set([
+  "con",
+  "prn",
+  "aux",
+  "nul",
+  "com1",
+  "com2",
+  "com3",
+  "com4",
+  "com5",
+  "com6",
+  "com7",
+  "com8",
+  "com9",
+  "lpt1",
+  "lpt2",
+  "lpt3",
+  "lpt4",
+  "lpt5",
+  "lpt6",
+  "lpt7",
+  "lpt8",
+  "lpt9"
+]);
+function sanitizeTopic(topic) {
+  const raw = topic.trim();
+  if (raw === "") return { error: "empty topic" };
+  if (raw.includes("/") || raw.includes("\\")) return { error: "topic must not contain a path separator" };
+  if (path28.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) return { error: "topic must not be an absolute or drive path" };
+  if (raw.includes("..")) return { error: "topic must not contain `..`" };
+  const stem = raw.replace(/\.(md|markdown)$/i, "");
+  if (stem === "") return { error: "empty topic" };
+  if (stem.startsWith(".")) return { error: "topic must not start with `.`" };
+  if (!/^[A-Za-z0-9._-]+$/.test(stem)) {
+    return { error: "topic may contain only letters, digits, `.`, `_`, `-`" };
+  }
+  if (WINDOWS_RESERVED.has(stem.toLowerCase())) return { error: "topic is a reserved name" };
+  return { stem };
+}
+var RESEARCH_DIR = "docs/00-research";
+function runResearchWrite(paths, opts) {
+  const topic = opts.topic;
+  const markdown = opts.markdown;
+  if (topic === void 0 || topic === "") {
+    return failure({ human: "usage: th research write --topic <t> --markdown <content>", data: { error: "missing_topic" } });
+  }
+  if (markdown === void 0) {
+    return failure({ human: "usage: th research write --topic <t> --markdown <content>", data: { error: "missing_markdown" } });
+  }
+  const sanitized = sanitizeTopic(topic);
+  if ("error" in sanitized) {
+    return failure({ human: `Refusing research write: ${sanitized.error}: ${topic}`, data: { error: "invalid_topic", reason: sanitized.error, topic } });
+  }
+  const relTarget = `${RESEARCH_DIR}/${sanitized.stem}.md`;
+  const absTarget = path28.resolve(paths.root, relTarget);
+  const reRel = path28.relative(paths.root, absTarget).split(path28.sep).join("/");
+  if (reRel !== relTarget) {
+    return failure({ human: `Refusing research write outside ${RESEARCH_DIR}/: ${reRel}`, data: { error: "path_not_pinned", expected: relTarget, got: reRel } });
+  }
+  const st = requireState(paths);
+  if (st.result) return st.result;
+  atomicWriteFile(absTarget, markdown, { root: paths.root });
+  const hash = shortHashPath(absTarget);
+  const reg = runArtifactRegister(paths, relTarget, 1);
+  if (!reg.ok) {
+    return failure({
+      human: `Wrote ${relTarget} but failed to register it: ${reg.human ?? "register failed"}`,
+      data: { error: "register_failed", file: relTarget, hash, register: reg.data }
+    });
+  }
+  structuredLog({ cmd: "research write", file: relTarget, hash });
+  return success({
+    data: { file: relTarget, hash, registered: true, version: 1 },
+    human: `wrote ${relTarget} (${hash}) and registered it v1`,
+    receipts: [{ file: relTarget, hash }]
+  });
+}
+
 // src/commands/verify.ts
 function resolveVerifyActor(explicit) {
   return (explicit ?? process.env.TH_VERIFY_ACTOR ?? "unknown").trim() || "unknown";
@@ -24468,10 +24548,10 @@ function runStageCurrent(paths) {
 
 // src/commands/doctor.ts
 var fs30 = __toESM(require("node:fs"));
-var path28 = __toESM(require("node:path"));
+var path29 = __toESM(require("node:path"));
 var DOCTOR_STRICT_KEY_ALLOWLIST = /* @__PURE__ */ new Set([]);
 function pluginRoot2() {
-  return path28.resolve(__dirname, "..", "..");
+  return path29.resolve(__dirname, "..", "..");
 }
 function packagingCheck(root, files) {
   if (files.length === 0) {
@@ -24480,7 +24560,7 @@ function packagingCheck(root, files) {
   const missing = [];
   const counts = [];
   for (const entry of files) {
-    const abs = path28.join(root, entry);
+    const abs = path29.join(root, entry);
     let st;
     try {
       st = fs30.statSync(abs);
@@ -24513,7 +24593,7 @@ function nodeMajor() {
   return m ? Number(m[1]) : 0;
 }
 function templateShadowCheck(root, pluginDir) {
-  const projectDir = path28.join(root, ".twinharness", "templates");
+  const projectDir = path29.join(root, ".twinharness", "templates");
   const mdFiles = (dir) => {
     try {
       if (!fs30.statSync(dir).isDirectory()) return /* @__PURE__ */ new Set();
@@ -24584,7 +24664,7 @@ function runDoctor(paths, opts = {}) {
     detail: major >= 20 ? `${process.version} (>= 20)` : `${process.version} \u2014 TwinHarness requires Node >= 20`
   });
   const root = pluginRoot2();
-  const distCli = path28.join(root, "dist", "cli.js");
+  const distCli = path29.join(root, "dist", "cli.js");
   checks.push({
     name: "plugin cli",
     status: fs30.existsSync(distCli) ? "ok" : "warn",
@@ -24593,14 +24673,14 @@ function runDoctor(paths, opts = {}) {
   let version2 = "unknown";
   let pkgFiles = [];
   try {
-    const pkg = JSON.parse(fs30.readFileSync(path28.join(root, "package.json"), "utf8"));
+    const pkg = JSON.parse(fs30.readFileSync(path29.join(root, "package.json"), "utf8"));
     if (typeof pkg.version === "string") version2 = pkg.version;
     if (Array.isArray(pkg.files)) pkgFiles = pkg.files.filter((f) => typeof f === "string");
   } catch {
   }
   checks.push({ name: "version", status: "ok", detail: version2 });
   checks.push(packagingCheck(root, pkgFiles));
-  checks.push(templateShadowCheck(paths.root, path28.join(root, "templates")));
+  checks.push(templateShadowCheck(paths.root, path29.join(root, "templates")));
   checks.push({
     name: "claude code",
     status: "warn",
@@ -24636,7 +24716,7 @@ function runDoctor(paths, opts = {}) {
       status: "ok",
       detail: `mode: ${writeMode} \u2014 GUARDRAIL for a compliant agent, NOT a security sandbox. The Bash heuristic is conservative and fail-open (unparsed here-docs/subshells/variable indirection and program-mediated writes like \`python -c\`/\`node -e\` bypass it). Do not run TwinHarness against untrusted repos and review \`th verify list\` before \`th verify run\`.`
     });
-    const lockDir = path28.join(paths.stateDir, ".state.lock");
+    const lockDir = path29.join(paths.stateDir, ".state.lock");
     if (fs30.existsSync(lockDir)) {
       let age = 0;
       try {
@@ -24925,7 +25005,7 @@ function renderScorecard(d) {
 
 // src/commands/slices.ts
 var fs32 = __toESM(require("node:fs"));
-var path29 = __toESM(require("node:path"));
+var path30 = __toESM(require("node:path"));
 function parseComponentTokens(raw) {
   const quoted = [];
   for (const m of raw.matchAll(/`([^`]+)`/g)) {
@@ -24976,9 +25056,9 @@ function runSlicesSync(paths, opts = {}) {
   return withStateLock(paths, () => runSlicesSyncLocked(paths, opts));
 }
 function runSlicesSyncLocked(paths, opts = {}) {
-  const planAbs = path29.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  const planAbs = path30.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
   if (!fs32.existsSync(planAbs) || !fs32.statSync(planAbs).isFile()) {
-    const rel = path29.relative(paths.root, planAbs).split(path29.sep).join("/");
+    const rel = path30.relative(paths.root, planAbs).split(path30.sep).join("/");
     return failure({
       human: `Plan file not found: ${rel}. Provide the path with --plan or author the implementation plan first.`,
       data: { error: "plan_file_not_found", planFile: rel }
@@ -26235,6 +26315,34 @@ var TOOL_DEFS = [
       additionalProperties: false
     },
     run: (paths, args) => runArtifactSection(paths, { file: optString(args, "file"), section: optString(args, "section"), maxTokens: optNumber(args, "maxTokens") })
+  },
+  // SG3 P2-A — governed research-output writer (resolves C-01). Appended LAST per the
+  // TOOL_DEFS append convention (the sub-lease tools must keep their fixed indices).
+  // The Researcher agent is read/web-only and cannot author its own artifact; this twin
+  // persists the markdown at the HANDLER-PINNED path docs/00-research/<topic>.md
+  // (sanitized in runResearchWrite — never a caller-chosen path) and auto-registers it.
+  {
+    name: "th_research_write",
+    description: "Persist a research artifact's markdown at the HANDLER-PINNED path docs/00-research/<topic>.md (the topic is sanitized to a flat slug; slashes, `..`, and absolute/drive paths are refused) and auto-register it at version 1. Returns a {file, hash} receipt. Serialized under the state lock via the register step.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topic: stringProp("Research topic slug \u2014 becomes the file stem under docs/00-research/. Flat name only (no path separators, no `..`)."),
+        markdown: stringProp("The full markdown body to persist.")
+      },
+      required: ["topic", "markdown"],
+      additionalProperties: false
+    },
+    run: (paths, args) => {
+      const topic = optString(args, "topic");
+      const markdown = optString(args, "markdown");
+      if (topic === void 0) return failure({ human: "th_research_write requires `topic`.", data: { error: "missing_topic" } });
+      if (markdown === void 0) return failure({ human: "th_research_write requires `markdown`.", data: { error: "missing_markdown" } });
+      if (isAbsoluteOrEscaping(topic)) {
+        return failure({ human: `Refusing a topic that is absolute or escapes the research dir: ${topic}`, data: { error: "invalid_topic", topic } });
+      }
+      return runResearchWrite(paths, { topic, markdown });
+    }
   }
 ];
 var ro = (category) => ({ category, readOnlyHint: true, destructiveHint: false, idempotentHint: true });
@@ -26302,6 +26410,9 @@ var TOOL_ANNOTATIONS = {
   th_artifact_claim: wr("artifact", { idempotent: false }),
   th_artifact_release: wr("artifact", { idempotent: false }),
   th_artifact_leases: ro("artifact"),
+  // SG3 P2-A — governed research writer: persists + registers docs/00-research/<topic>.md
+  // (a re-write of the same topic replaces the file + its register entry → idempotent).
+  th_research_write: wr("artifact", { idempotent: true }),
   // collab blackboard
   th_collab_init: wr("collab", { idempotent: true }),
   th_collab_fragment: wr("collab", { idempotent: false, destructive: true }),
@@ -26426,6 +26537,7 @@ var CLI_COMMAND_LEAVES = [
   "artifact claim",
   "artifact release",
   "artifact leases",
+  "research write",
   "coverage check",
   "coverage report",
   "verify add",
@@ -26529,8 +26641,8 @@ function listTools() {
 var SERVER_NAME = "twinharness-th";
 function readServerVersion() {
   const candidates = [
-    path30.join(__dirname, "..", "package.json"),
-    path30.join(__dirname, "..", "..", "package.json")
+    path31.join(__dirname, "..", "package.json"),
+    path31.join(__dirname, "..", "..", "package.json")
   ];
   for (const candidate of candidates) {
     try {

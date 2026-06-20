@@ -9,6 +9,7 @@ import { runReviseBump, runReviseStatus, runReviseReset } from "./commands/revis
 import { runTierClassify, runTierVetoCheck, runTierRecord, runTierFeatures } from "./commands/tier";
 import { runArtifactRegister, runArtifactList, runArtifactSection } from "./commands/artifact";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
+import { runResearchWrite } from "./commands/research";
 import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from "./commands/collab";
 import { runDebateAdd, runDebateList, runDebateResolve } from "./commands/debate";
 import { runCoverageCheck, runCoverageReport } from "./commands/coverage";
@@ -92,6 +93,7 @@ Usage:
   th implementation unlock [--lock] Typed gate command: unlock implementation when the gate ladder clears (--lock re-locks)
   th artifact register <file> --version <n>  Content-hash a file and record it in approved_artifacts
   th artifact list                  List recorded approved artifacts (file, version, hash)
+  th research write --topic <t> --markdown <md>  Persist + register research at docs/00-research/<topic>.md (governed; resolves C-01)
   th coverage check [--reqs F] [--plan F] [--tests D] [--scope F]
                                     Verify every (MVP) REQ-ID maps to ≥1 slice and ≥1 test (hard gate)
   th coverage report [--reqs F] [--plan F] [--tests D] [--scope F] [--code D]
@@ -192,6 +194,8 @@ Global flags:
   --cwd <dir>       Operate against <dir> instead of the current directory
   --cap <n>         (revise) Override the revise-loop cap (default 3)
   --version <n>     (artifact register) Artifact version (positive integer)
+  --topic <t>       (research write, debate add) Research topic slug (file stem under docs/00-research/) / debate topic
+  --markdown <md>   (research write) Markdown body to persist under docs/00-research/<topic>.md
   --reqs <file>     (coverage) Requirements file (default docs/01-requirements.md)
   --plan <file>     (coverage, slices sync) Implementation-plan file (default docs/09-implementation-plan.md)
   --tests <dir>     (coverage) Tests directory (default tests)
@@ -356,6 +360,7 @@ export interface ParsedArgs {
     section?: string;
     holder?: string;
     topic?: string;
+    markdown?: string;
     positions?: string;
     id?: string;
     resolution?: string;
@@ -461,6 +466,7 @@ const STRING_FLAGS: Record<string, FlagField> = {
   "--section": "section",
   "--holder": "holder",
   "--topic": "topic",
+  "--markdown": "markdown",
   "--positions": "positions",
   "--id": "id",
   "--resolution": "resolution",
@@ -969,6 +975,15 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           });
         default:
           return failure({ human: `unknown 'artifact' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    // SG3 P2-A — governed research-output path (resolves C-01). The write target is
+    // hard-pinned to docs/00-research/<topic>.md inside runResearchWrite.
+    case "research":
+      switch (sub) {
+        case "write":
+          return runResearchWrite(paths, { topic: parsed.flags.topic, markdown: parsed.flags.markdown });
+        default:
+          return failure({ human: `unknown 'research' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
     case "coverage":
       switch (sub) {

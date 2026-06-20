@@ -65,6 +65,7 @@ import { runInitMcp } from "./commands/init";
 
 // --- Component A wiring tool handlers (16 existing handlers exposed as ToolDefs) ---
 import { runArtifactRegister, runArtifactList, runArtifactSection } from "./commands/artifact";
+import { runResearchWrite } from "./commands/research";
 import { runVerifyAdd, runVerifyList, runVerifyClear, runVerifyRun } from "./commands/verify";
 import { runStageCurrent, runStageDescribe, runStageList } from "./commands/stage";
 import { runDoctor } from "./commands/doctor";
@@ -1550,6 +1551,38 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     run: (paths, args) =>
       runArtifactSection(paths, { file: optString(args, "file"), section: optString(args, "section"), maxTokens: optNumber(args, "maxTokens") }),
   },
+  // SG3 P2-A — governed research-output writer (resolves C-01). Appended LAST per the
+  // TOOL_DEFS append convention (the sub-lease tools must keep their fixed indices).
+  // The Researcher agent is read/web-only and cannot author its own artifact; this twin
+  // persists the markdown at the HANDLER-PINNED path docs/00-research/<topic>.md
+  // (sanitized in runResearchWrite — never a caller-chosen path) and auto-registers it.
+  {
+    name: "th_research_write",
+    description:
+      "Persist a research artifact's markdown at the HANDLER-PINNED path docs/00-research/<topic>.md (the topic is sanitized to a flat slug; slashes, `..`, and absolute/drive paths are refused) and auto-register it at version 1. Returns a {file, hash} receipt. Serialized under the state lock via the register step.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topic: stringProp("Research topic slug — becomes the file stem under docs/00-research/. Flat name only (no path separators, no `..`)."),
+        markdown: stringProp("The full markdown body to persist."),
+      },
+      required: ["topic", "markdown"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      const topic = optString(args, "topic");
+      const markdown = optString(args, "markdown");
+      if (topic === undefined) return failure({ human: "th_research_write requires `topic`.", data: { error: "missing_topic" } });
+      if (markdown === undefined) return failure({ human: "th_research_write requires `markdown`.", data: { error: "missing_markdown" } });
+      // Defense-in-depth: reject an obviously path-shaped topic BEFORE the handler
+      // (runResearchWrite re-sanitizes and re-pins regardless). Mirrors the
+      // th_artifact_register pre-check using the shared cross-platform predicate.
+      if (isAbsoluteOrEscaping(topic)) {
+        return failure({ human: `Refusing a topic that is absolute or escapes the research dir: ${topic}`, data: { error: "invalid_topic", topic } });
+      }
+      return runResearchWrite(paths, { topic, markdown });
+    },
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -1684,6 +1717,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_artifact_claim: wr("artifact", { idempotent: false }),
   th_artifact_release: wr("artifact", { idempotent: false }),
   th_artifact_leases: ro("artifact"),
+  // SG3 P2-A — governed research writer: persists + registers docs/00-research/<topic>.md
+  // (a re-write of the same topic replaces the file + its register entry → idempotent).
+  th_research_write: wr("artifact", { idempotent: true }),
   // collab blackboard
   th_collab_init: wr("collab", { idempotent: true }),
   th_collab_fragment: wr("collab", { idempotent: false, destructive: true }),
@@ -1839,6 +1875,7 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "stage advance", "stage current", "stage describe", "stage list",
   "implementation unlock",
   "artifact register", "artifact list", "artifact section", "artifact claim", "artifact release", "artifact leases",
+  "research write",
   "coverage check", "coverage report",
   "verify add", "verify list", "verify approve", "verify clear", "verify run",
   "build plan", "build next-wave", "build dispatch", "build claim", "build release",

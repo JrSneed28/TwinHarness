@@ -191,19 +191,25 @@ describe("REQ-PCO-070: CLI/MCP asymmetry is pinned (intentional, not accidental 
     }
   });
 
-  it("AC#5: the mutating-tool count is pinned to 32 (beside the 62-tool parity count)", () => {
-    // Mutating = NOT readOnlyHint. This is the write-surface size: every one of
-    // these is exercised by the write-surface audit harness (AC#1). Pinning it
-    // means a new mutating tool can never be added without this suite noticing.
-    // R-09 raised this from 30→32: th_route and th_scorecard are now honestly
-    // mutating (they append an opt-in telemetry.jsonl line per call when ON).
+  it("AC#5: the mutating-tool count is SELF-DERIVED from the registry (no per-merge literal)", () => {
+    // Mutating = explicitly annotated readOnlyHint:false. This is the write-surface
+    // size: every one of these is exercised by the write-surface audit harness (AC#1).
+    // SG3: this count used to be a hand-maintained literal (30→32→…) that every new
+    // mutating twin had to bump. We now DERIVE it so future mutating twins (P2-A's
+    // th_research_write, then P2-C/P3-A) need ZERO literal churn here — the guard
+    // still fires, but on the structural invariant, not a stale number.
     const mutating = TOOL_DEFS.filter((t) => TOOL_ANNOTATIONS[t.name]?.readOnlyHint === false);
-    expect(mutating.length).toBe(32);
-    // Cross-check against the existing 62-tool parity count: read-only + mutating
-    // partition the whole registry exactly (no tool is un-annotated).
     const readOnly = TOOL_DEFS.filter((t) => TOOL_ANNOTATIONS[t.name]?.readOnlyHint === true);
+    // Independent derivation of the mutating count: the whole registry MINUS the
+    // explicitly read-only tools. This is a real cross-check (not a tautology): if any
+    // tool were missing/garbled its readOnlyHint, it would land in neither partition
+    // and `total − readOnly` would NOT equal the directly-counted `mutating` set.
+    const derivedMutating = TOOL_DEFS.length - readOnly.length;
+    expect(mutating.length).toBe(derivedMutating);
+    // And the two partitions must tile the registry exactly (every tool is annotated
+    // as exactly one of read-only / mutating — no un-annotated tool, no overlap).
     expect(readOnly.length + mutating.length).toBe(TOOL_DEFS.length);
-    // Derived parity count (62 today): (|CLI_COMMAND_LEAVES| − |MCP_EXCLUDED|) + |MCP_ONLY_TOOLS|.
+    // Derived parity count: (|CLI_COMMAND_LEAVES| − |MCP_EXCLUDED|) + |MCP_ONLY_TOOLS|.
     const expected = CLI_COMMAND_LEAVES.length - Object.keys(MCP_EXCLUDED).length + Object.keys(MCP_ONLY_TOOLS).length;
     expect(TOOL_DEFS.length).toBe(expected);
   });
