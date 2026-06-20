@@ -26,9 +26,20 @@ const ROOT = path.resolve(__dirname, "..");
 /** Same heuristic as `src/commands/context.ts` (`th context estimate`). */
 const TOKENS_PER_CHAR = 1 / 4;
 
-/** Pre-optimization baseline and the ≥20% reduction ceiling (see header). */
+/**
+ * Pre-optimization baseline and the prompt-surface ceiling.
+ *
+ * The original ≥20%-reduction lock was floor(97_823 * 0.80) = 78_258. SG3
+ * (Evidence & Reality) adds genuine capability content to several agent prompts
+ * (universal researcher, broadened UX/UI direction, production-reality guidance,
+ * inspector/research write paths). Per the user-approved re-baseline (2026-06-20),
+ * "trim cheap redundancy, raise for the residual": obvious verbosity is trimmed
+ * first, then this ceiling tracks the post-SG3 surface. It is ratcheted tight at
+ * each prompt-touching SG3 commit and finalized at SG3 closure (P3-B). Do NOT
+ * raise it for ordinary edits — trim redundancy instead.
+ */
 const BASELINE_TOKENS = 97_823;
-const BUDGET_TOKENS = 78_258; // floor(97_823 * 0.80)
+const BUDGET_TOKENS = 78_800; // SG3 interim re-baseline (ratcheted; finalized at P3-B)
 
 /** Recursively collect every *.md file under a directory (sorted, deterministic). */
 function listMd(dir: string): string[] {
@@ -65,8 +76,9 @@ describe("prompt-surface budget: ≥20% reduction is locked in (Track C-2)", () 
     expect(
       total,
       `prompt surface is ~${total} tokens across ${files.length} files (baseline ${BASELINE_TOKENS}, ` +
-        `${reductionPct.toFixed(1)}% reduction); budget is ${BUDGET_TOKENS} (≥20% off baseline). ` +
-        `Trim redundancy/verbosity in agents/skills/commands rather than raising this ceiling.`,
+        `${reductionPct.toFixed(1)}% reduction); budget is ${BUDGET_TOKENS} (SG3 re-baseline). ` +
+        `Trim redundancy/verbosity in agents/skills/commands first; raise the ceiling only for ` +
+        `genuine new capability content (SG3 trim-cheap/raise-residual policy).`,
     ).toBeLessThanOrEqual(BUDGET_TOKENS);
   });
 

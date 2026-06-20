@@ -116,3 +116,33 @@ describe("agent-prompt lint: measured token counts (reporting)", () => {
     }
   });
 });
+
+// SG3 P2-B1 (C-03): ux-ui-designer frontmatter must NOT disallow WebSearch/WebFetch
+// (Researcher remains the default visual-research owner; Designer holds these for
+// targeted in-context lookups during Stage 4b only). Token budget still enforced.
+describe("agent-prompt lint: ux-ui-designer web-research grant (SG3 C-03)", () => {
+  const UX_UI_FILE = "ux-ui-designer.md";
+
+  it("ux-ui-designer.md frontmatter does not disallow WebSearch", () => {
+    const content = fs.readFileSync(path.join(AGENTS_DIR, UX_UI_FILE), "utf8");
+    const fm = frontmatter(content);
+    expect(fm, "must have frontmatter").not.toBeNull();
+    // disallowedTools must not contain WebSearch (whole-word match)
+    expect(fm!).not.toMatch(/\bWebSearch\b/);
+  });
+
+  it("ux-ui-designer.md frontmatter does not disallow WebFetch", () => {
+    const content = fs.readFileSync(path.join(AGENTS_DIR, UX_UI_FILE), "utf8");
+    const fm = frontmatter(content);
+    expect(fm, "must have frontmatter").not.toBeNull();
+    // disallowedTools must not contain WebFetch (whole-word match)
+    expect(fm!).not.toMatch(/\bWebFetch\b/);
+  });
+
+  it("ux-ui-designer.md still passes the 6000-token budget after the grant", () => {
+    const content = fs.readFileSync(path.join(AGENTS_DIR, UX_UI_FILE), "utf8");
+    const tokens = estimateTokens(content);
+    expect(tokens).toBeGreaterThan(0);
+    expect(tokens).toBeLessThanOrEqual(AGENT_TOKEN_BUDGET);
+  });
+});
