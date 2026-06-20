@@ -56,6 +56,7 @@ import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck, runRepoSearch
 import { runContextPack, runContextRead } from "./commands/context";
 import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite } from "./commands/handoff";
+import { runInspectorWrite } from "./commands/inspector";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
 import { runTemplateGet, runTemplateList } from "./commands/template";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
@@ -1650,6 +1651,31 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runGateProductionReality(paths),
   },
+  // Codebase-Inspector governed write (SG3 P3-A): the read-only inspector agent's
+  // single write path. Hard-pins the target to docs/00-existing-codebase-analysis.md
+  // in the handler (refuses any other `file` before the governed-write chokepoint),
+  // then writes + auto-registers the artifact and returns a content-hash receipt.
+  {
+    name: "th_inspector_write",
+    description:
+      "Codebase-Inspector governed write (brownfield): write `content` to docs/00-existing-codebase-analysis.md and auto-register it as an approved artifact. The target path is FIXED in the handler — an optional `file` must equal that path exactly or the write is refused (inspector_path_pinned). `version` defaults to 1. Returns a `receipts: [{file, hash}]` payload.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        content: stringProp("The full markdown analysis body to write (the agent assembles it; the CLI records + hashes it)."),
+        file: stringProp("Optional explicit target; must equal docs/00-existing-codebase-analysis.md or the write is refused."),
+        version: numberProp("Artifact version recorded on auto-register (default 1)."),
+      },
+      required: ["content"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runInspectorWrite(paths, {
+        content: optString(args, "content"),
+        file: optString(args, "file"),
+        version: optNumber(args, "version"),
+      }),
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -1832,6 +1858,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // template resolver (read-only; resolves bundled/overridden templates, never writes)
   th_template_get: ro("template"),
   th_template_list: ro("template"),
+  // codebase-inspector governed write (writes + registers a fixed artifact;
+  // re-writing the same analysis is an idempotent overwrite + upsert)
+  th_inspector_write: wr("artifact", { idempotent: true }),
 };
 
 /** The MCP-standard annotation object for a tool (or undefined if unknown). */
@@ -1970,6 +1999,7 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "context estimate", "context pack", "context read",
   "budget check",
   "handoff write", "handoff verify", "resume",
+  "inspector write",
   "delegate plan", "delegate pack", "delegate capsule", "delegate check",
   "repo map", "repo check", "repo relevant", "repo impact", "repo search",
   "decision detect", "decision add", "decision approve", "decision check", "decision list",

@@ -173,6 +173,10 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   // lifecycle + handoff (write under stateDir / HANDOFF.md under stateDir)
   th_init: {},
   th_handoff_write: {},
+  // codebase-inspector governed write — PATH-TAKING via `file`: a boundary path in
+  // the `file` slot is refused by the handler pin (inspector_path_pinned) before the
+  // chokepoint, so nothing escapes the governed surface. `content` is required.
+  th_inspector_write: { content: "probe", file: CANARY_REL },
 };
 
 describe("MCP write-surface audit — no mutating tool escapes the governed surface (AC#1)", () => {
@@ -253,6 +257,7 @@ describe("MCP write-surface audit — no mutating tool escapes the governed surf
         th_artifact_register: (v) => ({ path: v, version: 1 }),
         th_slices_sync: (v) => ({ planFile: v }),
         th_research_write: (v) => ({ topic: v, markdown: "probe" }),
+        th_inspector_write: (v) => ({ content: "probe", file: v }),
       };
       const mk = pathTaking[tool.name];
       if (mk) {

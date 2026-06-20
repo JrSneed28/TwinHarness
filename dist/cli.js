@@ -67,6 +67,7 @@ const context_1 = require("./commands/context");
 const stage_1 = require("./commands/stage");
 const budget_1 = require("./commands/budget");
 const handoff_1 = require("./commands/handoff");
+const inspector_1 = require("./commands/inspector");
 const manifest_1 = require("./commands/manifest");
 const preview_1 = require("./commands/preview");
 const scorecard_1 = require("./commands/scorecard");
@@ -164,6 +165,8 @@ Usage:
   th handoff write                  Assemble .twinharness/HANDOFF.md (run state + next action + artifact Summary blocks + open questions + "don't re-read docs/" directive)
   th handoff verify                 Confirm a resumed run matches HANDOFF (current_stage/slice + approved-artifact hashes still valid); pass/fail
   th resume                         Detect .twinharness/HANDOFF.md and print the next mechanical action (from th next)
+  th inspector write --content <md> [--version <n>]
+                                    Codebase-Inspector governed write: emit + auto-register the source-anchored brownfield analysis at docs/00-existing-codebase-analysis.md (path is fixed; refuses any other target)
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
   th delegate pack [--agent A] [--slice ID] [--task T] [--intent I] [--allowed-files <a,b,c>]
@@ -364,6 +367,7 @@ const STRING_FLAGS = {
     "--round": "round",
     "--name": "name",
     "--text": "text",
+    "--content": "content",
     "--section": "section",
     "--holder": "holder",
     "--topic": "topic",
@@ -619,6 +623,17 @@ function dispatch(parsed) {
                     return (0, handoff_1.runHandoffVerify)(paths);
                 default:
                     return (0, output_1.failure)({ human: `unknown 'handoff' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "inspector":
+            switch (sub) {
+                case "write":
+                    return (0, inspector_1.runInspectorWrite)(paths, {
+                        content: parsed.flags.content,
+                        file: parsed.flags.file,
+                        version: parsed.flags.version,
+                    });
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'inspector' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
         case "resume":
             return (0, handoff_1.runResume)(paths);
