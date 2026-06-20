@@ -60,3 +60,55 @@ describe("P2-6b — parseLcovContained drops escaping paths and honors knownFile
     expect(paths).not.toContain("src/deleted.ts");
   });
 });
+
+describe("R-18 — parseLcovContained TOLERATES malformed / truncated / garbage input (never throws)", () => {
+  // lcov is UNTRUSTED repo content (RULE-004). The parser is correct but was
+  // previously untested against malformed input (lane08 F-04). It must degrade
+  // gracefully on garbage — skip what it cannot use, never throw — so a corrupt or
+  // partial coverage report cannot crash a scan.
+  it("returns [] for empty / whitespace-only / non-lcov text", () => {
+    expect(parseLcovContained("", ROOT, "", undefined)).toEqual([]);
+    expect(parseLcovContained("   \n\t\n  ", ROOT, "", undefined)).toEqual([]);
+    expect(parseLcovContained("this is not lcov at all\nrandom words\n", ROOT, "", undefined)).toEqual([]);
+  });
+
+  it("skips an SF: line with an EMPTY path and records none", () => {
+    const lcov = ["SF:", "DA:1,1", "end_of_record", "SF:   ", "end_of_record"].join("\n");
+    expect(() => parseLcovContained(lcov, ROOT, "", undefined)).not.toThrow();
+    expect(parseLcovContained(lcov, ROOT, "", undefined)).toEqual([]);
+  });
+
+  it("tolerates a TRUNCATED record (SF: with no end_of_record) and still extracts the valid path", () => {
+    const lcov = ["SF:src/a.ts", "DA:1,1", "DA:2,"].join("\n"); // truncated mid-record, partial DA line
+    let out: string[] = [];
+    expect(() => {
+      out = parseLcovContained(lcov, ROOT, "", undefined);
+    }).not.toThrow();
+    expect(out).toContain("src/a.ts");
+  });
+
+  it("tolerates garbage interleaved with valid SF: records (skips garbage, keeps valid)", () => {
+    const lcov = [
+      "garbage line 1",
+      "SF:src/a.ts",
+      "!!! not a directive @@@",
+      "end_of_record",
+      "SF", // missing colon — not an SF: directive
+      "SFsrc/b.ts", // missing colon — not matched
+      "SF:src/c.ts",
+      "end_of_record",
+    ].join("\n");
+    let out: string[] = [];
+    expect(() => {
+      out = parseLcovContained(lcov, ROOT, "", undefined);
+    }).not.toThrow();
+    expect(out).toContain("src/a.ts");
+    expect(out).toContain("src/c.ts");
+    expect(out).not.toContain("src/b.ts"); // the malformed `SFsrc/b.ts` was not parsed
+  });
+
+  it("handles CRLF line endings and trailing whitespace on SF: lines", () => {
+    const lcov = "SF:src/a.ts  \r\nDA:1,1\r\nend_of_record\r\n";
+    expect(parseLcovContained(lcov, ROOT, "", undefined)).toContain("src/a.ts");
+  });
+});

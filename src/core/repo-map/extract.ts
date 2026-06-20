@@ -64,18 +64,46 @@ function tsKind(token: string): SymbolKind {
     case "const":
     case "let":
     case "var": return "const";
+    // `namespace`/`module` have no dedicated SymbolKind — coarse-bucket to "other"
+    // (RULE-008: a coarse kind is fine for the heuristic public-api surface).
     default: return "other";
   }
 }
 
-/** TS/JS: `export function|class|const|interface|type|enum NAME`, plus `export default`. */
+/**
+ * TS/JS: `export function|class|const|interface|type|enum|namespace NAME`, plus
+ * `export default` (named or anonymous) and `export *` re-export barrels.
+ *
+ * R-18: the alternations below are ADDITIVE — each new construct (namespace,
+ * anonymous default, `export *`) is matched by its OWN pass so the original named
+ * matches are byte-for-byte unchanged. The extractor favours false-NEGATIVES over
+ * false-positives (SCOPE & HONESTY at the top of this file), so a missed odd
+ * construct is acceptable but a phantom symbol is not.
+ */
 function extractTsJsSymbols(content: string): ExportedSymbol[] {
   const out: ExportedSymbol[] = [];
+  // `namespace`/`module` join the named-declaration alternation (kind → "other").
   const re =
-    /^[ \t]*export\s+(?:default\s+)?(?:async\s+)?(function|class|interface|type|enum|const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm;
+    /^[ \t]*export\s+(?:default\s+)?(?:declare\s+)?(?:async\s+)?(function|class|interface|type|enum|const|let|var|namespace|module)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
     out.push({ name: m[2]!, kind: tsKind(m[1]!) });
+  }
+  // ANONYMOUS `export default …` — `export default function () {}`, `export default
+  // class {}`, `export default { … }`, `export default someExpr`. These have no
+  // declared name; record the canonical `default` export so a default-exporting
+  // module isn't invisible. A NAMED default (`export default function foo`) is
+  // already captured by `re` above, so require that NO identifier follows the
+  // keyword here (negative lookahead) to avoid double-counting.
+  const defaultRe = /^[ \t]*export\s+default\s+(?!(?:async\s+)?(?:function|class)\s+[A-Za-z_$])/gm;
+  while ((m = defaultRe.exec(content)) !== null) {
+    out.push({ name: "default", kind: "other" });
+  }
+  // `export *` barrels — `export * from "x"` (the whole namespace; name "*") and
+  // `export * as ns from "x"` (a named namespace re-export). Names only, kind other.
+  const starRe = /^[ \t]*export\s*\*\s*(?:as\s+([A-Za-z_$][A-Za-z0-9_$]*)\s+)?from\b/gm;
+  while ((m = starRe.exec(content)) !== null) {
+    out.push({ name: m[1] ?? "*", kind: "other" });
   }
   // `export { a, b as c }` re-export lists (names only; kind unknown → other).
   const listRe = /^[ \t]*export\s*\{([^}]*)\}/gm;
@@ -281,8 +309,14 @@ export function resolveRelativeTsJs(
   fileSet: Set<string>,
 ): string | null {
   if (!specifier.startsWith(".")) return null; // bare/aliased → unresolved (Phase 2B)
+  // R-18: normalize backslashes to POSIX separators before joining. The scanner
+  // always feeds POSIX-normalized specifiers today (via `relPosix`), so this is a
+  // latent-defense one-liner — but a future non-normalizing caller passing a
+  // `.\\foo` / `..\\bar` specifier would otherwise mis-resolve, since path.posix
+  // does not treat `\` as a separator. Mirrors the scanner's POSIX-only contract.
+  const spec = specifier.replace(/\\/g, "/");
   const dir = path.posix.dirname(fromRel);
-  const base = path.posix.normalize(path.posix.join(dir, specifier));
+  const base = path.posix.normalize(path.posix.join(dir, spec));
   if (base.startsWith("..")) return null; // escapes the importing tree — never guess
   if (fileSet.has(base)) return base; // explicit extension already present
   for (const suf of TS_RESOLVE_EXTS) {

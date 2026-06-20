@@ -121,6 +121,52 @@ describe("REQ-PCO-041: section id validation", () => {
   });
 });
 
+describe("R-11: the shared lease validator rejects an absolute / parent-escaping file part (parity with th_artifact_register)", () => {
+  it("claim REJECTS an absolute file part with a path_escape error", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    const abs = runArtifactClaim(tp.paths, { section: "/etc/passwd#x", holder: "agent-A" });
+    expect(abs.ok).toBe(false);
+    expect(abs.data?.error).toBe("path_escape");
+    // No lease was opened for the rejected key.
+    expect(isSectionLeased(tp.paths, "/etc/passwd#x")).toBe(false);
+    expect(activeSectionLeases(tp.paths)).toEqual([]);
+  });
+
+  it("claim REJECTS a `..` segment in the file part (POSIX or Windows separator)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    const posix = runArtifactClaim(tp.paths, { section: "../../secret#s", holder: "agent-A" });
+    expect(posix.ok).toBe(false);
+    expect(posix.data?.error).toBe("path_escape");
+
+    const windows = runArtifactClaim(tp.paths, { section: "..\\..\\x#s", holder: "agent-A" });
+    expect(windows.ok).toBe(false);
+    expect(windows.data?.error).toBe("path_escape");
+
+    expect(activeSectionLeases(tp.paths)).toEqual([]);
+  });
+
+  it("release ALSO rejects an absolute / `..` file part (the validator is shared)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    expect(runArtifactRelease(tp.paths, { section: "/etc/passwd#x", holder: "agent-A" }).data?.error).toBe("path_escape");
+    expect(runArtifactRelease(tp.paths, { section: "..\\x#s", holder: "agent-A" }).data?.error).toBe("path_escape");
+  });
+
+  it("a legitimate in-repo section id (docs/x.md#s) still claims successfully", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    const ok = runArtifactClaim(tp.paths, { section: "docs/x.md#s", holder: "agent-A" });
+    expect(ok.ok).toBe(true);
+    expect(activeSectionLeases(tp.paths)).toEqual([{ section: "docs/x.md#s", holder: "agent-A" }]);
+  });
+});
+
 describe("REQ-PCO-041: commands return NOT_INIT on an uninitialized project", () => {
   it("claim returns not_initialized when state.json is absent", () => {
     tp = makeTempProject();

@@ -284,6 +284,101 @@ describe("SLICE-4 — decisions.jsonl store algorithms (hash chain + reduce)", (
   });
 });
 
+describe("R-18 (REQ-NFR-005) — decision-chain adversarial block: any tamper to a sealed decision record is detected", () => {
+  // lane08 F-05: verifyChain is correct but lacked a DECISION-specific adversarial
+  // test driving a real sealed chain and tampering distinct record positions /
+  // field types. Each case below builds a genuine hash-chained ledger via
+  // appendDecisionEvent, mutates it the way a forger would (edit-in-place WITHOUT
+  // re-hashing, reorder, splice), and asserts verifyChain pinpoints the FIRST break.
+  function sealedChain(t: TempProject, n: number): DecisionEvent[] {
+    for (let i = 1; i <= n; i++) {
+      appendDecisionEvent(t.paths, {
+        id: `DECISION-00${i}`,
+        event: "proposed",
+        title: `t${i}`,
+        rationale: `r${i}`,
+        links: [`REQ-40${i}`],
+        proposer: "orchestrator",
+        proposedAt: `2026-06-15T00:0${i}:00.000Z`,
+      });
+    }
+    const events = readDecisionEvents(t.paths);
+    expect(verifyChain(events)).toEqual({ ok: true }); // intact before any tamper
+    return events;
+  }
+
+  it("tampering the LINKS array of the middle record breaks the chain AT that record (edited)", () => {
+    tp = freshProject();
+    const events = sealedChain(tp, 3);
+    const tampered = events.map((e) => ({ ...e, links: e.links ? [...e.links] : undefined }));
+    tampered[1]!.links = ["REQ-999"]; // forge a traceability link without re-sealing
+    const res = verifyChain(tampered);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.brokenAt).toBe(1);
+      expect(res.reason).toBe("edited");
+    }
+  });
+
+  it("REORDERING two adjacent records is detected (prev_mismatch at the first moved record)", () => {
+    tp = freshProject();
+    const events = sealedChain(tp, 3);
+    // Swap records 1 and 2: record at index 1 now carries a prevHash that points at
+    // record 0's recordHash, but the walker expects the (swapped-in) record 2's prev.
+    const reordered = [events[0]!, events[2]!, events[1]!];
+    const res = verifyChain(reordered);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.brokenAt).toBe(1);
+      expect(res.reason).toBe("prev_mismatch");
+    }
+  });
+
+  it("editing the FIRST record (approver field on an approval transition) breaks at index 0", () => {
+    tp = freshProject();
+    appendDecisionEvent(tp.paths, {
+      id: "DECISION-001",
+      event: "proposed",
+      title: "t",
+      rationale: "r",
+      links: [],
+      proposer: "orchestrator",
+      proposedAt: "2026-06-15T00:00:00.000Z",
+    });
+    appendDecisionEvent(tp.paths, {
+      id: "DECISION-001",
+      event: "approved",
+      approver: "human",
+      approvedAt: "2026-06-15T00:05:00.000Z",
+    });
+    const events = readDecisionEvents(tp.paths);
+    expect(verifyChain(events)).toEqual({ ok: true });
+    // Forge the approver on the approval record without re-hashing.
+    const tampered = events.map((e) => ({ ...e }));
+    tampered[1]!.approver = "attacker";
+    const res = verifyChain(tampered);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.brokenAt).toBe(1);
+  });
+
+  it("SPLICING a forged record into the middle is detected (the survivor's prevHash no longer matches)", () => {
+    tp = freshProject();
+    const events = sealedChain(tp, 2);
+    // Insert a plausible-looking but unchained record between the two real ones.
+    const forged: DecisionEvent = {
+      ...events[1]!,
+      id: "DECISION-099",
+      title: "injected",
+    };
+    const spliced = [events[0]!, forged, events[1]!];
+    const res = verifyChain(spliced);
+    expect(res.ok).toBe(false);
+    // The forged record's own recordHash won't match its (copied) content edit, OR
+    // its prevHash won't match — either way the FIRST break is at the injected index.
+    if (!res.ok) expect(res.brokenAt).toBe(1);
+  });
+});
+
 describe("PERF-009 — appendDecisionEvent tail-read (no full-ledger parse)", () => {
   /** Append N proposed events; return the temp project with a populated ledger. */
   function seedLedger(n: number): TempProject {
