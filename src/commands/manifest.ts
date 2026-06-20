@@ -4,6 +4,7 @@ import { type CommandResult, success, failure } from "../core/output";
 import { readState } from "../core/state-store";
 import { parseDriftEntries } from "../core/drift-log";
 import { readLedger } from "../core/ledger";
+import { TOOL_CATALOG } from "../core/tool-catalog";
 
 /**
  * `th manifest export` — a deterministic, inspectable snapshot of a TwinHarness
@@ -96,4 +97,30 @@ export function runManifestExport(paths: ProjectPaths): CommandResult {
   ].join("\n");
 
   return success({ data: { manifest }, human });
+}
+
+/**
+ * `th manifest tools` — runtime discovery of the advertised MCP tool set (C-09 /
+ * C-16). Enumerates the SDK-free {@link TOOL_CATALOG} (name + one-line summary),
+ * which mirrors the MCP server's `TOOL_DEFS` registry exactly. This is the CLI
+ * MIRROR of `ListTools`: an agent (or operator) shelling the CLI can list the
+ * live tool set instead of relying on a hard-coded list, so prompts can say "the
+ * tool set GROWS — discover it" and back it with a mechanical command.
+ *
+ * Read-only, SDK-free: it imports only the plain-data catalog, never
+ * `mcp-server.ts`, so it does not drag `@modelcontextprotocol/sdk` into the
+ * zero-runtime-dependency CLI (mcp-server.ts:15-18).
+ */
+export function runManifestTools(): CommandResult {
+  const tools = TOOL_CATALOG.map((t) => ({ name: t.name, summary: t.summary }));
+
+  const human = [
+    `MCP tools (${tools.length}):`,
+    ...tools.map((t) => `  ${t.name}\n    ${t.summary}`),
+    "",
+    "Pass --json for the machine-readable list. This mirrors the server's ListTools;",
+    "the live advertised set is authoritative — never rely on a hard-coded count.",
+  ].join("\n");
+
+  return success({ data: { tools, count: tools.length }, human });
 }

@@ -199,6 +199,7 @@ Usage:
   th gate production-reality        Reader: report the production-reality gate (no unretired user-visible simulation, verify green, Tester record, no unledgered dist/ patterns)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
+  th manifest tools                 List the advertised MCP tool set (name + summary); CLI mirror of ListTools; --json for full
   th template get <name>            Resolve a template by bare name (e.g. task-file or task-file.md): project override (.twinharness/templates/) → plugin-bundled (templates/) → structured template_not_found; --json returns path+content+source
   th template list                  List resolvable templates across both layers (deduped; marks project overrides that shadow a bundled template)
   th version                        Print the CLI version
@@ -860,6 +861,9 @@ function dispatch(parsed) {
             switch (sub) {
                 case "export":
                     return (0, manifest_1.runManifestExport)(paths);
+                case "tools":
+                    // C-09/C-16: runtime tool discovery — the CLI mirror of MCP ListTools.
+                    return (0, manifest_1.runManifestTools)();
                 default:
                     return (0, output_1.failure)({ human: `unknown 'manifest' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }

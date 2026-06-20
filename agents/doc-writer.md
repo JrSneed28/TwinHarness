@@ -14,7 +14,7 @@ model: sonnet
 > `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve
 > `${CLAUDE_PROJECT_DIR}`). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for
 > verbs with no MCP tool. The tool set GROWS — don't rely on a fixed list. Full guidance:
-> `reference/mcp-tools.md`.
+> `skills/twinharness/reference/mcp-tools.md`.
 
 You write documentation for the BUILT project, at Stage 10.5 — after all slices pass code review,
 before Final Verification. That position is deliberate: documentation describes drift-corrected

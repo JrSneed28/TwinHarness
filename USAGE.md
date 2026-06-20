@@ -1311,7 +1311,7 @@ All MCP tool schemas are strict and closed (`additionalProperties: false`). Outp
 
 #### Generated command reference
 
-This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **102 CLI command leaves** and **74 MCP tools**.
+This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **103 CLI command leaves** and **74 MCP tools**.
 
 | CLI command | MCP tool | Status |
 |---|---|---|
@@ -1413,6 +1413,7 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th decision check` | `th_decision_check` | mirrored |
 | `th decision list` | `th_decision_list` | mirrored |
 | `th manifest export` | — (CLI-only) | Deterministic run-snapshot CLI surface; agents read th_scorecard / th_state_get. |
+| `th manifest tools` | — (CLI-only) | MCP advertises tools natively via ListTools; this is the CLI mirror. |
 | `th template get` | `th_template_get` | mirrored |
 | `th template list` | `th_template_list` | mirrored |
 | `th version` | — (CLI-only) | CLI meta; the MCP server advertises version via the protocol. |

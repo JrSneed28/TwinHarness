@@ -12,7 +12,7 @@ Live state (captured before this prompt runs):
 
 To refresh the state during this turn, **prefer the typed
 `mcp__plugin_twinharness_th__th_state_get` MCP tool** (typed + worktree-safe) and summarize the fields
-below; fall back to the CLI only for verbs not exposed as MCP tools (see `reference/mcp-tools.md`). The
+below; fall back to the CLI only for verbs not exposed as MCP tools (see `skills/twinharness/reference/mcp-tools.md`). The
 CLI renders the same snapshot if you'd rather not read raw state:
 
 ```

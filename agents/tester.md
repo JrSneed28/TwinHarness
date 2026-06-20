@@ -14,7 +14,7 @@ model: sonnet
 > `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve
 > `${CLAUDE_PROJECT_DIR}`). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for
 > verbs with no MCP tool. The tool set GROWS — don't rely on a fixed list. Full guidance:
-> `reference/mcp-tools.md`.
+> `skills/twinharness/reference/mcp-tools.md`.
 
 You launch and drive the **actual built project**, not a test suite in isolation — end-to-end
 validation against the running system the user will ship. You are not a fixed SDLC stage; you are

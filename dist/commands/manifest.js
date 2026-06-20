@@ -35,11 +35,13 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildManifest = buildManifest;
 exports.runManifestExport = runManifestExport;
+exports.runManifestTools = runManifestTools;
 const fs = __importStar(require("node:fs"));
 const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const drift_log_1 = require("../core/drift-log");
 const ledger_1 = require("../core/ledger");
+const tool_catalog_1 = require("../core/tool-catalog");
 /** Sort an object's keys for deterministic serialization. */
 function sortedRecord(obj) {
     const out = {};
@@ -99,4 +101,27 @@ function runManifestExport(paths) {
         "Pass --json for the full deterministic manifest.",
     ].join("\n");
     return (0, output_1.success)({ data: { manifest }, human });
+}
+/**
+ * `th manifest tools` — runtime discovery of the advertised MCP tool set (C-09 /
+ * C-16). Enumerates the SDK-free {@link TOOL_CATALOG} (name + one-line summary),
+ * which mirrors the MCP server's `TOOL_DEFS` registry exactly. This is the CLI
+ * MIRROR of `ListTools`: an agent (or operator) shelling the CLI can list the
+ * live tool set instead of relying on a hard-coded list, so prompts can say "the
+ * tool set GROWS — discover it" and back it with a mechanical command.
+ *
+ * Read-only, SDK-free: it imports only the plain-data catalog, never
+ * `mcp-server.ts`, so it does not drag `@modelcontextprotocol/sdk` into the
+ * zero-runtime-dependency CLI (mcp-server.ts:15-18).
+ */
+function runManifestTools() {
+    const tools = tool_catalog_1.TOOL_CATALOG.map((t) => ({ name: t.name, summary: t.summary }));
+    const human = [
+        `MCP tools (${tools.length}):`,
+        ...tools.map((t) => `  ${t.name}\n    ${t.summary}`),
+        "",
+        "Pass --json for the machine-readable list. This mirrors the server's ListTools;",
+        "the live advertised set is authoritative — never rely on a hard-coded count.",
+    ].join("\n");
+    return (0, output_1.success)({ data: { tools, count: tools.length }, human });
 }

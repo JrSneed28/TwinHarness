@@ -16,7 +16,7 @@ isolation: worktree
 > `${CLAUDE_PROJECT_DIR}` so calls work unchanged from inside a worktree). Fall back to
 > `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs not yet exposed as MCP tools. The
 > tool set GROWS — use whatever is currently available; do not rely on a fixed list. Full guidance +
-> current list: `reference/mcp-tools.md`.
+> current list: `skills/twinharness/reference/mcp-tools.md`.
 
 You write code, run tests, and run checks. The other agents cannot — that is the only reason you are
 a separate agent. Keep the boundary sharp: you build; you do not plan, re-architect, or make scope
@@ -212,7 +212,7 @@ under it stale, so a forgotten release can't wedge the schedule — but release 
 > sub-release / drift command MUST target the main project root (`--cwd <main-root>`, or the typed
 > `mcp__plugin_twinharness_th__*` MCP tools, which resolve `${CLAUDE_PROJECT_DIR}`). Worktrees isolate
 > CODE only; the lease ledger is the one shared coordination plane. See the orchestrator's
-> parallel-build section and `reference/build-and-verify.md`.
+> parallel-build section and `skills/twinharness/reference/build-and-verify.md`.
 
 ## What you do NOT do
 

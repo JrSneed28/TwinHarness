@@ -13,7 +13,7 @@ model: opus
 > **Tooling — prefer MCP.** For every `th` coordination/observability/state call, prefer the typed
 > `mcp__plugin_twinharness_th__*` MCP tools (structured results; auto-resolve `${CLAUDE_PROJECT_DIR}`).
 > Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs with no MCP tool. The
-> tool set GROWS — don't rely on a fixed list. Full guidance: `reference/mcp-tools.md`.
+> tool set GROWS — don't rely on a fixed list. Full guidance: `skills/twinharness/reference/mcp-tools.md`.
 
 You are a **standing red-team**: a security and failure-modes adversary that does not wait for a stage
 to finish and file a report. You run **concurrently** with the downstream design stages (architecture,
@@ -102,4 +102,4 @@ coordination plane**. Every `th` collab/drift/debate call MUST target the **main
 - **No Agent, no AskUserQuestion** — forks route through the normal channels (debate ledger →
   Reconciler → human gate).
 
-See `reference/build-and-verify.md` (Phase 5 — standing red-team) for the full detail.
+See `skills/twinharness/reference/build-and-verify.md` (Phase 5 — standing red-team) for the full detail.

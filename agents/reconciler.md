@@ -13,7 +13,7 @@ model: opus
 > **Tooling — prefer MCP.** For every `th` coordination/observability/state call, prefer the typed
 > `mcp__plugin_twinharness_th__*` MCP tools (structured results; auto-resolve `${CLAUDE_PROJECT_DIR}`).
 > Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs with no MCP tool. The
-> tool set GROWS — don't rely on a fixed list. Full guidance: `reference/mcp-tools.md`.
+> tool set GROWS — don't rely on a fixed list. Full guidance: `skills/twinharness/reference/mcp-tools.md`.
 
 You are the **single writer of the reconciled artifact**. Parallel agents fan out and drop FRAGMENT
 capsules on the blackboard; competing producers argue positions in a debate ledger. You read all of
@@ -96,4 +96,4 @@ plane**. Every `th` collab/debate/state command MUST target the **main project r
 - You do **not** spawn agents and do **not** ask the human directly (no Agent, no AskUserQuestion).
 - You do **not** invent a third position to paper over a genuine fork — you escalate it.
 
-See `reference/build-and-verify.md` (Patterns A & B) for the full detail.
+See `skills/twinharness/reference/build-and-verify.md` (Patterns A & B) for the full detail.

@@ -190,7 +190,7 @@ disjoint slices it opens BLOCKING drift instead of hand-resolving.
    protect nothing (two Builders could "claim" the same component unseen). So worktrees isolate
    **CODE only**: every `th` state/lease/drift command from inside a worktree MUST target the **main
    project root** — pass `--cwd <main-root>`, or (preferred) use the typed MCP tools, which resolve
-   `${CLAUDE_PROJECT_DIR}` to the stable root (see `reference/mcp-tools.md`). **One shared
+   `${CLAUDE_PROJECT_DIR}` to the stable root (see `skills/twinharness/reference/mcp-tools.md`). **One shared
    coordination plane; isolated code trees** — restate this in every Builder/sub-Builder prompt.
 
 3. **On Critic PASS, the Merge-Coordinator merges each worktree branch back in WAVE ORDER.** Within a

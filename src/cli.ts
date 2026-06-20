@@ -52,7 +52,7 @@ import {
 import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite, runHandoffVerify, runResume } from "./commands/handoff";
 import { runInspectorWrite } from "./commands/inspector";
-import { runManifestExport } from "./commands/manifest";
+import { runManifestExport, runManifestTools } from "./commands/manifest";
 import { runPreview } from "./commands/preview";
 import { runScorecard } from "./commands/scorecard";
 import { runTelemetrySet, runTelemetryStatus } from "./commands/telemetry";
@@ -195,6 +195,7 @@ Usage:
   th gate production-reality        Reader: report the production-reality gate (no unretired user-visible simulation, verify green, Tester record, no unledgered dist/ patterns)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
+  th manifest tools                 List the advertised MCP tool set (name + summary); CLI mirror of ListTools; --json for full
   th template get <name>            Resolve a template by bare name (e.g. task-file or task-file.md): project override (.twinharness/templates/) → plugin-bundled (templates/) → structured template_not_found; --json returns path+content+source
   th template list                  List resolvable templates across both layers (deduped; marks project overrides that shadow a bundled template)
   th version                        Print the CLI version
@@ -980,6 +981,9 @@ function dispatch(parsed: ParsedArgs): CommandResult {
       switch (sub) {
         case "export":
           return runManifestExport(paths);
+        case "tools":
+          // C-09/C-16: runtime tool discovery — the CLI mirror of MCP ListTools.
+          return runManifestTools();
         default:
           return failure({ human: `unknown 'manifest' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }

@@ -1940,6 +1940,7 @@ export const MCP_EXCLUDED: Readonly<Record<string, string>> = {
   resume: "Resume detector (prints th next); agents call th_next directly.",
   "delegate capsule": "Prints a blank capsule skeleton; a static template, not a coordination tool.",
   "manifest export": "Deterministic run-snapshot CLI surface; agents read th_scorecard / th_state_get.",
+  "manifest tools": "MCP advertises tools natively via ListTools; this is the CLI mirror.",
   preview: "Pre-run pipeline preview (operator orientation); the MCP th_stage_* tools expose stage contracts.",
 };
 
@@ -2003,7 +2004,7 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "delegate plan", "delegate pack", "delegate capsule", "delegate check",
   "repo map", "repo check", "repo relevant", "repo impact", "repo search",
   "decision detect", "decision add", "decision approve", "decision check", "decision list",
-  "manifest export",
+  "manifest export", "manifest tools",
   "template get", "template list",
   "version", "help",
 ];

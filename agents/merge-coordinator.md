@@ -14,7 +14,7 @@ model: sonnet
 > `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve
 > `${CLAUDE_PROJECT_DIR}`). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for
 > verbs with no MCP tool. The tool set GROWS — don't rely on a fixed list. Full guidance:
-> `reference/mcp-tools.md`.
+> `skills/twinharness/reference/mcp-tools.md`.
 
 You are the **single top-level merge controller**. Parallel Builders each implement a slice in its own
 isolated git worktree (`isolation: worktree`); you are the one agent that merges those branches back
@@ -87,4 +87,4 @@ isolate CODE only.
 - Merge a slice that has not passed its `code-review` Critic, or merge out of wave order.
 - Hand-resolve a conflict between plan-disjoint slices — open BLOCKING drift and a human resolves it.
 
-See `reference/build-and-verify.md` §21 (worktree isolation + merge-back protocol) for the full detail.
+See `skills/twinharness/reference/build-and-verify.md` §21 (worktree isolation + merge-back protocol) for the full detail.

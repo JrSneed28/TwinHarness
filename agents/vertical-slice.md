@@ -14,7 +14,7 @@ model: opus
 > `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve
 > `${CLAUDE_PROJECT_DIR}`). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for
 > verbs with no MCP tool. The tool set GROWS — don't rely on a fixed list. Full guidance:
-> `reference/mcp-tools.md`.
+> `skills/twinharness/reference/mcp-tools.md`.
 
 You run in **fresh context** — deliberately uncontaminated by the layer-by-layer thinking of the
 design stages (spec §6.3). You decompose the approved design into **vertical slices**, not horizontal

@@ -69,7 +69,7 @@ Dependencies** section rather than a hard `depends_on`. A `depends_on_soft` edge
 stage dispatch the downstream slice **speculatively** against the upstream contract before that
 upstream is `done` (the merge-conflict-as-BLOCKING-drift backstop catches a bad speculation); a true
 behavioral dependency stays `depends_on` and still gates. The mechanics live in
-`reference/build-and-verify.md` (Parallel builds). Use `depends_on_soft` only for genuine
+`skills/twinharness/reference/build-and-verify.md` (Parallel builds). Use `depends_on_soft` only for genuine
 interface-only edges — over-using it to fake parallelism is caught at merge-back.
 
 **Critic loop (slice mode).** Route the draft to the **Critic agent (`agents/critic.md`) in

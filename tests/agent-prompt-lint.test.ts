@@ -146,3 +146,65 @@ describe("agent-prompt lint: ux-ui-designer web-research grant (SG3 C-03)", () =
     expect(tokens).toBeLessThanOrEqual(AGENT_TOKEN_BUDGET);
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * P1-D (C-09/C-16) — canonical reference-citation guard.              *
+ *                                                                     *
+ * On-demand playbook detail lives under `skills/twinharness/reference/ *
+ * <name>.md`. A prompt that cites it with a BARE ` reference/<name>`   *
+ * (no `skills/twinharness/` prefix) is not a resolvable path from a    *
+ * worktree or the plugin root — it silently misresolves. This guard    *
+ * bans the bare token across the whole prompt surface (agents /        *
+ * commands / skills), the same files the citations were normalized in. *
+ * The canonical form is `skills/twinharness/reference/<name>.md`.       *
+ * ------------------------------------------------------------------ */
+
+/** The prompt-surface dirs (relative to repo root) the citation guards scan. */
+const PROMPT_DIRS = ["agents", "commands", path.join("skills", "twinharness")] as const;
+
+/** Recursively collect every `*.md` file under `dir` (absolute paths). */
+function markdownFilesUnder(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...markdownFilesUnder(full));
+    else if (entry.isFile() && entry.name.endsWith(".md")) out.push(full);
+  }
+  return out;
+}
+
+/** Every prompt-surface markdown file, sorted, repo-root-relative-labelled. */
+function promptSurfaceFiles(): Array<{ abs: string; rel: string }> {
+  const root = path.resolve(__dirname, "..");
+  const files: Array<{ abs: string; rel: string }> = [];
+  for (const d of PROMPT_DIRS) {
+    for (const abs of markdownFilesUnder(path.join(root, d))) {
+      files.push({ abs, rel: path.relative(root, abs).split(path.sep).join("/") });
+    }
+  }
+  return files.sort((a, b) => a.rel.localeCompare(b.rel));
+}
+
+describe("agent-prompt lint: canonical reference/ citations (no bare token)", () => {
+  // A bare ` reference/<name>` citation — a space (or backtick/paren) immediately
+  // before `reference/`, NOT preceded by the canonical `skills/twinharness/` path.
+  // The negative lookbehind admits the canonical `skills/twinharness/reference/`
+  // and the `${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference/` forms.
+  const BARE_REFERENCE_RE = /(?<!twinharness\/)\breference\//;
+
+  for (const { abs, rel } of promptSurfaceFiles()) {
+    it(`${rel} cites reference docs canonically (skills/twinharness/reference/<name>.md)`, () => {
+      const content = fs.readFileSync(abs, "utf8");
+      const offenders = content
+        .split(/\r?\n/)
+        .map((line, i) => ({ line, n: i + 1 }))
+        .filter(({ line }) => BARE_REFERENCE_RE.test(line))
+        .map(({ line, n }) => `${rel}:${n}: ${line.trim()}`);
+      expect(
+        offenders,
+        `bare \`reference/\` citation(s) — use the canonical \`skills/twinharness/reference/<name>.md\`:\n${offenders.join("\n")}`,
+      ).toEqual([]);
+    });
+  }
+});

@@ -10,7 +10,7 @@ Start (or resume) a **TwinHarness** orchestration run for: **$ARGUMENTS**
 > `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>`. The Orchestrator should prefer the typed
 > `mcp__plugin_twinharness_th__*` MCP tools and fall back to
 > `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js"` only for verbs not yet exposed as MCP tools (see
-> `reference/mcp-tools.md`). A tool that **returns** an error result (e.g. `not_initialized`) is
+> `skills/twinharness/reference/mcp-tools.md`). A tool that **returns** an error result (e.g. `not_initialized`) is
 > working — act on it and keep using the MCP tools; do not switch to the CLI just because a call
 > reported "no run yet."
 
@@ -84,7 +84,7 @@ Follow the `twinharness` skill (the Orchestrator playbook). In brief:
    - **[3] Skip → Final Verification** — advance to Stage 11 now.
 
    Options **[1]** and **[2]** loop; only **[3]** advances. Full detail in
-   `reference/build-and-verify.md` (Stage 10.5).
+   `skills/twinharness/reference/build-and-verify.md` (Stage 10.5).
 6. Keep `state.json` authoritative via the `th` CLI; the Stop-gate hook enforces a valid state before
    any "stage complete" claim.
 
