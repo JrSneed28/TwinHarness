@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.WriteSurfaceError = exports.PathContainmentError = void 0;
 exports.assertGovernedWriteSurface = assertGovernedWriteSurface;
 exports.resolveWithinRoot = resolveWithinRoot;
+exports.realpathExistingPrefix = realpathExistingPrefix;
 exports.resolveProjectPaths = resolveProjectPaths;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
@@ -205,6 +206,12 @@ function realpathSafe(p) {
  * tail literally (a tail that does not exist on disk cannot contain a symlink or
  * junction). This lets us resolve real locations for paths that point at files
  * about to be written, without throwing ENOENT.
+ *
+ * Exported so the write-gate hook canonicalizes a tool's target the SAME way the
+ * root is canonicalized (R-13): `resolveProjectPaths` realpaths the selected root,
+ * so a containment check that compares a NON-canonical target (resolved against a
+ * symlinked/8.3-aliased payload `cwd`) against the canonical root would falsely
+ * read as "outside root" and fail the gate OPEN. Both sides must be canonicalized.
  */
 function realpathExistingPrefix(abs) {
     let existing = abs;

@@ -42,6 +42,7 @@ exports.classifyOwnership = classifyOwnership;
 exports.runHookPretoolGate = runHookPretoolGate;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+const paths_1 = require("../core/paths");
 const state_store_1 = require("../core/state-store");
 const verify_1 = require("../core/verify");
 const decisions_1 = require("../core/decisions");
@@ -408,7 +409,18 @@ function rawWriteGateIsStrict(raw) {
  * or null if the path is outside the project root (caller should allow it).
  */
 function toRootRelative(absTarget, root) {
-    const rel = path.relative(root, absTarget);
+    // R-13 symmetry: `resolveProjectPaths` canonicalizes `paths.root` (realpath),
+    // but the caller resolves `absTarget` against the payload `cwd`, which may be a
+    // NON-canonical alias of the same root (macOS /var→/private/var, a Windows 8.3
+    // short name like RUNNER~1, a symlinked $TMPDIR, or any junctioned checkout). A
+    // lexical `path.relative(canonicalRoot, aliasedTarget)` then yields ".." and the
+    // gate reads an in-root write as "outside root" → it stands down and fails OPEN.
+    // Canonicalize BOTH sides through the longest-existing-prefix realpath (same
+    // mechanism as the root, idempotent when already canonical) so containment never
+    // depends on which alias the cwd arrived as.
+    const realRoot = (0, paths_1.realpathExistingPrefix)(root);
+    const realTarget = (0, paths_1.realpathExistingPrefix)(absTarget);
+    const rel = path.relative(realRoot, realTarget);
     // path.relative returns a string starting with ".." when outside root.
     if (rel.startsWith("..") || path.isAbsolute(rel))
         return null;

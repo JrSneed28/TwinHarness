@@ -17,6 +17,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import {
@@ -773,5 +774,64 @@ describe("REQ-WGATE-010: verify approval anchors are gated, not allowlisted", ()
     const out = runHookPretoolGate(tp.paths, inputFor(`${stateRel}/verify.json`, tp.root));
     expect(isAllow(out)).toBe(false);
     expect(permissionDecision(out)).toBe("ask");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// REQ-WGATE-011 (R-13 regression): a NON-CANONICAL cwd alias must not disarm
+// the gate.
+//
+// resolveProjectPaths canonicalizes the selected root (realpath), but Claude Code
+// hands the gate the session's RAW `cwd` on the stdin payload. When the project
+// dir is reached through a symlink/NTFS-junction (or a Windows 8.3 short name /
+// symlinked $TMPDIR on CI), that raw cwd is a non-canonical ALIAS of the canonical
+// paths.root. A lexical containment check resolves the target against the alias and
+// compares it to the canonical root, sees "..", and reads an in-root write as
+// out-of-root — so the gate stands down and ALLOWS every write (a fail-OPEN that
+// silently defeats the gate). toRootRelative must canonicalize BOTH sides so the
+// gate fires regardless of which alias the cwd arrived as.
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a dir junction (Windows) / dir symlink (POSIX) → real target. Returns
+ * false (skip cleanly) when links are unsupported, mirroring the POSIX-only skip
+ * pattern in tests/concurrency.test.ts. Windows junctions need no elevation.
+ */
+function tryLink(target: string, link: string): boolean {
+  try {
+    fs.symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe("REQ-WGATE-011 (R-13): a non-canonical cwd alias still fires the gate", () => {
+  let scratch: string | undefined;
+  afterEach(() => {
+    if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
+    scratch = undefined;
+  });
+
+  it("Phase A code write via a symlinked/junctioned project dir → ask (not a silent allow)", () => {
+    scratch = fs.mkdtempSync(path.join(os.tmpdir(), "th-alias-"));
+    const realProject = path.join(scratch, "real-project");
+    fs.mkdirSync(realProject, { recursive: true });
+    const linkedProject = path.join(scratch, "linked-project");
+    if (!tryLink(realProject, linkedProject)) return; // links unsupported → skip cleanly
+
+    // Resolve paths from the ALIAS: paths.root is canonicalized to realProject.
+    const paths = resolveProjectPaths(linkedProject);
+    writeState(paths, { ...initialState(), current_stage: "stage-05" });
+
+    // The gate receives the RAW alias as cwd (exactly what Claude Code passes).
+    const out = runHookPretoolGate(paths, {
+      tool_name: "Write",
+      tool_input: { file_path: "src/core/engine.ts" },
+      cwd: linkedProject,
+    });
+    expect(out.exitCode).toBe(0);
+    expect(permissionDecision(out)).toBe("ask");
+    expect(permissionReason(out)).toContain("src/core/engine.ts");
   });
 });

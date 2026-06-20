@@ -19,13 +19,15 @@ afterEach(() => {
 });
 
 /**
- * Canonicalize a dir for comparison. R-13 realpaths the selected root, so the
- * expected dir must be realpath'd too — otherwise a symlinked tmpdir (macOS
- * `/var` -> `/private/var`) makes the lexical-vs-canonical comparison spuriously
- * fail. realpath'ing both sides asserts the directories are the SAME, which is
- * the actual contract.
+ * Canonicalize a dir for comparison. R-13 realpaths the selected root via
+ * `fs.realpathSync.native`, so the expected dir must use the SAME resolver —
+ * otherwise a symlinked tmpdir (macOS `/var` -> `/private/var`) or a Windows 8.3
+ * short name (`RUNNER~1` -> `runneradmin`, which ONLY the native resolver expands;
+ * the JS `fs.realpathSync` leaves 8.3 names untouched) makes the comparison
+ * spuriously fail on CI. realpath'ing both sides with the native resolver asserts
+ * the directories are the SAME, which is the actual contract.
  */
-const real = (p: string): string => fs.realpathSync(p);
+const real = (p: string): string => fs.realpathSync.native(p);
 
 describe("resolveProjectPaths — upward walk (M-7)", () => {
   it("finds the ancestor .twinharness from a deep subdir", () => {

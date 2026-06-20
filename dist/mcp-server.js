@@ -17963,6 +17963,12 @@ function killOne(pid) {
 function killProcessTree(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return;
   try {
+    if (process.platform !== "win32") {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+      }
+    }
     const childrenOf = snapshotChildrenMap();
     if (childrenOf.size === 0 && process.platform === "win32") {
       try {
@@ -18008,7 +18014,7 @@ function runCommands(root, commands, nowOrOpts = () => /* @__PURE__ */ new Date(
       continue;
     }
     const start = Date.now();
-    const proc = (0, import_node_child_process.spawnSync)(command, {
+    const spawnOpts = {
       cwd: root,
       shell: true,
       encoding: "utf8",
@@ -18017,7 +18023,9 @@ function runCommands(root, commands, nowOrOpts = () => /* @__PURE__ */ new Date(
       killSignal: "SIGKILL",
       input: "",
       env
-    });
+    };
+    spawnOpts.detached = process.platform !== "win32";
+    const proc = (0, import_node_child_process.spawnSync)(command, spawnOpts);
     const durationMs = Date.now() - start;
     const errCode = proc.error?.code;
     const timedOut = errCode === "ETIMEDOUT";

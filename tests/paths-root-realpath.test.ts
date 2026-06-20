@@ -66,8 +66,8 @@ describe("resolveProjectPaths — selected root is realpath'd (R-13)", () => {
 
     // The selected root, once realpath'd, equals the REAL project dir — not the
     // junction path it was reached through.
-    const realExpected = fs.realpathSync(realProject);
-    expect(fs.realpathSync(paths.root)).toBe(realExpected);
+    const realExpected = fs.realpathSync.native(realProject);
+    expect(fs.realpathSync.native(paths.root)).toBe(realExpected);
     expect(paths.root).toBe(realExpected);
     // And the lexical junction path is NOT the anchor.
     expect(paths.root).not.toBe(linkedProject);
@@ -82,7 +82,7 @@ describe("resolveProjectPaths — selected root is realpath'd (R-13)", () => {
     fs.writeFileSync(path.join(root, ".twinharness", "state.json"), "{}", "utf8");
 
     const paths = resolveProjectPaths(root);
-    expect(paths.root).toBe(fs.realpathSync(root));
+    expect(paths.root).toBe(fs.realpathSync.native(root));
   });
 
   it("a fresh (not-yet-created) root resolves without throwing (longest-existing-prefix)", () => {
@@ -93,6 +93,6 @@ describe("resolveProjectPaths — selected root is realpath'd (R-13)", () => {
     const paths = resolveProjectPaths(ghost);
     // Falls back to the start dir (no ancestor state) with the existing prefix
     // canonicalized and the missing tail preserved.
-    expect(paths.root).toBe(path.join(fs.realpathSync(tmp), "does", "not", "exist", "yet"));
+    expect(paths.root).toBe(path.join(fs.realpathSync.native(tmp), "does", "not", "exist", "yet"));
   });
 });

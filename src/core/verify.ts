@@ -37,7 +37,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { ProjectPaths } from "./paths";
 import { assertGovernedWriteSurface } from "./paths";
@@ -749,17 +749,33 @@ function killOne(pid: number): void {
  * R-07). `spawnSync`'s own timeout/overflow kill only SIGKILLs the direct child
  * (the shell); a test runner or server the shell spawned (vitest workers, a dev
  * server) can survive as an orphan and hold the project cwd. This reaps the rest
- * of the tree on BOTH platforms by walking a live PID/PPID snapshot and killing
- * each descendant, depth-first, leaves-first, then the root.
+ * of the tree by signalling the child's process GROUP on POSIX (the child is
+ * spawned `detached`, so it leads its own group) and, on every platform, by walking
+ * a live PID/PPID snapshot and killing each descendant depth-first, leaves-first,
+ * then the root.
  *
- * We never signal a process GROUP (POSIX `spawnSync` can't detach the child into
- * its own group — that's `spawn`-only — so the child shares OUR group; signalling
- * the group would suicide). Killing explicit PIDs from the snapshot can never reach
- * the verify process or its siblings. Best-effort — never throws.
+ * (Historical note, now corrected: an earlier version believed `spawnSync` could not
+ * detach the child, so it relied on the snapshot walk alone — which silently leaks
+ * reparented grandchildren on POSIX. `spawnSync` does honour `detached`, so the group
+ * signal is the real fix.) Killing the explicit group/PIDs can never reach the verify
+ * process or its siblings. Best-effort — never throws.
  */
 export function killProcessTree(pid: number): void {
   if (!Number.isInteger(pid) || pid <= 0) return;
   try {
+    // POSIX primary reap: signal the detached child's process GROUP (PGID == pid).
+    // This reaches grandchildren that reparented to PID 1 when spawnSync SIGKILLed
+    // the direct child — reparenting changes PPID, not the process group, so the
+    // PID/PPID snapshot walk below can no longer follow them. The detached group is
+    // distinct from the verify process's group, so this never signals us. The walk
+    // remains as a fallback for hosts where the group signal finds nothing.
+    if (process.platform !== "win32") {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        /* group already empty / not a group leader — fall through to the walk */
+      }
+    }
     const childrenOf = snapshotChildrenMap();
     // F4 safety net: if no snapshot was available (e.g. wmic absent AND PowerShell
     // CIM failed on a locked-down Windows host), we have no descendant PIDs to walk.
@@ -881,7 +897,7 @@ export function runCommands(
     }
 
     const start = Date.now();
-    const proc = spawnSync(command, {
+    const spawnOpts: SpawnSyncOptionsWithStringEncoding = {
       cwd: root,
       shell: true,
       encoding: "utf8",
@@ -890,7 +906,20 @@ export function runCommands(
       killSignal: "SIGKILL",
       input: "",
       env,
-    });
+    };
+    // R-07 (POSIX grandchild reap): start the child in its OWN session/process group.
+    // spawnSync DOES honour `detached` at runtime — libuv sets UV_PROCESS_DETACHED and
+    // calls setsid() in the child, so the shell becomes a group leader (PGID == its
+    // pid) and every descendant inherits that group. When the timeout SIGKILLs the
+    // direct child, grandchildren reparent to PID 1 (breaking the PPID chain a
+    // snapshot-walk follows) but KEEP their process group, so signalling the group by
+    // `-pid` in killProcessTree still reaches them. The new group is distinct from the
+    // verify process's group, so the group signal can never hit us. Windows is excluded
+    // (no setsid/reparenting; it uses taskkill /T). `detached` is absent from
+    // @types/node's SpawnSyncOptions despite being honoured, so it is set through a
+    // narrow cast that leaves the known options fully type-checked above.
+    (spawnOpts as { detached?: boolean }).detached = process.platform !== "win32";
+    const proc = spawnSync(command, spawnOpts);
     const durationMs = Date.now() - start;
     const errCode = (proc.error as NodeJS.ErrnoException | undefined)?.code;
     // A timeout kill surfaces as ETIMEDOUT; a maxBuffer overflow as ENOBUFS — BOTH
