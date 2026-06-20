@@ -77,7 +77,7 @@ describe("REQ-COVERAGE-REPORT-002: passing is whole-suite, sourced from the veri
     writeFile(tp, "docs/01-requirements.md", "REQ-001 and REQ-002.\n");
     writeFile(tp, "tests/a.test.ts", "// REQ-001 tested\n");
     runVerifyAdd(tp.paths, PASS_CMD);
-    runVerifyApprove(tp.paths, { as: "test" });
+    runVerifyApprove(tp.paths, { as: "test", tty: { isTTY: true, stdinLine: "y" } });
     runVerifyRun(tp.paths);
 
     const res = runCoverageReport(tp.paths);
@@ -92,7 +92,7 @@ describe("REQ-COVERAGE-REPORT-002: passing is whole-suite, sourced from the veri
     writeFile(tp, "docs/01-requirements.md", "REQ-001.\n");
     writeFile(tp, "tests/a.test.ts", "// REQ-001\n");
     runVerifyAdd(tp.paths, FAIL_CMD);
-    runVerifyApprove(tp.paths, { as: "test" });
+    runVerifyApprove(tp.paths, { as: "test", tty: { isTTY: true, stdinLine: "y" } });
     runVerifyRun(tp.paths);
 
     const res = runCoverageReport(tp.paths);

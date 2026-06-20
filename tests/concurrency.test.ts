@@ -18,6 +18,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
+import { readVerifyConfig } from "../src/core/verify";
 import {
   readState,
   withStateLock,
@@ -92,6 +93,26 @@ describe("REQ-STATE-LOCK-001: concurrent mutations do not lose updates (F10)", (
     const state = readState(tp.paths).state;
     const inProgress = state?.slices.filter((s) => s.status === "in-progress").length ?? 0;
     expect(inProgress).toBe(N);
+  }, 30_000);
+
+  // P1/R-03: `verify add` is a read-modify-write of verify.json. Without
+  // `withStateLock` serializing it, N racing adds would lose updates (last writer
+  // wins). Every concurrent add must land — N distinct commands present.
+  it.skipIf(!fs.existsSync(CLI))("concurrent `verify add` all land (no lost verify-config writes)", async () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    const N = 16;
+    await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        execFileP("node", [CLI, "verify", "add", `cmd-${i}`, "--cwd", tp!.root],
+          { env: { ...process.env, TH_NO_LOG: "1" } }),
+      ),
+    );
+
+    const commands = readVerifyConfig(tp.paths).commands;
+    expect(commands).toHaveLength(N);
+    expect(new Set(commands).size).toBe(N); // each distinct add present, none lost
   }, 30_000);
 });
 

@@ -714,6 +714,24 @@ function runHookPretoolGate(paths, input, env = process.env) {
     const relFwd = toRootRelative(absTarget, paths.root);
     if (relFwd === null)
         return allow(); // Outside project root → not our concern.
+    // Step e2 (R-02): the verify approval trust anchors are NEVER silently writable by
+    // a tool call. A direct Write/Edit to verify.json or verify-approvals.jsonl is the
+    // "forge an approval around the gate" vector — those records authorize which
+    // commands `th verify run` executes. Gate it in BOTH phases (ask by default, deny
+    // under deny/strict), ahead of the doc/state allowlist that otherwise blanket-allows
+    // the whole state dir. Derived from paths.stateDir so it holds for `.twinharness`
+    // and the legacy `.agentic-sdlc`. The CLI/MCP `th verify` data layer writes these
+    // through atomicWriteFile (not a tool call), so legitimate flows are unaffected —
+    // the only path to an approval is `th verify approve`, which itself requires a TTY.
+    const stateRel = toRootRelative(paths.stateDir, paths.root);
+    if (stateRel !== null &&
+        (relFwd === `${stateRel}/verify.json` || relFwd === `${stateRel}/verify-approvals.jsonl`)) {
+        const reason = `TwinHarness write-gate gated a direct write to a verify approval anchor (${relFwd}). ` +
+            `This file authorizes which commands \`th verify run\` will execute; a direct tool write could forge an approval. ` +
+            `Use \`th verify add\` / \`th verify approve\` (approve requires an interactive human TTY) instead of editing the file. ` +
+            `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1.`;
+        return fireGate(gateMode, reason);
+    }
     // Step f: Doc/state allowlist → allow.
     if (isAllowedDocOrStatePath(relFwd))
         return allow();

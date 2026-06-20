@@ -63,7 +63,7 @@ describe("REQ-DEBUG-002: debug pack assembles failing-suite + slice evidence", (
     writeFile(tp, "docs/09-implementation-plan.md", "### SLICE-1\nComponents touched: export, store\n");
     runSlicesSync(tp.paths, { planFile: "docs/09-implementation-plan.md" });
     runVerifyAdd(tp.paths, "false");
-    runVerifyApprove(tp.paths, { as: "test" });
+    runVerifyApprove(tp.paths, { as: "test", tty: { isTTY: true, stdinLine: "y" } });
     runVerifyRun(tp.paths);
 
     const res = runDebugPack(tp.paths, { slice: "SLICE-1" });

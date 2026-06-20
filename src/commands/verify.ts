@@ -2,14 +2,19 @@ import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import {
   readVerifyConfig,
+  loadVerifyConfig,
   writeVerifyConfig,
   writeVerifyReport,
   runCommands,
   commandSetHash,
   isCommandSetApproved,
+  evaluateCommandSetApproval,
+  appendVerifyApproval,
+  latestApprovalFor,
   type VerifyReport,
-  type VerifyConfig,
 } from "../core/verify";
+import { withStateLock } from "../core/state-store";
+import { requireTTYConfirmation, type TTYConfirmationOpts } from "./decision";
 import { structuredLog } from "../core/log";
 
 /**
@@ -27,10 +32,17 @@ import { structuredLog } from "../core/log";
  *   th verify approve         Human-confirm the current command set for execution
  *   th verify run             Execute every configured command; exit 1 on any failure
  *
- * Phase 6 hardening (#19): every `add` records provenance (actor + timestamp); the
- * command SET must be human-approved (hash-pinned) before its first execution, so
- * a new/changed set cannot run until `th verify approve` confirms it; `run`
- * supports `--read-only` to refuse repo-mutating commands on untrusted projects.
+ * Phase 6 hardening (#19): every `add` records provenance (actor + timestamp);
+ * `run` supports `--read-only` to refuse repo-mutating commands on untrusted projects.
+ *
+ * P1 hardening (R-01/R-02/R-03): `approve` is HUMAN-ONLY — a TTY barrier
+ * (`requireTTYConfirmation`, shared with `decision approve`) refuses a
+ * non-interactive caller, so the automated actor that can `add` can no longer
+ * self-approve the commands it will then execute. The approval is sealed into the
+ * tamper-evident `verify-approvals.jsonl` ledger; a forged/edited approval breaks
+ * the chain and `run` fails CLOSED. `add`/`clear`/`approve` all mutate under
+ * `withStateLock` (no lost updates / torn writes), and a corrupt config is refused
+ * rather than read as an empty/approved set.
  */
 
 /** Resolve the actor attribution for a verify mutation (provenance, #19, P6-2). */
@@ -49,30 +61,33 @@ export interface VerifyAddOptions {
 export function runVerifyAdd(paths: ProjectPaths, command?: string, opts: VerifyAddOptions = {}): CommandResult {
   const trimmed = command?.trim();
   if (!trimmed) return failure({ human: 'usage: th verify add "<command>"' });
-  const config = readVerifyConfig(paths);
-  config.commands.push(trimmed);
 
   // Record provenance (#19, P6-2): who added this command, and when.
   const actor = resolveVerifyActor(opts.as);
   const addedAt = (opts.now ?? (() => new Date()))().toISOString();
-  config.provenance = [...(config.provenance ?? []), { command: trimmed, actor, addedAt }];
 
-  // Adding a command CHANGES the set: the prior approval (if any) no longer covers
-  // it, so the set is now unapproved until `th verify approve` re-confirms it.
-  // (isCommandSetApproved compares against approvedHash; leaving a stale hash here
-  // means it simply won't match the new set — but we clear it for an honest read.)
-  if (config.approvedHash !== commandSetHash(config.commands)) {
-    delete config.approvedHash;
-    delete config.approvedBy;
-    delete config.approvedAt;
-  }
+  // R-03: serialize the read-modify-write under withStateLock so N concurrent
+  // `verify add` calls never lose an update, and the config is written atomically.
+  // Adding a command CHANGES the set — no approval-field bookkeeping is needed: the
+  // tamper-evident ledger's latest approval no longer matches the new set, so it
+  // reads as UNAPPROVED automatically (evaluateCommandSetApproval).
+  const result = withStateLock(paths, () => {
+    const config = loadVerifyConfig(paths).config;
+    config.commands.push(trimmed);
+    config.provenance = [...(config.provenance ?? []), { command: trimmed, actor, addedAt }];
+    writeVerifyConfig(paths, config);
+    return { commands: config.commands, provenance: config.provenance };
+  });
 
-  writeVerifyConfig(paths, config);
-  structuredLog({ cmd: "verify add", command: trimmed, actor, count: config.commands.length });
+  structuredLog({ cmd: "verify add", command: trimmed, actor, count: result.commands.length });
   return success({
-    data: { commands: config.commands, provenance: config.provenance, approved: isCommandSetApproved(config) },
+    data: {
+      commands: result.commands,
+      provenance: result.provenance,
+      approved: isCommandSetApproved(paths, result.commands),
+    },
     human:
-      `added: ${trimmed} (by ${actor})\n${config.commands.length} command(s) configured.\n` +
+      `added: ${trimmed} (by ${actor})\n${result.commands.length} command(s) configured.\n` +
       `This command set is UNAPPROVED for execution — run \`th verify approve\` to confirm it before \`th verify run\`.`,
   });
 }
@@ -80,6 +95,8 @@ export function runVerifyAdd(paths: ProjectPaths, command?: string, opts: Verify
 /** `th verify list` — show configured commands (with provenance + approval status). */
 export function runVerifyList(paths: ProjectPaths): CommandResult {
   const config = readVerifyConfig(paths);
+  const approved = isCommandSetApproved(paths, config.commands);
+  const latest = approved ? latestApprovalFor(paths, config.commands) : undefined;
   const provByCommand = new Map((config.provenance ?? []).map((p) => [p.command, p]));
   const human = config.commands.length
     ? config.commands
@@ -90,23 +107,25 @@ export function runVerifyList(paths: ProjectPaths): CommandResult {
         })
         .join("\n") +
       "\n" +
-      (isCommandSetApproved(config)
-        ? `\nSet APPROVED for execution${config.approvedBy ? ` (by ${config.approvedBy} at ${config.approvedAt})` : ""}.`
+      (approved
+        ? `\nSet APPROVED for execution${latest ? ` (by ${latest.approvedBy} at ${latest.approvedAt})` : ""}.`
         : "\nSet UNAPPROVED — run `th verify approve` before `th verify run`.")
     : "(no verify commands configured — add one with `th verify add \"<command>\"`)";
   return success({
     data: {
       commands: config.commands,
       provenance: config.provenance ?? [],
-      approved: isCommandSetApproved(config),
+      approved,
     },
     human,
   });
 }
 
-/** `th verify clear` — remove all configured commands (and any approval). */
+/** `th verify clear` — remove all configured commands. Serialized + atomic (R-03).
+ * The approval ledger is append-only history; an empty set is trivially approved
+ * (nothing to run), so no approval entry needs clearing. */
 export function runVerifyClear(paths: ProjectPaths): CommandResult {
-  writeVerifyConfig(paths, { commands: [] });
+  withStateLock(paths, () => writeVerifyConfig(paths, { commands: [] }));
   structuredLog({ cmd: "verify clear" });
   return success({ data: { commands: [] }, human: "verify commands cleared." });
 }
@@ -114,31 +133,78 @@ export function runVerifyClear(paths: ProjectPaths): CommandResult {
 export interface VerifyApproveOptions {
   as?: string;
   now?: () => Date;
+  /** TTY barrier injection (tests) — { isTTY?, stdinLine? }. Mirrors decision approve. */
+  tty?: TTYConfirmationOpts;
 }
 
 /**
- * `th verify approve` — human-confirm the CURRENT command set for execution
- * (#19, P6-2). Pins the set hash so a later add/change re-requires confirmation.
- * Attribution comes from `--as` / TH_VERIFY_ACTOR. With no commands configured
- * there is nothing to approve.
+ * `th verify approve` — HUMAN-confirm the CURRENT command set for execution
+ * (R-01). The TTY barrier (`requireTTYConfirmation`, shared with `decision
+ * approve`) runs before any approval write: a caller with no controlling TTY (an
+ * agent's tool shell, CI, a pipe) is refused, and there is NO `--yes`/override
+ * flag — so the same automated actor that can `add` a command can no longer
+ * self-approve it. On confirmation the approval is sealed into the tamper-evident
+ * `verify-approvals.jsonl` ledger (R-02), serialized under `withStateLock` (R-03).
+ * Attribution (NOT a barrier) comes from `--as` / TH_VERIFY_ACTOR.
+ *
+ * The "nothing to approve" / corrupt-config checks run BEFORE the barrier (they are
+ * reads, perform no approval write, and reporting them needs no TTY — mirroring the
+ * pre-barrier disposition check in `decision approve`).
  */
 export function runVerifyApprove(paths: ProjectPaths, opts: VerifyApproveOptions = {}): CommandResult {
-  const config = readVerifyConfig(paths);
-  if (config.commands.length === 0) {
+  const pre = loadVerifyConfig(paths);
+  if (pre.status === "corrupt") {
+    structuredLog({ cmd: "verify approve", error: "corrupt_config" });
+    return failure({
+      human:
+        "verify.json is present but unreadable/corrupt — refusing to approve. Inspect it, or run " +
+        "`th verify clear` and re-add the commands, then approve.",
+      data: { error: "corrupt_config" },
+    });
+  }
+  if (pre.config.commands.length === 0) {
     return failure({
       human: "No verify commands configured — nothing to approve. Add one with `th verify add \"<command>\"`.",
       data: { error: "no_verify_commands" },
     });
   }
+
+  // ---- R-01 BARRIER (runs before any approval write) ------------------------
+  const confirm = requireTTYConfirmation("the verify command set", "approve", opts.tty);
+  if (!confirm.ok) {
+    structuredLog({ cmd: "verify approve", error: confirm.error });
+    return failure({
+      human:
+        confirm.error === "no_tty"
+          ? "Approving a verify command set requires an interactive terminal (no controlling TTY). " +
+            "This blocks a non-interactive/agent caller from self-approving the commands it will then execute."
+          : "Approval declined at the confirmation prompt.",
+      data: { error: confirm.error },
+    });
+  }
+
   const actor = resolveVerifyActor(opts.as);
   const approvedAt = (opts.now ?? (() => new Date()))().toISOString();
-  const hash = commandSetHash(config.commands);
-  const next: VerifyConfig = { ...config, approvedHash: hash, approvedBy: actor, approvedAt };
-  writeVerifyConfig(paths, next);
-  structuredLog({ cmd: "verify approve", actor, commands: config.commands.length, hash });
+  // Re-read the command set under the lock and seal the approval to whatever set is
+  // current at lock time (R-03 — no add/approve race can stamp a stale set). Echo
+  // the SAME in-lock set in the result so the reported commands match what was sealed.
+  const { sealed, commands } = withStateLock(paths, () => {
+    const locked = loadVerifyConfig(paths).config.commands;
+    const event = appendVerifyApproval(paths, {
+      approvedHash: commandSetHash(locked),
+      commandCount: locked.length,
+      approvedBy: actor,
+      approvedAt,
+    });
+    return { sealed: event, commands: locked };
+  });
+
+  structuredLog({ cmd: "verify approve", actor, commands: sealed.commandCount, hash: sealed.approvedHash });
   return success({
-    data: { approved: true, approvedHash: hash, approvedBy: actor, commands: config.commands },
-    human: `Approved ${config.commands.length} verify command(s) for execution (by ${actor}). \`th verify run\` may now execute this set.`,
+    data: { approved: true, approvedHash: sealed.approvedHash, approvedBy: actor, commands },
+    human:
+      `Approved ${sealed.commandCount} verify command(s) for execution (by ${actor}). ` +
+      "The approval is sealed in the tamper-evident verify-approvals ledger; `th verify run` may now execute this set.",
   });
 }
 
@@ -165,13 +231,28 @@ export interface VerifyRunOptions {
  * and exit non-zero if any command failed. With no commands configured it is a
  * usage failure (nothing to verify).
  *
- * Phase 6 (#19): refuses to run an UNAPPROVED command set (P6-2) — a new/changed
- * set must be confirmed via `th verify approve` first; passes a curated env and
- * redacts secrets from the report (P6-3, in core/verify); and supports
- * `--read-only` (P6-5) to refuse repo-mutating commands on untrusted projects.
+ * Phase 6 (#19): refuses to run an UNAPPROVED command set — a new/changed set must
+ * be confirmed via `th verify approve` first; passes a curated env and redacts
+ * secrets from the report (P6-3, in core/verify); and supports `--read-only`
+ * (P6-5) to refuse repo-mutating commands on untrusted projects.
+ *
+ * P1 (R-02/R-03): a CORRUPT config fails CLOSED (refused, never read as an
+ * empty/approved set), and a TAMPERED approval ledger (broken hash chain) is
+ * refused distinctly from a plain unapproved set.
  */
 export function runVerifyRun(paths: ProjectPaths, opts: VerifyRunOptions = {}): CommandResult {
-  const config = readVerifyConfig(paths);
+  const loaded = loadVerifyConfig(paths);
+  if (loaded.status === "corrupt") {
+    // R-03: fail CLOSED — an unreadable/torn config must never be treated as an
+    // empty (and therefore trivially "approved") command set.
+    return failure({
+      human:
+        "verify.json is present but unreadable/corrupt — refusing to run (fail-closed). " +
+        "It is NOT treated as an empty/approved set. Inspect it, or run `th verify clear` and re-configure.",
+      data: { error: "corrupt_config" },
+    });
+  }
+  const config = loaded.config;
   if (config.commands.length === 0) {
     return failure({
       human: 'No verify commands configured. Add one with `th verify add "<command>"` (e.g. `th verify add "npm test"`).',
@@ -179,14 +260,22 @@ export function runVerifyRun(paths: ProjectPaths, opts: VerifyRunOptions = {}): 
     });
   }
 
-  // P6-2: a new/changed command set must be human-confirmed before its first run.
-  if (!isCommandSetApproved(config)) {
+  // R-01/R-02: a new/changed command set must be human-confirmed (sealed in the
+  // tamper-evident ledger) before its first run; a broken ledger chain → tampered.
+  const approval = evaluateCommandSetApproval(paths, config.commands);
+  if (!approval.approved) {
+    const tampered = approval.reason === "chain_broken";
     return failure({
-      human:
-        "This verify command set is UNAPPROVED for execution. A new or changed command set must be human-confirmed " +
-        "before the first run (defense against an injected/changed command running silently). " +
-        "Review it with `th verify list`, then run `th verify approve` to confirm, then `th verify run`.",
-      data: { error: "unapproved_command_set", commandHash: commandSetHash(config.commands) },
+      human: tampered
+        ? "The verify approval ledger (.twinharness/verify-approvals.jsonl) is TAMPERED — its hash chain is broken. " +
+          "Refusing to run on a possibly-forged approval. Inspect the ledger, then re-approve with `th verify approve`."
+        : "This verify command set is UNAPPROVED for execution. A new or changed command set must be human-confirmed " +
+          "before the first run (defense against an injected/changed command running silently). " +
+          "Review it with `th verify list`, then run `th verify approve` to confirm, then `th verify run`.",
+      data: {
+        error: tampered ? "tampered_approval" : "unapproved_command_set",
+        commandHash: commandSetHash(config.commands),
+      },
     });
   }
 

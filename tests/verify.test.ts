@@ -69,7 +69,7 @@ describe("REQ-VERIFY-002: run executes configured commands and records a report"
     runInit(tp.paths, {});
     runVerifyAdd(tp.paths, PASS_CMD);
     runVerifyAdd(tp.paths, PASS_CMD);
-    runVerifyApprove(tp.paths, { as: "test" });
+    runVerifyApprove(tp.paths, { as: "test", tty: { isTTY: true, stdinLine: "y" } });
 
     const res = runVerifyRun(tp.paths);
     expect(res.ok).toBe(true);
@@ -86,7 +86,7 @@ describe("REQ-VERIFY-002: run executes configured commands and records a report"
     runInit(tp.paths, {});
     runVerifyAdd(tp.paths, PASS_CMD);
     runVerifyAdd(tp.paths, FAIL_CMD);
-    runVerifyApprove(tp.paths, { as: "test" });
+    runVerifyApprove(tp.paths, { as: "test", tty: { isTTY: true, stdinLine: "y" } });
 
     const res = runVerifyRun(tp.paths);
     expect(res.ok).toBe(false);
@@ -153,7 +153,7 @@ describe("REQ-VERIFY-SEC-001 (P6-2): a new/changed command set must be human-app
     tp = makeTempProject();
     runInit(tp.paths, {});
     runVerifyAdd(tp.paths, PASS_CMD);
-    expect(isCommandSetApproved(readVerifyConfig(tp.paths))).toBe(false);
+    expect(isCommandSetApproved(tp.paths, readVerifyConfig(tp.paths).commands)).toBe(false);
     const res = runVerifyRun(tp.paths);
     expect(res.ok).toBe(false);
     expect(res.data?.error).toBe("unapproved_command_set");
@@ -164,13 +164,13 @@ describe("REQ-VERIFY-SEC-001 (P6-2): a new/changed command set must be human-app
     tp = makeTempProject();
     runInit(tp.paths, {});
     runVerifyAdd(tp.paths, PASS_CMD);
-    expect(runVerifyApprove(tp.paths, { as: "alice" }).ok).toBe(true);
-    expect(isCommandSetApproved(readVerifyConfig(tp.paths))).toBe(true);
+    expect(runVerifyApprove(tp.paths, { as: "alice", tty: { isTTY: true, stdinLine: "y" } }).ok).toBe(true);
+    expect(isCommandSetApproved(tp.paths, readVerifyConfig(tp.paths).commands)).toBe(true);
     expect(runVerifyRun(tp.paths).ok).toBe(true);
 
     // Adding a command changes the set → unapproved again.
     runVerifyAdd(tp.paths, PASS_CMD);
-    expect(isCommandSetApproved(readVerifyConfig(tp.paths))).toBe(false);
+    expect(isCommandSetApproved(tp.paths, readVerifyConfig(tp.paths).commands)).toBe(false);
     expect(runVerifyRun(tp.paths).data?.error).toBe("unapproved_command_set");
   });
 

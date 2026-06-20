@@ -717,3 +717,61 @@ describe("extractBashWriteTargets: touch flags every operand, dest-last cmds fla
     expect(targets).not.toContain("a.ts");
   });
 });
+
+// ---------------------------------------------------------------------------
+// REQ-WGATE-010 (P1/R-02): the verify approval anchors are NOT silently writable
+// by a tool call — verify.json / verify-approvals.jsonl are gated in BOTH phases,
+// even though the rest of the state dir is doc/state-allowlisted. This closes the
+// "forge an approval around the write-gate" vector (the records authorize which
+// commands `th verify run` executes).
+// ---------------------------------------------------------------------------
+
+describe("REQ-WGATE-010: verify approval anchors are gated, not allowlisted", () => {
+  const anchors = [".twinharness/verify.json", ".twinharness/verify-approvals.jsonl"];
+
+  for (const anchor of anchors) {
+    it(`pre-implementation: a Write to ${anchor} is gated (ask in default mode)`, () => {
+      tp = makeTempProject();
+      writePreImplState(tp.paths); // default write_gate (ask)
+      const out = runHookPretoolGate(tp.paths, inputFor(anchor, tp.root));
+      expect(isAllow(out)).toBe(false);
+      expect(permissionDecision(out)).toBe("ask");
+      expect(permissionReason(out)).toContain("verify approval anchor");
+    });
+
+    it(`deny mode: a Write to ${anchor} is DENIED`, () => {
+      tp = makeTempProject();
+      writePreImplState(tp.paths, { write_gate: "deny" });
+      const out = runHookPretoolGate(tp.paths, inputFor(anchor, tp.root));
+      expect(permissionDecision(out)).toBe("deny");
+    });
+
+    it(`Phase B (post-implementation): a Write to ${anchor} is STILL gated (phase-independent)`, () => {
+      tp = makeTempProject();
+      writePostImplState(tp.paths, {
+        slices: [{ id: "SLICE-1", status: "in-progress", components: ["src/"] }],
+      });
+      const out = runHookPretoolGate(tp.paths, inputFor(anchor, tp.root));
+      expect(isAllow(out)).toBe(false);
+      expect(permissionDecision(out)).toBe("ask");
+    });
+  }
+
+  it("a non-anchor file in the same state dir (.twinharness/custom.json) stays allowed", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths);
+    const out = runHookPretoolGate(tp.paths, inputFor(".twinharness/custom.json", tp.root));
+    expect(isAllow(out)).toBe(true);
+  });
+
+  it("the legacy .agentic-sdlc state dir gates its verify.json too", () => {
+    // The anchor is derived from paths.stateDir, so it holds for either dir name.
+    // A project whose stateDir basename is .agentic-sdlc resolves the anchor there.
+    tp = makeTempProject();
+    writePreImplState(tp.paths);
+    const stateRel = path.basename(tp.paths.stateDir);
+    const out = runHookPretoolGate(tp.paths, inputFor(`${stateRel}/verify.json`, tp.root));
+    expect(isAllow(out)).toBe(false);
+    expect(permissionDecision(out)).toBe("ask");
+  });
+});

@@ -9,22 +9,31 @@
  * the run-health view (`th coverage report`, `th doctor`) can reflect whether the
  * suite is actually green, not just whether tests are anchored.
  *
- * Two small JSON files live under the state dir, never inside state.json (so the
- * state schema and its content-hash stability are untouched):
- *   - verify.json        → { commands, provenance, approvedHash }  (the config)
- *   - verify-report.json → the last run's results
+ * Files live under the state dir, never inside state.json (so the state schema
+ * and its content-hash stability are untouched):
+ *   - verify.json            → { commands, provenance }  (the config)
+ *   - verify-approvals.jsonl → append-only, hash-chained approval ledger (P1/R-02)
+ *   - verify-report.json     → the last run's results
  *
  * Security note (see SECURITY.md): the configured commands are run with the
  * shell, in the project root. They are operator-authored, exactly like the
  * scripts a developer would run by hand; `th verify run` never sources commands
  * from untrusted artifact content. Phase 6 hardening (#19) adds:
  *   - per-command provenance (actor + timestamp) recorded on `th verify add`;
- *   - a hash-pin of the command SET that must be human-confirmed before the first
- *     execution of a new/changed set (`requireApproval`);
  *   - a curated (not fully-inherited) child env;
  *   - secret redaction of the persisted/printed output tail;
  *   - a Windows/POSIX process-TREE kill on timeout so grandchildren die;
  *   - an optional read-only mode that refuses repo-mutating verification.
+ *
+ * P1 hardening (R-01/R-02/R-03 — bring verify.json to the decision-record
+ * standard): the command SET must be human-confirmed (a TTY barrier on
+ * `th verify approve`, in the command layer) before its first execution; the
+ * approval is recorded in a tamper-EVIDENT, SHA-256 hash-chained append-only
+ * ledger (`verify-approvals.jsonl`, mirroring `decisions.jsonl`) so a forged or
+ * edited approval breaks the chain and `verify run` fails CLOSED; and the config
+ * write is atomic + governed (and serialized by the command layer's
+ * `withStateLock`). A torn/unreadable config is treated as CORRUPT and refused,
+ * never silently degraded to an empty/approved set.
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -64,9 +73,17 @@ exports.DEFAULT_COMMAND_TIMEOUT_MS = void 0;
 exports.verifyConfigPath = verifyConfigPath;
 exports.verifyReportPath = verifyReportPath;
 exports.commandSetHash = commandSetHash;
+exports.loadVerifyConfig = loadVerifyConfig;
 exports.readVerifyConfig = readVerifyConfig;
 exports.writeVerifyConfig = writeVerifyConfig;
+exports.verifyApprovalsPath = verifyApprovalsPath;
+exports.approvalCanonicalText = approvalCanonicalText;
+exports.readVerifyApprovals = readVerifyApprovals;
+exports.verifyApprovalChain = verifyApprovalChain;
+exports.appendVerifyApproval = appendVerifyApproval;
+exports.evaluateCommandSetApproval = evaluateCommandSetApproval;
 exports.isCommandSetApproved = isCommandSetApproved;
+exports.latestApprovalFor = latestApprovalFor;
 exports.readVerifyReport = readVerifyReport;
 exports.writeVerifyReport = writeVerifyReport;
 exports.redactSecrets = redactSecrets;
@@ -78,7 +95,10 @@ const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const node_child_process_1 = require("node:child_process");
 const node_crypto_1 = require("node:crypto");
+const paths_1 = require("./paths");
 const atomic_io_1 = require("./atomic-io");
+const hash_1 = require("./hash");
+const jsonl_1 = require("./jsonl");
 const OUTPUT_TAIL_CHARS = 2000;
 /**
  * Per-command wall-clock budget (ms). A configured command that hangs (a watch
@@ -102,13 +122,31 @@ function verifyReportPath(paths) {
 function commandSetHash(commands) {
     return (0, node_crypto_1.createHash)("sha256").update(JSON.stringify(commands), "utf8").digest("hex");
 }
-/** Read the configured commands. Missing/invalid file → empty command list. */
-function readVerifyConfig(paths) {
+/**
+ * Read verify.json, DISTINGUISHING absent from present-but-corrupt (R-03). The old
+ * reader collapsed both to `{ commands: [] }`, so an unreadable/torn config read as
+ * "no commands" — which `isCommandSetApproved` then judged trivially approved
+ * (fail-OPEN). Here a present file that does not parse, or parses to the wrong
+ * shape, returns `status:"corrupt"` so the run gate can fail CLOSED instead of
+ * treating a corrupt config as an empty/approved set. The read goes through
+ * {@link readFileWithRetry} so a transient contention error (a reader colliding
+ * with a concurrent atomic rename of the config) is retried, not misjudged.
+ */
+function loadVerifyConfig(paths) {
     const file = verifyConfigPath(paths);
     if (!fs.existsSync(file))
-        return { commands: [] };
+        return { status: "absent", config: { commands: [] } };
+    let raw;
     try {
-        const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+        raw = (0, atomic_io_1.readFileWithRetry)(file);
+    }
+    catch {
+        // Present a moment ago but unreadable after the retry budget (e.g. removed
+        // mid-read) → treat as absent: there are no bytes to misjudge as corrupt.
+        return { status: "absent", config: { commands: [] } };
+    }
+    try {
+        const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === "object" && Array.isArray(parsed.commands)) {
             const obj = parsed;
             const commands = obj.commands.filter((c) => typeof c === "string");
@@ -116,34 +154,160 @@ function readVerifyConfig(paths) {
             if (Array.isArray(obj.provenance)) {
                 config.provenance = obj.provenance.filter((p) => p != null && typeof p.command === "string");
             }
-            if (typeof obj.approvedHash === "string")
-                config.approvedHash = obj.approvedHash;
-            if (typeof obj.approvedBy === "string")
-                config.approvedBy = obj.approvedBy;
-            if (typeof obj.approvedAt === "string")
-                config.approvedAt = obj.approvedAt;
-            return config;
+            return { status: "ok", config };
         }
+        // Present + parseable but the wrong shape (no commands array) → corrupt.
+        return { status: "corrupt", config: { commands: [] } };
     }
     catch {
-        // Fall through to empty.
+        // Present but unparseable JSON → corrupt. Fail CLOSED at the run gate; never
+        // silently degrade to "no commands / approved-empty" as the old reader did.
+        return { status: "corrupt", config: { commands: [] } };
     }
-    return { commands: [] };
 }
-function writeVerifyConfig(paths, config) {
-    fs.mkdirSync(paths.stateDir, { recursive: true });
-    fs.writeFileSync(verifyConfigPath(paths), JSON.stringify(config, null, 2) + "\n", "utf8");
+/** Read the configured commands. Missing/corrupt file → empty command list (the
+ * back-compat shape). Callers that must DISTINGUISH a corrupt config (to fail
+ * closed) use {@link loadVerifyConfig} directly. */
+function readVerifyConfig(paths) {
+    return loadVerifyConfig(paths).config;
 }
 /**
- * Whether the current command set has been approved for execution (#19, P6-2):
- * a non-empty set whose stored `approvedHash` matches the current command set.
- * An empty set is trivially "approved" (nothing to run); a new/changed set is
- * unapproved until `th verify approve` re-confirms it.
+ * Write verify.json atomically + through the governed write-surface chokepoint
+ * (R-03 — was a bare `fs.writeFileSync`, torn-readable and ungoverned). The
+ * command layer serializes concurrent mutations via `withStateLock`;
+ * {@link atomicWriteFile} threads `paths.root` so the target is asserted in-surface
+ * and the temp→fsync→rename→dir-fsync barrier makes a torn read impossible.
  */
-function isCommandSetApproved(config) {
-    if (config.commands.length === 0)
-        return true;
-    return config.approvedHash === commandSetHash(config.commands);
+function writeVerifyConfig(paths, config) {
+    (0, atomic_io_1.atomicWriteFile)(verifyConfigPath(paths), JSON.stringify(config, null, 2) + "\n", { root: paths.root });
+}
+function verifyApprovalsPath(paths) {
+    return path.join(paths.stateDir, "verify-approvals.jsonl");
+}
+/** Fixed canonical field order for hashing (deterministic JSON; recordHash omitted). */
+const APPROVAL_FIELD_ORDER = [
+    "approvedHash",
+    "commandCount",
+    "approvedBy",
+    "approvedAt",
+    "prevHash",
+];
+/** Deterministic canonical text of an approval event for hashing (recordHash omitted). */
+function approvalCanonicalText(event) {
+    const ordered = {};
+    for (const key of APPROVAL_FIELD_ORDER) {
+        const val = event[key];
+        if (val === undefined)
+            continue;
+        ordered[key] = val;
+    }
+    return JSON.stringify(ordered);
+}
+/** `recordHash` of an approval event = SHA-256 of its canonical text. */
+function approvalRecordHash(event) {
+    return (0, hash_1.hashContent)(approvalCanonicalText(event));
+}
+/** Validate a parsed approval line; malformed lines are skipped by the reader. */
+function isValidApprovalEvent(parsed) {
+    if (typeof parsed !== "object" || parsed === null)
+        return false;
+    const e = parsed;
+    if (typeof e.approvedHash !== "string" || !hash_1.HEX64.test(e.approvedHash))
+        return false;
+    if (typeof e.commandCount !== "number")
+        return false;
+    if (typeof e.approvedBy !== "string")
+        return false;
+    if (typeof e.approvedAt !== "string")
+        return false;
+    if (typeof e.prevHash !== "string" || !hash_1.HEX64.test(e.prevHash))
+        return false;
+    if (typeof e.recordHash !== "string" || !hash_1.HEX64.test(e.recordHash))
+        return false;
+    return true;
+}
+/** Read every approval event in file order. Missing file → []. Bad lines skipped. */
+function readVerifyApprovals(paths) {
+    return (0, jsonl_1.readJsonlValues)(verifyApprovalsPath(paths), isValidApprovalEvent);
+}
+/** The recordHash of the last VALID approval event, or GENESIS when none (tail parse). */
+function lastApprovalRecordHash(paths) {
+    const last = (0, jsonl_1.scanTailValid)(verifyApprovalsPath(paths), isValidApprovalEvent);
+    return last ? last.recordHash : hash_1.GENESIS_PREV_HASH;
+}
+/**
+ * Walk approval events with a running `expectedPrev`. A recomputed recordHash that
+ * does not match → the record was edited (a forged field); `prevHash !== expectedPrev`
+ * → inserted/deleted/reordered. Returns the FIRST break. Mirrors decisions' verifyChain.
+ */
+function verifyApprovalChain(events) {
+    let expectedPrev = hash_1.GENESIS_PREV_HASH;
+    for (let i = 0; i < events.length; i++) {
+        const e = events[i];
+        const { recordHash, ...rest } = e;
+        if (approvalRecordHash(rest) !== recordHash)
+            return { ok: false, brokenAt: i, reason: "edited" };
+        if (e.prevHash !== expectedPrev)
+            return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+        expectedPrev = e.recordHash;
+    }
+    return { ok: true };
+}
+/**
+ * Append one approval event, sealing the hash chain (mirrors `appendDecisionEvent`).
+ * The caller MUST already hold the `withStateLock` span. Reads only the current tail
+ * for `prevHash`, computes `recordHash`, then atomically appends the JSON line. The
+ * write-surface chokepoint fires here (not best-effort — this writer propagates) so a
+ * non-governed target throws.
+ */
+function appendVerifyApproval(paths, record) {
+    (0, paths_1.assertGovernedWriteSurface)(paths.root, verifyApprovalsPath(paths));
+    fs.mkdirSync(paths.stateDir, { recursive: true });
+    const prevHash = lastApprovalRecordHash(paths);
+    const withPrev = { ...record, prevHash };
+    const recordHash = approvalRecordHash(withPrev);
+    const sealed = { ...withPrev, recordHash };
+    fs.appendFileSync(verifyApprovalsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+    return sealed;
+}
+/**
+ * Evaluate whether `commands` is approved for execution against the tamper-evident
+ * ledger (R-02). An empty set is trivially approved (nothing to run). Otherwise the
+ * ledger chain is verified FIRST and a break fails CLOSED (`chain_broken` →
+ * unapproved). A set is approved iff the LATEST valid approval event's `approvedHash`
+ * equals `commandSetHash(commands)` — so any `add`/`clear` that changed the set since
+ * the last approval (the ledger is touched ONLY by `approve`) leaves the latest
+ * approval pointing at a different hash → unapproved until re-confirmed.
+ */
+function evaluateCommandSetApproval(paths, commands) {
+    if (commands.length === 0)
+        return { approved: true, reason: "empty" };
+    const events = readVerifyApprovals(paths);
+    if (!verifyApprovalChain(events).ok)
+        return { approved: false, reason: "chain_broken" };
+    const last = events.length ? events[events.length - 1] : undefined;
+    if (last && last.approvedHash === commandSetHash(commands))
+        return { approved: true, reason: "approved" };
+    return { approved: false, reason: "unapproved" };
+}
+/**
+ * Whether the current command set has been approved for execution (P1/R-02). A
+ * non-empty set is approved only when the tamper-evident ledger's latest event
+ * matches it on an unbroken chain; an empty set is trivially approved (nothing to
+ * run). Reads the ledger; the caller passes `paths` + the current `commands`.
+ */
+function isCommandSetApproved(paths, commands) {
+    return evaluateCommandSetApproval(paths, commands).approved;
+}
+/** The latest valid approval event matching `commands` (for audit display), or undefined. */
+function latestApprovalFor(paths, commands) {
+    if (commands.length === 0)
+        return undefined;
+    const events = readVerifyApprovals(paths);
+    if (!verifyApprovalChain(events).ok)
+        return undefined;
+    const last = events.length ? events[events.length - 1] : undefined;
+    return last && last.approvedHash === commandSetHash(commands) ? last : undefined;
 }
 /**
  * Read the last verify report, or null when none has been written.

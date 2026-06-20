@@ -17572,11 +17572,17 @@ function verifyReportPath(paths) {
 function commandSetHash(commands) {
   return (0, import_node_crypto3.createHash)("sha256").update(JSON.stringify(commands), "utf8").digest("hex");
 }
-function readVerifyConfig(paths) {
+function loadVerifyConfig(paths) {
   const file = verifyConfigPath(paths);
-  if (!fs11.existsSync(file)) return { commands: [] };
+  if (!fs11.existsSync(file)) return { status: "absent", config: { commands: [] } };
+  let raw;
   try {
-    const parsed = JSON.parse(fs11.readFileSync(file, "utf8"));
+    raw = readFileWithRetry(file);
+  } catch {
+    return { status: "absent", config: { commands: [] } };
+  }
+  try {
+    const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && Array.isArray(parsed.commands)) {
       const obj = parsed;
       const commands = obj.commands.filter((c) => typeof c === "string");
@@ -17586,22 +17592,83 @@ function readVerifyConfig(paths) {
           (p) => p != null && typeof p.command === "string"
         );
       }
-      if (typeof obj.approvedHash === "string") config2.approvedHash = obj.approvedHash;
-      if (typeof obj.approvedBy === "string") config2.approvedBy = obj.approvedBy;
-      if (typeof obj.approvedAt === "string") config2.approvedAt = obj.approvedAt;
-      return config2;
+      return { status: "ok", config: config2 };
     }
+    return { status: "corrupt", config: { commands: [] } };
   } catch {
+    return { status: "corrupt", config: { commands: [] } };
   }
-  return { commands: [] };
+}
+function readVerifyConfig(paths) {
+  return loadVerifyConfig(paths).config;
 }
 function writeVerifyConfig(paths, config2) {
-  fs11.mkdirSync(paths.stateDir, { recursive: true });
-  fs11.writeFileSync(verifyConfigPath(paths), JSON.stringify(config2, null, 2) + "\n", "utf8");
+  atomicWriteFile(verifyConfigPath(paths), JSON.stringify(config2, null, 2) + "\n", { root: paths.root });
 }
-function isCommandSetApproved(config2) {
-  if (config2.commands.length === 0) return true;
-  return config2.approvedHash === commandSetHash(config2.commands);
+function verifyApprovalsPath(paths) {
+  return path9.join(paths.stateDir, "verify-approvals.jsonl");
+}
+var APPROVAL_FIELD_ORDER = [
+  "approvedHash",
+  "commandCount",
+  "approvedBy",
+  "approvedAt",
+  "prevHash"
+];
+function approvalCanonicalText(event) {
+  const ordered = {};
+  for (const key of APPROVAL_FIELD_ORDER) {
+    const val = event[key];
+    if (val === void 0) continue;
+    ordered[key] = val;
+  }
+  return JSON.stringify(ordered);
+}
+function approvalRecordHash(event) {
+  return hashContent(approvalCanonicalText(event));
+}
+function isValidApprovalEvent(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const e = parsed;
+  if (typeof e.approvedHash !== "string" || !HEX64.test(e.approvedHash)) return false;
+  if (typeof e.commandCount !== "number") return false;
+  if (typeof e.approvedBy !== "string") return false;
+  if (typeof e.approvedAt !== "string") return false;
+  if (typeof e.prevHash !== "string" || !HEX64.test(e.prevHash)) return false;
+  if (typeof e.recordHash !== "string" || !HEX64.test(e.recordHash)) return false;
+  return true;
+}
+function readVerifyApprovals(paths) {
+  return readJsonlValues(verifyApprovalsPath(paths), isValidApprovalEvent);
+}
+function verifyApprovalChain(events) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    const { recordHash, ...rest } = e;
+    if (approvalRecordHash(rest) !== recordHash) return { ok: false, brokenAt: i, reason: "edited" };
+    if (e.prevHash !== expectedPrev) return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    expectedPrev = e.recordHash;
+  }
+  return { ok: true };
+}
+function evaluateCommandSetApproval(paths, commands) {
+  if (commands.length === 0) return { approved: true, reason: "empty" };
+  const events = readVerifyApprovals(paths);
+  if (!verifyApprovalChain(events).ok) return { approved: false, reason: "chain_broken" };
+  const last = events.length ? events[events.length - 1] : void 0;
+  if (last && last.approvedHash === commandSetHash(commands)) return { approved: true, reason: "approved" };
+  return { approved: false, reason: "unapproved" };
+}
+function isCommandSetApproved(paths, commands) {
+  return evaluateCommandSetApproval(paths, commands).approved;
+}
+function latestApprovalFor(paths, commands) {
+  if (commands.length === 0) return void 0;
+  const events = readVerifyApprovals(paths);
+  if (!verifyApprovalChain(events).ok) return void 0;
+  const last = events.length ? events[events.length - 1] : void 0;
+  return last && last.approvedHash === commandSetHash(commands) ? last : void 0;
 }
 function readVerifyReport(paths) {
   const file = verifyReportPath(paths);
@@ -23343,45 +23410,49 @@ function resolveVerifyActor(explicit) {
 function runVerifyAdd(paths, command, opts = {}) {
   const trimmed = command?.trim();
   if (!trimmed) return failure({ human: 'usage: th verify add "<command>"' });
-  const config2 = readVerifyConfig(paths);
-  config2.commands.push(trimmed);
   const actor = resolveVerifyActor(opts.as);
   const addedAt = (opts.now ?? (() => /* @__PURE__ */ new Date()))().toISOString();
-  config2.provenance = [...config2.provenance ?? [], { command: trimmed, actor, addedAt }];
-  if (config2.approvedHash !== commandSetHash(config2.commands)) {
-    delete config2.approvedHash;
-    delete config2.approvedBy;
-    delete config2.approvedAt;
-  }
-  writeVerifyConfig(paths, config2);
-  structuredLog({ cmd: "verify add", command: trimmed, actor, count: config2.commands.length });
+  const result = withStateLock(paths, () => {
+    const config2 = loadVerifyConfig(paths).config;
+    config2.commands.push(trimmed);
+    config2.provenance = [...config2.provenance ?? [], { command: trimmed, actor, addedAt }];
+    writeVerifyConfig(paths, config2);
+    return { commands: config2.commands, provenance: config2.provenance };
+  });
+  structuredLog({ cmd: "verify add", command: trimmed, actor, count: result.commands.length });
   return success({
-    data: { commands: config2.commands, provenance: config2.provenance, approved: isCommandSetApproved(config2) },
+    data: {
+      commands: result.commands,
+      provenance: result.provenance,
+      approved: isCommandSetApproved(paths, result.commands)
+    },
     human: `added: ${trimmed} (by ${actor})
-${config2.commands.length} command(s) configured.
+${result.commands.length} command(s) configured.
 This command set is UNAPPROVED for execution \u2014 run \`th verify approve\` to confirm it before \`th verify run\`.`
   });
 }
 function runVerifyList(paths) {
   const config2 = readVerifyConfig(paths);
+  const approved = isCommandSetApproved(paths, config2.commands);
+  const latest = approved ? latestApprovalFor(paths, config2.commands) : void 0;
   const provByCommand = new Map((config2.provenance ?? []).map((p) => [p.command, p]));
   const human = config2.commands.length ? config2.commands.map((c, i) => {
     const p = provByCommand.get(c);
     const prov = p ? `  (added by ${p.actor} at ${p.addedAt})` : "";
     return `  ${i + 1}. ${c}${prov}`;
-  }).join("\n") + "\n" + (isCommandSetApproved(config2) ? `
-Set APPROVED for execution${config2.approvedBy ? ` (by ${config2.approvedBy} at ${config2.approvedAt})` : ""}.` : "\nSet UNAPPROVED \u2014 run `th verify approve` before `th verify run`.") : '(no verify commands configured \u2014 add one with `th verify add "<command>"`)';
+  }).join("\n") + "\n" + (approved ? `
+Set APPROVED for execution${latest ? ` (by ${latest.approvedBy} at ${latest.approvedAt})` : ""}.` : "\nSet UNAPPROVED \u2014 run `th verify approve` before `th verify run`.") : '(no verify commands configured \u2014 add one with `th verify add "<command>"`)';
   return success({
     data: {
       commands: config2.commands,
       provenance: config2.provenance ?? [],
-      approved: isCommandSetApproved(config2)
+      approved
     },
     human
   });
 }
 function runVerifyClear(paths) {
-  writeVerifyConfig(paths, { commands: [] });
+  withStateLock(paths, () => writeVerifyConfig(paths, { commands: [] }));
   structuredLog({ cmd: "verify clear" });
   return success({ data: { commands: [] }, human: "verify commands cleared." });
 }
@@ -23396,17 +23467,29 @@ function renderReport(report) {
   ].join("\n");
 }
 function runVerifyRun(paths, opts = {}) {
-  const config2 = readVerifyConfig(paths);
+  const loaded = loadVerifyConfig(paths);
+  if (loaded.status === "corrupt") {
+    return failure({
+      human: "verify.json is present but unreadable/corrupt \u2014 refusing to run (fail-closed). It is NOT treated as an empty/approved set. Inspect it, or run `th verify clear` and re-configure.",
+      data: { error: "corrupt_config" }
+    });
+  }
+  const config2 = loaded.config;
   if (config2.commands.length === 0) {
     return failure({
       human: 'No verify commands configured. Add one with `th verify add "<command>"` (e.g. `th verify add "npm test"`).',
       data: { error: "no_verify_commands" }
     });
   }
-  if (!isCommandSetApproved(config2)) {
+  const approval = evaluateCommandSetApproval(paths, config2.commands);
+  if (!approval.approved) {
+    const tampered = approval.reason === "chain_broken";
     return failure({
-      human: "This verify command set is UNAPPROVED for execution. A new or changed command set must be human-confirmed before the first run (defense against an injected/changed command running silently). Review it with `th verify list`, then run `th verify approve` to confirm, then `th verify run`.",
-      data: { error: "unapproved_command_set", commandHash: commandSetHash(config2.commands) }
+      human: tampered ? "The verify approval ledger (.twinharness/verify-approvals.jsonl) is TAMPERED \u2014 its hash chain is broken. Refusing to run on a possibly-forged approval. Inspect the ledger, then re-approve with `th verify approve`." : "This verify command set is UNAPPROVED for execution. A new or changed command set must be human-confirmed before the first run (defense against an injected/changed command running silently). Review it with `th verify list`, then run `th verify approve` to confirm, then `th verify run`.",
+      data: {
+        error: tampered ? "tampered_approval" : "unapproved_command_set",
+        commandHash: commandSetHash(config2.commands)
+      }
     });
   }
   const report = runCommands(paths.root, config2.commands, { readOnly: opts.readOnly });

@@ -99,7 +99,7 @@ Usage:
                                     Planned/implemented/tested/passing breakdown per REQ-ID (status view)
   th verify add "<command>" [--as <actor>]  Add a project test/check command (records actor+time provenance; the new set is UNAPPROVED until \`th verify approve\`)
   th verify list                    Show configured verify commands (with provenance + approval status)
-  th verify approve [--as <actor>]  Human-confirm the current command SET for execution (hash-pinned; re-required after any add/change)
+  th verify approve [--as <actor>]  Human-confirm the current command SET for execution — requires an interactive TTY (an agent/non-interactive caller cannot self-approve); sealed in a tamper-evident ledger; re-required after any add/change
   th verify clear                   Remove all configured verify commands
   th verify run [--read-only]       Run every configured verify command; refuses an UNAPPROVED set; --read-only refuses repo-mutating commands; writes a report; exit 1 on failure
   th build plan [--include-done] [--advise]  Schedule slices into dependency-aware, conflict-free build waves (§16; a slice's wave is strictly after its hard depends_on); --advise emits the parallelism-optimizer advisory (max wave width + serializing conflict pairs); exit 7 when the depends_on graph is unsatisfiable (cycle/dangling)
