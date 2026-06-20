@@ -188,12 +188,14 @@ describe("REQ-PCO-070: CLI/MCP asymmetry is pinned (intentional, not accidental 
     }
   });
 
-  it("AC#5: the mutating-tool count is pinned to 30 (beside the 62-tool parity count)", () => {
+  it("AC#5: the mutating-tool count is pinned to 32 (beside the 62-tool parity count)", () => {
     // Mutating = NOT readOnlyHint. This is the write-surface size: every one of
     // these is exercised by the write-surface audit harness (AC#1). Pinning it
     // means a new mutating tool can never be added without this suite noticing.
+    // R-09 raised this from 30→32: th_route and th_scorecard are now honestly
+    // mutating (they append an opt-in telemetry.jsonl line per call when ON).
     const mutating = TOOL_DEFS.filter((t) => TOOL_ANNOTATIONS[t.name]?.readOnlyHint === false);
-    expect(mutating.length).toBe(30);
+    expect(mutating.length).toBe(32);
     // Cross-check against the existing 62-tool parity count: read-only + mutating
     // partition the whole registry exactly (no tool is un-annotated).
     const readOnly = TOOL_DEFS.filter((t) => TOOL_ANNOTATIONS[t.name]?.readOnlyHint === true);

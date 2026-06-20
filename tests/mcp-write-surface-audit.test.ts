@@ -130,6 +130,11 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   th_build_sub_release: { subId: "SLICE-1#sub" },
   // repo map — writes .twinharness/repo-map.json + docs/00-repo-map.md (both governed)
   th_repo_map: { write: true },
+  // routing + scorecard — mutating because each appends an opt-in telemetry.jsonl line
+  // under stateDir when telemetry is ON (R-09). The target is governed; with telemetry
+  // off in this harness they write nothing, and either way never escape the surface.
+  th_route: { agent: "builder" },
+  th_scorecard: {},
   // decision ledger (append to stateDir)
   th_decision_add: { title: "probe", rationale: "probe" },
   // artifacts — PATH-TAKING: register a boundary path; claim/release a section path

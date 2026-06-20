@@ -10,6 +10,8 @@
  */
 
 import { describe, it, expect, afterEach } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import {
@@ -19,10 +21,25 @@ import {
   listTools,
   compactHeavyResult,
 } from "../src/mcp-server";
+import { writeTelemetryConfig } from "../src/core/telemetry";
 import { success, failure } from "../src/core/output";
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
+
+/** Snapshot every file under `dir` as a relative-path → bytes map (recursive). */
+function snapshotDir(dir: string): Map<string, Buffer> {
+  const out = new Map<string, Buffer>();
+  const walk = (cur: string) => {
+    for (const ent of fs.readdirSync(cur, { withFileTypes: true })) {
+      const abs = path.join(cur, ent.name);
+      if (ent.isDirectory()) walk(abs);
+      else out.set(path.relative(dir, abs), fs.readFileSync(abs));
+    }
+  };
+  if (fs.existsSync(dir)) walk(dir);
+  return out;
+}
 
 describe("REQ-PCO-071: every tool is annotated (no gaps, no orphans)", () => {
   it("REQ-PCO-071: every TOOL_DEFS entry has exactly one annotation", () => {
@@ -53,13 +70,18 @@ describe("REQ-PCO-071: hint semantics are coherent", () => {
   });
 
   it("REQ-PCO-071: known read-only tools are flagged read-only", () => {
-    for (const name of ["th_state_get", "th_next", "th_doctor", "th_scorecard", "th_coverage_report", "th_repo_relevant", "th_repo_impact"]) {
+    // R-09: th_scorecard was previously (wrongly) pinned read-only here while it
+    // appends a telemetry.jsonl line per call when telemetry is ON. It now lives in
+    // the not-read-only list below. th_doctor is the genuine read-only health oracle.
+    for (const name of ["th_state_get", "th_next", "th_doctor", "th_coverage_report", "th_repo_relevant", "th_repo_impact"]) {
       expect(toolAnnotations(name)?.readOnlyHint, `${name} must be read-only`).toBe(true);
     }
   });
 
   it("REQ-PCO-071: mutating tools are flagged not-read-only", () => {
-    for (const name of ["th_state_set", "th_tier_record", "th_drift_add", "th_verify_clear", "th_init", "th_repo_map"]) {
+    // R-09: th_route and th_scorecard write an opt-in telemetry line per call, so
+    // their honest hint is readOnlyHint:false (moved out of the read-only list above).
+    for (const name of ["th_state_set", "th_tier_record", "th_drift_add", "th_verify_clear", "th_init", "th_repo_map", "th_route", "th_scorecard"]) {
       expect(toolAnnotations(name)?.readOnlyHint, `${name} must NOT be read-only`).toBe(false);
     }
   });
@@ -74,6 +96,9 @@ describe("REQ-PCO-071: hint semantics are coherent", () => {
       "th_drift_add", "th_decision_add", "th_debate_add", "th_verify_add",
       "th_build_claim", "th_build_release", "th_build_sub_claim", "th_build_sub_release",
       "th_artifact_claim", "th_artifact_release",
+      // R-09: each appends one telemetry.jsonl line per call when telemetry is ON
+      // (N calls → N lines), so idempotentHint:false matches the append reality.
+      "th_route", "th_scorecard",
     ]) {
       expect(toolAnnotations(name)?.idempotentHint, `${name} (append) must not be idempotent`).toBe(false);
     }
@@ -148,5 +173,56 @@ describe("REQ-PCO-071: compact-by-default for heavy tools (verbose opt-in)", () 
       expect(def.inputSchema.properties.verbose, `${name} must declare a verbose input`).toBeDefined();
       expect(def.inputSchema.properties.verbose!.type).toBe("boolean");
     }
+  });
+});
+
+describe("REQ-PCO-071 / R-09: read-only tools write zero bytes even with telemetry ON", () => {
+  // The general guard the deep dive (R-09) calls for: a tool that advertises
+  // readOnlyHint:true must perform NO stateDir mutation on ANY client-reachable call.
+  // Telemetry is the worst case — it's the opt-in switch that turned th_route /
+  // th_scorecard into disk writers under a false read-only hint. With telemetry ON
+  // and a populated state dir (including a LEGACY interview.json that would otherwise
+  // be lazily rewritten on read), driving every readOnlyHint:true tool must leave the
+  // state dir byte-for-byte unchanged. If a future tool starts writing under a
+  // read-only hint, this sweep fails with the offending tool name.
+  it("R-09: a telemetry-on sweep over every read-only tool leaves stateDir unchanged", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    // Worst case: telemetry is explicitly ENABLED (the R-09 trigger).
+    writeTelemetryConfig(tp.paths, { enabled: true });
+    // Seed a LEGACY-shape interview store so the read-only interview/gate tools
+    // exercise the lazy-upgrade path (which must NOT persist on a read-only call).
+    fs.writeFileSync(
+      tp.paths.interviewFile,
+      JSON.stringify({ idea: "legacy", threshold: 0.2, ambiguity: 0.1, rounds: [] }, null, 2) + "\n",
+      "utf8",
+    );
+
+    const before = snapshotDir(tp.paths.stateDir);
+
+    const readOnly = TOOL_DEFS.filter((t) => TOOL_ANNOTATIONS[t.name]?.readOnlyHint === true);
+    // Guard against a vacuous sweep: the read-only set must be non-trivial AND must
+    // include the interview/next gate consumers that exercise the lazy-upgrade path.
+    expect(readOnly.length).toBeGreaterThan(10);
+    const roNames = new Set(readOnly.map((t) => t.name));
+    expect(roNames.has("th_interview_status"), "th_interview_status must be read-only (R-09)").toBe(true);
+    expect(roNames.has("th_next"), "th_next must be read-only").toBe(true);
+
+    for (const def of readOnly) {
+      // Every read-only oracle tolerates empty args (sensible defaults); drive it.
+      def.run(tp.paths, {});
+    }
+
+    const after = snapshotDir(tp.paths.stateDir);
+
+    // No new files, no deleted files, no changed bytes — for EVERY read-only tool.
+    const newFiles = [...after.keys()].filter((k) => !before.has(k));
+    const goneFiles = [...before.keys()].filter((k) => !after.has(k));
+    expect(newFiles, `read-only sweep created files: ${newFiles.join(", ")}`).toEqual([]);
+    expect(goneFiles, `read-only sweep deleted files: ${goneFiles.join(", ")}`).toEqual([]);
+    const changed = [...after.entries()]
+      .filter(([k, buf]) => !before.get(k)?.equals(buf))
+      .map(([k]) => k);
+    expect(changed, `read-only sweep mutated bytes in: ${changed.join(", ")}`).toEqual([]);
   });
 });

@@ -1587,8 +1587,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_build_plan: ro("oracle"),
   th_build_sub_claim: wr("build", { idempotent: false }),
   th_build_sub_release: wr("build", { idempotent: false }),
-  // routing
-  th_route: ro("routing"),
+  // routing — writes an opt-in telemetry.jsonl line per call when telemetry is ON
+  // (one event per call ⇒ non-idempotent), so it is NOT read-only (R-09).
+  th_route: wr("routing", { idempotent: false }),
   // coverage
   th_coverage_check: ro("coverage"),
   th_coverage_report: ro("coverage"),
@@ -1636,7 +1637,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_stage_list: ro("stage"),
   // run-health oracles
   th_doctor: ro("health"),
-  th_scorecard: ro("health"),
+  // th_scorecard appends an opt-in telemetry.jsonl line per call when telemetry is ON
+  // (one event per call ⇒ non-idempotent), so it is NOT read-only (R-09).
+  th_scorecard: wr("health", { idempotent: false }),
   // slices
   th_slices_sync: wr("slices", { idempotent: true }),
   th_slice_set_status: wr("slices", { idempotent: true }),
