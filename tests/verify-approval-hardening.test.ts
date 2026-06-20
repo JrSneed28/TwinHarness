@@ -274,3 +274,60 @@ describe("REQ-VERIFY-P1-R03: a corrupt verify.json is refused, not read as empty
     expect(runVerifyRun(tp.paths).data?.error).toBe("unapproved_command_set");
   });
 });
+
+// ===========================================================================
+// R-20 — confirm→seal TOCTOU: a set that changes after the human confirms is
+// REJECTED under the lock (the human approves CONTENT, not a generic id).
+// ===========================================================================
+
+describe("REQ-VERIFY-P1-R20: confirm→seal TOCTOU is closed", () => {
+  it("a `verify add` injected between confirm and lock ABORTS the approval (nothing sealed)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runVerifyAdd(tp.paths, PASS_CMD);
+
+    // The human confirms the 1-command set; a concurrent `add` injects a second command
+    // in the confirm→lock window (deterministically, via the onAfterConfirm seam).
+    const res = runVerifyApprove(tp.paths, {
+      as: "human",
+      tty: TTY_YES,
+      onAfterConfirm: () => {
+        runVerifyAdd(tp.paths, `node -e "process.exit(1)"`);
+      },
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("command_set_changed");
+    // Nothing sealed: no ledger entry; the (now 2-command) set is unapproved; run refuses.
+    expect(readVerifyApprovals(tp.paths)).toHaveLength(0);
+    expect(isCommandSetApproved(tp.paths, readVerifyConfig(tp.paths).commands)).toBe(false);
+    expect(runVerifyRun(tp.paths).data?.error).toBe("unapproved_command_set");
+  });
+
+  it("an UNCHANGED set through the window still seals normally (no false abort)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    runVerifyAdd(tp.paths, PASS_CMD);
+
+    let called = false;
+    const res = runVerifyApprove(tp.paths, {
+      as: "human",
+      tty: TTY_YES,
+      onAfterConfirm: () => {
+        called = true; // observe the window, but do NOT mutate the set
+      },
+    });
+
+    expect(called).toBe(true);
+    expect(res.ok).toBe(true);
+    expect(readVerifyApprovals(tp.paths)).toHaveLength(1);
+    expect(isCommandSetApproved(tp.paths, readVerifyConfig(tp.paths).commands)).toBe(true);
+  });
+
+  // NOTE (OPT-2): runVerifyApprove also prints the actual command list + a short hash
+  // fingerprint to stderr before the barrier so the confirmation is content-bound (not a
+  // blind "approve the verify command set?"). That preview is informational UX; per repo
+  // convention these command tests assert on the returned CommandResult, not on stderr
+  // bytes (vitest's stdio handling makes stderr capture unreliable here), so the preview
+  // is intentionally not asserted. The SECURITY guarantee — reject-on-drift — is covered above.
+});

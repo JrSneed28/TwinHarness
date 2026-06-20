@@ -12,6 +12,7 @@ import {
   appendVerifyApproval,
   latestApprovalFor,
   type VerifyReport,
+  type VerifyApprovalEvent,
 } from "../core/verify";
 import { withStateLock } from "../core/state-store";
 import { requireTTYConfirmation, type TTYConfirmationOpts } from "./decision";
@@ -135,6 +136,12 @@ export interface VerifyApproveOptions {
   now?: () => Date;
   /** TTY barrier injection (tests) — { isTTY?, stdinLine? }. Mirrors decision approve. */
   tty?: TTYConfirmationOpts;
+  /**
+   * R-20 TEST SEAM: invoked AFTER the TTY confirm returns ok and BEFORE the approve
+   * lock is taken. Exists solely to exercise the confirm→seal window deterministically
+   * (e.g. inject a concurrent `verify add`). Production callers leave this undefined.
+   */
+  onAfterConfirm?: () => void;
 }
 
 /**
@@ -169,6 +176,18 @@ export function runVerifyApprove(paths: ProjectPaths, opts: VerifyApproveOptions
     });
   }
 
+  // R-20: snapshot the command-set hash the human is about to confirm, BEFORE the
+  // barrier. A concurrent `th verify add` landing in the confirm→lock window must not
+  // be able to seal a set the human never saw (a confirm→seal TOCTOU); the under-lock
+  // re-check below rejects on drift. Surface the actual commands + a short fingerprint
+  // to stderr so the confirmation is CONTENT-bound, not a blind "approve the verify
+  // command set?" on an opaque id.
+  const preConfirmHash = commandSetHash(pre.config.commands);
+  process.stderr.write(
+    `About to approve ${pre.config.commands.length} verify command(s) [${preConfirmHash.slice(0, 12)}]:\n` +
+      pre.config.commands.map((c) => `  • ${c}\n`).join(""),
+  );
+
   // ---- R-01 BARRIER (runs before any approval write) ------------------------
   const confirm = requireTTYConfirmation("the verify command set", "approve", opts.tty);
   if (!confirm.ok) {
@@ -183,21 +202,40 @@ export function runVerifyApprove(paths: ProjectPaths, opts: VerifyApproveOptions
     });
   }
 
+  // R-20 TEST SEAM: deterministically exercise the confirm→lock window (no-op in prod).
+  opts.onAfterConfirm?.();
+
   const actor = resolveVerifyActor(opts.as);
   const approvedAt = (opts.now ?? (() => new Date()))().toISOString();
-  // Re-read the command set under the lock and seal the approval to whatever set is
-  // current at lock time (R-03 — no add/approve race can stamp a stale set). Echo
-  // the SAME in-lock set in the result so the reported commands match what was sealed.
-  const { sealed, commands } = withStateLock(paths, () => {
+  // Re-read the command set under the lock (R-03 — serialized). R-20: REJECT if the set
+  // drifted from what the human confirmed (preConfirmHash). The prior contract sealed
+  // "whatever is current at lock time", which let a concurrent `verify add` inject a
+  // command into the human's approval; now a changed set aborts the approval instead of
+  // silently sealing the injected command. Echo the SAME in-lock set on success so the
+  // reported commands match what was sealed.
+  const outcome = withStateLock(paths, (): { drifted: true } | { drifted: false; sealed: VerifyApprovalEvent; commands: string[] } => {
     const locked = loadVerifyConfig(paths).config.commands;
+    const lockedHash = commandSetHash(locked); // computed once (drift check + sealed approvedHash)
+    if (lockedHash !== preConfirmHash) return { drifted: true };
     const event = appendVerifyApproval(paths, {
-      approvedHash: commandSetHash(locked),
+      approvedHash: lockedHash,
       commandCount: locked.length,
       approvedBy: actor,
       approvedAt,
     });
-    return { sealed: event, commands: locked };
+    return { drifted: false, sealed: event, commands: locked };
   });
+
+  if (outcome.drifted) {
+    structuredLog({ cmd: "verify approve", error: "command_set_changed" });
+    return failure({
+      human:
+        "The verify command set changed between your confirmation and the approval lock — " +
+        "approval ABORTED (nothing was sealed). Re-run `th verify approve` to review and approve the current set.",
+      data: { error: "command_set_changed" },
+    });
+  }
+  const { sealed, commands } = outcome;
 
   structuredLog({ cmd: "verify approve", actor, commands: sealed.commandCount, hash: sealed.approvedHash });
   return success({
