@@ -875,10 +875,11 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       properties: {
         write: boolProp("Write the artifacts (default true). false = dry/preview, no filesystem write."),
         format: { type: "string", description: "Text rendering: summary (default) | json | md.", enum: ["summary", "json", "md"] },
+        force: boolProp("Overwrite a target that is registered as an approved artifact (R-14). Default false: a write that would clobber a registered docs/00-repo-map.md (or repo-map.json) is refused; force:true deliberately re-authors it."),
       },
       additionalProperties: false,
     },
-    run: (paths, args) => runRepoMap(paths, { write: optBool(args, "write"), format: optString(args, "format") }),
+    run: (paths, args) => runRepoMap(paths, { write: optBool(args, "write"), format: optString(args, "format"), force: optBool(args, "force") }),
   },
   // Anchor: REQ-RU-045
   // Anchor: REQ-RU-094

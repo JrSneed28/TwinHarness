@@ -5,6 +5,7 @@ import { readState } from "../core/state-store";
 import { readVerifyConfig, readVerifyReport } from "../core/verify";
 import { gatingObligations, reduceDecisions, readDecisionEvents } from "../core/decisions";
 import { isFinalVerification } from "../core/stages";
+import { matchApprovedArtifact } from "../core/artifact-guard";
 
 /**
  * Stop-gate decision (plan pre-mortem #2 mitigation): the mechanical gate that
@@ -836,6 +837,31 @@ export function runHookPretoolGate(
       `Use \`th verify add\` / \`th verify approve\` (approve requires an interactive human TTY) instead of editing the file. ` +
       `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1.`;
     return fireGate(gateMode, reason);
+  }
+
+  // Step e3 (R-14 / DR-04a): a write that would OVERWRITE a registered approved
+  // artifact is held for human confirmation, even inside the otherwise-whitelisted
+  // `docs/` surface. `approved_artifacts` is the mechanical record of "reviewed /
+  // approved" content; a stage re-run that re-authors such a doc must not SILENTLY
+  // clobber a human-edited version. We fire `ask` (not `deny`) so the deliberate
+  // re-author still works — the human approves the overwrite interactively, which IS
+  // the escape for a tool write (the CLI/MCP `th repo map` direct-write path wires an
+  // explicit `--force`). This runs AHEAD of the doc/state allowlist (step f), which
+  // would otherwise blanket-allow every `docs/` write; a NEVER-registered `docs/` path
+  // is unaffected (falls through to step f). Keyed strictly on registration, so
+  // non-artifact state/ledger writes never reach here.
+  const matched = matchApprovedArtifact(state.approved_artifacts, paths.root, absTarget);
+  if (matched) {
+    const reason =
+      `TwinHarness write-gate held this write for confirmation (R-14 — approved-artifact overwrite). ` +
+      `Target path: ${relFwd}. ` +
+      `This path is a REGISTERED approved artifact (${matched.file} v${matched.version}, hash ${matched.hash}); ` +
+      `re-running a stage must not silently overwrite reviewed/human-edited content. ` +
+      `If this re-author is intended, APPROVE the write, then record the new content with ` +
+      `\`th artifact register ${matched.file} --version ${matched.version + 1}\` (a version bump). ` +
+      `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1. ` +
+      `AGENT INSTRUCTION: do NOT blindly retry — confirm the overwrite is intended before proceeding.`;
+    return fireGate("ask", reason);
   }
 
   // Step f: Doc/state allowlist → allow.

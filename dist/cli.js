@@ -160,8 +160,8 @@ Usage:
                                     Assemble a bounded child-agent handoff (reuses context pack for a slice)
   th delegate capsule               Print the blank Delegation Capsule skeleton (the strict return format)
   th delegate check --capsule <path>  Validate a returned capsule has every required section (presence only)
-  th repo map [--write|--no-write] [--format <summary|json|md>] [--max-files <N>] [--max-bytes <N>]
-                                    Scan the repo; write .twinharness/repo-map.json + docs/00-repo-map.md (writes by default; --no-write = dry/preview; --max-files/--max-bytes raise the scan caps for large repos)
+  th repo map [--write|--no-write] [--force] [--format <summary|json|md>] [--max-files <N>] [--max-bytes <N>]
+                                    Scan the repo; write .twinharness/repo-map.json + docs/00-repo-map.md (writes by default; --no-write = dry/preview; --force overwrites a target registered as an approved artifact; --max-files/--max-bytes raise the scan caps for large repos)
   th repo check [--max-files <N>] [--max-bytes <N>]
                                     Report whether .twinharness/repo-map.json is fresh vs the working tree (exit 0 fresh / 4 stale / 5 no-map / 1 parse-fail; pass the same caps used to build the map)
   th repo relevant (--slice <ID> | --req <REQ-ID> | --file <path> | --query <kw>)
@@ -223,7 +223,7 @@ Global flags:
   --task <s>        (delegate) Free-text task label (echoed; not parsed)
   --agent <a>       (route, delegate pack) The agent being spawned / delegated to
   --capsule <path>  (delegate check) Capsule file to validate
-  --force           (init) Reset existing state.json; (collab fragment) overwrite an existing fragment
+  --force           (init) Reset existing state.json; (collab fragment) overwrite an existing fragment; (repo map) overwrite a target registered as an approved artifact (R-14)
   --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)
   --max-tokens <k>  (init) Per-session context budget in THOUSANDS; persisted as max_tokens (×1000, e.g. 150 → 150000)
   --max <k>         (budget check) Budget override in THOUSANDS; default is state.max_tokens, else the tier-aware default
@@ -655,10 +655,13 @@ function dispatch(parsed) {
                     // default). --no-write/--dry-run wins when both are given.
                     const noWrite = parsed.flags.noWrite || parsed.flags.dryRun;
                     // P4-8 — configurable scan caps for large repos.
+                    // R-14 / DR-04a — --force overrides the approved-artifact clobber guard so a
+                    // deliberately-registered repo-map artifact can still be re-authored.
                     return (0, repo_1.runRepoMap)(paths, {
                         write: !noWrite,
                         format: parsed.flags.format,
                         scanOptions: buildScanOptions(parsed.flags),
+                        force: parsed.flags.force,
                     });
                 }
                 case "relevant":

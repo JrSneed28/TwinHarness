@@ -23,6 +23,8 @@ import { resolveWithinRoot } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { structuredLog } from "../core/log";
 import { requireState } from "../core/guards";
+import { readState } from "../core/state-store";
+import { matchApprovedArtifact, APPROVED_ARTIFACT_CLOBBER_CODE } from "../core/artifact-guard";
 import { scanRepo, type ScanOptions } from "../core/repo-map/scanner";
 import { serializeRepoMap, renderRepoMapMarkdown, parseRepoMap, type RepoMap, type ScanReport } from "../core/repo-map/schema";
 import { hashFileBytes } from "../core/hash";
@@ -69,6 +71,16 @@ export interface RepoMapOptions {
    * scan, which the summary view then flags with a prominent banner (P0-2).
    */
   scanOptions?: ScanOptions;
+  /**
+   * R-14 / DR-04a clobber-guard escape. The two repo-map targets are GENERATED
+   * artifacts that are not normally registered in `approved_artifacts`; but if an
+   * operator has explicitly registered one (e.g. a hand-curated `docs/00-repo-map.md`),
+   * a re-run would silently overwrite it. With `force:false` (default) such a write is
+   * REFUSED; `force:true` is the deliberate-re-author escape (the version-bump/force
+   * path DR-04 mandates). Inert when neither target is registered — the common case,
+   * so normal `th repo map` re-runs are unaffected.
+   */
+  force?: boolean;
 }
 
 /** Relative artifact paths (POSIX) reported in `data.artifacts`. */
@@ -191,6 +203,35 @@ export function runRepoMap(paths: ProjectPaths, opts: RepoMapOptions = {}): Comm
   if (write) {
     const jsonAbs = path.join(paths.stateDir, "repo-map.json");
     const mdAbs = path.join(paths.docsDir, "00-repo-map.md");
+
+    // R-14 / DR-04a clobber guard. Both repo-map targets are GENERATED artifacts,
+    // not normally registered in `approved_artifacts`, so this guard is inert on a
+    // normal re-run. But if an operator has explicitly registered either path, a
+    // re-run would SILENTLY overwrite reviewed/approved content. Refuse unless
+    // `--force` is supplied (the deliberate-re-author escape). Read state read-only;
+    // an uninitialized project (no state) has no approved artifacts → guard inert, so
+    // `th repo map` still works pre-init. Keyed strictly on registration: no effect on
+    // any non-registered write.
+    if (!opts.force) {
+      const sr = readState(paths);
+      const approved = sr.state?.approved_artifacts ?? [];
+      const blocked = matchApprovedArtifact(approved, paths.root, mdAbs)
+        ? REPO_MAP_MD_REL
+        : matchApprovedArtifact(approved, paths.root, jsonAbs)
+          ? REPO_MAP_JSON_REL
+          : null;
+      if (blocked) {
+        structuredLog({ cmd: "repo map", error: APPROVED_ARTIFACT_CLOBBER_CODE, file: blocked });
+        return failure({
+          human:
+            `Refusing to overwrite ${blocked}: it is a REGISTERED approved artifact, and a silent ` +
+            `clobber would lose reviewed content (R-14). Re-run with --force to overwrite deliberately, ` +
+            `then re-register it (\`th artifact register ${blocked} --version <N+1>\`).`,
+          data: { error: APPROVED_ARTIFACT_CLOBBER_CODE, file: blocked },
+        });
+      }
+    }
+
     try {
       atomicWrite(paths.root, jsonAbs, json);
     } catch {
