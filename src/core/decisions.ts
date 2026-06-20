@@ -20,6 +20,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHmac } from "node:crypto";
 import type { ProjectPaths } from "./paths";
+import { assertGovernedWriteSurface } from "./paths";
 import { hashContent, GENESIS_PREV_HASH, HEX64 } from "./hash";
 import { readJsonlValues, scanTailValid } from "./jsonl";
 import { canonicalizeStage } from "./stages";
@@ -167,6 +168,11 @@ export interface ApprovalAuditRecord {
  */
 export function appendApprovalAudit(paths: ProjectPaths, record: ApprovalAuditRecord): void {
   try {
+    // AC#1 write-surface chokepoint (defense-in-depth, INSIDE the best-effort try):
+    // a non-governed target is PREVENTED without crashing — this audit path must
+    // never abort a governance flow. approvalAuditPath is under stateDir; the
+    // propagating mechanical guard lives at appendDecisionEvent (below).
+    assertGovernedWriteSurface(paths.root, approvalAuditPath(paths));
     fs.mkdirSync(paths.stateDir, { recursive: true });
     fs.appendFileSync(approvalAuditPath(paths), JSON.stringify(record) + "\n", "utf8");
   } catch {
@@ -369,6 +375,9 @@ export function appendDecisionEvent(
   event: Omit<DecisionEvent, "prevHash" | "recordHash" | "keyedHash">,
   key?: string | null,
 ): DecisionEvent {
+  // AC#1 write-surface chokepoint: decisionsPath is under stateDir; the guard fires
+  // here (not best-effort — this writer propagates) so a non-governed target throws.
+  assertGovernedWriteSurface(paths.root, decisionsPath(paths));
   fs.mkdirSync(paths.stateDir, { recursive: true });
   const prevHash = readLastDecisionRecordHash(paths);
   const withPrev: Omit<DecisionEvent, "recordHash" | "keyedHash"> = { ...event, prevHash };

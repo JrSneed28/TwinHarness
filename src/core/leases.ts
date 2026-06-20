@@ -17,6 +17,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "./paths";
+import { assertGovernedWriteSurface } from "./paths";
 import type { SliceState } from "./state-schema";
 
 export interface LeaseEvent {
@@ -107,6 +108,9 @@ export function appendLeaseEvent(
   event: Omit<LeaseEvent, "ts">,
   now: () => Date = () => new Date(),
 ): void {
+  // AC#1 write-surface chokepoint: leasesPath is under stateDir; the guard fires
+  // here (this writer propagates) so a non-governed target throws WriteSurfaceError.
+  assertGovernedWriteSurface(paths.root, leasesPath(paths));
   fs.mkdirSync(paths.stateDir, { recursive: true });
   // Explicit canonical serialization (LEASE_FIELD_ORDER): drops `undefined`-valued
   // keys, so a top-level lease (no `parent`) serializes byte-identically to the

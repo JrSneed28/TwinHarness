@@ -15489,6 +15489,40 @@ var PathContainmentError = class extends Error {
   /** Stable machine token surfaced in the `--json` failure envelope. */
   code = "path_containment";
 };
+var WriteSurfaceError = class extends Error {
+  constructor(message, target) {
+    super(message);
+    this.target = target;
+    this.name = "WriteSurfaceError";
+  }
+  target;
+  /** Stable machine token surfaced in the `--json` failure envelope. */
+  code = "write_surface";
+};
+var GOVERNED_WRITE_SURFACES = /* @__PURE__ */ new Set([
+  ".twinharness",
+  ".agentic-sdlc",
+  "docs",
+  "drift-log.md",
+  "debate-log.md"
+]);
+function assertGovernedWriteSurface(root, absPath) {
+  const contained = resolveWithinRoot(root, absPath);
+  if (contained === null) {
+    throw new WriteSurfaceError(
+      `Refusing a write that escapes the project root: ${absPath}`,
+      absPath
+    );
+  }
+  const rel = path.relative(path.resolve(root), contained);
+  const firstSegment = rel.split(/[\\/]/)[0] ?? "";
+  if (firstSegment === "" || !GOVERNED_WRITE_SURFACES.has(firstSegment)) {
+    throw new WriteSurfaceError(
+      `Refusing a write outside the governed write-surface (${[...GOVERNED_WRITE_SURFACES].join(", ")}): ${rel || absPath}`,
+      absPath
+    );
+  }
+}
 function resolveWithinRoot(root, p) {
   if (path.sep === "/" && (/^[a-zA-Z]:[\\/]/.test(p) || p.includes("\\"))) return null;
   const absRoot = path.resolve(root);
@@ -15597,6 +15631,49 @@ function sleepSync(ms) {
 }
 
 // src/core/atomic-io.ts
+var REAL_FSYNC = {
+  openSync: (p, flags) => fs2.openSync(p, flags),
+  fsyncFd: (fd) => fs2.fsyncSync(fd),
+  closeSync: (fd) => fs2.closeSync(fd)
+};
+var WIN32_DIR_FSYNC_NA_CODES = /* @__PURE__ */ new Set([
+  "EISDIR",
+  "EINVAL",
+  "EPERM",
+  "EACCES"
+]);
+function fsyncFile(target, shim) {
+  const fd = shim.openSync(target, "r+");
+  try {
+    shim.fsyncFd(fd);
+  } finally {
+    shim.closeSync(fd);
+  }
+}
+function fsyncDir(dir, shim) {
+  let fd;
+  try {
+    fd = shim.openSync(dir, "r");
+  } catch (e) {
+    if (process.platform === "win32" && isWin32DirFsyncNA(e.code)) {
+      return;
+    }
+    throw e;
+  }
+  try {
+    shim.fsyncFd(fd);
+  } catch (e) {
+    if (process.platform === "win32" && isWin32DirFsyncNA(e.code)) {
+      return;
+    }
+    throw e;
+  } finally {
+    shim.closeSync(fd);
+  }
+}
+function isWin32DirFsyncNA(code) {
+  return code !== void 0 && WIN32_DIR_FSYNC_NA_CODES.has(code);
+}
 function isTransientIoError(code) {
   return code === "EPERM" || code === "EACCES" || code === "EBUSY";
 }
@@ -15610,14 +15687,28 @@ var StateWriteContendedError = class extends Error {
     this.name = "StateWriteContendedError";
   }
 };
-function atomicWriteFile(absPath, content, rename = fs2.renameSync) {
-  fs2.mkdirSync(path2.dirname(absPath), { recursive: true });
+function atomicWriteFile(absPath, content, optsOrRename = {}) {
+  const opts = typeof optsOrRename === "function" ? { rename: optsOrRename } : optsOrRename;
+  const rename = opts.rename ?? fs2.renameSync;
+  const fsync = opts.fsync ?? REAL_FSYNC;
+  if (opts.root !== void 0) assertGovernedWriteSurface(opts.root, absPath);
+  const dir = path2.dirname(absPath);
+  fs2.mkdirSync(dir, { recursive: true });
   const tmp = `${absPath}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
   fs2.writeFileSync(tmp, content, "utf8");
+  try {
+    fsyncFile(tmp, fsync);
+  } catch (e) {
+    try {
+      fs2.rmSync(tmp, { force: true });
+    } catch {
+    }
+    throw e;
+  }
   for (let attempt = 1; ; attempt++) {
     try {
       rename(tmp, absPath);
-      return;
+      break;
     } catch (e) {
       const code = e.code;
       const transient = isTransientIoError(code);
@@ -15632,6 +15723,7 @@ function atomicWriteFile(absPath, content, rename = fs2.renameSync) {
       sleepSync(Math.min(4 * attempt, 40));
     }
   }
+  fsyncDir(dir, fsync);
 }
 function readFileWithRetry(absPath, read = (p) => fs2.readFileSync(p, "utf8")) {
   for (let attempt = 1; ; attempt++) {
@@ -15885,7 +15977,7 @@ function readState(paths) {
   return { exists: true, raw, state, warnings: result.warnings };
 }
 function writeState(paths, state) {
-  atomicWriteFile(paths.stateFile, serializeState(state));
+  atomicWriteFile(paths.stateFile, serializeState(state), { root: paths.root });
 }
 function isLockHeldError(code) {
   return code === "EEXIST" || code === "EPERM" || code === "EACCES";
@@ -16121,6 +16213,7 @@ function readLastLedgerRecordHash(paths) {
 }
 function appendLedger(paths, entry) {
   try {
+    assertGovernedWriteSurface(paths.root, ledgerPath(paths));
     fs6.mkdirSync(paths.stateDir, { recursive: true });
     const prevHash = readLastLedgerRecordHash(paths);
     const withPrev = { ts: (/* @__PURE__ */ new Date()).toISOString(), ...entry, prevHash };
@@ -16859,6 +16952,7 @@ function readLeaseEvents(paths) {
   return out;
 }
 function appendLeaseEvent(paths, event, now = () => /* @__PURE__ */ new Date()) {
+  assertGovernedWriteSurface(paths.root, leasesPath(paths));
   fs8.mkdirSync(paths.stateDir, { recursive: true });
   const line = serializeLeaseEvent({ ts: now().toISOString(), ...event }) + "\n";
   fs8.appendFileSync(leasesPath(paths), line, "utf8");
@@ -17531,7 +17625,7 @@ function readVerifyReport(paths) {
 }
 function writeVerifyReport(paths, report) {
   fs11.mkdirSync(paths.stateDir, { recursive: true });
-  atomicWriteFile(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n");
+  atomicWriteFile(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n", { root: paths.root });
 }
 var REDACTION_RULES = [
   // key=value / key: value for secret-ish keys (token, secret, password, api_key, ...).
@@ -17890,6 +17984,7 @@ function readTelemetryConfig(paths) {
 function appendTelemetry(paths, record2) {
   if (!readTelemetryConfig(paths).enabled) return;
   try {
+    assertGovernedWriteSurface(paths.root, telemetryLogPath(paths));
     fs13.mkdirSync(paths.stateDir, { recursive: true });
     fs13.appendFileSync(telemetryLogPath(paths), JSON.stringify(record2) + "\n", "utf8");
   } catch {
@@ -18084,6 +18179,7 @@ function mintNextId(events) {
   return formatDecisionId(max + 1);
 }
 function appendDecisionEvent(paths, event, key) {
+  assertGovernedWriteSurface(paths.root, decisionsPath(paths));
   fs15.mkdirSync(paths.stateDir, { recursive: true });
   const prevHash = readLastDecisionRecordHash(paths);
   const withPrev = { ...event, prevHash };
@@ -18373,7 +18469,7 @@ function isStringArray(v) {
 }
 var LANGUAGE_SOURCES = ["extension", "manifest", "both"];
 var COMMAND_KINDS = ["build", "test", "lint", "other"];
-var SCAN_CAPS = [null, "file-count", "total-bytes"];
+var SCAN_CAPS = [null, "file-count", "total-bytes", "symbol-cap", "edge-cap"];
 var PROVENANCE_BASES = [
   "exact",
   "manifest",
@@ -18901,27 +18997,82 @@ function stripTrailingCommas(text) {
   }
   return out;
 }
-function buildAliasTable(configDir, parsed) {
-  const co = parsed.compilerOptions;
-  const opts = typeof co === "object" && co !== null && !Array.isArray(co) ? co : {};
-  const baseUrlRaw = typeof opts.baseUrl === "string" ? opts.baseUrl : void 0;
-  const pathsRaw = typeof opts.paths === "object" && opts.paths !== null && !Array.isArray(opts.paths) ? opts.paths : void 0;
-  if (baseUrlRaw === void 0 && pathsRaw === void 0) return void 0;
+var MAX_EXTENDS_DEPTH = 16;
+function resolveExtendsTarget(fromConfigDir, ref) {
+  if (typeof ref !== "string" || ref.length === 0) return null;
+  const withJson = (p) => p.endsWith(".json") ? p : `${p}.json`;
+  const normPosix = (p) => {
+    const j = path14.posix.normalize(p);
+    if (j.startsWith("..") || j === ".." || path14.posix.isAbsolute(j)) return null;
+    return j;
+  };
+  if (ref.startsWith("./") || ref.startsWith("../") || ref === "." || ref === "..") {
+    const joined = path14.posix.join(fromConfigDir === "" ? "." : fromConfigDir, withJson(ref));
+    return normPosix(joined);
+  }
+  if (ref.startsWith("/") || /^[A-Za-z]:[\\/]/.test(ref)) return null;
+  return normPosix(`node_modules/${withJson(ref)}`);
+}
+function resolveExtendsChain(configPath, parsed, readFile) {
+  const optsOf = (obj) => {
+    const co = obj.compilerOptions;
+    return typeof co === "object" && co !== null && !Array.isArray(co) ? co : {};
+  };
+  const dirOf = (p) => {
+    const d = path14.posix.dirname(p);
+    return d === "." ? "" : d;
+  };
   const joinPosix = (dir, rel) => {
     const j = path14.posix.normalize(path14.posix.join(dir === "" ? "." : dir, rel));
     return j === "." ? "" : j;
   };
-  const baseDir = joinPosix(configDir, baseUrlRaw ?? ".");
+  let effBaseUrlVal;
+  let effBaseUrlDir = "";
+  let effPaths;
+  let effPathsDir = "";
+  const seen = /* @__PURE__ */ new Set();
+  const visit = (cfgPath, cfgParsed, depth) => {
+    if (depth > MAX_EXTENDS_DEPTH) return;
+    if (seen.has(cfgPath)) return;
+    seen.add(cfgPath);
+    const cfgDir = dirOf(cfgPath);
+    const opts = optsOf(cfgParsed);
+    if (effBaseUrlVal === void 0 && typeof opts.baseUrl === "string") {
+      effBaseUrlVal = opts.baseUrl;
+      effBaseUrlDir = cfgDir;
+    }
+    if (effPaths === void 0 && typeof opts.paths === "object" && opts.paths !== null && !Array.isArray(opts.paths)) {
+      effPaths = opts.paths;
+      effPathsDir = cfgDir;
+    }
+    const ext = cfgParsed.extends;
+    const refs = typeof ext === "string" ? [ext] : Array.isArray(ext) ? ext : [];
+    for (const ref of refs) {
+      if (typeof ref !== "string") continue;
+      const basePath = resolveExtendsTarget(cfgDir, ref);
+      if (basePath === null) continue;
+      if (seen.has(basePath)) continue;
+      const text = readFile(basePath);
+      if (text === void 0) continue;
+      const baseParsed = parseJsonc(text);
+      if (!baseParsed) continue;
+      visit(basePath, baseParsed, depth + 1);
+    }
+  };
+  visit(configPath, parsed, 0);
+  if (effBaseUrlVal === void 0 && effPaths === void 0) return void 0;
+  const configDir = dirOf(configPath);
+  const baseDir = effBaseUrlVal !== void 0 ? joinPosix(effBaseUrlDir, effBaseUrlVal) : effPathsDir;
   const patterns = [];
-  if (pathsRaw) {
-    for (const [pattern, targetsRaw] of Object.entries(pathsRaw)) {
+  if (effPaths) {
+    for (const [pattern, targetsRaw] of Object.entries(effPaths)) {
       if (typeof pattern !== "string") continue;
       if (!Array.isArray(targetsRaw)) continue;
       const targets = targetsRaw.filter((t) => typeof t === "string");
       if (targets.length > 0) patterns.push({ pattern, targets });
     }
   }
-  return { configDir, baseDir, hasBaseUrl: baseUrlRaw !== void 0, patterns };
+  return { configDir, baseDir, hasBaseUrl: effBaseUrlVal !== void 0, patterns };
 }
 function resolveAliasTsJs(fromRel, specifier, tables, fileSet) {
   if (specifier.startsWith(".")) return null;
@@ -19280,6 +19431,8 @@ function scanRepo(root, opts = {}) {
   const map = emptyRepoMap(absRoot);
   const fileCountCap = opts.fileCountCap ?? FILE_COUNT_CAP;
   const totalBytesCap = opts.totalBytesCap ?? TOTAL_BYTES_CAP;
+  const maxTotalSymbols = opts.maxTotalSymbols ?? MAX_TOTAL_SYMBOLS;
+  const maxTotalEdges = opts.maxTotalEdges ?? MAX_TOTAL_EDGES;
   if (!fs16.existsSync(absRoot) || !fs16.statSync(absRoot).isDirectory()) {
     return map;
   }
@@ -19468,14 +19621,17 @@ function scanRepo(root, opts = {}) {
         }
       }
       if (content !== void 0 && isParseableExt(ext)) {
-        if (symbolTotal < MAX_TOTAL_SYMBOLS) {
+        if (symbolTotal < maxTotalSymbols) {
           const syms = extractSymbols(ext, content, MAX_SYMBOLS_PER_FILE);
           if (syms.length > 0) {
-            const room = MAX_TOTAL_SYMBOLS - symbolTotal;
+            const room = maxTotalSymbols - symbolTotal;
             const bounded = syms.length > room ? syms.slice(0, room) : syms;
             fileEntry.symbols = bounded;
             symbolTotal += bounded.length;
+            if (bounded.length < syms.length) st.capHit ??= "symbol-cap";
           }
+        } else {
+          st.capHit ??= "symbol-cap";
         }
         const imports = extractImports(ext, content);
         if (imports.length > 0) {
@@ -19569,9 +19725,8 @@ function scanRepo(root, opts = {}) {
           }
         }
       }
-      if ((nameLower === "tsconfig.json" || nameLower === "jsconfig.json") && content !== void 0) {
-        const dir = path15.posix.dirname(rel);
-        tsConfigText.set(dir === "." ? "" : dir, content);
+      if (content !== void 0 && (nameLower === "tsconfig.json" || nameLower === "jsconfig.json" || /^(tsconfig|jsconfig)\..*\.json$/.test(nameLower))) {
+        tsConfigText.set(rel, content);
       }
       if (ENTRY_FILES.has(nameLower)) {
         entrypoints.push({ name: entry.name, path: rel, source: "convention" });
@@ -19594,11 +19749,27 @@ function scanRepo(root, opts = {}) {
     }
   }
   const fileSet = new Set(files.map((f) => f.path));
+  const extendsReadCache = /* @__PURE__ */ new Map();
+  const readExtendsBase = (posixKey) => {
+    const inMem = tsConfigText.get(posixKey);
+    if (inMem !== void 0) return inMem;
+    if (extendsReadCache.has(posixKey)) return extendsReadCache.get(posixKey);
+    let text;
+    try {
+      const abs = path15.join(absRoot, ...posixKey.split("/"));
+      const buf = fs16.readFileSync(abs);
+      text = looksBinary(buf) ? void 0 : buf.toString("utf8");
+    } catch {
+      text = void 0;
+    }
+    extendsReadCache.set(posixKey, text);
+    return text;
+  };
   const aliasTables = [];
-  for (const [dir, text] of [...tsConfigText.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+  for (const [configPath, text] of [...tsConfigText.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
     const parsed = parseJsonc(text);
     if (!parsed) continue;
-    const table = buildAliasTable(dir, parsed);
+    const table = resolveExtendsChain(configPath, parsed, readExtendsBase);
     if (table) aliasTables.push(table);
   }
   const packageNameMap = buildPackageNameMap(packageManifests, workspacePatterns);
@@ -19609,7 +19780,10 @@ function scanRepo(root, opts = {}) {
     const isTsJs = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"].includes(e);
     const isPy = e === "py";
     for (const imp of imports) {
-      if (edges.length >= MAX_TOTAL_EDGES) break outer;
+      if (edges.length >= maxTotalEdges) {
+        st.capHit ??= "edge-cap";
+        break outer;
+      }
       let to = null;
       if (isTsJs) to = resolveRelativeTsJs(from, imp.specifier, fileSet);
       else if (isPy) to = resolveRelativePython(from, imp.specifier, fileSet);
@@ -20446,8 +20620,8 @@ var LCOV_CANDIDATES = [
 var MAX_COVERAGE_FILES = 5e4;
 var REPO_MAP_JSON_REL = ".twinharness/repo-map.json";
 var REPO_MAP_MD_REL = "docs/00-repo-map.md";
-function atomicWrite(absFile, content) {
-  atomicWriteFile(absFile, content);
+function atomicWrite(root, absFile, content) {
+  atomicWriteFile(absFile, content, { root });
 }
 function runRepoMap(paths, opts = {}) {
   const write = opts.write !== false;
@@ -20515,13 +20689,13 @@ function runRepoMap(paths, opts = {}) {
     const jsonAbs = path18.join(paths.stateDir, "repo-map.json");
     const mdAbs = path18.join(paths.docsDir, "00-repo-map.md");
     try {
-      atomicWrite(jsonAbs, json);
+      atomicWrite(paths.root, jsonAbs, json);
     } catch {
       structuredLog({ cmd: "repo map", error: "write_failed", file: REPO_MAP_JSON_REL });
       return failure({ human: `failed to write ${REPO_MAP_JSON_REL}`, data: { error: "write_failed", file: REPO_MAP_JSON_REL } });
     }
     try {
-      atomicWrite(mdAbs, md);
+      atomicWrite(paths.root, mdAbs, md);
     } catch {
       structuredLog({ cmd: "repo map", error: "write_failed", file: REPO_MAP_MD_REL });
       return failure({ human: `failed to write ${REPO_MAP_MD_REL}`, data: { error: "write_failed", file: REPO_MAP_MD_REL } });
@@ -20959,7 +21133,7 @@ function readInterview(paths) {
   }
 }
 function writeInterview(paths, state) {
-  atomicWriteFile(paths.interviewFile, JSON.stringify(state, null, 2) + "\n");
+  atomicWriteFile(paths.interviewFile, JSON.stringify(state, null, 2) + "\n", { root: paths.root });
 }
 function computeReady(confidence, cutoff) {
   return confidence !== null && confidence >= cutoff;
@@ -22267,7 +22441,7 @@ function runHandoffWrite(paths) {
     ""
   ].join("\n");
   fs23.mkdirSync(paths.stateDir, { recursive: true });
-  atomicWriteFile(handoffPath(paths), md);
+  atomicWriteFile(handoffPath(paths), md, { root: paths.root });
   const relPath = path21.relative(paths.root, handoffPath(paths)).split(path21.sep).join("/");
   structuredLog({ cmd: "handoff write", path: relPath, slices: slices.length, artifacts: s.approved_artifacts.length });
   return success({
@@ -24368,7 +24542,7 @@ var TOOL_DEFS = [
   // Anchor: REQ-RU-051
   {
     name: "th_repo_map",
-    description: "Scan the governed project and build the dual repo-map artifacts (.twinharness/repo-map.json + docs/00-repo-map.md). WRITES both artifacts by default (D-CONTRACTS-001). Pass write:false for a dry/preview run that returns the compact summary in memory only \u2014 nothing written.",
+    description: "Scan the governed project and build the dual repo-map artifacts (.twinharness/repo-map.json + docs/00-repo-map.md). WRITES both artifacts by default (D-CONTRACTS-001), OVERWRITING any prior repo-map.json and docs/00-repo-map.md. This overwrite is idempotent regeneration of GENERATED_ARTIFACTS \u2014 derived content, not authored data \u2014 so it is NOT flagged destructive (destructiveHint stays false); re-running reproduces equivalent output rather than losing work. Pass write:false for a dry/preview run that returns the compact summary in memory only \u2014 nothing written.",
     inputSchema: {
       type: "object",
       properties: {

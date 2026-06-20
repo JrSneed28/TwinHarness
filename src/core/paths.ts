@@ -27,6 +27,91 @@ export class PathContainmentError extends Error {
 }
 
 /**
+ * Thrown by {@link assertGovernedWriteSurface} when a write targets a path that is
+ * IN-ROOT but outside the governed write-surface allowlist
+ * (`.twinharness` / `.agentic-sdlc` / `docs/` / `drift-log.md`). Distinct from
+ * {@link PathContainmentError} (which is root ESCAPE): a write can be contained in
+ * the root yet still land somewhere TwinHarness must never write (e.g. a slice's
+ * `src/` implementation file). Mirrors `PathContainmentError`'s shape — a typed
+ * error with a stable `code` — so the single CLI boundary maps it to a structured
+ * `failure(...)` rather than letting a raw stack escape. This is the MECHANICAL
+ * write-surface invariant (AC#1): it fires at the shared `atomicWriteFile`/append
+ * chokepoint below every governed writer, so no control surface (CLI or MCP) can
+ * write outside the allowlist by convention alone.
+ */
+export class WriteSurfaceError extends Error {
+  /** Stable machine token surfaced in the `--json` failure envelope. */
+  readonly code = "write_surface";
+  constructor(
+    message: string,
+    /** The offending absolute path, echoed into the structured failure data. */
+    public readonly target: string,
+  ) {
+    super(message);
+    this.name = "WriteSurfaceError";
+  }
+}
+
+/**
+ * The governed write-surface allowlist: the FIRST path segment (under root) that a
+ * TwinHarness write is permitted to create/touch. `.twinharness` is the default
+ * state dir; `.agentic-sdlc` is the legacy fallback (kept FOREVER so pre-migration
+ * projects' legitimate writes are never false-rejected — pinned by test); `docs`
+ * holds generated docs; `drift-log.md` and `debate-log.md` are the two root-level
+ * append-only ledger files (the debate ledger mirrors the drift ledger,
+ * `core/debate-log.ts`). This is the set the write-gate hook already allows
+ * (`hook.ts` doc/state allowlist — which also permits any root-level `*.md`),
+ * expressed here as a chokepoint guard so it binds CLI and MCP writes uniformly, not
+ * just Claude-tool writes. Kept as an EXPLICIT list (not "any *.md") so the guard's
+ * write surface is a closed, auditable set rather than an open category.
+ */
+const GOVERNED_WRITE_SURFACES: ReadonlySet<string> = new Set([
+  ".twinharness",
+  ".agentic-sdlc",
+  "docs",
+  "drift-log.md",
+  "debate-log.md",
+]);
+
+/**
+ * Assert that `absPath` is a GOVERNED write target under `root` (AC#1). Two checks,
+ * in order:
+ *   1. Root containment via {@link resolveWithinRoot} — a path that escapes the
+ *      root (absolute elsewhere, `..`, symlink/junction) throws (treated as a
+ *      surface violation; the offending path is echoed).
+ *   2. First-segment allowlist — the path's first component under root must be one
+ *      of {@link GOVERNED_WRITE_SURFACES}; otherwise throw {@link WriteSurfaceError}.
+ *
+ * The root itself (a write AT `root`, rel === "") is not a file write and is
+ * rejected. Called at the shared write chokepoint (`atomicWriteFile` + the four
+ * append sites), so it is surface-agnostic: every governed writer passes through
+ * it regardless of whether the caller is the CLI or the MCP adapter. Reads are
+ * never guarded — only writes (per the spec: extends-target reads, artifact reads,
+ * etc. are legitimate and bypass this).
+ */
+export function assertGovernedWriteSurface(root: string, absPath: string): void {
+  const contained = resolveWithinRoot(root, absPath);
+  if (contained === null) {
+    throw new WriteSurfaceError(
+      `Refusing a write that escapes the project root: ${absPath}`,
+      absPath,
+    );
+  }
+  const rel = path.relative(path.resolve(root), contained);
+  // A write AT the root (rel === "") is not a file write — reject it.
+  // The first path segment is the allowlist key; split on either separator so the
+  // check is identical on POSIX and Windows.
+  const firstSegment = rel.split(/[\\/]/)[0] ?? "";
+  if (firstSegment === "" || !GOVERNED_WRITE_SURFACES.has(firstSegment)) {
+    throw new WriteSurfaceError(
+      `Refusing a write outside the governed write-surface ` +
+        `(${[...GOVERNED_WRITE_SURFACES].join(", ")}): ${rel || absPath}`,
+      absPath,
+    );
+  }
+}
+
+/**
  * Resolved filesystem locations for a TwinHarness-governed project.
  *
  * The CLI only ever *records and computes* against these paths; it never decides

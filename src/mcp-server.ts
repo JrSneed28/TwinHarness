@@ -866,7 +866,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_repo_map",
     description:
-      "Scan the governed project and build the dual repo-map artifacts (.twinharness/repo-map.json + docs/00-repo-map.md). WRITES both artifacts by default (D-CONTRACTS-001). Pass write:false for a dry/preview run that returns the compact summary in memory only — nothing written.",
+      "Scan the governed project and build the dual repo-map artifacts (.twinharness/repo-map.json + docs/00-repo-map.md). WRITES both artifacts by default (D-CONTRACTS-001), OVERWRITING any prior repo-map.json and docs/00-repo-map.md. This overwrite is idempotent regeneration of GENERATED_ARTIFACTS — derived content, not authored data — so it is NOT flagged destructive (destructiveHint stays false); re-running reproduces equivalent output rather than losing work. Pass write:false for a dry/preview run that returns the compact summary in memory only — nothing written.",
     inputSchema: {
       type: "object",
       properties: {

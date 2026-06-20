@@ -144,7 +144,7 @@ function runHandoffWrite(paths) {
     fs.mkdirSync(paths.stateDir, { recursive: true });
     // Atomic write (temp + rename) — same durability guarantee as state.json /
     // interview.json, so a crash mid-write never leaves a corrupt HANDOFF.md.
-    (0, atomic_io_1.atomicWriteFile)(handoffPath(paths), md);
+    (0, atomic_io_1.atomicWriteFile)(handoffPath(paths), md, { root: paths.root });
     const relPath = path.relative(paths.root, handoffPath(paths)).split(path.sep).join("/");
     (0, log_1.structuredLog)({ cmd: "handoff write", path: relPath, slices: slices.length, artifacts: s.approved_artifacts.length });
     return (0, output_1.success)({

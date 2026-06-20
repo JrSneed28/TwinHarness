@@ -1,0 +1,13 @@
+{
+  // CONTROL fixture (no `extends`): the SAME `@app/*` alias declared INLINE in the
+  // package config. This already resolved to basis:"alias" before AC#3; it is the
+  // parity control proving the extends fixture lands the IDENTICAL edge by a different
+  // path. `baseUrl: "../.."` points resolution at the repo root, matching the extends
+  // fixture's effective baseDir exactly.
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "paths": {
+      "@app/*": ["packages/app/src/*"]
+    }
+  }
+}

@@ -34,6 +34,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHmac } from "node:crypto";
 import type { ProjectPaths } from "./paths";
+import { assertGovernedWriteSurface } from "./paths";
 import { hashContent, GENESIS_PREV_HASH, HEX64 } from "./hash";
 import { readJsonlValues, scanTailValid } from "./jsonl";
 
@@ -178,6 +179,13 @@ export function readLastLedgerRecordHash(paths: ProjectPaths): string {
  */
 export function appendLedger(paths: ProjectPaths, entry: Omit<LedgerEntry, "ts" | "prevHash" | "recordHash" | "keyedHash">): void {
   try {
+    // AC#1 write-surface chokepoint (defense-in-depth, INSIDE the best-effort try):
+    // a non-governed target is PREVENTED (the append below never runs) without
+    // crashing — the audit path's contract is "never throw" (mirrors `structuredLog`).
+    // ledgerPath is always under stateDir, so this never false-rejects a legitimate
+    // append; the propagating mechanical guarantee lives at the non-best-effort sites
+    // (appendDecisionEvent / appendLeaseEvent / atomicWriteFile).
+    assertGovernedWriteSurface(paths.root, ledgerPath(paths));
     fs.mkdirSync(paths.stateDir, { recursive: true });
     const prevHash = readLastLedgerRecordHash(paths);
     // Build the unsealed entry first (the ts captured here becomes sealed

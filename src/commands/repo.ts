@@ -24,7 +24,7 @@ import { type CommandResult, success, failure } from "../core/output";
 import { structuredLog } from "../core/log";
 import { requireState } from "../core/guards";
 import { scanRepo, type ScanOptions } from "../core/repo-map/scanner";
-import { serializeRepoMap, renderRepoMapMarkdown, parseRepoMap, type RepoMap } from "../core/repo-map/schema";
+import { serializeRepoMap, renderRepoMapMarkdown, parseRepoMap, type RepoMap, type ScanReport } from "../core/repo-map/schema";
 import { hashFileBytes } from "../core/hash";
 import { parseLcovContained } from "../core/repo-map/lcov";
 import { atomicWriteFile } from "../core/atomic-io";
@@ -75,9 +75,11 @@ export interface RepoMapOptions {
 const REPO_MAP_JSON_REL = ".twinharness/repo-map.json";
 const REPO_MAP_MD_REL = "docs/00-repo-map.md";
 
-/** Atomic write: delegates to the shared atomic-io helper (C-2 / S-C). */
-function atomicWrite(absFile: string, content: string): void {
-  atomicWriteFile(absFile, content);
+/** Atomic write: delegates to the shared atomic-io helper (C-2 / S-C). Threads the
+ *  governed `root` so the write-surface guard (AC#1) fires at the chokepoint —
+ *  both targets (`.twinharness/repo-map.json`, `docs/00-repo-map.md`) are governed. */
+function atomicWrite(root: string, absFile: string, content: string): void {
+  atomicWriteFile(absFile, content, { root });
 }
 
 /**
@@ -190,13 +192,13 @@ export function runRepoMap(paths: ProjectPaths, opts: RepoMapOptions = {}): Comm
     const jsonAbs = path.join(paths.stateDir, "repo-map.json");
     const mdAbs = path.join(paths.docsDir, "00-repo-map.md");
     try {
-      atomicWrite(jsonAbs, json);
+      atomicWrite(paths.root, jsonAbs, json);
     } catch {
       structuredLog({ cmd: "repo map", error: "write_failed", file: REPO_MAP_JSON_REL });
       return failure({ human: `failed to write ${REPO_MAP_JSON_REL}`, data: { error: "write_failed", file: REPO_MAP_JSON_REL } });
     }
     try {
-      atomicWrite(mdAbs, md);
+      atomicWrite(paths.root, mdAbs, md);
     } catch {
       structuredLog({ cmd: "repo map", error: "write_failed", file: REPO_MAP_MD_REL });
       return failure({ human: `failed to write ${REPO_MAP_MD_REL}`, data: { error: "write_failed", file: REPO_MAP_MD_REL } });
@@ -883,8 +885,12 @@ export interface RepoFreshnessSummary {
   /** P4-4 — persisted partial-scan marker (capHit≠null on disk). */
   partial: boolean;
   scanIncomplete: boolean;
-  /** Which cap was hit (null when complete), echoed for messaging. */
-  capHit: null | "file-count" | "total-bytes";
+  /**
+   * Which cap was hit (null when complete), echoed for messaging. AC#4 — sourced from
+   * the canonical `ScanReport["capHit"]` union so new cap markers (symbol-cap/edge-cap)
+   * stay in sync automatically.
+   */
+  capHit: ScanReport["capHit"];
 }
 
 /**
