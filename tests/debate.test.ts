@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
+import { runStateSet } from "../src/commands/state";
 import { runDebateAdd, runDebateList, runDebateResolve } from "../src/commands/debate";
 import { parseDebateEntries } from "../src/core/debate-log";
 import { readState } from "../src/core/state-store";
@@ -15,10 +16,22 @@ function debateLog(t: TempProject): string {
   return fs.readFileSync(path.join(t.paths.root, "debate-log.md"), "utf8");
 }
 
+/**
+ * Init a fresh project AND unlock the advanced-coordination tier. The debate
+ * ledger is an advanced feature (SG3 P1-C / C-14): the shared CLI handlers gate it
+ * at tier <T2 with no parallel authorship, identically to the MCP runtime. These
+ * are DOMAIN tests for the ledger logic, so they record T2 in setup to reach it —
+ * the tier gate itself is pinned separately by cli-tier-gate-parity.test.ts.
+ */
+function initUnlocked(t: TempProject): void {
+  runInit(t.paths, {});
+  runStateSet(t.paths, "tier", "T2", { emergency: true });
+}
+
 describe("REQ-PCO-042: debate add mints DEBATE-001 and increments debate_open_blocking", () => {
   it("first add → DEBATE-001, open, blocking counter incremented", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     const before = readState(tp.paths).state!.debate_open_blocking ?? 0;
 
     const res = runDebateAdd(tp.paths, {
@@ -39,7 +52,7 @@ describe("REQ-PCO-042: debate add mints DEBATE-001 and increments debate_open_bl
 describe("REQ-PCO-042: debate ids auto-increment DEBATE-001 → DEBATE-002", () => {
   it("a second add gets the next id and increments the counter again", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     const a = runDebateAdd(tp.paths, { topic: "first" });
     const b = runDebateAdd(tp.paths, { topic: "second" });
     expect(a.data?.id).toBe("DEBATE-001");
@@ -51,7 +64,7 @@ describe("REQ-PCO-042: debate ids auto-increment DEBATE-001 → DEBATE-002", () 
 describe("REQ-PCO-042: debate list returns both entries sorted by numeric id", () => {
   it("list returns parsed entries plus the open blocking count", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     runDebateAdd(tp.paths, { topic: "alpha", positions: "p1", links: "REQ-1" });
     runDebateAdd(tp.paths, { topic: "beta", positions: "p2" });
 
@@ -71,7 +84,7 @@ describe("REQ-PCO-042: debate list returns both entries sorted by numeric id", (
 describe("REQ-PCO-042: debate resolve clears the entry and decrements the counter (floor 0)", () => {
   it("resolve an open debate → status resolved, count back to 0, reconciliation recorded", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     runDebateAdd(tp.paths, { topic: "cache the registry?" });
     expect(readState(tp.paths).state?.debate_open_blocking).toBe(1);
 
@@ -91,7 +104,7 @@ describe("REQ-PCO-042: debate resolve clears the entry and decrements the counte
 
   it("resolving a non-existent id returns debate_not_found and leaves the counter unchanged", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     const res = runDebateResolve(tp.paths, { id: "DEBATE-001" });
     expect(res.ok).toBe(false);
     expect(res.data?.error).toBe("debate_not_found");
@@ -100,7 +113,7 @@ describe("REQ-PCO-042: debate resolve clears the entry and decrements the counte
 
   it("double-resolve is rejected with already_resolved", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     runDebateAdd(tp.paths, { topic: "x" });
     runDebateResolve(tp.paths, { id: "DEBATE-001", resolution: "done" });
 
@@ -114,7 +127,7 @@ describe("REQ-PCO-042: debate resolve clears the entry and decrements the counte
 describe("REQ-PCO-042: the debate ledger is append-only and resumable", () => {
   it("a second add does not erase the first entry", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     runDebateAdd(tp.paths, { topic: "first topic" });
     runDebateAdd(tp.paths, { topic: "second topic" });
 
@@ -127,7 +140,7 @@ describe("REQ-PCO-042: the debate ledger is append-only and resumable", () => {
 
   it("the ledger is resumable: parsing after writes recovers every turn + reconciliation", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     runDebateAdd(tp.paths, { topic: "persistent debate", positions: "A vs B" });
     runDebateAdd(tp.paths, { topic: "second debate" });
     runDebateResolve(tp.paths, { id: "DEBATE-001", resolution: "B wins" });
@@ -150,22 +163,26 @@ describe("REQ-PCO-042: the debate ledger is append-only and resumable", () => {
 describe("REQ-PCO-042: input/init guards", () => {
   it("add without a topic → missing_topic failure", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     const res = runDebateAdd(tp.paths, {});
     expect(res.ok).toBe(false);
     expect(res.data?.error).toBe("missing_topic");
   });
 
-  it("add before init → not_initialized", () => {
+  it("add before init → tier_locked (the advanced-feature gate precedes the not-init check, SG3 P1-C)", () => {
+    // The debate ledger is an advanced feature OFF by default (C-14). On an absent
+    // state.json the shared gate reads the conservative default (unclassified tier,
+    // no slices) and refuses `tier_locked` BEFORE the handler's own not-init guard —
+    // the intended C-14 contract, identical on the MCP runtime (cli-tier-gate-parity).
     tp = makeTempProject();
     const res = runDebateAdd(tp.paths, { topic: "x" });
     expect(res.ok).toBe(false);
-    expect(res.data?.error).toBe("not_initialized");
+    expect(res.data?.error).toBe("tier_locked");
   });
 
   it("resolve without an id → failure", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     expect(runDebateResolve(tp.paths, {}).ok).toBe(false);
   });
 });

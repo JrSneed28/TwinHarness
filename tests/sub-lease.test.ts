@@ -31,6 +31,20 @@ function setSlices(t: TempProject, slices: unknown[]): void {
   runStateSet(t.paths, "slices", JSON.stringify(slices));
 }
 
+/**
+ * Init a fresh project AND unlock the advanced-coordination tier. Sub-leases are an
+ * advanced feature (SG3 P1-C / C-14): the shared CLI handlers gate them at tier <T2
+ * with no parallel authorship, identically to the MCP runtime. A lone in-progress
+ * parent slice is single-writer (parallel authorship needs >1 in-flight slice), so
+ * it does NOT auto-unlock — these DOMAIN tests record T2 in setup to reach the
+ * sub-lease logic. The tier gate itself is pinned separately by
+ * cli-tier-gate-parity.test.ts.
+ */
+function initUnlocked(t: TempProject): void {
+  runInit(t.paths, {});
+  runStateSet(t.paths, "tier", "T2", { emergency: true });
+}
+
 /** A parent slice in-progress on a few components, with its top-level lease held. */
 function parentInProgress(t: TempProject, id = "SLICE-1", components = ["api", "db", "ui"]): void {
   setSlices(t, [{ id, status: "in-progress", components }]);
@@ -40,7 +54,7 @@ function parentInProgress(t: TempProject, id = "SLICE-1", components = ["api", "
 describe("REQ-SUBLEASE-001: sub-claim opens a sub-lease on a subset of an in-progress parent", () => {
   it("succeeds on a valid subset and records parent + sub-owner id", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     parentInProgress(tp);
 
     const res = runBuildSubClaim(tp.paths, "SLICE-1", ["api", "db"]);
@@ -56,7 +70,7 @@ describe("REQ-SUBLEASE-001: sub-claim opens a sub-lease on a subset of an in-pro
 
   it("mints a fresh, non-colliding sub-owner id per claim under the same parent", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     parentInProgress(tp);
 
     expect(runBuildSubClaim(tp.paths, "SLICE-1", ["api"]).data?.subId).toBe("SLICE-1#sub-1");
@@ -69,7 +83,7 @@ describe("REQ-SUBLEASE-001: sub-claim opens a sub-lease on a subset of an in-pro
 
   it("refuses when the parent slice does not exist (slice_not_found)", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     setSlices(tp, [{ id: "SLICE-1", status: "in-progress", components: ["api"] }]);
     const res = runBuildSubClaim(tp.paths, "SLICE-99", ["api"]);
     expect(res.ok).toBe(false);
@@ -78,7 +92,7 @@ describe("REQ-SUBLEASE-001: sub-claim opens a sub-lease on a subset of an in-pro
 
   it("refuses when the parent is not in-progress (parent_not_in_progress)", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     setSlices(tp, [{ id: "SLICE-1", status: "pending", components: ["api"] }]);
     const res = runBuildSubClaim(tp.paths, "SLICE-1", ["api"]);
     expect(res.ok).toBe(false);
@@ -89,7 +103,7 @@ describe("REQ-SUBLEASE-001: sub-claim opens a sub-lease on a subset of an in-pro
 describe("REQ-SUBLEASE-002: components must be a non-empty SUBSET of the parent", () => {
   it("refuses a superset / component not in the parent (not_a_subset)", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     parentInProgress(tp, "SLICE-1", ["api", "db"]);
 
     // "ui" is not among the parent's components → superset of the parent set.
@@ -101,7 +115,7 @@ describe("REQ-SUBLEASE-002: components must be a non-empty SUBSET of the parent"
 
   it("refuses an empty component list", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     parentInProgress(tp, "SLICE-1", ["api"]);
     const res = runBuildSubClaim(tp.paths, "SLICE-1", []);
     expect(res.ok).toBe(false);
@@ -111,7 +125,7 @@ describe("REQ-SUBLEASE-002: components must be a non-empty SUBSET of the parent"
 describe("REQ-SUBLEASE-003: sibling sub-leases must be disjoint (sub_lease_conflict, exit 1)", () => {
   it("refuses an overlapping sibling sub-lease with exit 1", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     parentInProgress(tp, "SLICE-1", ["api", "db", "ui"]);
 
     expect(runBuildSubClaim(tp.paths, "SLICE-1", ["api", "db"]).ok).toBe(true);
@@ -123,7 +137,7 @@ describe("REQ-SUBLEASE-003: sibling sub-leases must be disjoint (sub_lease_confl
 
   it("a disjoint sibling sub-lease is allowed; a released sibling frees its components", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     parentInProgress(tp, "SLICE-1", ["api", "db", "ui"]);
 
     expect(runBuildSubClaim(tp.paths, "SLICE-1", ["api"]).ok).toBe(true);
@@ -141,7 +155,7 @@ describe("REQ-SUBLEASE-003: sibling sub-leases must be disjoint (sub_lease_confl
 describe("REQ-SUBLEASE-004: a sub-lease's lifetime is its PARENT's status (reconciliation)", () => {
   it("is LIVE while the parent is in-progress and STALE once the parent is done", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     parentInProgress(tp, "SLICE-1", ["api", "db"]);
     runBuildSubClaim(tp.paths, "SLICE-1", ["api"]);
 
@@ -162,7 +176,7 @@ describe("REQ-SUBLEASE-004: a sub-lease's lifetime is its PARENT's status (recon
 
   it("becomes STALE when the parent is set blocked", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     parentInProgress(tp, "SLICE-1", ["api"]);
     runBuildSubClaim(tp.paths, "SLICE-1", ["api"]);
     runSliceSetStatus(tp.paths, "SLICE-1", "blocked");
@@ -174,7 +188,7 @@ describe("REQ-SUBLEASE-004: a sub-lease's lifetime is its PARENT's status (recon
 describe("REQ-SUBLEASE-005: a live sub-lease's components count as occupied", () => {
   it("occupiedComponents includes a live sub-lease's components (mapped to the sub-owner id)", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     const slices: SliceState[] = [{ id: "SLICE-1", status: "in-progress", components: ["api", "db"] }];
     setSlices(tp, slices);
     runBuildClaim(tp.paths, "SLICE-1");
@@ -192,7 +206,7 @@ describe("REQ-SUBLEASE-005: a live sub-lease's components count as occupied", ()
     // parent in-progress declares only "db"; the sub-lease (under the parent) holds
     // "api" — which no in-progress slice's component set covers.
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     const slices: SliceState[] = [{ id: "SLICE-1", status: "in-progress", components: ["db"] }];
     // Open the sub-lease while the parent still declares "api" (subset guard
     // satisfied), then narrow the parent's declared set back to just "db". The
@@ -210,7 +224,7 @@ describe("REQ-SUBLEASE-005: a live sub-lease's components count as occupied", ()
 describe("REQ-SUBLEASE-006: sub-release closes the sub-lease; bad id is rejected", () => {
   it("sub-release removes the sub-lease from the active set", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     parentInProgress(tp, "SLICE-1", ["api", "db"]);
     runBuildSubClaim(tp.paths, "SLICE-1", ["api"]);
     expect(subLeasesOf(tp.paths, "SLICE-1")).toHaveLength(1);
@@ -221,7 +235,7 @@ describe("REQ-SUBLEASE-006: sub-release closes the sub-lease; bad id is rejected
 
   it("refuses sub-release of an unknown sub-id (sub_lease_not_found)", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     parentInProgress(tp, "SLICE-1", ["api"]);
     const res = runBuildSubRelease(tp.paths, "SLICE-1#sub-9");
     expect(res.ok).toBe(false);
@@ -230,7 +244,7 @@ describe("REQ-SUBLEASE-006: sub-release closes the sub-lease; bad id is rejected
 
   it("refuses to sub-release a TOP-LEVEL lease id (not a sub-lease)", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     parentInProgress(tp, "SLICE-1", ["api"]);
     const res = runBuildSubRelease(tp.paths, "SLICE-1"); // the parent's own lease, not a sub-lease
     expect(res.ok).toBe(false);
@@ -241,7 +255,7 @@ describe("REQ-SUBLEASE-006: sub-release closes the sub-lease; bad id is rejected
 describe("REQ-SUBLEASE-007: th build leases shows sub-leases in a labeled section", () => {
   it("lists the live sub-lease alongside the top-level lease", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     parentInProgress(tp, "SLICE-1", ["api", "db"]);
     runBuildSubClaim(tp.paths, "SLICE-1", ["api"]);
 
@@ -256,7 +270,7 @@ describe("REQ-SUBLEASE-007: th build leases shows sub-leases in a labeled sectio
 
   it("reports a sub-lease as STALE once its parent settles", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
     parentInProgress(tp, "SLICE-1", ["api"]);
     runBuildSubClaim(tp.paths, "SLICE-1", ["api"]);
     // Force the parent done without releasing either lease.
@@ -272,6 +286,9 @@ describe("REQ-SUBLEASE-007: th build leases shows sub-leases in a labeled sectio
 
 describe("REQ-SUBLEASE-008: top-level claim still refuses cross-slice component overlap (unchanged)", () => {
   it("a second slice cannot claim a component held by a live top-level lease", () => {
+    // Top-level `runBuildClaim` is NOT a gated advanced feature, and the two
+    // in-progress slices below are themselves parallel authorship — so this test
+    // needs no T2 unlock (bare init is sufficient).
     tp = makeTempProject();
     runInit(tp.paths, {});
     setSlices(tp, [

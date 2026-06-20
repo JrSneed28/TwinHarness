@@ -29,6 +29,7 @@ import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { type ProjectPaths, WriteSurfaceError } from "../src/core/paths";
 import { runInit } from "../src/commands/init";
+import { runStateSet } from "../src/commands/state";
 import { runDriftAdd, runDriftResolve } from "../src/commands/drift";
 import { runDebateAdd, runDebateResolve } from "../src/commands/debate";
 
@@ -102,6 +103,9 @@ describe("R-15: debate appends are append-only — prior blocks survive every la
   it("add + resolve never lose earlier content; the header is preserved verbatim", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
+    // The debate ledger is an advanced feature gated at tier <T2 (SG3 P1-C / C-14);
+    // record T2 so the debate add/resolve reach the ledger instead of tier_locked.
+    runStateSet(tp.paths, "tier", "T2", { emergency: true });
     runDebateAdd(tp.paths, { topic: "Cache the registry?", positions: "LRU vs none" });
     const afterAdd = debateLog(tp);
     expect(afterAdd.startsWith("# Debate Log")).toBe(true);

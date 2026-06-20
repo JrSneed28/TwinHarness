@@ -7,12 +7,16 @@ exports.runCollabMerge = runCollabMerge;
 const output_1 = require("../core/output");
 const collab_1 = require("../core/collab");
 const log_1 = require("../core/log");
+const tier_1 = require("./tier");
 /**
  * `th collab init --stage <stage>` — report the resolved collab directory for a
  * stage. Path construction only (dirs are created on the first fragment write),
  * so callers can confirm where fragments will land without side effects.
  */
 function runCollabInit(paths, opts) {
+    const locked = (0, tier_1.assertFeatureUnlocked)(paths, "collab");
+    if (locked)
+        return locked;
     if (!opts.stage) {
         return (0, output_1.failure)({
             human: "usage: th collab init --stage <stage>",
@@ -32,6 +36,9 @@ function runCollabInit(paths, opts) {
  * Returns the absolute path written.
  */
 function runCollabFragment(paths, opts) {
+    const locked = (0, tier_1.assertFeatureUnlocked)(paths, "collab");
+    if (locked)
+        return locked;
     if (!opts.stage || !opts.round || !opts.name) {
         return (0, output_1.failure)({
             human: "usage: th collab fragment --stage <stage> --round <round> --name <name> [--text <text>] [--force]",
@@ -73,6 +80,9 @@ function runCollabFragment(paths, opts) {
  * for a stage (optionally scoped to one round) in deterministic sorted order.
  */
 function runCollabList(paths, opts) {
+    const locked = (0, tier_1.assertFeatureUnlocked)(paths, "collab");
+    if (locked)
+        return locked;
     if (!opts.stage) {
         return (0, output_1.failure)({
             human: "usage: th collab list --stage <stage> [--round <round>]",
@@ -93,6 +103,9 @@ function runCollabList(paths, opts) {
  * (traceability §17: every fragment must carry ≥1 REQ-ID anchor). Idempotent.
  */
 function runCollabMerge(paths, opts) {
+    const locked = (0, tier_1.assertFeatureUnlocked)(paths, "collab");
+    if (locked)
+        return locked;
     if (!opts.stage || !opts.round) {
         return (0, output_1.failure)({
             human: "usage: th collab merge --stage <stage> --round <round>",

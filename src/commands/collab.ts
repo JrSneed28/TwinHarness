@@ -9,6 +9,7 @@ import {
   mergeFragments,
 } from "../core/collab";
 import { structuredLog } from "../core/log";
+import { assertFeatureUnlocked } from "./tier";
 
 /**
  * `th collab` — the blackboard collab core (REQ-PCO-040, plan Phase 4 / Slice 5).
@@ -54,6 +55,8 @@ export interface CollabMergeOptions {
  * so callers can confirm where fragments will land without side effects.
  */
 export function runCollabInit(paths: ProjectPaths, opts: CollabInitOptions): CommandResult {
+  const locked = assertFeatureUnlocked(paths, "collab");
+  if (locked) return locked;
   if (!opts.stage) {
     return failure({
       human: "usage: th collab init --stage <stage>",
@@ -74,6 +77,8 @@ export function runCollabInit(paths: ProjectPaths, opts: CollabInitOptions): Com
  * Returns the absolute path written.
  */
 export function runCollabFragment(paths: ProjectPaths, opts: CollabFragmentOptions): CommandResult {
+  const locked = assertFeatureUnlocked(paths, "collab");
+  if (locked) return locked;
   if (!opts.stage || !opts.round || !opts.name) {
     return failure({
       human: "usage: th collab fragment --stage <stage> --round <round> --name <name> [--text <text>] [--force]",
@@ -114,6 +119,8 @@ export function runCollabFragment(paths: ProjectPaths, opts: CollabFragmentOptio
  * for a stage (optionally scoped to one round) in deterministic sorted order.
  */
 export function runCollabList(paths: ProjectPaths, opts: CollabListOptions): CommandResult {
+  const locked = assertFeatureUnlocked(paths, "collab");
+  if (locked) return locked;
   if (!opts.stage) {
     return failure({
       human: "usage: th collab list --stage <stage> [--round <round>]",
@@ -135,6 +142,8 @@ export function runCollabList(paths: ProjectPaths, opts: CollabListOptions): Com
  * (traceability §17: every fragment must carry ≥1 REQ-ID anchor). Idempotent.
  */
 export function runCollabMerge(paths: ProjectPaths, opts: CollabMergeOptions): CommandResult {
+  const locked = assertFeatureUnlocked(paths, "collab");
+  if (locked) return locked;
   if (!opts.stage || !opts.round) {
     return failure({
       human: "usage: th collab merge --stage <stage> --round <round>",

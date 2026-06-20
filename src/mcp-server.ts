@@ -58,7 +58,7 @@ import { runTemplateGet, runTemplateList } from "./commands/template";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
 import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from "./commands/collab";
 import { runDebateAdd, runDebateList, runDebateResolve } from "./commands/debate";
-import { type AdvancedFeature, featureActiveForState, featureSpec } from "./commands/tier";
+import { type AdvancedFeature, assertFeatureUnlocked } from "./commands/tier";
 import { GATE_OWNED } from "./core/state-fields";
 import { runInterviewStart, runInterviewRecord, runInterviewStatus } from "./commands/interview";
 import { runInitMcp } from "./commands/init";
@@ -148,27 +148,15 @@ function gateRefusal(check: GateResult): CommandResult {
  * human line pointing at `th tier features` / `th tier record` so a caller knows
  * exactly which capability is off and how to enable it. Never throws — a locked
  * tool is a clean refusal, not a crash (the parity-compatible contract).
+ *
+ * Thin delegate over {@link assertFeatureUnlocked} (tier.ts), the SINGLE gate the
+ * CLI shared handlers also call — so the MCP and CLI refusals are byte-for-byte
+ * identical and the two surfaces cannot drift (SG3 P1-C).
  */
 function assertTierAllows(paths: ProjectPaths, feature: AdvancedFeature): CommandResult | undefined {
-  // Plain state read (NOT a re-classification): the tier is already on disk.
-  const r = readState(paths);
-  // Conservative default for absent/invalid state: an unclassified single-writer
-  // run with no slices, which {@link featureActiveForState} evaluates as locked.
-  const state: TwinHarnessState = r.state ?? { ...EMPTY_STATE_FOR_GATE };
-  if (featureActiveForState(feature, state)) return undefined;
-  const spec = featureSpec(feature);
-  const tierLabel = state.tier ?? "unclassified";
-  return failure({
-    data: {
-      error: "tier_locked",
-      feature,
-      tier: tierLabel,
-    },
-    human:
-      `Advanced feature "${feature}" is locked at tier ${tierLabel} — it activates at tier ≥T2 or when >1 slice is in flight. ` +
-      `Enable via \`th tier record <T2|T3>\` (or run \`th tier features\` to see what is active).` +
-      (spec ? ` Use when: ${spec.useWhen}` : ""),
-  });
+  // Delegate to the single shared gate (tier.ts) so the MCP refusal is byte-for-byte
+  // identical to the CLI shared-handler refusal — the two surfaces cannot drift.
+  return assertFeatureUnlocked(paths, feature);
 }
 
 /* ------------------------------------------------------------------ *
@@ -267,15 +255,6 @@ export function compactHeavyResult(result: CommandResult, verbose: boolean): Com
     human: `${headline}\n(compact: ${omitted} more line(s) omitted — pass verbose:true for the full report; full data in structuredContent)`,
   };
 }
-
-/**
- * A minimal valid state used ONLY as the conservative default for
- * {@link assertTierAllows} when state.json is absent/invalid: an unclassified tier
- * with no slices, which evaluates to LOCKED for every advanced feature. Kept tiny
- * (only the fields the activation predicate reads) and frozen so it is never
- * mutated.
- */
-const EMPTY_STATE_FOR_GATE = Object.freeze({ tier: null, slices: [] }) as unknown as TwinHarnessState;
 
 /* ------------------------------------------------------------------ *
  * Project-paths resolution                                            *

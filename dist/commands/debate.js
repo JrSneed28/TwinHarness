@@ -46,6 +46,7 @@ const debate_log_1 = require("../core/debate-log");
 const log_1 = require("../core/log");
 const ledger_1 = require("../core/ledger");
 const guards_1 = require("../core/guards");
+const tier_1 = require("./tier");
 /**
  * `th debate` — append-only access to the debate ledger (REQ-PCO-042). The
  * twin of `th drift`: mechanical only. The CLI records debate turns and the
@@ -114,6 +115,9 @@ function appendDebateLog(paths, block) {
  * it increments `state.debate_open_blocking`.
  */
 function runDebateAdd(paths, opts) {
+    const locked = (0, tier_1.assertFeatureUnlocked)(paths, "debate");
+    if (locked)
+        return locked;
     return (0, state_store_1.withStateLock)(paths, () => runDebateAddLocked(paths, opts));
 }
 function runDebateAddLocked(paths, opts) {
@@ -167,6 +171,9 @@ function runDebateAddLocked(paths, opts) {
  * with a later `## DEBATE-NNN — resolved` note reads as resolved.
  */
 function runDebateList(paths) {
+    const locked = (0, tier_1.assertFeatureUnlocked)(paths, "debate");
+    if (locked)
+        return locked;
     const r = (0, state_store_1.readState)(paths);
     if (!r.exists)
         return guards_1.NOT_INIT;
@@ -214,6 +221,9 @@ function idNum(id) {
  * - Double-resolving (a `## <id> — resolved` note already present) is rejected.
  */
 function runDebateResolve(paths, opts) {
+    const locked = (0, tier_1.assertFeatureUnlocked)(paths, "debate");
+    if (locked)
+        return locked;
     return (0, state_store_1.withStateLock)(paths, () => runDebateResolveLocked(paths, opts));
 }
 function runDebateResolveLocked(paths, opts) {
