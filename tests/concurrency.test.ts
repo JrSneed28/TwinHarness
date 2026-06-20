@@ -18,6 +18,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
+import { readVerifyConfig } from "../src/core/verify";
 import {
   readState,
   withStateLock,
@@ -93,6 +94,26 @@ describe("REQ-STATE-LOCK-001: concurrent mutations do not lose updates (F10)", (
     const inProgress = state?.slices.filter((s) => s.status === "in-progress").length ?? 0;
     expect(inProgress).toBe(N);
   }, 30_000);
+
+  // P1/R-03: `verify add` is a read-modify-write of verify.json. Without
+  // `withStateLock` serializing it, N racing adds would lose updates (last writer
+  // wins). Every concurrent add must land — N distinct commands present.
+  it.skipIf(!fs.existsSync(CLI))("concurrent `verify add` all land (no lost verify-config writes)", async () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    const N = 16;
+    await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        execFileP("node", [CLI, "verify", "add", `cmd-${i}`, "--cwd", tp!.root],
+          { env: { ...process.env, TH_NO_LOG: "1" } }),
+      ),
+    );
+
+    const commands = readVerifyConfig(tp.paths).commands;
+    expect(commands).toHaveLength(N);
+    expect(new Set(commands).size).toBe(N); // each distinct add present, none lost
+  }, 30_000);
 });
 
 describe("REQ-PCO-000: withStateLock treats Windows EPERM/EACCES as 'held' and retries", () => {
@@ -110,15 +131,19 @@ describe("REQ-PCO-000: withStateLock treats Windows EPERM/EACCES as 'held' and r
     expect(isLockHeldError(undefined)).toBe(false); // unknown → rethrow
   });
 
-  it("steals a STALE lock and runs fn (the held → steal → retry loop, no fs mocking)", () => {
+  it("steals a STALE, STAMPED lock and runs fn (the held → steal → retry loop, no fs mocking)", () => {
     const tp = makeTempProject();
     try {
       runInit(tp.paths, {}); // creates stateDir so withStateLock engages the lock
       const lockDir = path.join(tp.paths.stateDir, ".state.lock");
 
       // Simulate a crashed holder: a lock dir whose mtime is older than the stale
-      // threshold (STALE_MS, now 15s). The contention branch must steal it and let fn run.
+      // threshold (STALE_MS, now 15s). It carries an OWNER stamp so it is
+      // steal-eligible — R-08: only STAMPED locks may be stolen; an owner-less lock
+      // is reclaimed via the 25s timeout, never stolen (covered in state-store-seam).
+      // The contention branch must steal this stamped stale lock and let fn run.
       fs.mkdirSync(lockDir, { recursive: true });
+      fs.writeFileSync(path.join(lockDir, "owner"), "crashed-holder-token", "utf8");
       const old = Date.now() - 60_000;
       fs.utimesSync(lockDir, new Date(old), new Date(old));
 

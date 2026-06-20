@@ -63,10 +63,22 @@ exports.cachedFreshness = cachedFreshness;
 exports.clearFreshnessCache = clearFreshnessCache;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+const scanner_1 = require("./scanner");
 /** Per-process cache, keyed by absolute project root. Never persisted. */
 const CACHE = new Map();
-/** Directory names never descended into for the cheap tree walk (mirror scanner scope coarsely). */
-const SKIP_DIRS = new Set([".git", "node_modules", "dist", ".twinharness"]);
+/**
+ * Directory names never descended into for the cheap tree walk.
+ *
+ * R-18: this is a SUPERSET of the scanner's `GENERATED_DIRS` (every generated/cache
+ * dir the real scan prunes) plus `.twinharness` (the state dir — `repo-map.json`
+ * lives there and is keyed separately as `mapStat`, never as a tracked source file).
+ * Previously this was a small SUBSET of `GENERATED_DIRS` (only `.git`/`node_modules`/
+ * `dist`), so the cheap-signature walk descended into `coverage/`, `.next/`,
+ * `__pycache__/`, etc. that the real scan skips — making the "cheap" path needlessly
+ * expensive AND occasionally invalidating the cache on churn in a dir the scan ignores.
+ * Mirroring `GENERATED_DIRS` keeps the cache walk scope coherent with the scan it guards.
+ */
+const SKIP_DIRS = new Set([...scanner_1.GENERATED_DIRS, ".twinharness"]);
 /**
  * Build the cheap stat signature for a project root. Pure I/O: `readdirSync` +
  * `statSync` only — NO file content is read and NOTHING is hashed. Bounded by a

@@ -64,6 +64,8 @@ const paths_1 = require("../core/paths");
 const output_1 = require("../core/output");
 const log_1 = require("../core/log");
 const guards_1 = require("../core/guards");
+const state_store_1 = require("../core/state-store");
+const artifact_guard_1 = require("../core/artifact-guard");
 const scanner_1 = require("../core/repo-map/scanner");
 const schema_1 = require("../core/repo-map/schema");
 const hash_1 = require("../core/hash");
@@ -207,6 +209,32 @@ function runRepoMap(paths, opts = {}) {
     if (write) {
         const jsonAbs = path.join(paths.stateDir, "repo-map.json");
         const mdAbs = path.join(paths.docsDir, "00-repo-map.md");
+        // R-14 / DR-04a clobber guard. Both repo-map targets are GENERATED artifacts,
+        // not normally registered in `approved_artifacts`, so this guard is inert on a
+        // normal re-run. But if an operator has explicitly registered either path, a
+        // re-run would SILENTLY overwrite reviewed/approved content. Refuse unless
+        // `--force` is supplied (the deliberate-re-author escape). Read state read-only;
+        // an uninitialized project (no state) has no approved artifacts → guard inert, so
+        // `th repo map` still works pre-init. Keyed strictly on registration: no effect on
+        // any non-registered write.
+        if (!opts.force) {
+            const sr = (0, state_store_1.readState)(paths);
+            const approved = sr.state?.approved_artifacts ?? [];
+            const blocked = (0, artifact_guard_1.matchApprovedArtifact)(approved, paths.root, mdAbs)
+                ? REPO_MAP_MD_REL
+                : (0, artifact_guard_1.matchApprovedArtifact)(approved, paths.root, jsonAbs)
+                    ? REPO_MAP_JSON_REL
+                    : null;
+            if (blocked) {
+                (0, log_1.structuredLog)({ cmd: "repo map", error: artifact_guard_1.APPROVED_ARTIFACT_CLOBBER_CODE, file: blocked });
+                return (0, output_1.failure)({
+                    human: `Refusing to overwrite ${blocked}: it is a REGISTERED approved artifact, and a silent ` +
+                        `clobber would lose reviewed content (R-14). Re-run with --force to overwrite deliberately, ` +
+                        `then re-register it (\`th artifact register ${blocked} --version <N+1>\`).`,
+                    data: { error: artifact_guard_1.APPROVED_ARTIFACT_CLOBBER_CODE, file: blocked },
+                });
+            }
+        }
         try {
             atomicWrite(paths.root, jsonAbs, json);
         }

@@ -188,12 +188,14 @@ describe("REQ-PCO-070: CLI/MCP asymmetry is pinned (intentional, not accidental 
     }
   });
 
-  it("AC#5: the mutating-tool count is pinned to 30 (beside the 62-tool parity count)", () => {
+  it("AC#5: the mutating-tool count is pinned to 32 (beside the 62-tool parity count)", () => {
     // Mutating = NOT readOnlyHint. This is the write-surface size: every one of
     // these is exercised by the write-surface audit harness (AC#1). Pinning it
     // means a new mutating tool can never be added without this suite noticing.
+    // R-09 raised this from 30→32: th_route and th_scorecard are now honestly
+    // mutating (they append an opt-in telemetry.jsonl line per call when ON).
     const mutating = TOOL_DEFS.filter((t) => TOOL_ANNOTATIONS[t.name]?.readOnlyHint === false);
-    expect(mutating.length).toBe(30);
+    expect(mutating.length).toBe(32);
     // Cross-check against the existing 62-tool parity count: read-only + mutating
     // partition the whole registry exactly (no tool is un-annotated).
     const readOnly = TOOL_DEFS.filter((t) => TOOL_ANNOTATIONS[t.name]?.readOnlyHint === true);
@@ -206,14 +208,45 @@ describe("REQ-PCO-070: CLI/MCP asymmetry is pinned (intentional, not accidental 
     // gate tools are the only MCP path to them. We assert the refusal is wired to
     // the canonical GATE_OWNED set (state-fields.ts), not a stale local copy, by
     // pinning that the th_state_set closure consults GATE_OWNED, and that the set
-    // is non-empty and contains the four governing fields it is meant to cover.
+    // covers the governing fields it is meant to cover.
     const stateSet = TOOL_DEFS.find((t) => t.name === "th_state_set");
     expect(stateSet, "th_state_set must be registered").toBeTruthy();
     expect(stateSet!.run.toString()).toMatch(/GATE_OWNED/);
     expect(GATE_OWNED.size).toBeGreaterThan(0);
-    for (const field of ["implementation_allowed", "tier", "current_stage", "write_gate"]) {
+    // The 5 original gate-security fields + the 4 gate-defining config fields (R-04).
+    for (const field of [
+      "implementation_allowed",
+      "tier",
+      "current_stage",
+      "write_gate",
+      "blast_radius_flags",
+      "delivery_mode",
+      "has_ui",
+      "interview_required",
+      "interview_cutoff",
+    ]) {
       expect(GATE_OWNED.has(field), `GATE_OWNED must cover ${field}`).toBe(true);
     }
+  });
+
+  it("AC#5: the set MCP refuses == the set CLI --emergency-gates == 9 fields (R-04 parity)", () => {
+    // GATE_OWNED is the single source of truth for BOTH surfaces: MCP th_state_set
+    // refuses `GATE_OWNED.has(firstSegment)` and the CLI runStateSetLocked gates the
+    // SAME set behind --emergency. After R-04 it is exactly these nine fields.
+    expect([...GATE_OWNED].sort()).toEqual(
+      [
+        "blast_radius_flags",
+        "current_stage",
+        "implementation_allowed",
+        "tier",
+        "write_gate",
+        "delivery_mode",
+        "has_ui",
+        "interview_required",
+        "interview_cutoff",
+      ].sort(),
+    );
+    expect(GATE_OWNED.size).toBe(9);
   });
 
   it("AC#5: th_write_gate_set is tighten-only over MCP (cannot loosen the write-gate)", () => {

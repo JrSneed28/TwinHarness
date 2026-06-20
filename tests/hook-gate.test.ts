@@ -5,7 +5,7 @@ import { runInit } from "../src/commands/init";
 import { evaluateStopGate, runHookStopGate } from "../src/commands/hook";
 import { readState, writeState } from "../src/core/state-store";
 import { initialState } from "../src/core/state-schema";
-import { writeVerifyConfig, writeVerifyReport } from "../src/core/verify";
+import { writeVerifyConfig, writeVerifyReport, verifyConfigPath } from "../src/core/verify";
 import { runDecisionAdd, runDecisionApprove } from "../src/commands/decision";
 
 let tp: TempProject | undefined;
@@ -154,6 +154,24 @@ describe("REQ-GATE-005: final-verification requires a green verify suite when on
     writeVerifyReport(tp.paths, { ok: true, ranAt: "2026-06-13T00:00:00.000Z", results: [{ command: "npm test", exitCode: 0, ok: true, durationMs: 1, outputTail: "" }] });
     settledAtFinal(tp);
     expect(evaluateStopGate(tp.paths).block).toBe(false);
+  });
+
+  // R-23: a present-but-CORRUPT verify.json must fail CLOSED at the stop gate — the old
+  // readVerifyConfig collapsed it to `{ commands: [] }`, skipping the suite block and
+  // letting the run STOP/complete on an unreadable config.
+  it("a CORRUPT verify.json → blocks (fail-closed, NOT treated as empty/no-commands)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    // First wire + green a suite, then corrupt the config bytes: the old reader would
+    // have degraded this to "no commands" and ALLOWED completion.
+    writeVerifyConfig(tp.paths, { commands: ["npm test"] });
+    writeVerifyReport(tp.paths, { ok: true, ranAt: "2026-06-13T00:00:00.000Z", results: [{ command: "npm test", exitCode: 0, ok: true, durationMs: 1, outputTail: "" }] });
+    fs.writeFileSync(verifyConfigPath(tp.paths), "{ not valid json", "utf8");
+    settledAtFinal(tp);
+    const d = evaluateStopGate(tp.paths);
+    expect(d.block).toBe(true);
+    expect(d.reasons[0]).toContain("corrupt");
+    expect(d.reasons[0]).toContain("fail-closed");
   });
 });
 

@@ -167,7 +167,7 @@ describe("interview handlers — store-only round-trip (start/record/status)", (
 });
 
 describe("interview.json LAZY on-read upgrade (legacy {threshold, ambiguity} → {cutoff, confidence})", () => {
-  it("upgrades a legacy interview.json on read: cutoff 0.8, confidence inverts, NOT dropped as not-started", () => {
+  it("R-09: status upgrades a legacy interview.json IN MEMORY (not dropped), WITHOUT writing to disk", () => {
     tp = makeTempProject();
     // A legacy on-disk document in the OLD shape (threshold 0.2, ambiguity 0.3 → confidence 0.7).
     const legacy = {
@@ -188,8 +188,12 @@ describe("interview.json LAZY on-read upgrade (legacy {threshold, ambiguity} →
     fs.mkdirSync(path.dirname(tp.paths.interviewFile), { recursive: true });
     fs.writeFileSync(tp.paths.interviewFile, JSON.stringify(legacy, null, 2) + "\n", "utf8");
 
+    // Snapshot the exact on-disk bytes BEFORE the read-only status call.
+    const beforeBytes = fs.readFileSync(tp.paths.interviewFile, "utf8");
+
     const status = runInterviewStatus(tp.paths);
-    // NOT dropped as "not started" — the legacy shape survives validation + upgrades.
+    // NOT dropped as "not started" — the legacy shape survives validation + upgrades
+    // IN MEMORY, so the report reflects the new shape.
     expect(status.ok).toBe(true);
     expect(status.data?.started).toBe(true);
     expect(status.data?.rounds).toBe(1);
@@ -199,21 +203,11 @@ describe("interview.json LAZY on-read upgrade (legacy {threshold, ambiguity} →
     // confidence 0.7 < cutoff 0.8 → not ready.
     expect(status.data?.ready).toBe(false);
 
-    // The file was rewritten in the NEW shape, and a one-time .bak snapshot was made.
-    const onDisk = JSON.parse(fs.readFileSync(tp.paths.interviewFile, "utf8")) as Record<string, unknown>;
-    expect(onDisk.cutoff).toBeCloseTo(0.8, 10);
-    expect(onDisk.confidence).toBeCloseTo(0.7, 10);
-    expect(onDisk).not.toHaveProperty("threshold");
-    expect(onDisk).not.toHaveProperty("ambiguity");
-    // The recorded round's ambiguity inverted to confidence (0.3 → 0.7).
-    const rounds = onDisk.rounds as Array<Record<string, unknown>>;
-    expect(rounds[0]?.confidence).toBeCloseTo(0.7, 10);
-    expect(rounds[0]).not.toHaveProperty("ambiguity");
-
-    expect(fs.existsSync(tp.paths.interviewFile + ".bak")).toBe(true);
-    const bak = JSON.parse(fs.readFileSync(tp.paths.interviewFile + ".bak", "utf8")) as Record<string, unknown>;
-    expect(bak.threshold).toBe(0.2);
-    expect(bak.ambiguity).toBe(0.3);
+    // R-09: `th interview status` is read-only — the legacy file is NOT rewritten and
+    // NO `.bak` snapshot is created on a read. The bytes are byte-for-byte unchanged;
+    // the next mutating `record`/`start` migrates the file on disk (covered below).
+    expect(fs.readFileSync(tp.paths.interviewFile, "utf8")).toBe(beforeBytes);
+    expect(fs.existsSync(tp.paths.interviewFile + ".bak")).toBe(false);
   });
 
   it("after upgrade, a subsequent record appends in the new shape and gates on confidence", () => {

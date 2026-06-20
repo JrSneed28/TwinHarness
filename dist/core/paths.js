@@ -36,6 +36,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.WriteSurfaceError = exports.PathContainmentError = void 0;
 exports.assertGovernedWriteSurface = assertGovernedWriteSurface;
 exports.resolveWithinRoot = resolveWithinRoot;
+exports.isAbsoluteOrEscaping = isAbsoluteOrEscaping;
+exports.realpathExistingPrefix = realpathExistingPrefix;
 exports.resolveProjectPaths = resolveProjectPaths;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
@@ -186,6 +188,28 @@ function resolveWithinRoot(root, p) {
         return null;
     return abs; // success: return the lexical in-root path (contract unchanged)
 }
+/**
+ * Pure (no-I/O) predicate (R-22): does `p` look absolute or parent-escaping on
+ * EITHER platform? Encodes the same cross-platform reject rule as
+ * `resolveWithinRoot`'s `path.sep === "/"` branch above, but WITHOUT filesystem
+ * realpath resolution — so it is safe (and correct) to run against an opaque
+ * ledger KEY that is never joined to disk (the `<file>` part of an artifact lease
+ * section id, and the artifact-register MCP pre-check). Catches:
+ *   - native absolute (`path.isAbsolute`): POSIX `/x`; on Windows also `C:\x`, `\\unc`;
+ *   - Windows drive-absolute (`C:\x`) — host-native `path.isAbsolute` returns FALSE
+ *     for this on a POSIX host, which was the R-11 cross-platform gap this closes;
+ *   - UNC (`\\server\share`) on a POSIX host;
+ *   - any `..` segment (parent escape) on either platform.
+ * The drive/UNC/`..` checks are host-independent (regex + string ops), so a hostile
+ * `C:\Windows\x` is rejected identically on POSIX and Windows — containment no longer
+ * depends on the host OS.
+ */
+function isAbsoluteOrEscaping(p) {
+    return (path.isAbsolute(p) ||
+        /^[a-zA-Z]:[\\/]/.test(p) ||
+        p.startsWith("\\\\") ||
+        p.split(/[\\/]/).includes(".."));
+}
 /** realpath `p`, preferring the native resolver; fall back to `p` if it errors. */
 function realpathSafe(p) {
     try {
@@ -205,6 +229,12 @@ function realpathSafe(p) {
  * tail literally (a tail that does not exist on disk cannot contain a symlink or
  * junction). This lets us resolve real locations for paths that point at files
  * about to be written, without throwing ENOENT.
+ *
+ * Exported so the write-gate hook canonicalizes a tool's target the SAME way the
+ * root is canonicalized (R-13): `resolveProjectPaths` realpaths the selected root,
+ * so a containment check that compares a NON-canonical target (resolved against a
+ * symlinked/8.3-aliased payload `cwd`) against the canonical root would falsely
+ * read as "outside root" and fail the gate OPEN. Both sides must be canonicalized.
  */
 function realpathExistingPrefix(abs) {
     let existing = abs;
@@ -250,6 +280,15 @@ function resolveProjectPaths(root) {
             break; // reached the filesystem root: keep startAbs
         cursor = parent;
     }
+    // R-13: canonicalize the selected root ONCE, here at selection — the walk picks
+    // `abs` LEXICALLY, so a junction/symlink in the ancestor chain (NTFS junctions
+    // are not symlinks: lstat().isSymbolicLink() is false for them) would leave the
+    // containment anchor non-canonical. `resolveWithinRoot` realpaths both sides
+    // today so writes are safe, but any future writer using `paths.root` directly
+    // would inherit the redirected base. Anchoring the canonical form here makes the
+    // root the single source of truth. `realpathExistingPrefix` tolerates a
+    // not-yet-created root (fresh `th init`) by resolving its longest existing prefix.
+    abs = realpathExistingPrefix(abs);
     let stateDir;
     const newDir = path.join(abs, ".twinharness");
     const legacyStateFile = path.join(abs, ".agentic-sdlc", "state.json");

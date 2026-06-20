@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.realLockOps = exports.STALE_MS = exports.LockTimeoutError = void 0;
+exports.realLockOps = exports.STALE_MS = exports.LockStampError = exports.LockTimeoutError = void 0;
 exports.readState = readState;
 exports.writeState = writeState;
 exports.isLockHeldError = isLockHeldError;
@@ -52,11 +52,31 @@ const state_schema_1 = require("./state-schema");
 class LockTimeoutError extends Error {
     code = "state_lock_timeout";
     constructor(lockDir) {
-        super(`state lock timeout: ${lockDir} is held; remove it if no \`th\` process is running.`);
+        super(`state lock timeout: ${lockDir} is held; if no \`th\` process is running, reclaim it with \`th state unlock\`.`);
         this.name = "LockTimeoutError";
     }
 }
 exports.LockTimeoutError = LockTimeoutError;
+/**
+ * Thrown by {@link withStateLock} (R-21) when the owner stamp cannot be written after
+ * acquiring the lock, repeatedly, within `MAX_STAMP_FAILS` attempts. This means the
+ * filesystem itself is refusing the owner write (full disk, read-only mount, or
+ * persistent AV interception of the just-created lock dir) — distinct from
+ * `state_lock_timeout` (another process holds the lock). The stamp is MANDATORY: a held
+ * but owner-less lock is never stealable (R-08) and the timeout path never reclaims it,
+ * so proceeding owner-less and then crashing would brick every future state mutation.
+ * Surfaced as a distinct typed error so the operator knows the FS — not a stuck holder —
+ * is the problem.
+ */
+class LockStampError extends Error {
+    code = "state_lock_stamp_failed";
+    constructor(lockDir) {
+        super(`state lock owner-stamp failed: could not write the owner token under ${lockDir} ` +
+            `(the filesystem may be read-only/full, or the lock dir is being blocked).`);
+        this.name = "LockStampError";
+    }
+}
+exports.LockStampError = LockStampError;
 /** Read + validate state.json. Distinguishes "missing" from "present but invalid". */
 function readState(paths) {
     if (!fs.existsSync(paths.stateFile)) {
@@ -211,6 +231,10 @@ function withStateLock(paths, fn, ops = exports.realLockOps) {
     const BACKOFF_BASE_MS = 5;
     const BACKOFF_CAP_MS = 80;
     let attempt = 0;
+    // R-21: cap consecutive owner-stamp failures so a genuinely unwritable FS surfaces a
+    // distinct LockStampError WELL within the 25s deadline, instead of retrying to timeout.
+    const MAX_STAMP_FAILS = 3;
+    let stampFails = 0;
     // Zero-CPU backoff-with-jitter for THIS failed attempt (PERF-007 / PERF-008): the
     // ceiling is BACKOFF_BASE_MS * 2^attempt clamped to BACKOFF_CAP_MS, and we sleep a
     // uniform [0, ceiling) ("full jitter") so N contenders desynchronize instead of
@@ -234,11 +258,36 @@ function withStateLock(paths, fn, ops = exports.realLockOps) {
         }
         try {
             ops.acquire(lockDir); // atomic test-and-set: throws EEXIST (POSIX) / EPERM|EACCES (Windows) if held
+            // Stamp the owner token BEFORE declaring acquisition success so a LIVE lock is
+            // reliably steal-eligible-and-verifiable: a waiter only steals a STAMPED stale
+            // lock whose token is unchanged (the TOCTOU guard below).
+            //
+            // R-21: the stamp is MANDATORY, not best-effort. If it throws (Windows AV/contention
+            // can deny the write to the just-created lock dir), we must NOT proceed into fn()
+            // holding an OWNER-LESS lock: such a lock is never stealable (R-08) and the deadline
+            // path only throws — it never reclaims — so a crash while holding one would brick
+            // EVERY future state mutation until a manual `th state unlock`. Instead, release our
+            // OWN just-acquired lock and retry. Releasing is race-free wrt R-08: WE are the
+            // holder, so this removes our own lock, and a waiter cannot have stolen an owner-less
+            // lock (the guard below forbids it). The lock is therefore owner-less only transiently
+            // (we hold nothing across the retry). A genuinely unwritable FS is bounded: after
+            // MAX_STAMP_FAILS consecutive failures we surface a distinct LockStampError well
+            // within the 25s deadline (the loop-head deadline still bounds the interim retries).
             try {
                 ops.writeOwner(ownerFile, myToken);
             }
             catch {
-                /* best-effort owner stamp; absence just means a steal can't TOCTOU-verify */
+                stampFails++;
+                try {
+                    ops.remove(lockDir);
+                }
+                catch {
+                    /* best-effort release of our own just-acquired lock */
+                }
+                if (stampFails >= MAX_STAMP_FAILS)
+                    throw new LockStampError(lockDir);
+                backoff();
+                continue;
             }
             break;
         }
@@ -254,12 +303,27 @@ function withStateLock(paths, fn, ops = exports.realLockOps) {
             // (REQ-STATE-LOCK-003).
             try {
                 const ownerBefore = ops.readOwner(ownerFile);
+                // R-08 — NEVER steal an OWNER-LESS lock. `readOwner` returns null both on a
+                // read failure AND when the owner stamp is simply absent (the holder's
+                // best-effort `writeOwner` threw and was swallowed — common on Windows under
+                // AV/contention — or a crashed/legacy owner-less lock). With a null
+                // `ownerBefore` the TOCTOU guard below degrades to `null === null` → TRUE for
+                // EVERY waiter, so two waiters could both pass it and both `remove()`, letting
+                // a fresh third holder's LIVE lock be clobbered → two actors in `fn()` (the
+                // lost-update the lock exists to prevent). Only a STAMPED lock is steal-eligible;
+                // an unstamped lock is reclaimed via the ~25s TIMEOUT_MS path, never stolen. Back
+                // off and retry (bounded by the loop-head deadline) instead of the age/steal check.
+                if (ownerBefore === null) {
+                    backoff(); // owner-less → not steal-eligible; wait it out to the timeout (#3)
+                    continue;
+                }
                 const age = ops.now() - ops.mtimeMs(lockDir);
                 if (age > exports.STALE_MS) {
                     // TOCTOU guard: only steal if the owner token is unchanged since we
                     // observed the stale lock. If another waiter already stole and
                     // re-acquired (fresh token, or a fresh mtime), we must NOT clobber its
-                    // live lock — fall through and retry/wait instead.
+                    // live lock — fall through and retry/wait instead. (`ownerBefore` is now
+                    // provably non-null here, so this compares two real stamps, never null===null.)
                     if (ops.readOwner(ownerFile) === ownerBefore) {
                         ops.remove(lockDir);
                     }

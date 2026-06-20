@@ -55,7 +55,18 @@ describe("F-7/H-1: validateToolArgs enforces the closed, typed inputSchema", () 
 });
 
 describe("F-7/H-2: th_state_set refuses GATE_OWNED fields over MCP", () => {
-  it.each(["implementation_allowed", "tier", "current_stage", "write_gate", "blast_radius_flags"])(
+  it.each([
+    "implementation_allowed",
+    "tier",
+    "current_stage",
+    "write_gate",
+    "blast_radius_flags",
+    // R-04 / DR-02 — the four gate-defining config fields are refused over MCP too.
+    "delivery_mode",
+    "has_ui",
+    "interview_required",
+    "interview_cutoff",
+  ])(
     "refuses gate-owned field %j via the MCP adapter even though the CLI allows it",
     (field) => {
       tp = makeTempProject();
@@ -65,6 +76,10 @@ describe("F-7/H-2: th_state_set refuses GATE_OWNED fields over MCP", () => {
         : field === "tier" ? "T1"
         : field === "current_stage" ? "requirements"
         : field === "blast_radius_flags" ? "[]"
+        : field === "delivery_mode" ? "no-code"
+        : field === "has_ui" ? "false"
+        : field === "interview_required" ? "false"
+        : field === "interview_cutoff" ? "0.1"
         : "deny";
       const res = defFor("th_state_set").run(tp.paths, { key: field, value });
       expect(res.ok).toBe(false);

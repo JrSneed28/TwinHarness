@@ -206,6 +206,44 @@ describe("REQ-PLUGIN-003: every component resolves `th` without relying on PATH"
   });
 });
 
+describe("REQ-PLUGIN-005 (R-17): every package.json files[] entry ships on disk", () => {
+  // A marketplace install COPIES the repo with no build step, so a `files[]` entry
+  // that is absent at install time is a silently-broken package (`th doctor`'s new
+  // packaging check surfaces it at runtime; this pins it at build time). The
+  // load-bearing fact: templates/ (16 prose templates), schemas/, hooks/, and
+  // agents/ are all declared in files[] AND present — none can be dropped from the
+  // package without failing here.
+  const pkg = readJson("package.json");
+  const files = (pkg.files as string[]) ?? [];
+
+  it("package.json declares a non-empty files[]", () => {
+    expect(Array.isArray(files)).toBe(true);
+    expect(files.length).toBeGreaterThan(0);
+  });
+
+  it.each(files)("files[] entry `%s` exists on disk", (entry) => {
+    expect(fs.existsSync(path.join(ROOT, entry))).toBe(true);
+  });
+
+  it("the shipped component directories are declared in files[]", () => {
+    for (const dir of ["templates", "schemas", "hooks", "agents", "dist"]) {
+      expect(files).toContain(dir);
+    }
+  });
+
+  it("templates/ ships the 16 prose templates (the count agents read against)", () => {
+    const templates = fs.readdirSync(path.join(ROOT, "templates")).filter((f) => f.endsWith(".md"));
+    // Exact count mirrors the existing agents/commands convention above; bump this
+    // deliberately when a template is added/removed (the source of truth is the dir).
+    expect(templates).toHaveLength(16);
+  });
+
+  it("schemas/ and hooks/ are present and non-empty", () => {
+    expect(fs.readdirSync(path.join(ROOT, "schemas")).length).toBeGreaterThan(0);
+    expect(fs.readdirSync(path.join(ROOT, "hooks")).length).toBeGreaterThan(0);
+  });
+});
+
 describe("REQ-PLUGIN-004: pre-prompt `!` snapshot directives are non-fatal", () => {
   // A `!`-prefixed directive runs BEFORE the prompt as a best-effort context
   // snapshot. Claude Code ABORTS the whole slash command if that directive exits

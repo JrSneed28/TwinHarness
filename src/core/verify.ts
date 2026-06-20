@@ -8,30 +8,42 @@
  * the run-health view (`th coverage report`, `th doctor`) can reflect whether the
  * suite is actually green, not just whether tests are anchored.
  *
- * Two small JSON files live under the state dir, never inside state.json (so the
- * state schema and its content-hash stability are untouched):
- *   - verify.json        → { commands, provenance, approvedHash }  (the config)
- *   - verify-report.json → the last run's results
+ * Files live under the state dir, never inside state.json (so the state schema
+ * and its content-hash stability are untouched):
+ *   - verify.json            → { commands, provenance }  (the config)
+ *   - verify-approvals.jsonl → append-only, hash-chained approval ledger (P1/R-02)
+ *   - verify-report.json     → the last run's results
  *
  * Security note (see SECURITY.md): the configured commands are run with the
  * shell, in the project root. They are operator-authored, exactly like the
  * scripts a developer would run by hand; `th verify run` never sources commands
  * from untrusted artifact content. Phase 6 hardening (#19) adds:
  *   - per-command provenance (actor + timestamp) recorded on `th verify add`;
- *   - a hash-pin of the command SET that must be human-confirmed before the first
- *     execution of a new/changed set (`requireApproval`);
  *   - a curated (not fully-inherited) child env;
  *   - secret redaction of the persisted/printed output tail;
  *   - a Windows/POSIX process-TREE kill on timeout so grandchildren die;
  *   - an optional read-only mode that refuses repo-mutating verification.
+ *
+ * P1 hardening (R-01/R-02/R-03 — bring verify.json to the decision-record
+ * standard): the command SET must be human-confirmed (a TTY barrier on
+ * `th verify approve`, in the command layer) before its first execution; the
+ * approval is recorded in a tamper-EVIDENT, SHA-256 hash-chained append-only
+ * ledger (`verify-approvals.jsonl`, mirroring `decisions.jsonl`) so a forged or
+ * edited approval breaks the chain and `verify run` fails CLOSED; and the config
+ * write is atomic + governed (and serialized by the command layer's
+ * `withStateLock`). A torn/unreadable config is treated as CORRUPT and refused,
+ * never silently degraded to an empty/approved set.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { ProjectPaths } from "./paths";
+import { assertGovernedWriteSurface } from "./paths";
 import { atomicWriteFile, readFileWithRetry } from "./atomic-io";
+import { hashContent, GENESIS_PREV_HASH, HEX64 } from "./hash";
+import { readJsonlValues, scanTailValid } from "./jsonl";
 
 /** Per-command provenance (#19, P6-2): who added the command and when. */
 export interface VerifyCommandProvenance {
@@ -46,15 +58,13 @@ export interface VerifyConfig {
   commands: string[];
   /** Provenance of each configured command (omit-when-absent for legacy files). */
   provenance?: VerifyCommandProvenance[];
-  /**
-   * The command-set hash a human explicitly approved for execution (#19, P6-2).
-   * When it does not match the current command set, `th verify run` refuses to
-   * execute until the set is re-confirmed. Absent on a legacy file → unapproved.
-   */
-  approvedHash?: string;
-  /** Who approved the current set, and when (audit). */
-  approvedBy?: string;
-  approvedAt?: string;
+  // NOTE (P1/R-02): approval is no longer a forgeable field on this config. A bare
+  // `approvedHash = sha256(commands)` was publicly recomputable, so anyone who could
+  // write verify.json could forge approval. Approvals now live in the tamper-evident
+  // hash-chained ledger `verify-approvals.jsonl` (see {@link appendVerifyApproval} /
+  // {@link evaluateCommandSetApproval}); legacy `approvedHash`/`approvedBy`/`approvedAt`
+  // fields on an old file are ignored (treated as unapproved until a fresh
+  // `th verify approve` seals a ledger entry).
 }
 
 export interface VerifyResult {
@@ -100,12 +110,37 @@ export function commandSetHash(commands: string[]): string {
   return createHash("sha256").update(JSON.stringify(commands), "utf8").digest("hex");
 }
 
-/** Read the configured commands. Missing/invalid file → empty command list. */
-export function readVerifyConfig(paths: ProjectPaths): VerifyConfig {
+/** Whether a read of verify.json found it absent, well-formed, or present-but-corrupt. */
+export type VerifyConfigStatus = "ok" | "absent" | "corrupt";
+
+export interface LoadedVerifyConfig {
+  status: VerifyConfigStatus;
+  config: VerifyConfig;
+}
+
+/**
+ * Read verify.json, DISTINGUISHING absent from present-but-corrupt (R-03). The old
+ * reader collapsed both to `{ commands: [] }`, so an unreadable/torn config read as
+ * "no commands" — which `isCommandSetApproved` then judged trivially approved
+ * (fail-OPEN). Here a present file that does not parse, or parses to the wrong
+ * shape, returns `status:"corrupt"` so the run gate can fail CLOSED instead of
+ * treating a corrupt config as an empty/approved set. The read goes through
+ * {@link readFileWithRetry} so a transient contention error (a reader colliding
+ * with a concurrent atomic rename of the config) is retried, not misjudged.
+ */
+export function loadVerifyConfig(paths: ProjectPaths): LoadedVerifyConfig {
   const file = verifyConfigPath(paths);
-  if (!fs.existsSync(file)) return { commands: [] };
+  if (!fs.existsSync(file)) return { status: "absent", config: { commands: [] } };
+  let raw: string;
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
+    raw = readFileWithRetry(file);
+  } catch {
+    // Present a moment ago but unreadable after the retry budget (e.g. removed
+    // mid-read) → treat as absent: there are no bytes to misjudge as corrupt.
+    return { status: "absent", config: { commands: [] } };
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === "object" && Array.isArray((parsed as VerifyConfig).commands)) {
       const obj = parsed as VerifyConfig;
       const commands = obj.commands.filter((c): c is string => typeof c === "string");
@@ -116,31 +151,201 @@ export function readVerifyConfig(paths: ProjectPaths): VerifyConfig {
             p != null && typeof (p as VerifyCommandProvenance).command === "string",
         );
       }
-      if (typeof obj.approvedHash === "string") config.approvedHash = obj.approvedHash;
-      if (typeof obj.approvedBy === "string") config.approvedBy = obj.approvedBy;
-      if (typeof obj.approvedAt === "string") config.approvedAt = obj.approvedAt;
-      return config;
+      return { status: "ok", config };
     }
+    // Present + parseable but the wrong shape (no commands array) → corrupt.
+    return { status: "corrupt", config: { commands: [] } };
   } catch {
-    // Fall through to empty.
+    // Present but unparseable JSON → corrupt. Fail CLOSED at the run gate; never
+    // silently degrade to "no commands / approved-empty" as the old reader did.
+    return { status: "corrupt", config: { commands: [] } };
   }
-  return { commands: [] };
 }
 
-export function writeVerifyConfig(paths: ProjectPaths, config: VerifyConfig): void {
-  fs.mkdirSync(paths.stateDir, { recursive: true });
-  fs.writeFileSync(verifyConfigPath(paths), JSON.stringify(config, null, 2) + "\n", "utf8");
+/** Read the configured commands. Missing/corrupt file → empty command list (the
+ * back-compat shape). Callers that must DISTINGUISH a corrupt config (to fail
+ * closed) use {@link loadVerifyConfig} directly. */
+export function readVerifyConfig(paths: ProjectPaths): VerifyConfig {
+  return loadVerifyConfig(paths).config;
 }
 
 /**
- * Whether the current command set has been approved for execution (#19, P6-2):
- * a non-empty set whose stored `approvedHash` matches the current command set.
- * An empty set is trivially "approved" (nothing to run); a new/changed set is
- * unapproved until `th verify approve` re-confirms it.
+ * Write verify.json atomically + through the governed write-surface chokepoint
+ * (R-03 — was a bare `fs.writeFileSync`, torn-readable and ungoverned). The
+ * command layer serializes concurrent mutations via `withStateLock`;
+ * {@link atomicWriteFile} threads `paths.root` so the target is asserted in-surface
+ * and the temp→fsync→rename→dir-fsync barrier makes a torn read impossible.
  */
-export function isCommandSetApproved(config: VerifyConfig): boolean {
-  if (config.commands.length === 0) return true;
-  return config.approvedHash === commandSetHash(config.commands);
+export function writeVerifyConfig(paths: ProjectPaths, config: VerifyConfig): void {
+  atomicWriteFile(verifyConfigPath(paths), JSON.stringify(config, null, 2) + "\n", { root: paths.root });
+}
+
+// ---------------------------------------------------------------------------
+// Approval ledger (P1/R-02) — tamper-evident, hash-chained verify-approvals.jsonl
+// ---------------------------------------------------------------------------
+
+/**
+ * Why a ledger and not a field on verify.json: the old `approvedHash` was a bare
+ * `sha256(commands)`. `commandSetHash` is exported and its input is public, so
+ * anyone who could write verify.json could recompute and FORGE the approval (R-02).
+ * Approvals now live in an append-only, SHA-256 hash-chained ledger that mirrors
+ * `decisions.jsonl`: a forged or edited approval event breaks the chain, and
+ * `verify run` then fails CLOSED (unapproved). Forging by APPEND is separately
+ * blocked by the TTY barrier on `th verify approve` (the command layer) and by the
+ * write-gate (verify.json + this ledger are no longer auto-allowed for a direct
+ * tool Write — see hook.ts) — exactly the layered defense `decisions.jsonl` relies on.
+ */
+export interface VerifyApprovalEvent {
+  /** `commandSetHash(commands)` of the SET a human approved (64-hex). */
+  approvedHash: string;
+  /** Number of commands approved (audit only). */
+  commandCount: number;
+  /** Resolved approver attribution (`--as` / TH_VERIFY_ACTOR / "unknown"). */
+  approvedBy: string;
+  /** ISO-8601 UTC approval time. */
+  approvedAt: string;
+  /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
+  prevHash: string;
+  /** SHA-256 hex (64) of THIS event's canonical text (computed with recordHash omitted). */
+  recordHash: string;
+}
+
+export function verifyApprovalsPath(paths: ProjectPaths): string {
+  return path.join(paths.stateDir, "verify-approvals.jsonl");
+}
+
+/** Fixed canonical field order for hashing (deterministic JSON; recordHash omitted). */
+const APPROVAL_FIELD_ORDER: ReadonlyArray<keyof VerifyApprovalEvent> = [
+  "approvedHash",
+  "commandCount",
+  "approvedBy",
+  "approvedAt",
+  "prevHash",
+];
+
+/** Deterministic canonical text of an approval event for hashing (recordHash omitted). */
+export function approvalCanonicalText(event: Omit<VerifyApprovalEvent, "recordHash">): string {
+  const ordered: Record<string, unknown> = {};
+  for (const key of APPROVAL_FIELD_ORDER) {
+    const val = (event as Record<string, unknown>)[key];
+    if (val === undefined) continue;
+    ordered[key] = val;
+  }
+  return JSON.stringify(ordered);
+}
+
+/** `recordHash` of an approval event = SHA-256 of its canonical text. */
+function approvalRecordHash(event: Omit<VerifyApprovalEvent, "recordHash">): string {
+  return hashContent(approvalCanonicalText(event));
+}
+
+/** Validate a parsed approval line; malformed lines are skipped by the reader. */
+function isValidApprovalEvent(parsed: unknown): parsed is VerifyApprovalEvent {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const e = parsed as Record<string, unknown>;
+  if (typeof e.approvedHash !== "string" || !HEX64.test(e.approvedHash)) return false;
+  if (typeof e.commandCount !== "number") return false;
+  if (typeof e.approvedBy !== "string") return false;
+  if (typeof e.approvedAt !== "string") return false;
+  if (typeof e.prevHash !== "string" || !HEX64.test(e.prevHash)) return false;
+  if (typeof e.recordHash !== "string" || !HEX64.test(e.recordHash)) return false;
+  return true;
+}
+
+/** Read every approval event in file order. Missing file → []. Bad lines skipped. */
+export function readVerifyApprovals(paths: ProjectPaths): VerifyApprovalEvent[] {
+  return readJsonlValues(verifyApprovalsPath(paths), isValidApprovalEvent);
+}
+
+/** The recordHash of the last VALID approval event, or GENESIS when none (tail parse). */
+function lastApprovalRecordHash(paths: ProjectPaths): string {
+  const last = scanTailValid(verifyApprovalsPath(paths), isValidApprovalEvent);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+
+export type VerifyApprovalChainResult =
+  | { ok: true }
+  | { ok: false; brokenAt: number; reason: "edited" | "prev_mismatch" };
+
+/**
+ * Walk approval events with a running `expectedPrev`. A recomputed recordHash that
+ * does not match → the record was edited (a forged field); `prevHash !== expectedPrev`
+ * → inserted/deleted/reordered. Returns the FIRST break. Mirrors decisions' verifyChain.
+ */
+export function verifyApprovalChain(events: VerifyApprovalEvent[]): VerifyApprovalChainResult {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i]!;
+    const { recordHash, ...rest } = e;
+    if (approvalRecordHash(rest) !== recordHash) return { ok: false, brokenAt: i, reason: "edited" };
+    if (e.prevHash !== expectedPrev) return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    expectedPrev = e.recordHash;
+  }
+  return { ok: true };
+}
+
+/**
+ * Append one approval event, sealing the hash chain (mirrors `appendDecisionEvent`).
+ * The caller MUST already hold the `withStateLock` span. Reads only the current tail
+ * for `prevHash`, computes `recordHash`, then atomically appends the JSON line. The
+ * write-surface chokepoint fires here (not best-effort — this writer propagates) so a
+ * non-governed target throws.
+ */
+export function appendVerifyApproval(
+  paths: ProjectPaths,
+  record: { approvedHash: string; commandCount: number; approvedBy: string; approvedAt: string },
+): VerifyApprovalEvent {
+  assertGovernedWriteSurface(paths.root, verifyApprovalsPath(paths));
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = lastApprovalRecordHash(paths);
+  const withPrev: Omit<VerifyApprovalEvent, "recordHash"> = { ...record, prevHash };
+  const recordHash = approvalRecordHash(withPrev);
+  const sealed: VerifyApprovalEvent = { ...withPrev, recordHash };
+  fs.appendFileSync(verifyApprovalsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+
+/** Why a command set is (un)approved — distinguishes a tamper from a plain miss. */
+export type ApprovalReason = "empty" | "approved" | "unapproved" | "chain_broken";
+
+/**
+ * Evaluate whether `commands` is approved for execution against the tamper-evident
+ * ledger (R-02). An empty set is trivially approved (nothing to run). Otherwise the
+ * ledger chain is verified FIRST and a break fails CLOSED (`chain_broken` →
+ * unapproved). A set is approved iff the LATEST valid approval event's `approvedHash`
+ * equals `commandSetHash(commands)` — so any `add`/`clear` that changed the set since
+ * the last approval (the ledger is touched ONLY by `approve`) leaves the latest
+ * approval pointing at a different hash → unapproved until re-confirmed.
+ */
+export function evaluateCommandSetApproval(
+  paths: ProjectPaths,
+  commands: string[],
+): { approved: boolean; reason: ApprovalReason } {
+  if (commands.length === 0) return { approved: true, reason: "empty" };
+  const events = readVerifyApprovals(paths);
+  if (!verifyApprovalChain(events).ok) return { approved: false, reason: "chain_broken" };
+  const last = events.length ? events[events.length - 1]! : undefined;
+  if (last && last.approvedHash === commandSetHash(commands)) return { approved: true, reason: "approved" };
+  return { approved: false, reason: "unapproved" };
+}
+
+/**
+ * Whether the current command set has been approved for execution (P1/R-02). A
+ * non-empty set is approved only when the tamper-evident ledger's latest event
+ * matches it on an unbroken chain; an empty set is trivially approved (nothing to
+ * run). Reads the ledger; the caller passes `paths` + the current `commands`.
+ */
+export function isCommandSetApproved(paths: ProjectPaths, commands: string[]): boolean {
+  return evaluateCommandSetApproval(paths, commands).approved;
+}
+
+/** The latest valid approval event matching `commands` (for audit display), or undefined. */
+export function latestApprovalFor(paths: ProjectPaths, commands: string[]): VerifyApprovalEvent | undefined {
+  if (commands.length === 0) return undefined;
+  const events = readVerifyApprovals(paths);
+  if (!verifyApprovalChain(events).ok) return undefined;
+  const last = events.length ? events[events.length - 1]! : undefined;
+  return last && last.approvedHash === commandSetHash(commands) ? last : undefined;
 }
 
 /**
@@ -239,47 +444,119 @@ export function redactSecrets(text: string): string {
  * from a possibly-untrusted project. An operator who needs a specific var present
  * can export it via a wrapper script they author, keeping the allowlist explicit.
  */
-const ENV_ALLOWLIST: ReadonlySet<string> = new Set([
-  "PATH",
-  "HOME",
-  "TMPDIR",
-  "TMP",
-  "TEMP",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "SHELL",
-  "TERM",
-  "USER",
-  "LOGNAME",
-  // Windows essentials.
-  "SystemRoot",
-  "SYSTEMROOT",
-  "ComSpec",
-  "COMSPEC",
-  "PATHEXT",
-  "WINDIR",
-  "USERPROFILE",
-  "HOMEDRIVE",
-  "HOMEPATH",
-  "APPDATA",
-  "LOCALAPPDATA",
-  "ProgramData",
-  "ProgramFiles",
-  "ProgramFiles(x86)",
-]);
+/**
+ * Allowlisted env-var names (the minimum a shell + test runner needs). Matched
+ * CASE-INSENSITIVELY (F1): native-Windows/PowerShell surfaces `Path`/`ProgramFiles`
+ * in mixed case via `Object.keys(process.env)`, and a case-sensitive Set silently
+ * dropped the critical PATH var — so a `th verify run` launched from PowerShell/cmd
+ * couldn't resolve `node_modules/.bin` shims, `git`, `bash`, or corp tools. The names
+ * here are stored upper-cased and compared against `k.toUpperCase()`. The Windows
+ * dual-cased pairs (`SystemRoot`/`SYSTEMROOT`, …) collapse to one entry under folding.
+ */
+const ENV_ALLOWLIST: ReadonlySet<string> = new Set(
+  [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "SHELL",
+    "TERM",
+    "USER",
+    "LOGNAME",
+    // Windows essentials.
+    "SYSTEMROOT",
+    "COMSPEC",
+    "PATHEXT",
+    "WINDIR",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    // Benign, explicitly-named tool vars a JS suite legitimately reads (R-05). These
+    // are data/selectors, NOT code-injection or trust-redirect surfaces — unlike
+    // NODE_OPTIONS/NODE_EXTRA_CA_CERTS/npm_config_registry, which are denied below.
+    "NODE_ENV", // build/test mode selector (development|production|test)
+    "FORCE_COLOR", // color-output toggle honored by node/npm/vitest
+    "NO_COLOR", // de-facto standard color opt-out
+    "CI", // many runners branch on this; pure boolean selector
+  ].map((n) => n.toUpperCase()),
+);
 
 /**
- * Build the curated child env from `parentEnv` (default `process.env`): keep only
- * allowlisted names; carry through a tool-prefix family (`NODE_*`, `npm_*`) that a
- * JS test suite commonly relies on, but never blanket-inherit. Returns a plain
- * record suitable for `spawnSync`'s `env`.
+ * Closed denylist of `NODE_*` / `npm_*` vars that turn a verify child into a code-
+ * execution, TLS-trust, or supply-chain redirect surface (R-05). The pre-fix code
+ * forwarded EVERY `NODE_*`/`npm_*` var verbatim, so a poisoned parent env
+ * (`NODE_OPTIONS=--require /evil.js`, `NODE_EXTRA_CA_CERTS=…`, `npm_config_registry=…`)
+ * injected straight into every node/npm/vitest child. We now forward NOTHING by
+ * prefix: only the explicit `ENV_ALLOWLIST` members above pass. This set is kept as
+ * a belt-and-suspenders tripwire (a NODE_/npm_ var that somehow reached the allowlist
+ * would still be dropped) and to document the precise vectors being closed.
+ *
+ * Matched CASE-INSENSITIVELY (F1): Windows env-var names are case-insensitive, so a
+ * `nodE_OptionS` must drop exactly like `NODE_OPTIONS`. Stored upper-cased; compared
+ * against `k.toUpperCase()`. Anything matching `--inspect` (a debugger/RCE bridge) in
+ * its VALUE is also dropped regardless of name (see {@link curatedEnv}).
+ */
+const ENV_DENYLIST: ReadonlySet<string> = new Set(
+  [
+    // node code-injection / module-resolution / trust
+    "NODE_OPTIONS",
+    "NODE_EXTRA_CA_CERTS",
+    "NODE_TLS_REJECT_UNAUTHORIZED",
+    "NODE_PATH",
+    "NODE_REPL_EXTERNAL_MODULE",
+    "NODE_INSPECT",
+    // npm trust / supply-chain redirect / script-execution toggles
+    "npm_config_registry",
+    "npm_config_cafile",
+    "npm_config_ca",
+    "npm_config_proxy",
+    "npm_config_https_proxy",
+    "npm_config_https-proxy",
+    "npm_config_userconfig",
+    "npm_config_globalconfig",
+    "npm_config_prefix",
+    "npm_config_node_options",
+    "npm_config_ignore_scripts",
+  ].map((n) => n.toUpperCase()),
+);
+
+/**
+ * Build the curated child env from `parentEnv` (default `process.env`): keep ONLY
+ * explicitly-allowlisted names — never a blanket `NODE_*`/`npm_*` passthrough (R-05).
+ *
+ * The old open prefix (`^(?:NODE_|npm_)`) forwarded code-injection and trust-redirect
+ * vars verbatim into every child (`NODE_OPTIONS=--require /evil.js`, `NODE_EXTRA_CA_CERTS`,
+ * `npm_config_registry`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, …). Now a name passes iff it
+ * is in {@link ENV_ALLOWLIST}; the {@link ENV_DENYLIST} and an `--inspect`-in-value check
+ * are redundant tripwires that drop a dangerous var even if it were ever allowlisted.
+ *
+ * All name matching is CASE-INSENSITIVE (F1) so it is correct on Windows (where env
+ * names are case-insensitive and surfaced in mixed case — `Path`, `ProgramFiles`): the
+ * allowlisted PATH survives in any casing, and a `nodE_OptionS` is still denied. The
+ * ORIGINAL key casing and value are emitted unchanged (we only case-fold the compare).
+ * An operator who needs another var present exports it via a wrapper script they author,
+ * keeping the allowlist explicit. Returns a plain record suitable for `spawnSync`'s `env`.
  */
 export function curatedEnv(parentEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(parentEnv)) {
     if (v === undefined) continue;
-    if (ENV_ALLOWLIST.has(k) || /^(?:NODE_|npm_)/.test(k)) out[k] = v;
+    const kUpper = k.toUpperCase();
+    if (ENV_DENYLIST.has(kUpper)) continue; // tripwire: never forward a known-dangerous var
+    // Drop any NODE_*/npm_* var whose VALUE tries to attach a debugger / open an RCE
+    // bridge (--inspect), even under an unanticipated alias name. Scoped (case-folded)
+    // to the tool-prefix family so a benign allowlisted var (PATH, etc.) is judged by name.
+    if (/^(?:NODE_|NPM_)/.test(kUpper) && /--inspect\b/.test(v)) continue;
+    if (ENV_ALLOWLIST.has(kUpper)) out[k] = v; // preserve original key casing + value
   }
   return out;
 }
@@ -317,46 +594,203 @@ export function looksRepoMutating(command: string): boolean {
 // Process-tree kill (#19, P6-4) — kill grandchildren on timeout
 // ---------------------------------------------------------------------------
 
+/** A parent→children adjacency map plus the helper that builds it (shared by all parsers). */
+type ChildrenMap = Map<number, number[]>;
+function addEdge(childrenOf: ChildrenMap, parentPid: number, childPid: number): void {
+  if (!Number.isInteger(parentPid) || !Number.isInteger(childPid)) return;
+  const arr = childrenOf.get(parentPid) ?? [];
+  arr.push(childPid);
+  childrenOf.set(parentPid, arr);
+}
+
 /**
- * Kill the process TREE rooted at the timed-out child `pid` (#19, P6-4).
- * `spawnSync`'s own timeout only SIGKILLs the direct child (the shell); a test
- * runner or server the shell spawned (vitest workers, a dev server) can survive
- * as an orphan and hold the project cwd. This reaps the rest of the tree.
- *
- * Windows: `taskkill /pid <pid> /T /F` — a real recursive tree kill (the case the
- * original code missed entirely; spawnSync's SIGKILL on Windows does not cascade).
- *
- * POSIX: `spawnSync` cannot put the child in its own detached process group (that
- * option is `spawn`-only), so the child shares OUR group — signalling `-ourGroup`
- * would suicide. We instead reap descendants by walking the child's children from
- * `ps` (PID/PPID) and SIGKILLing each, depth-first, then the child itself. We never
- * signal a process group, so this can never kill the verify process or its siblings.
- * Best-effort — never throws.
+ * Parse POSIX `ps -e -o pid=,ppid=` output ("<pid> <ppid>" per line) into a
+ * parent→children map. Exported for unit coverage of the parser.
  */
-export function killProcessTree(pid: number): void {
-  if (!pid || pid <= 0) return;
+export function parsePsProcessTable(stdout: string): ChildrenMap {
+  const childrenOf: ChildrenMap = new Map();
+  for (const line of (stdout ?? "").split("\n")) {
+    const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    if (!m) continue;
+    addEdge(childrenOf, Number(m[2]), Number(m[1])); // ppid, pid
+  }
+  return childrenOf;
+}
+
+/**
+ * Parse `Get-CimInstance Win32_Process | Select ProcessId,ParentProcessId |
+ * ConvertTo-Csv -NoTypeInformation` output into a parent→children map (F4). CSV is
+ * used over JSON because `ConvertTo-Json` emits a bare object for a single row and an
+ * array otherwise; CSV is uniformly header + quoted rows for 0/1/many. The two value
+ * columns appear in selection order (ProcessId, ParentProcessId). Exported for tests.
+ */
+export function parseCsvProcessTable(stdout: string): ChildrenMap {
+  const childrenOf: ChildrenMap = new Map();
+  const lines = (stdout ?? "").split(/\r?\n/).filter((l) => l.trim() !== "");
+  if (lines.length === 0) return childrenOf;
+  // Locate the header to know column order; tolerate a leading "#TYPE …" comment line.
+  let headerIdx = lines.findIndex((l) => /ProcessId/i.test(l) && /ParentProcessId/i.test(l));
+  if (headerIdx < 0) headerIdx = 0;
+  const header = lines[headerIdx]!.split(",").map((c) => c.replace(/^"|"$/g, "").trim().toLowerCase());
+  const pidCol = header.indexOf("processid");
+  const ppidCol = header.indexOf("parentprocessid");
+  if (pidCol < 0 || ppidCol < 0) return childrenOf;
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const cells = lines[i]!.split(",").map((c) => c.replace(/^"|"$/g, "").trim());
+    const pid = Number(cells[pidCol]);
+    const ppid = Number(cells[ppidCol]);
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
+    addEdge(childrenOf, ppid, pid);
+  }
+  return childrenOf;
+}
+
+/**
+ * Parse legacy `wmic process get ParentProcessId,ProcessId` output (columns come back
+ * alphabetically as "ParentProcessId  ProcessId", whitespace-padded, with a header row
+ * skipped by the all-digits match) into a parent→children map. Exported for tests.
+ */
+export function parseWmicProcessTable(stdout: string): ChildrenMap {
+  const childrenOf: ChildrenMap = new Map();
+  for (const line of (stdout ?? "").split("\n")) {
+    const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    if (!m) continue;
+    addEdge(childrenOf, Number(m[1]), Number(m[2])); // ParentProcessId, ProcessId
+  }
+  return childrenOf;
+}
+
+/**
+ * Run a process-table snapshot command and return its stdout (or "" on failure).
+ * argv-array, no `shell:true`. A module-level seam so a test can stub the command
+ * matrix without spawning real processes.
+ */
+let runSnapshotCommand = (cmd: string, args: string[]): string => {
+  const out = spawnSync(cmd, args, { encoding: "utf8" });
+  return out.error ? "" : (out.stdout ?? "");
+};
+
+/** Test seam: override the snapshot command runner; returns a restore fn. */
+export function __setSnapshotCommandRunner(fn: (cmd: string, args: string[]) => string): () => void {
+  const prev = runSnapshotCommand;
+  runSnapshotCommand = fn;
+  return () => {
+    runSnapshotCommand = prev;
+  };
+}
+
+/**
+ * Snapshot the live process table as a `parentPid → childPids` map, on both
+ * platforms (R-07). POSIX uses `ps -e -o pid=,ppid=`. Windows tries, in order:
+ * PowerShell `Get-CimInstance Win32_Process` (CSV), then the older `Get-WmiObject`,
+ * then legacy `wmic` — because `wmic` is DEPRECATED and removed-by-default (Feature-
+ * on-Demand) on recent Win11, so it may be absent (F4). The FIRST command that yields
+ * a non-empty map wins. Empty map on total failure; the caller then falls back to an
+ * OS-level `taskkill /T` and a single-pid kill. Never throws.
+ *
+ * Why a snapshot walk and not `taskkill /T` alone (the pre-fix Windows path): by the
+ * time the reap runs, `spawnSync` has ALREADY SIGKILLed the direct child (the shell),
+ * so `taskkill /pid <deadRoot> /T` reports "process not found" and reaps NOTHING — the
+ * grandchildren (vitest workers, a dev server) leak and can hold the cwd lock. The
+ * process table still records each grandchild's ParentProcessId pointing at the
+ * (now-dead) intermediate, so we can reconstruct and kill the whole subtree by PID.
+ */
+function snapshotChildrenMap(): ChildrenMap {
   try {
     if (process.platform === "win32") {
-      spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
-      return;
-    }
-    // Build a pid → children map from `ps -e -o pid=,ppid=` (POSIX-portable).
-    const childrenOf = new Map<number, number[]>();
-    try {
-      const out = spawnSync("ps", ["-e", "-o", "pid=,ppid="], { encoding: "utf8" });
-      for (const line of (out.stdout ?? "").split("\n")) {
-        const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
-        if (!m) continue;
-        const childPid = Number(m[1]);
-        const parentPid = Number(m[2]);
-        const arr = childrenOf.get(parentPid) ?? [];
-        arr.push(childPid);
-        childrenOf.set(parentPid, arr);
+      // PowerShell CIM is the primary path; Get-WmiObject is an older PS fallback;
+      // wmic is the legacy last resort. Each yields the same CSV columns we parse.
+      const psSelect = "Select-Object ProcessId,ParentProcessId | ConvertTo-Csv -NoTypeInformation";
+      const attempts: Array<{ cmd: string; args: string[]; parse: (s: string) => ChildrenMap }> = [
+        {
+          cmd: "powershell",
+          args: ["-NoProfile", "-NonInteractive", "-Command", `Get-CimInstance Win32_Process | ${psSelect}`],
+          parse: parseCsvProcessTable,
+        },
+        {
+          cmd: "powershell",
+          args: ["-NoProfile", "-NonInteractive", "-Command", `Get-WmiObject Win32_Process | ${psSelect}`],
+          parse: parseCsvProcessTable,
+        },
+        {
+          cmd: "wmic",
+          args: ["process", "get", "ParentProcessId,ProcessId"],
+          parse: parseWmicProcessTable,
+        },
+      ];
+      for (const a of attempts) {
+        const map = a.parse(runSnapshotCommand(a.cmd, a.args));
+        if (map.size > 0) return map;
       }
-    } catch {
-      // `ps` unavailable → fall back to single-pid kill below.
+      return new Map();
     }
-    // Depth-first: collect the whole subtree, then SIGKILL leaves-first.
+    return parsePsProcessTable(runSnapshotCommand("ps", ["-e", "-o", "pid=,ppid="]));
+  } catch {
+    // Snapshot tool unavailable → empty map; caller degrades to taskkill /T + single-pid kill.
+    return new Map();
+  }
+}
+
+/** SIGKILL (POSIX) / `taskkill /F` (Windows) a single pid. Best-effort — never throws. */
+function killOne(pid: number): void {
+  try {
+    if (process.platform === "win32") {
+      spawnSync("taskkill", ["/pid", String(pid), "/F"], { stdio: "ignore" });
+    } else {
+      process.kill(pid, "SIGKILL");
+    }
+  } catch {
+    /* already dead / not permitted — best-effort */
+  }
+}
+
+/**
+ * Kill the process TREE rooted at the killed child `pid` (#19, P6-4; hardened in
+ * R-07). `spawnSync`'s own timeout/overflow kill only SIGKILLs the direct child
+ * (the shell); a test runner or server the shell spawned (vitest workers, a dev
+ * server) can survive as an orphan and hold the project cwd. This reaps the rest
+ * of the tree by signalling the child's process GROUP on POSIX (the child is
+ * spawned `detached`, so it leads its own group) and, on every platform, by walking
+ * a live PID/PPID snapshot and killing each descendant depth-first, leaves-first,
+ * then the root.
+ *
+ * (Historical note, now corrected: an earlier version believed `spawnSync` could not
+ * detach the child, so it relied on the snapshot walk alone — which silently leaks
+ * reparented grandchildren on POSIX. `spawnSync` does honour `detached`, so the group
+ * signal is the real fix.) Killing the explicit group/PIDs can never reach the verify
+ * process or its siblings. Best-effort — never throws.
+ */
+export function killProcessTree(pid: number): void {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  try {
+    // POSIX primary reap: signal the detached child's process GROUP (PGID == pid).
+    // This reaches grandchildren that reparented to PID 1 when spawnSync SIGKILLed
+    // the direct child — reparenting changes PPID, not the process group, so the
+    // PID/PPID snapshot walk below can no longer follow them. The detached group is
+    // distinct from the verify process's group, so this never signals us. The walk
+    // remains as a fallback for hosts where the group signal finds nothing.
+    if (process.platform !== "win32") {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        /* group already empty / not a group leader — fall through to the walk */
+      }
+    }
+    const childrenOf = snapshotChildrenMap();
+    // F4 safety net: if no snapshot was available (e.g. wmic absent AND PowerShell
+    // CIM failed on a locked-down Windows host), we have no descendant PIDs to walk.
+    // Attempt the OS-level recursive tree kill so a missing snapshot doesn't mean zero
+    // reap. It may still find nothing if the root is already dead, but it's strictly
+    // better than killing only the root — and on POSIX there's no equivalent, so we
+    // just fall through to the single-pid kill. argv-array, numeric pid, no shell.
+    if (childrenOf.size === 0 && process.platform === "win32") {
+      try {
+        spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+      } catch {
+        /* best-effort */
+      }
+    }
+    // Depth-first: collect the whole subtree, then kill leaves-first.
     const order: number[] = [];
     const stack = [pid];
     const seen = new Set<number>();
@@ -367,17 +801,22 @@ export function killProcessTree(pid: number): void {
       order.push(cur);
       for (const c of childrenOf.get(cur) ?? []) stack.push(c);
     }
-    for (const target of order.reverse()) {
-      try {
-        process.kill(target, "SIGKILL");
-      } catch {
-        /* already dead / not permitted — best-effort */
-      }
-    }
+    for (const target of order.reverse()) killOne(target);
   } catch {
     // Best-effort cleanup; a kill failure must not crash the run.
   }
 }
+
+/**
+ * Conventional exit codes recorded for a child that `spawnSync` killed (status:null).
+ * 124 = command timed out (matches GNU `timeout`); we keep it ONLY for a real
+ * ETIMEDOUT. A `maxBuffer` overflow (ENOBUFS) or any other non-timeout kill is NOT
+ * a timeout, so it gets a DISTINCT code (R-07) — recording 124 for an overflow
+ * mislabels it as a timeout and hides the leak in the report.
+ */
+export const EXIT_TIMEOUT = 124;
+export const EXIT_OUTPUT_OVERFLOW = 125; // ENOBUFS: child produced more output than maxBuffer
+export const EXIT_KILLED = 137; // 128 + SIGKILL(9): any other non-timeout kill (status null)
 
 export interface RunCommandsOptions {
   now?: () => Date;
@@ -386,6 +825,18 @@ export interface RunCommandsOptions {
   env?: NodeJS.ProcessEnv;
   /** When true, refuse to execute a command that looks repo-mutating (#19, P6-5). */
   readOnly?: boolean;
+  /**
+   * Max bytes of combined stdout+stderr buffered per child before `spawnSync` kills
+   * it with ENOBUFS (default 64 MiB). Exposed mainly so tests can force the overflow
+   * path; production callers keep the default.
+   */
+  maxBuffer?: number;
+  /**
+   * Seam for the process-tree reap (default {@link killProcessTree}). Injectable so a
+   * test can assert the reap fires on every killed-child path without spawning a real
+   * grandchild on every platform. Production callers never set this.
+   */
+  killTree?: (pid: number) => void;
 }
 
 /**
@@ -398,6 +849,13 @@ export interface RunCommandsOptions {
  * recorded as a failure, so a hanging command can never block the run forever.
  * stdin is closed (`input: ""`) so a command that reads stdin gets EOF instead of
  * blocking.
+ *
+ * Kill paths (R-07): the process-tree reap fires on ANY child that `spawnSync`
+ * killed (status null with a pid) — a timeout (ETIMEDOUT), a `maxBuffer` overflow
+ * (ENOBUFS), or any other non-completion — so grandchildren never leak. The recorded
+ * exit code is HONEST: {@link EXIT_TIMEOUT} (124) ONLY for a real timeout,
+ * {@link EXIT_OUTPUT_OVERFLOW} (125) for an output overflow, {@link EXIT_KILLED} (137)
+ * for any other kill — never 124 for a non-timeout.
  *
  * Hardening (#19): the child env is curated (not a full inherit; P6-3); the
  * recorded `outputTail` is secret-redacted (P6-3); and in `readOnly` mode (P6-5) a
@@ -418,6 +876,8 @@ export function runCommands(
   const now = opts.now ?? (() => new Date());
   const timeoutMs = opts.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
   const env = opts.env ?? curatedEnv();
+  const maxBuffer = opts.maxBuffer ?? 64 * 1024 * 1024;
+  const killTree = opts.killTree ?? killProcessTree;
 
   const results: VerifyResult[] = [];
   for (const command of commands) {
@@ -437,31 +897,64 @@ export function runCommands(
     }
 
     const start = Date.now();
-    const proc = spawnSync(command, {
+    const spawnOpts: SpawnSyncOptionsWithStringEncoding = {
       cwd: root,
       shell: true,
       encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
+      maxBuffer,
       timeout: timeoutMs,
       killSignal: "SIGKILL",
       input: "",
       env,
-    });
+    };
+    // R-07 (POSIX grandchild reap): start the child in its OWN session/process group.
+    // spawnSync DOES honour `detached` at runtime — libuv sets UV_PROCESS_DETACHED and
+    // calls setsid() in the child, so the shell becomes a group leader (PGID == its
+    // pid) and every descendant inherits that group. When the timeout SIGKILLs the
+    // direct child, grandchildren reparent to PID 1 (breaking the PPID chain a
+    // snapshot-walk follows) but KEEP their process group, so signalling the group by
+    // `-pid` in killProcessTree still reaches them. The new group is distinct from the
+    // verify process's group, so the group signal can never hit us. Windows is excluded
+    // (no setsid/reparenting; it uses taskkill /T). `detached` is absent from
+    // @types/node's SpawnSyncOptions despite being honoured, so it is set through a
+    // narrow cast that leaves the known options fully type-checked above.
+    (spawnOpts as { detached?: boolean }).detached = process.platform !== "win32";
+    const proc = spawnSync(command, spawnOpts);
     const durationMs = Date.now() - start;
-    // A timeout kill surfaces as proc.error with code ETIMEDOUT and a null status.
-    const timedOut = (proc.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT";
-    if (timedOut && typeof proc.pid === "number") {
+    const errCode = (proc.error as NodeJS.ErrnoException | undefined)?.code;
+    // A timeout kill surfaces as ETIMEDOUT; a maxBuffer overflow as ENOBUFS — BOTH
+    // leave status null with the direct child already SIGKILLed (R-07).
+    const timedOut = errCode === "ETIMEDOUT";
+    const outputOverflow = errCode === "ENOBUFS";
+    // Reap the tree on ANY killed/failed-to-complete child (status null with a pid),
+    // not just on timeout — the pre-fix code skipped the reap on ENOBUFS, leaking
+    // grandchildren (vitest workers, dev servers) that could hold the cwd lock (R-07).
+    if (proc.status === null && typeof proc.pid === "number") {
       // spawnSync already SIGKILLed the direct child; reap the rest of the tree so
-      // a grandchild (test runner, server) can't linger and hold the cwd (#19, P6-4).
-      killProcessTree(proc.pid);
+      // a grandchild can't linger and hold the cwd (#19, P6-4; widened in R-07).
+      killTree(proc.pid);
     }
-    const combined = `${proc.stdout ?? ""}${proc.stderr ?? ""}${timedOut ? `\n[th verify] command (and its process tree) killed after ${timeoutMs}ms timeout` : ""}`;
+    // Append an honest reason note — a timeout ONLY when it really timed out; an
+    // output-overflow note for ENOBUFS; a generic kill note for any other null-status
+    // termination. Never claim "timeout" for a non-timeout (R-07).
+    const reasonNote = timedOut
+      ? `\n[th verify] command (and its process tree) killed after ${timeoutMs}ms timeout`
+      : outputOverflow
+        ? `\n[th verify] command (and its process tree) killed: output exceeded the ${maxBuffer}-byte buffer (ENOBUFS)`
+        : proc.status === null
+          ? `\n[th verify] command (and its process tree) killed before completion${errCode ? ` (${errCode})` : ""}`
+          : "";
+    const combined = `${proc.stdout ?? ""}${proc.stderr ?? ""}${reasonNote}`;
     // Redact secrets BEFORE truncation so a redaction that straddles the tail
     // boundary still applies, then take the tail (#19, P6-3).
     const redacted = redactSecrets(combined);
     const outputTail = redacted.length > OUTPUT_TAIL_CHARS ? redacted.slice(-OUTPUT_TAIL_CHARS) : redacted;
     // spawnSync returns status null when the process was killed or failed to spawn.
-    const exitCode = proc.status ?? 124; // 124 = conventional timeout/kill exit code
+    // Record an HONEST exit code: 124 ONLY for a real timeout; a distinct code for an
+    // output-overflow or any other non-timeout kill so the report can tell them apart.
+    const exitCode =
+      proc.status ??
+      (timedOut ? EXIT_TIMEOUT : outputOverflow ? EXIT_OUTPUT_OVERFLOW : EXIT_KILLED);
     results.push({ command, exitCode, ok: proc.status === 0, durationMs, outputTail });
   }
   return {

@@ -60,6 +60,55 @@ const DOCTOR_STRICT_KEY_ALLOWLIST = new Set([]);
 function pluginRoot() {
     return path.resolve(__dirname, "..", "..");
 }
+/**
+ * R-17 — assert every `package.json files[]` entry exists on disk under the plugin
+ * root (the install-integrity surface). A marketplace install copies the repo with
+ * NO build step, so a missing `files[]` directory is a broken install that produced
+ * no error before this check. Returns a single Check: FAIL if any declared entry is
+ * absent (a genuinely incomplete package), else OK with a per-component count
+ * summary (templates/schemas/hooks/agents) so the package's shape is visible at a
+ * glance. Entry-count of a directory entry = its immediate children; a file entry
+ * counts as itself.
+ */
+function packagingCheck(root, files) {
+    if (files.length === 0) {
+        return { name: "packaging", status: "warn", detail: "package.json declares no files[] — cannot verify install completeness" };
+    }
+    const missing = [];
+    const counts = [];
+    for (const entry of files) {
+        const abs = path.join(root, entry);
+        let st;
+        try {
+            st = fs.statSync(abs);
+        }
+        catch {
+            missing.push(entry);
+            continue;
+        }
+        if (st.isDirectory()) {
+            let n = 0;
+            try {
+                n = fs.readdirSync(abs).length;
+            }
+            catch {
+                /* unreadable — count stays 0 */
+            }
+            counts.push(`${entry}/ (${n})`);
+        }
+        else {
+            counts.push(entry);
+        }
+    }
+    if (missing.length > 0) {
+        return {
+            name: "packaging",
+            status: "fail",
+            detail: `INCOMPLETE install — missing package.json files[] entr${missing.length === 1 ? "y" : "ies"}: ${missing.join(", ")}. A marketplace copy is broken; reinstall the plugin.`,
+        };
+    }
+    return { name: "packaging", status: "ok", detail: `all ${files.length} package files[] present: ${counts.join(", ")}` };
+}
 function nodeMajor() {
     const m = /^v?(\d+)\./.exec(process.version);
     return m ? Number(m[1]) : 0;
@@ -153,15 +202,26 @@ function runDoctor(paths, opts = {}) {
         detail: fs.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary",
     });
     let version = "unknown";
+    let pkgFiles = [];
     try {
         const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
         if (typeof pkg.version === "string")
             version = pkg.version;
+        if (Array.isArray(pkg.files))
+            pkgFiles = pkg.files.filter((f) => typeof f === "string");
     }
     catch {
         /* leave unknown */
     }
     checks.push({ name: "version", status: "ok", detail: version });
+    // R-17 — package-completeness. A marketplace install COPIES the repo (no build
+    // step), so every `package.json files[]` entry — templates/, schemas/, hooks/,
+    // agents/, etc. — must be present on disk next to this binary. Doctor previously
+    // checked only `dist/cli.js`, so a copy missing `templates/` or `schemas/` passed
+    // silently and agents then improvised structure with no mechanical error. Reported
+    // in the style of the artifact-drift check: a WARN listing the missing entries, plus
+    // a per-dir presence/count summary so an operator can see the package is intact.
+    checks.push(packagingCheck(root, pkgFiles));
     // Claude Code compatibility expectation. Informational only: this binary can't
     // observe the host Claude Code version, so it reports the contract the plugin
     // is built against (declared in .claude-plugin/plugin.json `metadata`). A
@@ -231,7 +291,7 @@ function runDoctor(paths, opts = {}) {
             checks.push({
                 name: "state lock",
                 status: "warn",
-                detail: `${lockDir} present (${Math.round(age / 1000)}s old) — remove it if no \`th\` process is running`,
+                detail: `${lockDir} present (${Math.round(age / 1000)}s old) — if no \`th\` process is running, reclaim it with \`th state unlock\` (or \`th state unlock --force\` for a still-live-looking lock)`,
             });
         }
         // Gate-ledger audit (GOV-2) — "audit ledger" count + "ledger chain"

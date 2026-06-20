@@ -118,11 +118,19 @@ export function writeFragment(paths: ProjectPaths, input: WriteFragmentInput): s
   validatePathSegment(input.name, "name");
   const dir = collabDir(paths, input.stage, input.round);
   const file = path.join(dir, input.name);
-  if (!input.force && fs.existsSync(file)) {
-    throw new FragmentExistsError(file);
-  }
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(file, input.content, "utf8");
+  // R-16: ATOMIC create-or-fail. The old `existsSync`-then-`writeFileSync` guard was
+  // a check-then-write TOCTOU — two parallel writers could both see `!existsSync` and
+  // both write, the second silently clobbering with NO FragmentExistsError. The `wx`
+  // open flag (write, fail if the path exists) lets the OS arbitrate the race: exactly
+  // one create wins, the loser gets EEXIST → FragmentExistsError. `--force` keeps the
+  // overwrite semantics via the plain `w` flag.
+  try {
+    fs.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new FragmentExistsError(file);
+    throw e;
+  }
   return file;
 }
 

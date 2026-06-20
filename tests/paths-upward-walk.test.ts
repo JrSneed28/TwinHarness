@@ -18,6 +18,17 @@ afterEach(() => {
   tmp = undefined;
 });
 
+/**
+ * Canonicalize a dir for comparison. R-13 realpaths the selected root via
+ * `fs.realpathSync.native`, so the expected dir must use the SAME resolver —
+ * otherwise a symlinked tmpdir (macOS `/var` -> `/private/var`) or a Windows 8.3
+ * short name (`RUNNER~1` -> `runneradmin`, which ONLY the native resolver expands;
+ * the JS `fs.realpathSync` leaves 8.3 names untouched) makes the comparison
+ * spuriously fail on CI. realpath'ing both sides with the native resolver asserts
+ * the directories are the SAME, which is the actual contract.
+ */
+const real = (p: string): string => fs.realpathSync.native(p);
+
 describe("resolveProjectPaths — upward walk (M-7)", () => {
   it("finds the ancestor .twinharness from a deep subdir", () => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "th-upward-"));
@@ -29,8 +40,8 @@ describe("resolveProjectPaths — upward walk (M-7)", () => {
     fs.mkdirSync(deep, { recursive: true });
 
     const paths = resolveProjectPaths(deep);
-    expect(path.resolve(paths.root)).toBe(path.resolve(root));
-    expect(paths.stateFile).toBe(path.join(stateDir, "state.json"));
+    expect(real(paths.root)).toBe(real(root));
+    expect(paths.stateFile).toBe(path.join(paths.root, ".twinharness", "state.json"));
   });
 
   it("finds the ancestor legacy .agentic-sdlc/state.json from a subdir", () => {
@@ -43,7 +54,7 @@ describe("resolveProjectPaths — upward walk (M-7)", () => {
     fs.mkdirSync(deep, { recursive: true });
 
     const paths = resolveProjectPaths(deep);
-    expect(path.resolve(paths.root)).toBe(path.resolve(root));
+    expect(real(paths.root)).toBe(real(root));
     expect(paths.stateDir).toContain(".agentic-sdlc");
   });
 
@@ -53,7 +64,7 @@ describe("resolveProjectPaths — upward walk (M-7)", () => {
     fs.mkdirSync(sub, { recursive: true });
 
     const paths = resolveProjectPaths(sub);
-    expect(path.resolve(paths.root)).toBe(path.resolve(sub));
+    expect(real(paths.root)).toBe(real(sub));
   });
 
   it("prefers the nearest (deepest) ancestor when state dirs nest", () => {
@@ -66,6 +77,6 @@ describe("resolveProjectPaths — upward walk (M-7)", () => {
     fs.mkdirSync(deep, { recursive: true });
 
     const paths = resolveProjectPaths(deep);
-    expect(path.resolve(paths.root)).toBe(path.resolve(inner));
+    expect(real(paths.root)).toBe(real(inner));
   });
 });

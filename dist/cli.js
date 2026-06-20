@@ -77,11 +77,13 @@ const decision_1 = require("./commands/decision");
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
-  th init [--force] [--brownfield]  Scaffold docs/, .twinharness/state.json, drift-log.md
+  th init [--force] [--brownfield] [--delivery-mode <m>] [--no-ui] [--interview-required|--no-interview-required] [--interview-cutoff <0..1>]
+                                    Scaffold docs/, .twinharness/state.json, drift-log.md (the gate-defining flags set delivery_mode/has_ui/interview_required/interview_cutoff once at creation)
   th state get [dotted.path]        Print state.json (or one value)
   th state set <dotted.key> <value> Patch state.json (refuses invalid results; rejects unknown keys; gate-owned fields require --emergency — prefer the typed gate commands below)
   th state status                   Human-readable tier/stage/gate snapshot
   th state verify                   Validate state.json (exit 0 = valid)
+  th state unlock [--force]         Reclaim a stale .state.lock left by a crashed process (refuses a live lock unless --force; R-21 recovery)
   th revise bump <mode> [--cap N]   Increment revise-loop count (computes escalate = count >= cap)
   th revise status <mode> [--cap N] Report revise-loop count + cap (no mutation)
   th revise reset <mode>            Zero revise-loop count (stage passed / zero issues)
@@ -99,7 +101,7 @@ Usage:
                                     Planned/implemented/tested/passing breakdown per REQ-ID (status view)
   th verify add "<command>" [--as <actor>]  Add a project test/check command (records actor+time provenance; the new set is UNAPPROVED until \`th verify approve\`)
   th verify list                    Show configured verify commands (with provenance + approval status)
-  th verify approve [--as <actor>]  Human-confirm the current command SET for execution (hash-pinned; re-required after any add/change)
+  th verify approve [--as <actor>]  Human-confirm the current command SET for execution — requires an interactive TTY (an agent/non-interactive caller cannot self-approve); sealed in a tamper-evident ledger; re-required after any add/change
   th verify clear                   Remove all configured verify commands
   th verify run [--read-only]       Run every configured verify command; refuses an UNAPPROVED set; --read-only refuses repo-mutating commands; writes a report; exit 1 on failure
   th build plan [--include-done] [--advise]  Schedule slices into dependency-aware, conflict-free build waves (§16; a slice's wave is strictly after its hard depends_on); --advise emits the parallelism-optimizer advisory (max wave width + serializing conflict pairs); exit 7 when the depends_on graph is unsatisfiable (cycle/dangling)
@@ -159,8 +161,8 @@ Usage:
                                     Assemble a bounded child-agent handoff (reuses context pack for a slice)
   th delegate capsule               Print the blank Delegation Capsule skeleton (the strict return format)
   th delegate check --capsule <path>  Validate a returned capsule has every required section (presence only)
-  th repo map [--write|--no-write] [--format <summary|json|md>] [--max-files <N>] [--max-bytes <N>]
-                                    Scan the repo; write .twinharness/repo-map.json + docs/00-repo-map.md (writes by default; --no-write = dry/preview; --max-files/--max-bytes raise the scan caps for large repos)
+  th repo map [--write|--no-write] [--force] [--format <summary|json|md>] [--max-files <N>] [--max-bytes <N>]
+                                    Scan the repo; write .twinharness/repo-map.json + docs/00-repo-map.md (writes by default; --no-write = dry/preview; --force overwrites a target registered as an approved artifact; --max-files/--max-bytes raise the scan caps for large repos)
   th repo check [--max-files <N>] [--max-bytes <N>]
                                     Report whether .twinharness/repo-map.json is fresh vs the working tree (exit 0 fresh / 4 stale / 5 no-map / 1 parse-fail; pass the same caps used to build the map)
   th repo relevant (--slice <ID> | --req <REQ-ID> | --file <path> | --query <kw>)
@@ -222,7 +224,7 @@ Global flags:
   --task <s>        (delegate) Free-text task label (echoed; not parsed)
   --agent <a>       (route, delegate pack) The agent being spawned / delegated to
   --capsule <path>  (delegate check) Capsule file to validate
-  --force           (init) Reset existing state.json; (collab fragment) overwrite an existing fragment
+  --force           (init) Reset existing state.json; (collab fragment) overwrite an existing fragment; (repo map) overwrite a target registered as an approved artifact (R-14); (state unlock) remove a lock that still looks live (R-21)
   --brownfield      (init) Scaffold a brownfield run (project_mode=brownfield; adopting an existing codebase)
   --max-tokens <k>  (init) Per-session context budget in THOUSANDS; persisted as max_tokens (×1000, e.g. 150 → 150000)
   --max <k>         (budget check) Budget override in THOUSANDS; default is state.max_tokens, else the tier-aware default
@@ -245,7 +247,11 @@ Global flags:
   --supersede <id>  (decision approve) Mark this (approved) decision superseded by <id> (mutually exclusive with --reject)
   --as <actor>      (decision approve) Approver attribution (attribution only — NOT a barrier; default TH_APPROVAL_ACTOR or "human")
   --lock            (implementation unlock) Re-lock implementation (set implementation_allowed=false) instead of unlocking
-  --emergency       (state set) Force a raw write to a gate-owned field, bypassing the typed gate ladder (loud + audit-ledgered)`;
+  --emergency       (state set) Force a raw write to a gate-owned field, bypassing the typed gate ladder (loud + audit-ledgered)
+  --delivery-mode <m>  (init) Set delivery_mode once at creation: code (default) | no-code | documentation-only
+  --has-ui / --no-ui   (init) Set has_ui at creation (default absent ⇒ true; --no-ui drops the UX/UI stages)
+  --interview-required / --no-interview-required  (init) Force the clarity-interview gate on/off (default absent ⇒ computed from tier)
+  --interview-cutoff <0..1>  (init) Set the interview-readiness confidence cutoff at creation`;
 /** Boolean flags (presence = true). */
 const BOOLEAN_FLAGS = {
     "--json": "json",
@@ -258,6 +264,11 @@ const BOOLEAN_FLAGS = {
     "--dry-run": "dryRun",
     "--remove-missing": "removeMissing",
     "--brownfield": "brownfield",
+    // R-04 typed capture path (init-only): the boolean gate-defining config fields.
+    "--has-ui": "hasUi",
+    "--no-ui": "noUi",
+    "--interview-required": "interviewRequired",
+    "--no-interview-required": "noInterviewRequired",
     "--component-blast": "componentBlast",
     "--summarization": "summarization",
     "--explain": "explain",
@@ -276,6 +287,8 @@ const BOOLEAN_FLAGS = {
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
 const STRING_FLAGS = {
     "--cwd": "cwd",
+    // R-04 typed capture path (init-only): delivery_mode enum.
+    "--delivery-mode": "deliveryMode",
     "--reqs": "reqs",
     "--plan": "plan",
     "--tests": "tests",
@@ -337,6 +350,9 @@ const NUMBER_FLAGS = {
     // thousands "k"); the ×1000 conversion happens at the write/compute site
     // (budget.ts / init), NOT in this parser.
     "--max-tokens": "maxTokens",
+    // R-04 typed capture path (init-only): interview_cutoff in [0,1] (validated at the
+    // init write site, like every gate-defining field — the parser only coerces).
+    "--interview-cutoff": "interviewCutoff",
     "--max": "max",
     "--files-read": "filesRead",
     "--slices-built": "slicesBuilt",
@@ -381,6 +397,10 @@ function parseArgs(argv) {
         dryRun: false,
         removeMissing: false,
         brownfield: false,
+        hasUi: false,
+        noUi: false,
+        interviewRequired: false,
+        noInterviewRequired: false,
         componentBlast: false,
         summarization: false,
         explain: false,
@@ -504,12 +524,33 @@ function dispatch(parsed) {
             const ver = readCliVersion();
             return (0, output_1.success)({ data: { version: ver }, human: ver });
         }
-        case "init":
+        case "init": {
+            // R-04 typed capture path: fold the boolean flag PAIRS into tri-state
+            // optionals (undefined = "leave at the safe default / omit from state"), so
+            // an operator sets a gate-defining field once cleanly at creation without
+            // `--emergency`. Passing BOTH halves of a pair is contradictory → refused.
+            if (parsed.flags.hasUi && parsed.flags.noUi) {
+                return (0, output_1.failure)({ human: "Pass only one of --has-ui / --no-ui." });
+            }
+            if (parsed.flags.interviewRequired && parsed.flags.noInterviewRequired) {
+                return (0, output_1.failure)({ human: "Pass only one of --interview-required / --no-interview-required." });
+            }
+            const hasUi = parsed.flags.hasUi ? true : parsed.flags.noUi ? false : undefined;
+            const interviewRequired = parsed.flags.interviewRequired
+                ? true
+                : parsed.flags.noInterviewRequired
+                    ? false
+                    : undefined;
             return (0, init_1.runInit)(paths, {
                 force: parsed.flags.force,
                 brownfield: parsed.flags.brownfield,
                 maxTokens: parsed.flags.maxTokens,
+                deliveryMode: parsed.flags.deliveryMode,
+                hasUi,
+                interviewRequired,
+                interviewCutoff: parsed.flags.interviewCutoff,
             });
+        }
         case "budget":
             switch (sub) {
                 case "check":
@@ -615,10 +656,13 @@ function dispatch(parsed) {
                     // default). --no-write/--dry-run wins when both are given.
                     const noWrite = parsed.flags.noWrite || parsed.flags.dryRun;
                     // P4-8 — configurable scan caps for large repos.
+                    // R-14 / DR-04a — --force overrides the approved-artifact clobber guard so a
+                    // deliberately-registered repo-map artifact can still be re-authored.
                     return (0, repo_1.runRepoMap)(paths, {
                         write: !noWrite,
                         format: parsed.flags.format,
                         scanOptions: buildScanOptions(parsed.flags),
+                        force: parsed.flags.force,
                     });
                 }
                 case "relevant":
@@ -724,6 +768,8 @@ function dispatch(parsed) {
                     return (0, state_1.runStateStatus)(paths);
                 case "verify":
                     return (0, state_1.runStateVerify)(paths);
+                case "unlock":
+                    return (0, state_1.runStateUnlock)(paths, { force: parsed.flags.force });
                 default:
                     return (0, output_1.failure)({ human: `unknown 'state' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
@@ -1026,6 +1072,25 @@ function readHookStdin() {
         return undefined;
     }
 }
+/**
+ * Resolve the project paths for a hook dispatch, reading the hook's stdin payload
+ * once and applying the SAME stdin-`cwd` precedence to every hook (PreToolUse /
+ * Stop / SubagentStop). Claude Code does NOT pass `--cwd` to the shipped hooks
+ * (`hooks/hooks.json`), so the session's project dir arrives ONLY on the stdin
+ * payload's `cwd`. If all three hooks resolved from process cwd while one read
+ * stdin, they could govern different roots for one session — the write-gate and
+ * the completion-gate must agree.
+ *
+ * Precedence (identical for all hooks): prefer the payload's `cwd` UNLESS the
+ * caller explicitly passed `--cwd` (then the explicit flag wins). Returns the
+ * resolved paths alongside the parsed payload so callers don't re-read stdin.
+ */
+function resolveHookPaths(flagCwd) {
+    const payload = readHookStdin();
+    const cwdFromStdin = payload?.cwd;
+    const effectiveCwd = cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : flagCwd;
+    return { paths: (0, paths_1.resolveProjectPaths)(effectiveCwd), payload };
+}
 function main() {
     // P0-4 (#20) — fail fast with a friendly, actionable message on an unsupported
     // Node, BEFORE any command runs. A too-old runtime can otherwise surface as an
@@ -1048,26 +1113,36 @@ function main() {
         writeAndExit((0, output_1.renderResult)(result, parsed.flags.json) + "\n", result.exitCode);
     }
     // Hook commands speak the Claude Code hook protocol on stdout (not --json).
+    // A matched hook command is TERMINAL: it must be the SOLE thing on stdout so a
+    // strict JSON consumer (Claude Code) parses the decision. `writeAndExit` defers
+    // its `process.exit` to the stdout-flush callback, so a bare fall-through would
+    // synchronously reach `dispatch` below and append "unknown command: hook" + the
+    // full help to the hook's stdout — corrupting the decision into unparseable JSON
+    // (a fail-open). Compute the decision, then exit; never fall through.
     if (parsed.positionals[0] === "hook") {
+        let hookOut;
         if (parsed.positionals[1] === "stop-gate") {
-            const paths = (0, paths_1.resolveProjectPaths)(parsed.flags.cwd);
-            const out = (0, hook_1.runHookStopGate)(paths, readHookStdin());
-            writeAndExit(out.stdout + "\n", out.exitCode);
+            const { paths, payload } = resolveHookPaths(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookStopGate)(paths, payload);
         }
-        if (parsed.positionals[1] === "pretool-gate") {
-            // Prefer the payload's cwd for path resolution when --cwd was not explicitly passed.
-            const stdinPayload = readHookStdin();
-            const cwdFromStdin = stdinPayload?.cwd;
-            const effectiveCwd = cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : parsed.flags.cwd;
-            const paths = (0, paths_1.resolveProjectPaths)(effectiveCwd);
-            const out = (0, hook_1.runHookPretoolGate)(paths, stdinPayload);
-            writeAndExit(out.stdout + "\n", out.exitCode);
+        else if (parsed.positionals[1] === "pretool-gate") {
+            const { paths, payload } = resolveHookPaths(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookPretoolGate)(paths, payload);
         }
-        if (parsed.positionals[1] === "subagent-stop") {
-            const paths = (0, paths_1.resolveProjectPaths)(parsed.flags.cwd);
-            const out = (0, hook_1.runHookSubagentStop)(paths, readHookStdin());
-            writeAndExit(out.stdout + "\n", out.exitCode);
+        else if (parsed.positionals[1] === "subagent-stop") {
+            const { paths, payload } = resolveHookPaths(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookSubagentStop)(paths, payload);
         }
+        if (hookOut) {
+            writeAndExit(hookOut.stdout + "\n", hookOut.exitCode);
+            // `writeAndExit` defers `process.exit` to the stdout-drain callback (an
+            // intentional POSIX large-output correctness measure — see its doc), so it
+            // returns synchronously. Without this `return`, control would fall through
+            // to `dispatch` below and append help text to the hook's stdout BEFORE the
+            // drain callback exits. Stop the synchronous continuation here.
+            return;
+        }
+        // An unknown `hook <x>` subcommand falls through to the normal help/error path.
     }
     let result;
     try {

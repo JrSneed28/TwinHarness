@@ -27,6 +27,8 @@ AUDIT.md
 /audit*.md
 /*-report.md
 /scratch/
+# Root CLAUDE.md is a local working copy of the project context, not shipped.
+/CLAUDE.md
 
 # examples/ are reference projects, not part of the shipped plugin.
 /examples/

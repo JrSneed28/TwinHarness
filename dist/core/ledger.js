@@ -90,6 +90,16 @@ exports.GATE_LEDGER_KEYS = new Set([
     "write_gate",
     "tier",
     "blast_radius_flags",
+    // RC-C / R-04 (DR-02): the gate-DEFINING config fields. An `--emergency` raw
+    // write of any of these moves a gate (skip slices / drop UX-UI stages / vanish
+    // the interview gate / lower the interview cutoff), so it must seal a ledger
+    // entry + high-water anchor just like the other gate-owned fields above. These
+    // are flat scalars (string / boolean / number), so `ledgerCanonicalText` seals
+    // them deterministically.
+    "delivery_mode",
+    "has_ui",
+    "interview_required",
+    "interview_cutoff",
 ]);
 /** `<stateDir>/gate-ledger.jsonl` — the audit record's location. */
 function ledgerPath(paths) {

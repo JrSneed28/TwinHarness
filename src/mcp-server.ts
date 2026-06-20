@@ -39,7 +39,7 @@ import {
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { resolveProjectPaths, type ProjectPaths } from "./core/paths";
+import { resolveProjectPaths, isAbsoluteOrEscaping, type ProjectPaths } from "./core/paths";
 import { type CommandResult, failure } from "./core/output";
 
 import { runStateGet, runStateSet, applyGateMutation } from "./commands/state";
@@ -436,7 +436,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_state_set",
     description:
-      "Patch a single dotted key in state.json. `value` is JSON-parsed when possible, else stored as a string. Refuses gate-owned fields (implementation_allowed, tier, current_stage, write_gate) over MCP — those are changed only through the human-driven CLI flow, never an agent tool — plus unknown top-level fields, unsafe key segments, the managed drift/debate counters, and any write that would make state invalid.",
+      "Patch a single dotted key in state.json. `value` is JSON-parsed when possible, else stored as a string. Refuses gate-owned fields (implementation_allowed, tier, current_stage, write_gate, blast_radius_flags, and the gate-defining config fields delivery_mode, has_ui, interview_required, interview_cutoff) over MCP — those are changed only through the human-driven CLI flow (`th init` flags or `th state set --emergency`), never an agent tool — plus unknown top-level fields, unsafe key segments, the managed drift/debate counters, and any write that would make state invalid.",
     inputSchema: {
       type: "object",
       properties: {
@@ -454,10 +454,13 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       if (key === undefined || rawValue === undefined) {
         return { ok: false, exitCode: 1, human: "th_state_set requires both `key` and `value` (strings)." };
       }
-      // H-2: the MCP raw setter must NOT move a gate-security field. The CLI keeps
-      // these settable (the documented human unlock/advance path), but an agent
-      // over MCP must never flip implementation_allowed / tier / current_stage /
-      // write_gate. Defense-in-depth: refuse here before the handler.
+      // H-2 / R-04: the MCP raw setter must NOT move a gate-security field. The CLI
+      // keeps these settable (the documented human unlock/advance path + `th init`
+      // flags), but an agent over MCP must never flip implementation_allowed / tier /
+      // current_stage / write_gate / blast_radius_flags, nor the gate-defining config
+      // fields delivery_mode / has_ui / interview_required / interview_cutoff (a
+      // silent gate downgrade). The full set is GATE_OWNED. Defense-in-depth: refuse
+      // here before the handler.
       // Trim the segment so a whitespace-padded key (" tier", "tier ") still hits
       // the gate refusal instead of slipping through to a generic unknown-field error.
       const firstSegment = (key.split(".")[0] ?? "").trim();
@@ -872,10 +875,11 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       properties: {
         write: boolProp("Write the artifacts (default true). false = dry/preview, no filesystem write."),
         format: { type: "string", description: "Text rendering: summary (default) | json | md.", enum: ["summary", "json", "md"] },
+        force: boolProp("Overwrite a target that is registered as an approved artifact (R-14). Default false: a write that would clobber a registered docs/00-repo-map.md (or repo-map.json) is refused; force:true deliberately re-authors it."),
       },
       additionalProperties: false,
     },
-    run: (paths, args) => runRepoMap(paths, { write: optBool(args, "write"), format: optString(args, "format") }),
+    run: (paths, args) => runRepoMap(paths, { write: optBool(args, "write"), format: optString(args, "format"), force: optBool(args, "force") }),
   },
   // Anchor: REQ-RU-045
   // Anchor: REQ-RU-094
@@ -1060,9 +1064,11 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       const file = optString(args, "path");
       const version = optNumber(args, "version");
       if (file === undefined) return failure({ human: "th_artifact_register requires `path`.", data: { error: "missing_path" } });
-      // AC-A6: reject absolute or parent-escaping paths BEFORE the handler
+      // AC-A6 / R-22: reject absolute or parent-escaping paths BEFORE the handler
       // (defense-in-depth; runArtifactRegister also re-checks via resolveWithinRoot).
-      if (path.isAbsolute(file) || file.split(/[\\/]/).includes("..")) {
+      // Uses the shared cross-platform predicate so a `C:\…`/UNC path is rejected on
+      // POSIX too (host-native `path.isAbsolute` missed those — the R-11 gap).
+      if (isAbsoluteOrEscaping(file)) {
         return failure({ human: `Refusing a path that is absolute or escapes the project root: ${file}`, data: { error: "path_escape", path: file } });
       }
       return runArtifactRegister(paths, file, version);
@@ -1578,14 +1584,15 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_drift_resolve: wr("drift", { idempotent: false }),
   // build oracles (read-only) + leases (mutating)
   th_build_next_wave: ro("oracle"),
-  th_build_claim: wr("build", { idempotent: true }),
-  th_build_release: wr("build", { idempotent: true }),
+  th_build_claim: wr("build", { idempotent: false }),
+  th_build_release: wr("build", { idempotent: false }),
   th_build_dispatch: ro("oracle"),
   th_build_plan: ro("oracle"),
   th_build_sub_claim: wr("build", { idempotent: false }),
-  th_build_sub_release: wr("build", { idempotent: true }),
-  // routing
-  th_route: ro("routing"),
+  th_build_sub_release: wr("build", { idempotent: false }),
+  // routing — writes an opt-in telemetry.jsonl line per call when telemetry is ON
+  // (one event per call ⇒ non-idempotent), so it is NOT read-only (R-09).
+  th_route: wr("routing", { idempotent: false }),
   // coverage
   th_coverage_check: ro("coverage"),
   th_coverage_report: ro("coverage"),
@@ -1610,8 +1617,8 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // artifacts: register (content-hash record, idempotent) + leases + read
   th_artifact_register: wr("artifact", { idempotent: true }),
   th_artifact_list: ro("artifact"),
-  th_artifact_claim: wr("artifact", { idempotent: true }),
-  th_artifact_release: wr("artifact", { idempotent: true }),
+  th_artifact_claim: wr("artifact", { idempotent: false }),
+  th_artifact_release: wr("artifact", { idempotent: false }),
   th_artifact_leases: ro("artifact"),
   // collab blackboard
   th_collab_init: wr("collab", { idempotent: true }),
@@ -1633,7 +1640,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_stage_list: ro("stage"),
   // run-health oracles
   th_doctor: ro("health"),
-  th_scorecard: ro("health"),
+  // th_scorecard appends an opt-in telemetry.jsonl line per call when telemetry is ON
+  // (one event per call ⇒ non-idempotent), so it is NOT read-only (R-09).
+  th_scorecard: wr("health", { idempotent: false }),
   // slices
   th_slices_sync: wr("slices", { idempotent: true }),
   th_slice_set_status: wr("slices", { idempotent: true }),
@@ -1705,6 +1714,7 @@ export const MCP_EXCLUDED: Readonly<Record<string, string>> = {
   // adapter to the coordination/observability subset (plan boundary rule). ---
   "state status": "Human-readable snapshot; agents read th_state_get / th_scorecard structurally.",
   "state verify": "CLI/CI exit-code gate; agents read th_doctor for validity posture.",
+  "state unlock": "Local lock-recovery operator surface; destructive (removes the .state.lock dir), not agent-reachable (R-21; mirrors migrate / state status).",
   "revise bump": "Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface.",
   "revise status": "Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface.",
   "revise reset": "Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface.",
@@ -1756,7 +1766,7 @@ export const MCP_ONLY_TOOLS: Readonly<Record<string, string>> = {
  */
 export const CLI_COMMAND_LEAVES: readonly string[] = [
   "init",
-  "state get", "state set", "state status", "state verify",
+  "state get", "state set", "state status", "state verify", "state unlock",
   "revise bump", "revise status", "revise reset",
   "tier classify", "tier veto-check", "tier record", "tier features",
   "stage advance", "stage current", "stage describe", "stage list",

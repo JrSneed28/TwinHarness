@@ -77,6 +77,20 @@ describe("REQ-DOCTOR-001: environment + project health", () => {
     expect(byName(res.data, "state.json")?.status).toBe("fail");
   });
 
+  it("R-17: reports a `packaging` check that all package.json files[] entries ship (counts templates/schemas/hooks/agents)", () => {
+    // Doctor resolves the plugin root from its own compiled location, so this check
+    // runs against the REAL repo (every files[] entry present). It must be OK, must
+    // not change the exit code, and must enumerate the component dirs with a count.
+    tp = makeTempProject();
+    const res = runDoctor(tp.paths);
+    const pkg = byName(res.data, "packaging");
+    expect(pkg?.status).toBe("ok");
+    expect(res.ok).toBe(true); // a complete package never fails the process
+    for (const dir of ["templates", "schemas", "hooks", "agents", "dist"]) {
+      expect(pkg?.detail).toContain(dir);
+    }
+  });
+
   it("reports the Claude Code compatibility expectation as a non-fatal note", () => {
     tp = makeTempProject();
     const res = runDoctor(tp.paths);

@@ -17,6 +17,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import {
@@ -715,5 +716,200 @@ describe("extractBashWriteTargets: touch flags every operand, dest-last cmds fla
     const targets = extractBashWriteTargets("cp a.ts dst.ts");
     expect(targets).toEqual(expect.arrayContaining(["dst.ts"]));
     expect(targets).not.toContain("a.ts");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// REQ-WGATE-010 (P1/R-02): the verify approval anchors are NOT silently writable
+// by a tool call — verify.json / verify-approvals.jsonl are gated in BOTH phases,
+// even though the rest of the state dir is doc/state-allowlisted. This closes the
+// "forge an approval around the write-gate" vector (the records authorize which
+// commands `th verify run` executes).
+// ---------------------------------------------------------------------------
+
+describe("REQ-WGATE-010: verify approval anchors are gated, not allowlisted", () => {
+  const anchors = [".twinharness/verify.json", ".twinharness/verify-approvals.jsonl"];
+
+  for (const anchor of anchors) {
+    it(`pre-implementation: a Write to ${anchor} is gated (ask in default mode)`, () => {
+      tp = makeTempProject();
+      writePreImplState(tp.paths); // default write_gate (ask)
+      const out = runHookPretoolGate(tp.paths, inputFor(anchor, tp.root));
+      expect(isAllow(out)).toBe(false);
+      expect(permissionDecision(out)).toBe("ask");
+      expect(permissionReason(out)).toContain("verify approval anchor");
+    });
+
+    it(`deny mode: a Write to ${anchor} is DENIED`, () => {
+      tp = makeTempProject();
+      writePreImplState(tp.paths, { write_gate: "deny" });
+      const out = runHookPretoolGate(tp.paths, inputFor(anchor, tp.root));
+      expect(permissionDecision(out)).toBe("deny");
+    });
+
+    it(`Phase B (post-implementation): a Write to ${anchor} is STILL gated (phase-independent)`, () => {
+      tp = makeTempProject();
+      writePostImplState(tp.paths, {
+        slices: [{ id: "SLICE-1", status: "in-progress", components: ["src/"] }],
+      });
+      const out = runHookPretoolGate(tp.paths, inputFor(anchor, tp.root));
+      expect(isAllow(out)).toBe(false);
+      expect(permissionDecision(out)).toBe("ask");
+    });
+  }
+
+  it("a non-anchor file in the same state dir (.twinharness/custom.json) stays allowed", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths);
+    const out = runHookPretoolGate(tp.paths, inputFor(".twinharness/custom.json", tp.root));
+    expect(isAllow(out)).toBe(true);
+  });
+
+  it("the legacy .agentic-sdlc state dir gates its verify.json too", () => {
+    // The anchor is derived from paths.stateDir, so it holds for either dir name.
+    // A project whose stateDir basename is .agentic-sdlc resolves the anchor there.
+    tp = makeTempProject();
+    writePreImplState(tp.paths);
+    const stateRel = path.basename(tp.paths.stateDir);
+    const out = runHookPretoolGate(tp.paths, inputFor(`${stateRel}/verify.json`, tp.root));
+    expect(isAllow(out)).toBe(false);
+    expect(permissionDecision(out)).toBe("ask");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// REQ-WGATE-011 (R-19): a BASH-mediated write to a verify approval anchor is
+// HARD-denied in EVERY phase and EVERY write_gate mode (off excepted by A1). Step
+// e2 (REQ-WGATE-010) closes the SAME forge vector for file_path Write/Edit, but a
+// Bash tool call carries `command` (no file_path) and short-circuits at step d before
+// e2 — and the doc/state allowlist blanket-allows `.twinharness/` for Bash. Step c1
+// closes that residual hole. Closure is PARSEABLE targets only (metachar-obscured
+// targets are dropped by extractBashWriteTargets — a tracked follow-up, NOT total closure).
+// ---------------------------------------------------------------------------
+
+describe("REQ-WGATE-011: Bash writes to verify anchors are hard-denied in all phases/modes (R-19)", () => {
+  const anchors = [".twinharness/verify.json", ".twinharness/verify-approvals.jsonl"] as const;
+  const modes = [undefined, "ask", "deny", "strict"] as const;
+
+  function bashInput(command: string, cwd?: string): PreToolHookInput {
+    return { tool_name: "Bash", tool_input: { command }, cwd };
+  }
+
+  for (const anchor of anchors) {
+    for (const mode of modes) {
+      const label = mode ?? "default";
+      it(`Phase A (pre-impl), write_gate=${label}: bash write to ${anchor} → DENY`, () => {
+        tp = makeTempProject();
+        writePreImplState(tp.paths, mode ? { write_gate: mode } : {});
+        const out = runHookPretoolGate(tp.paths, bashInput(`echo x > ${anchor}`, tp.root));
+        expect(permissionDecision(out)).toBe("deny");
+      });
+      it(`Phase B (post-impl), write_gate=${label}: bash append to ${anchor} → DENY`, () => {
+        tp = makeTempProject();
+        writePostImplState(tp.paths, mode ? { write_gate: mode } : {});
+        const out = runHookPretoolGate(tp.paths, bashInput(`echo x >> ${anchor}`, tp.root));
+        expect(permissionDecision(out)).toBe("deny");
+      });
+    }
+  }
+
+  it("a RELATIVE anchor token resolved against cwd=stateDir → DENY (the realistic agent shape)", () => {
+    tp = makeTempProject();
+    writePostImplState(tp.paths);
+    const out = runHookPretoolGate(
+      tp.paths,
+      bashInput("echo x > verify-approvals.jsonl", tp.paths.stateDir),
+    );
+    expect(permissionDecision(out)).toBe("deny");
+  });
+
+  it("a same-basename file OUTSIDE the state dir (docs/verify.json) is NOT denied by c1 (no false-positive)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths);
+    const out = runHookPretoolGate(tp.paths, bashInput("echo x > docs/verify.json", tp.root));
+    expect(permissionDecision(out)).not.toBe("deny");
+    expect(isAllow(out)).toBe(true); // docs/ is doc-allowlisted
+  });
+
+  it("write_gate=off BYPASSES the anchor deny by design (A1: off = deliberate full disable)", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths, { write_gate: "off" });
+    const out = runHookPretoolGate(tp.paths, bashInput(`echo x > ${anchors[0]}`, tp.root));
+    expect(isAllow(out)).toBe(true);
+  });
+
+  it("the legacy .agentic-sdlc anchor is denied too (derived from paths.stateDir)", () => {
+    tp = makeTempProject();
+    writePostImplState(tp.paths);
+    const stateRel = path.basename(tp.paths.stateDir);
+    const out = runHookPretoolGate(tp.paths, bashInput(`echo x > ${stateRel}/verify-approvals.jsonl`, tp.root));
+    expect(permissionDecision(out)).toBe("deny");
+  });
+
+  it("the deny reason names R-19 and instructs the agent not to retry", () => {
+    tp = makeTempProject();
+    writePreImplState(tp.paths);
+    const out = runHookPretoolGate(tp.paths, bashInput(`echo x > ${anchors[0]}`, tp.root));
+    expect(permissionReason(out)).toContain("R-19");
+    expect(permissionReason(out)).toMatch(/do NOT retry/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// REQ-WGATE-011 (R-13 regression): a NON-CANONICAL cwd alias must not disarm
+// the gate.
+//
+// resolveProjectPaths canonicalizes the selected root (realpath), but Claude Code
+// hands the gate the session's RAW `cwd` on the stdin payload. When the project
+// dir is reached through a symlink/NTFS-junction (or a Windows 8.3 short name /
+// symlinked $TMPDIR on CI), that raw cwd is a non-canonical ALIAS of the canonical
+// paths.root. A lexical containment check resolves the target against the alias and
+// compares it to the canonical root, sees "..", and reads an in-root write as
+// out-of-root — so the gate stands down and ALLOWS every write (a fail-OPEN that
+// silently defeats the gate). toRootRelative must canonicalize BOTH sides so the
+// gate fires regardless of which alias the cwd arrived as.
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a dir junction (Windows) / dir symlink (POSIX) → real target. Returns
+ * false (skip cleanly) when links are unsupported, mirroring the POSIX-only skip
+ * pattern in tests/concurrency.test.ts. Windows junctions need no elevation.
+ */
+function tryLink(target: string, link: string): boolean {
+  try {
+    fs.symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe("REQ-WGATE-011 (R-13): a non-canonical cwd alias still fires the gate", () => {
+  let scratch: string | undefined;
+  afterEach(() => {
+    if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
+    scratch = undefined;
+  });
+
+  it("Phase A code write via a symlinked/junctioned project dir → ask (not a silent allow)", () => {
+    scratch = fs.mkdtempSync(path.join(os.tmpdir(), "th-alias-"));
+    const realProject = path.join(scratch, "real-project");
+    fs.mkdirSync(realProject, { recursive: true });
+    const linkedProject = path.join(scratch, "linked-project");
+    if (!tryLink(realProject, linkedProject)) return; // links unsupported → skip cleanly
+
+    // Resolve paths from the ALIAS: paths.root is canonicalized to realProject.
+    const paths = resolveProjectPaths(linkedProject);
+    writeState(paths, { ...initialState(), current_stage: "stage-05" });
+
+    // The gate receives the RAW alias as cwd (exactly what Claude Code passes).
+    const out = runHookPretoolGate(paths, {
+      tool_name: "Write",
+      tool_input: { file_path: "src/core/engine.ts" },
+      cwd: linkedProject,
+    });
+    expect(out.exitCode).toBe(0);
+    expect(permissionDecision(out)).toBe("ask");
+    expect(permissionReason(out)).toContain("src/core/engine.ts");
   });
 });

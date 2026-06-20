@@ -38,6 +38,8 @@ exports.runDebateList = runDebateList;
 exports.runDebateResolve = runDebateResolve;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+const paths_1 = require("../core/paths");
+const atomic_io_1 = require("../core/atomic-io");
 const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const debate_log_1 = require("../core/debate-log");
@@ -80,17 +82,31 @@ function debateLogPath(paths) {
 function readDebateLog(paths) {
     const file = debateLogPath(paths);
     if (!fs.existsSync(file)) {
-        fs.writeFileSync(file, DEBATE_LOG_HEADER, "utf8");
+        // R-15: self-heal a missing log atomically + in-surface (mirrors drift).
+        (0, atomic_io_1.atomicWriteFile)(file, DEBATE_LOG_HEADER, { root: paths.root });
         return DEBATE_LOG_HEADER;
     }
     return fs.readFileSync(file, "utf8");
 }
-/** Append a block to debate-log.md (append-only — never rewrites history). */
+/**
+ * Append a block to debate-log.md (append-only — never rewrites history). R-15:
+ * a TRUE `fs.appendFileSync` of ONLY the new block — never a read-whole-then-
+ * write-whole rewrite — so a crash mid-append can never truncate prior history.
+ * The write is asserted in-surface through the governed chokepoint first; callers
+ * already serialize via `withStateLock`. Byte-compatible with the old whole-file
+ * rewrite: the separating `\n` is emitted iff the existing file does NOT already
+ * end with one (checked by reading only the last byte, not the whole file).
+ */
 function appendDebateLog(paths, block) {
-    const current = readDebateLog(paths);
-    // Ensure a separating newline before the appended block.
-    const sep = current.endsWith("\n") ? "" : "\n";
-    fs.writeFileSync(debateLogPath(paths), `${current}${sep}${block}`, "utf8");
+    const file = debateLogPath(paths);
+    // Ensure the file (and its header) exists before appending — self-heals a
+    // deleted log and guarantees the surface assertion below sees a real target.
+    readDebateLog(paths);
+    (0, paths_1.assertGovernedWriteSurface)(paths.root, file);
+    // Separator only when the existing file lacks a trailing newline (byte-for-byte
+    // identical to the prior `current.endsWith("\n") ? "" : "\n"` logic).
+    const sep = (0, atomic_io_1.endsWithNewline)(file) ? "" : "\n";
+    fs.appendFileSync(file, `${sep}${block}`, "utf8");
 }
 /**
  * `th debate add --topic <...> [--positions ...] [--links ...] [--source ...]`

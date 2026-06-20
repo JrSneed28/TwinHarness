@@ -1,9 +1,11 @@
 import * as fs from "node:fs";
 import type { ProjectPaths } from "../core/paths";
-import { type CommandResult, success } from "../core/output";
-import { initialState } from "../core/state-schema";
+import { atomicWriteFile } from "../core/atomic-io";
+import { type CommandResult, success, failure } from "../core/output";
+import { initialState, validateState, DELIVERY_MODES, type TwinHarnessState, type DeliveryMode } from "../core/state-schema";
 import { readState, writeState } from "../core/state-store";
 import { structuredLog } from "../core/log";
+import { formatIssues } from "../core/guards";
 import { kToTokens } from "./budget";
 
 const DRIFT_LOG_HEADER = `# Drift Log
@@ -23,6 +25,34 @@ Escalation: ...
 `;
 
 /**
+ * Stamp the gate-defining config fields (R-04 capture path) onto a fresh state, in
+ * place. Each is applied ONLY when the operator passed it; an unset field is left
+ * absent so the serialized state stays byte-identical to a plain init and the safe
+ * default applies. `delivery_mode` gets a focused enum pre-check (clearer than the
+ * generic `would_be_invalid` from `validateState`); the boolean/number fields are
+ * stamped verbatim and left for `validateState` to range-check. Returns a failure
+ * CommandResult on a bad value, else null.
+ */
+function applyGateDefiningFields(
+  state: TwinHarnessState,
+  opts: { deliveryMode?: string; hasUi?: boolean; interviewRequired?: boolean; interviewCutoff?: number },
+): CommandResult | null {
+  if (opts.deliveryMode !== undefined) {
+    if (!(DELIVERY_MODES as readonly string[]).includes(opts.deliveryMode)) {
+      return failure({
+        human: `Invalid --delivery-mode "${opts.deliveryMode}". Valid: ${DELIVERY_MODES.join(", ")}.`,
+        data: { error: "invalid_delivery_mode", value: opts.deliveryMode, validModes: DELIVERY_MODES },
+      });
+    }
+    state.delivery_mode = opts.deliveryMode as DeliveryMode;
+  }
+  if (opts.hasUi !== undefined) state.has_ui = opts.hasUi;
+  if (opts.interviewRequired !== undefined) state.interview_required = opts.interviewRequired;
+  if (opts.interviewCutoff !== undefined) state.interview_cutoff = opts.interviewCutoff;
+  return null;
+}
+
+/**
  * `th init` — scaffold `docs/`, `.agentic-sdlc/state.json`, and `drift-log.md`.
  * Idempotent: existing state.json is preserved unless `--force` is given.
  *
@@ -36,10 +66,28 @@ Escalation: ...
  * `kToTokens`), never in the parser — so `--max-tokens 150` persists as
  * `max_tokens: 150000`. It is applied on a fresh init AND as a targeted update on
  * an already-initialized run (so a resume can re-set the budget without --force).
+ *
+ * The four gate-DEFINING config fields (R-04 / DR-02) — `deliveryMode`, `hasUi`,
+ * `interviewRequired`, `interviewCutoff` — are the typed CAPTURE PATH for fields that
+ * are otherwise gate-owned (refused over MCP, `--emergency`-only via raw `state
+ * set`). They are CREATION-time only: applied on a fresh init, ignored on a
+ * preserve-existing re-init (a project's nature is fixed once; change it later only
+ * via the loud `--emergency` raw write). Each is stamped only when the operator
+ * passes it (absent ⇒ field omitted ⇒ the safe default applies), and the assembled
+ * state is run through `validateState` before writing so a bad enum / out-of-range
+ * cutoff is refused cleanly rather than persisting an invalid file.
  */
 export function runInit(
   paths: ProjectPaths,
-  opts: { force?: boolean; brownfield?: boolean; maxTokens?: number },
+  opts: {
+    force?: boolean;
+    brownfield?: boolean;
+    maxTokens?: number;
+    deliveryMode?: string;
+    hasUi?: boolean;
+    interviewRequired?: boolean;
+    interviewCutoff?: number;
+  },
 ): CommandResult {
   const created: string[] = [];
   const skipped: string[] = [];
@@ -71,12 +119,31 @@ export function runInit(
     const state = initialState();
     if (opts.brownfield) state.project_mode = "brownfield";
     if (maxTokens !== undefined) state.max_tokens = maxTokens;
+    // R-04 typed capture path: stamp the gate-defining config fields ONLY when the
+    // operator passed them (absent ⇒ omitted ⇒ safe default). Each is the typed,
+    // non-`--emergency` write site for an otherwise gate-owned field.
+    const captureFailure = applyGateDefiningFields(state, opts);
+    if (captureFailure) return captureFailure;
+    // Validate the assembled state before writing (writeState does NOT validate):
+    // a bad --delivery-mode enum or an out-of-range --interview-cutoff is refused
+    // here rather than persisting an invalid state.json.
+    const validation = validateState(state);
+    if (!validation.ok) {
+      return failure({
+        human: `Refusing to init: the requested gate-defining flags would make state invalid:\n${formatIssues(validation.issues)}`,
+        data: { error: "would_be_invalid", issues: validation.issues },
+      });
+    }
     writeState(paths, state);
     created.push(".twinharness/state.json");
   }
 
   if (!fs.existsSync(paths.driftLog)) {
-    fs.writeFileSync(paths.driftLog, DRIFT_LOG_HEADER, "utf8");
+    // R-15: write the header atomically through the governed write-surface
+    // chokepoint (temp→fsync→rename) so a crash mid-write can never leave a
+    // truncated drift-log.md, and the write is asserted in-surface like every
+    // other governed writer (drift-log.md is in GOVERNED_WRITE_SURFACES).
+    atomicWriteFile(paths.driftLog, DRIFT_LOG_HEADER, { root: paths.root });
     created.push("drift-log.md");
   } else {
     skipped.push("drift-log.md (already exists)");

@@ -1311,7 +1311,7 @@ All MCP tool schemas are strict and closed (`additionalProperties: false`). Outp
 
 #### Generated command reference
 
-This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **89 CLI command leaves** and **62 MCP tools**.
+This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **90 CLI command leaves** and **62 MCP tools**.
 
 | CLI command | MCP tool | Status |
 |---|---|---|
@@ -1320,6 +1320,7 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th state set` | `th_state_set` | mirrored |
 | `th state status` | — (CLI-only) | Human-readable snapshot; agents read th_state_get / th_scorecard structurally. |
 | `th state verify` | — (CLI-only) | CLI/CI exit-code gate; agents read th_doctor for validity posture. |
+| `th state unlock` | — (CLI-only) | Local lock-recovery operator surface; destructive (removes the .state.lock dir), not agent-reachable (R-21; mirrors migrate / state status). |
 | `th revise bump` | — (CLI-only) | Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface. |
 | `th revise status` | — (CLI-only) | Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface. |
 | `th revise reset` | — (CLI-only) | Revise-loop counter is Critic-loop CLI machinery; not an MCP coordination surface. |

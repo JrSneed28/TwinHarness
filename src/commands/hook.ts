@@ -1,10 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ProjectPaths } from "../core/paths";
+import { realpathExistingPrefix, type ProjectPaths } from "../core/paths";
 import { readState } from "../core/state-store";
-import { readVerifyConfig, readVerifyReport } from "../core/verify";
+import { loadVerifyConfig, readVerifyReport } from "../core/verify";
 import { gatingObligations, reduceDecisions, readDecisionEvents } from "../core/decisions";
 import { isFinalVerification } from "../core/stages";
+import { matchApprovedArtifact } from "../core/artifact-guard";
 
 /**
  * Stop-gate decision (plan pre-mortem #2 mitigation): the mechanical gate that
@@ -108,7 +109,26 @@ export function evaluateStopGate(paths: ProjectPaths): StopGateDecision {
 
     // Verify-suite gate: if the operator configured project test commands, the
     // run may not claim completion with a red or never-run suite.
-    const commands = readVerifyConfig(paths).commands;
+    //
+    // R-23: read through loadVerifyConfig (NOT readVerifyConfig) so a present-but-
+    // CORRUPT verify.json fails CLOSED here too. readVerifyConfig collapses a corrupt
+    // config to `{ commands: [] }`, which made this whole suite block skip (length 0)
+    // and let a run STOP/complete on an unreadable config — the same fail-OPEN that
+    // `runVerifyRun`/`runVerifyApprove` already refuse. A corrupt config is now a hard
+    // block: the operator wired a suite, so an unreadable suite config is a stop
+    // condition, not a silent "no commands".
+    const loadedVerify = loadVerifyConfig(paths);
+    if (loadedVerify.status === "corrupt") {
+      return {
+        block: true,
+        reasons: [
+          `Stop-gate (final-verification suite check): verify.json is present but unreadable/corrupt — ` +
+            `refusing to complete (fail-closed). It is NOT treated as an empty/approved set. ` +
+            `Inspect it, or run \`th verify clear\` and re-configure, then \`th verify approve\` and \`th verify run\` before completing.`,
+        ],
+      };
+    }
+    const commands = loadedVerify.config.commands;
     if (commands.length > 0) {
       const report = readVerifyReport(paths);
       if (!report) {
@@ -142,6 +162,13 @@ export function evaluateStopGate(paths: ProjectPaths): StopGateDecision {
  */
 export interface StopHookInput {
   stop_hook_active?: boolean;
+  /**
+   * The session's project directory, as Claude Code passes it on the hook stdin
+   * payload. Used (with the same precedence as PreToolUse) to resolve the SAME
+   * project root the write-gate resolves — see {@link resolveHookCwd}. Absent in
+   * older payloads; the resolver falls back to `--cwd`/process cwd.
+   */
+  cwd?: string;
 }
 
 /**
@@ -188,6 +215,12 @@ export function runHookStopGate(
  */
 export interface SubagentStopHookInput {
   stop_hook_active?: boolean;
+  /**
+   * The session's project directory (see {@link StopHookInput.cwd}). Resolved
+   * with the identical stdin-cwd precedence so PreToolUse / Stop / SubagentStop
+   * agree on one project root. Absent in older payloads.
+   */
+  cwd?: string;
 }
 
 /**
@@ -423,7 +456,18 @@ function rawWriteGateIsStrict(raw: string | undefined): boolean {
  * or null if the path is outside the project root (caller should allow it).
  */
 function toRootRelative(absTarget: string, root: string): string | null {
-  const rel = path.relative(root, absTarget);
+  // R-13 symmetry: `resolveProjectPaths` canonicalizes `paths.root` (realpath),
+  // but the caller resolves `absTarget` against the payload `cwd`, which may be a
+  // NON-canonical alias of the same root (macOS /var→/private/var, a Windows 8.3
+  // short name like RUNNER~1, a symlinked $TMPDIR, or any junctioned checkout). A
+  // lexical `path.relative(canonicalRoot, aliasedTarget)` then yields ".." and the
+  // gate reads an in-root write as "outside root" → it stands down and fails OPEN.
+  // Canonicalize BOTH sides through the longest-existing-prefix realpath (same
+  // mechanism as the root, idempotent when already canonical) so containment never
+  // depends on which alias the cwd arrived as.
+  const realRoot = realpathExistingPrefix(root);
+  const realTarget = realpathExistingPrefix(absTarget);
+  const rel = path.relative(realRoot, realTarget);
   // path.relative returns a string starting with ".." when outside root.
   if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
   return rel.split(path.sep).join("/");
@@ -450,6 +494,20 @@ function isAllowedDocOrStatePath(relFwd: string): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * R-02 / R-19: is `relFwd` (a root-relative, forward-slash path) one of the verify
+ * approval trust anchors — `verify.json` or `verify-approvals.jsonl` under the state
+ * dir? These records authorize which commands `th verify run` executes, so they are
+ * NEVER silently writable by a tool call. Derived from `paths.stateDir`, so it holds
+ * for `.twinharness` AND the legacy `.agentic-sdlc`. This is the SINGLE source of the
+ * anchor names, shared by step e2 (file_path Write/Edit) and step c1 (Bash).
+ */
+function isVerifyAnchorPath(relFwd: string, paths: ProjectPaths): boolean {
+  const stateRel = toRootRelative(paths.stateDir, paths.root);
+  if (stateRel === null) return false;
+  return relFwd === `${stateRel}/verify.json` || relFwd === `${stateRel}/verify-approvals.jsonl`;
 }
 
 /**
@@ -782,6 +840,75 @@ export function runHookPretoolGate(
   // to phaseABashGate — fires the gate on the first offending Phase-A Bash target,
   // or returns null to fall through. Behavior identical to the prior inline block.
   const bashCommand = input?.tool_input?.command;
+
+  // Step c1 (R-19): the verify approval trust anchors (verify.json /
+  // verify-approvals.jsonl) are NEVER writable by a Bash-mediated tool call — in ANY
+  // phase and ANY write_gate mode. (The sole bypass is step b's `write_gate==="off"`
+  // above — a deliberate full disable, A1.) Step e2 below closes the SAME forge vector
+  // for file_path Write/Edit, but a Bash tool call carries `command` and no `file_path`,
+  // so it would short-circuit at step d (`!filePath → allow`) before ever reaching e2 —
+  // and the doc/state allowlist otherwise blanket-allows the whole `.twinharness/` dir
+  // for Bash (phaseABashGate / phaseBStrictBashGate). There is NO legitimate Bash writer
+  // of these anchors (the `th verify` data layer writes via atomicWriteFile, not a shell),
+  // so this is a HARD `deny` regardless of gateMode — there is nothing to "ask" about.
+  // This runs UNCONDITIONALLY (not nested in phaseA/phaseBStrictBashGate, which are
+  // phase/strict-gated) so the deny truly holds across all phases and modes.
+  // Closure scope: this catches PARSEABLE write targets; an obfuscated target (heredoc,
+  // `> $var`, `python -c`, process substitution) is dropped by extractBashWriteTargets
+  // and remains a tracked follow-up — a green test here is NOT total Bash-forge closure.
+  if (bashCommand) {
+    const baseC1 = input?.cwd ?? paths.root;
+    for (const token of extractBashWriteTargets(bashCommand)) {
+      const absC1 = path.isAbsolute(token) ? token : path.resolve(baseC1, token);
+      const relC1 = toRootRelative(absC1, paths.root);
+      if (relC1 !== null && isVerifyAnchorPath(relC1, paths)) {
+        const reason =
+          `TwinHarness write-gate (R-19) hard-blocked a Bash-mediated write to a verify approval anchor (${relC1}). ` +
+          `This file authorizes which commands \`th verify run\` will execute; a shell redirection (echo/tee/sed >) could forge an approval around the gate. ` +
+          `There is NO legitimate Bash writer of this file — use \`th verify add\` / \`th verify approve\` (approve requires an interactive human TTY) instead. ` +
+          `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1. ` +
+          `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision.`;
+        return fireGate("deny", reason);
+      }
+    }
+  }
+
+  // Step c1b (R-24): a Bash-mediated write that would OVERWRITE a REGISTERED approved
+  // artifact is held for human confirmation — mirroring step e3 (R-14) for Write/Edit.
+  // A Bash tool call carries `command` and no `file_path`, so it short-circuits at step
+  // d (`!filePath → allow`) BEFORE ever reaching the step-e3 R-14 guard, and the
+  // doc/state allowlist otherwise blanket-allows the whole `docs/` surface for Bash —
+  // so `echo x > docs/01-requirements.md` silently clobbered a reviewed artifact. We
+  // close that with the SAME conservative target extraction + matcher and the SAME
+  // `ask` disposition as Write/Edit (NOT a deny — a deliberate re-author must still be
+  // approvable interactively). Runs in EVERY phase/mode (like e3), ahead of the
+  // phase/strict-gated Bash gates below. Reuses extractBashWriteTargets +
+  // matchApprovedArtifact — no reimplementation. Honest caveat (shared with R-19/M-4):
+  // a metachar/variable-obscured target (`> $f`, heredoc, `python -c`) is dropped by
+  // extractBashWriteTargets and is NOT caught here — this is the parseable-target guard.
+  if (bashCommand) {
+    const baseC1b = input?.cwd ?? paths.root;
+    for (const token of extractBashWriteTargets(bashCommand)) {
+      const absC1b = path.isAbsolute(token) ? token : path.resolve(baseC1b, token);
+      const relC1b = toRootRelative(absC1b, paths.root);
+      if (relC1b === null) continue; // outside root → not our concern
+      const matched = matchApprovedArtifact(state.approved_artifacts, paths.root, absC1b);
+      if (matched) {
+        const reason =
+          `TwinHarness write-gate held this write for confirmation (R-24 — approved-artifact overwrite via Bash). ` +
+          `Target path: ${relC1b}. ` +
+          `This path is a REGISTERED approved artifact (${matched.file} v${matched.version}, hash ${matched.hash}); ` +
+          `a Bash-mediated write (e.g. echo/sed/tee redirection) must not silently overwrite reviewed/human-edited content ` +
+          `any more than a Write/Edit can (R-14). ` +
+          `If this re-author is intended, APPROVE the write, then record the new content with ` +
+          `\`th artifact register ${matched.file} --version ${matched.version + 1}\` (a version bump). ` +
+          `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1. ` +
+          `AGENT INSTRUCTION: do NOT blindly retry — confirm the overwrite is intended before proceeding.`;
+        return fireGate("ask", reason);
+      }
+    }
+  }
+
   const c2 = phaseABashGate(state, bashCommand, input, paths, gateMode);
   if (c2) return c2;
 
@@ -802,6 +929,50 @@ export function runHookPretoolGate(
   const absTarget = path.isAbsolute(filePath) ? filePath : path.resolve(base, filePath);
   const relFwd = toRootRelative(absTarget, paths.root);
   if (relFwd === null) return allow(); // Outside project root → not our concern.
+
+  // Step e2 (R-02): the verify approval trust anchors are NEVER silently writable by
+  // a tool call. A direct Write/Edit to verify.json or verify-approvals.jsonl is the
+  // "forge an approval around the gate" vector — those records authorize which
+  // commands `th verify run` executes. Gate it in BOTH phases (ask by default, deny
+  // under deny/strict), ahead of the doc/state allowlist that otherwise blanket-allows
+  // the whole state dir. Derived from paths.stateDir so it holds for `.twinharness`
+  // and the legacy `.agentic-sdlc`. The CLI/MCP `th verify` data layer writes these
+  // through atomicWriteFile (not a tool call), so legitimate flows are unaffected —
+  // the only path to an approval is `th verify approve`, which itself requires a TTY.
+  // Shares isVerifyAnchorPath with step c1 (R-19) — the single source of the anchor names.
+  if (isVerifyAnchorPath(relFwd, paths)) {
+    const reason =
+      `TwinHarness write-gate gated a direct write to a verify approval anchor (${relFwd}). ` +
+      `This file authorizes which commands \`th verify run\` will execute; a direct tool write could forge an approval. ` +
+      `Use \`th verify add\` / \`th verify approve\` (approve requires an interactive human TTY) instead of editing the file. ` +
+      `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1.`;
+    return fireGate(gateMode, reason);
+  }
+
+  // Step e3 (R-14 / DR-04a): a write that would OVERWRITE a registered approved
+  // artifact is held for human confirmation, even inside the otherwise-whitelisted
+  // `docs/` surface. `approved_artifacts` is the mechanical record of "reviewed /
+  // approved" content; a stage re-run that re-authors such a doc must not SILENTLY
+  // clobber a human-edited version. We fire `ask` (not `deny`) so the deliberate
+  // re-author still works — the human approves the overwrite interactively, which IS
+  // the escape for a tool write (the CLI/MCP `th repo map` direct-write path wires an
+  // explicit `--force`). This runs AHEAD of the doc/state allowlist (step f), which
+  // would otherwise blanket-allow every `docs/` write; a NEVER-registered `docs/` path
+  // is unaffected (falls through to step f). Keyed strictly on registration, so
+  // non-artifact state/ledger writes never reach here.
+  const matched = matchApprovedArtifact(state.approved_artifacts, paths.root, absTarget);
+  if (matched) {
+    const reason =
+      `TwinHarness write-gate held this write for confirmation (R-14 — approved-artifact overwrite). ` +
+      `Target path: ${relFwd}. ` +
+      `This path is a REGISTERED approved artifact (${matched.file} v${matched.version}, hash ${matched.hash}); ` +
+      `re-running a stage must not silently overwrite reviewed/human-edited content. ` +
+      `If this re-author is intended, APPROVE the write, then record the new content with ` +
+      `\`th artifact register ${matched.file} --version ${matched.version + 1}\` (a version bump). ` +
+      `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1. ` +
+      `AGENT INSTRUCTION: do NOT blindly retry — confirm the overwrite is intended before proceeding.`;
+    return fireGate("ask", reason);
+  }
 
   // Step f: Doc/state allowlist → allow.
   if (isAllowedDocOrStatePath(relFwd)) return allow();

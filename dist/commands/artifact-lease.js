@@ -22,6 +22,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runArtifactClaim = runArtifactClaim;
 exports.runArtifactRelease = runArtifactRelease;
 exports.runArtifactLeases = runArtifactLeases;
+const paths_1 = require("../core/paths");
 const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const guards_1 = require("../core/guards");
@@ -42,6 +43,24 @@ function validate(opts, usage) {
             result: (0, output_1.failure)({
                 human: `Invalid section id: "${section}". Expected <file>#<section> (a non-empty file and section separated by a single '#'). ${usage}`,
                 data: { error: "invalid_section_id", section },
+            }),
+        };
+    }
+    // R-11 / R-22: reject an absolute or parent-escaping FILE part via the shared
+    // cross-platform `isAbsoluteOrEscaping` predicate (same one the `th_artifact_register`
+    // MCP pre-check now uses). The section id is an opaque ledger key (never joined to
+    // disk for a write), but the validation contract must be UNIFORM across the artifact
+    // tools AND cross-platform: a `/etc/passwd#x`, `C:\Windows\x#s` (R-22 — host-native
+    // `path.isAbsolute` missed this on POSIX), `\\server\share#s`, or `..\..\x#s` that
+    // `register` refuses must not slip in as a lease key. `parseSectionId` cannot return
+    // undefined here (isSectionId passed), so the `file` part is well-formed.
+    const file = (0, leases_1.parseSectionId)(section).file;
+    if ((0, paths_1.isAbsoluteOrEscaping)(file)) {
+        return {
+            ok: false,
+            result: (0, output_1.failure)({
+                human: `Refusing a section whose file part is absolute or escapes the project root: "${section}". ${usage}`,
+                data: { error: "path_escape", section },
             }),
         };
     }

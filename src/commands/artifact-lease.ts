@@ -18,7 +18,7 @@
  * prints / sets the exit code.
  */
 
-import type { ProjectPaths } from "../core/paths";
+import { isAbsoluteOrEscaping, type ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { withStateLock } from "../core/state-store";
 import { requireState } from "../core/guards";
@@ -27,6 +27,7 @@ import {
   activeSectionLeases,
   isSectionLeased,
   isSectionId,
+  parseSectionId,
   sectionLeaseHolder,
 } from "../core/leases";
 import { structuredLog } from "../core/log";
@@ -56,6 +57,24 @@ function validate(opts: ArtifactLeaseOptions, usage: string):
       result: failure({
         human: `Invalid section id: "${section}". Expected <file>#<section> (a non-empty file and section separated by a single '#'). ${usage}`,
         data: { error: "invalid_section_id", section },
+      }),
+    };
+  }
+  // R-11 / R-22: reject an absolute or parent-escaping FILE part via the shared
+  // cross-platform `isAbsoluteOrEscaping` predicate (same one the `th_artifact_register`
+  // MCP pre-check now uses). The section id is an opaque ledger key (never joined to
+  // disk for a write), but the validation contract must be UNIFORM across the artifact
+  // tools AND cross-platform: a `/etc/passwd#x`, `C:\Windows\x#s` (R-22 — host-native
+  // `path.isAbsolute` missed this on POSIX), `\\server\share#s`, or `..\..\x#s` that
+  // `register` refuses must not slip in as a lease key. `parseSectionId` cannot return
+  // undefined here (isSectionId passed), so the `file` part is well-formed.
+  const file = parseSectionId(section)!.file;
+  if (isAbsoluteOrEscaping(file)) {
+    return {
+      ok: false,
+      result: failure({
+        human: `Refusing a section whose file part is absolute or escapes the project root: "${section}". ${usage}`,
+        data: { error: "path_escape", section },
       }),
     };
   }

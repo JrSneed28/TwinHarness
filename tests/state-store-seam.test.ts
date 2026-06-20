@@ -24,7 +24,7 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import { makeTempProject } from "./helpers";
-import { withStateLock, LockTimeoutError, STALE_MS, realLockOps, type LockOps } from "../src/core/state-store";
+import { withStateLock, LockTimeoutError, LockStampError, STALE_MS, realLockOps, type LockOps } from "../src/core/state-store";
 
 /** A node ErrnoException with a given `code`. */
 function errno(code: string): NodeJS.ErrnoException {
@@ -289,6 +289,154 @@ describe("#3-pre: injected seam reproduces acquire / steal / timeout / rethrow i
       const out = withStateLock(tp.paths, () => "acquired", ops);
       expect(out).toBe("acquired");
       expect(state.attempts).toBe(2); // attempt 1 vanished → retry → attempt 2 acquires
+    } finally {
+      tp.cleanup();
+    }
+  });
+});
+
+describe("R-08: an OWNER-LESS stale lock is NEVER stolen — only stamped locks are steal-eligible", () => {
+  // The degeneracy: `readOwner` returns null both on a read failure AND when the
+  // owner stamp is simply absent (the holder's best-effort `writeOwner` threw and was
+  // swallowed — common on Windows under AV/contention — or a crashed/legacy owner-less
+  // lock). The OLD steal guard `if (readOwner() === ownerBefore) remove()` then became
+  // `null === null` → TRUE for EVERY waiter, so two concurrent waiters BOTH passed the
+  // guard and BOTH removed the dir — one clobbering a fresh third holder's LIVE lock,
+  // letting two actors into `fn()`. The existing seam tests above always supply a
+  // PRESENT owner ("tok"/"stable-token"), so this absent case was unexercised.
+
+  it("owner-less + stale + always-held → NEVER calls remove() on the steal path; times out instead", () => {
+    const tp = lockableProject();
+    try {
+      // The owner stamp is ABSENT (readOwner → null) and the lock is stale and stays
+      // held forever. Pre-fix this STOLE on the first attempt (null===null → remove()).
+      // Post-fix the owner-less branch backs off and waits out the deadline — it must
+      // NEVER steal, so a concurrent waiter cannot also steal and clobber a live lock.
+      const { state, ops } = makeFakeOps({
+        acquire: () => "EEXIST", // always held
+        age: STALE_MS + 5_000, // stale → the steal branch would fire IF owner-present
+        owners: () => null, // OWNER-LESS — the degenerate case
+      });
+      expect(() => withStateLock(tp.paths, () => 1, ops)).toThrow(LockTimeoutError);
+      // The crux: an owner-less lock is reclaimed via the TIMEOUT path, never STOLEN.
+      // remove() is therefore never called (no acquisition either → no release remove).
+      expect(state.removes).toBe(0);
+      expect(state.sleeps.length).toBeGreaterThan(0); // backed off, did not busy-spin
+      expect(state.attempts).toBeLessThan(5_000); // bounded — no infinite loop
+    } finally {
+      tp.cleanup();
+    }
+  });
+
+  it("owner-less stale lock that is later RELEASED → acquires once free (waited, never stole)", () => {
+    const tp = lockableProject();
+    try {
+      // Held + owner-less + stale for the first two attempts (must NOT steal), then the
+      // (crashed) holder's lock is gone and we acquire on attempt 3. This models the
+      // safe outcome: an owner-less lock is waited out, not stolen, and the section is
+      // entered EXACTLY ONCE — only after the lock is genuinely free.
+      const { state, ops } = makeFakeOps({
+        acquire: (n) => (n <= 2 ? "EEXIST" : null),
+        age: STALE_MS + 5_000,
+        owners: () => null, // owner-less throughout the held attempts
+      });
+      let entries = 0;
+      const out = withStateLock(tp.paths, () => {
+        entries++;
+        return "ok";
+      }, ops);
+      expect(out).toBe("ok");
+      expect(entries).toBe(1); // EXACTLY ONE actor enters fn
+      expect(state.attempts).toBe(3); // waited (not stole) twice, then acquired
+      // remove() only for the release in the finally — never for a steal.
+      expect(state.removes).toBe(1);
+    } finally {
+      tp.cleanup();
+    }
+  });
+
+  it("POSITIVE CONTROL: an owner-PRESENT stale lock IS still stolen (legit stealing unbroken)", () => {
+    const tp = lockableProject();
+    try {
+      // Contrast with the owner-less cases: a STAMPED stale lock (token stable) is still
+      // steal-eligible, so this must steal (remove on the steal path) then acquire. Proves
+      // the R-08 fix narrowed stealing to stamped locks WITHOUT disabling it entirely.
+      const { state, ops } = makeFakeOps({
+        acquire: (n) => (n === 1 ? "EEXIST" : null),
+        age: STALE_MS + 5_000,
+        owners: () => "stable-token", // PRESENT + stable → steal-eligible
+      });
+      const out = withStateLock(tp.paths, () => "stolen-then-acquired", ops);
+      expect(out).toBe("stolen-then-acquired");
+      expect(state.attempts).toBe(2); // stole on attempt 1, acquired on attempt 2
+      expect(state.removes).toBeGreaterThanOrEqual(2); // >=1 steal + 1 release
+    } finally {
+      tp.cleanup();
+    }
+  });
+
+  it("two waiters against the SAME owner-less stale lock: at most ONE could ever steal (both wait)", () => {
+    // Model the original double-steal SCHEDULE deterministically with the seam: two
+    // independent waiters each observe the SAME owner-less stale lock. Pre-fix BOTH
+    // passed `null === null` and BOTH removed the dir (the second clobbering a fresh
+    // third holder's live lock). Post-fix NEITHER steals — each backs off to the
+    // timeout — so `remove()` is called ZERO times across both waiters, which is the
+    // invariant that makes the "two actors in fn()" outcome unreachable.
+    const tpA = lockableProject();
+    const tpB = lockableProject();
+    try {
+      const mk = () =>
+        makeFakeOps({ acquire: () => "EEXIST", age: STALE_MS + 5_000, owners: () => null });
+      const a = mk();
+      const b = mk();
+      expect(() => withStateLock(tpA.paths, () => 1, a.ops)).toThrow(LockTimeoutError);
+      expect(() => withStateLock(tpB.paths, () => 1, b.ops)).toThrow(LockTimeoutError);
+      // The crux invariant: NEITHER waiter stole the owner-less lock (0 + 0 removes).
+      expect(a.state.removes + b.state.removes).toBe(0);
+    } finally {
+      tpA.cleanup();
+      tpB.cleanup();
+    }
+  });
+});
+
+describe("R-21: the owner stamp is MANDATORY — a held owner-less lock is never entered", () => {
+  it("acquire ok but writeOwner ALWAYS throws → releases each time and throws LockStampError at the cap (no 25s livelock, no owner-less-held lock)", () => {
+    const tp = lockableProject();
+    try {
+      const { state, ops } = makeFakeOps({ acquire: () => null }); // acquire always succeeds
+      ops.writeOwner = () => {
+        throw new Error("simulated EACCES on owner stamp (AV / read-only FS)");
+      };
+      // Fast-fail at MAX_STAMP_FAILS=3 — NOT a ~25s deadline livelock.
+      expect(() => withStateLock(tp.paths, () => 1, ops)).toThrow(LockStampError);
+      expect(state.attempts).toBe(3); // exactly the cap, not the hundreds a 25s deadline would take
+      expect(state.removes).toBe(3); // each acquired-but-unstamped lock is RELEASED (never held owner-less)
+      expect(state.sleeps.length).toBe(2); // backed off after fails 1 and 2; throws on fail 3 before backoff
+    } finally {
+      tp.cleanup();
+    }
+  });
+
+  it("a TRANSIENT stamp failure (throws once, then succeeds) recovers, stamps, and runs fn", () => {
+    const tp = lockableProject();
+    try {
+      const { state, ops } = makeFakeOps({ acquire: () => null });
+      let stampCalls = 0;
+      ops.writeOwner = () => {
+        stampCalls++;
+        if (stampCalls === 1) throw new Error("transient AV block");
+        // 2nd stamp succeeds.
+      };
+      let ran = false;
+      const out = withStateLock(tp.paths, () => {
+        ran = true;
+        return "ok";
+      }, ops);
+      expect(ran).toBe(true);
+      expect(out).toBe("ok");
+      expect(state.attempts).toBe(2); // released the unstamped lock, re-acquired, stamped, ran
+      expect(state.removes).toBe(2); // 1 release of the failed-stamp lock + 1 finally release
     } finally {
       tp.cleanup();
     }

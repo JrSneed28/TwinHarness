@@ -146,8 +146,15 @@ function upgradeLegacy(o) {
  * LAZY UPGRADE: a legacy `{ threshold, ambiguity }` file is snapshotted once to
  * `interview.json.bak`, upgraded to the `{ cutoff, confidence }` shape, and
  * rewritten in place — so every later read sees the new shape.
+ *
+ * `persist` (default true) controls whether the lazy upgrade is written back to
+ * disk. A genuinely READ-ONLY caller (`th interview status`, R-09) passes
+ * `persist:false`: it still receives the upgraded shape IN MEMORY (the return value
+ * is identical), but no `.bak`/`interview.json` write occurs, so the read leaves the
+ * state dir byte-for-byte unchanged. The next mutating `record` migrates on disk.
  */
-function readInterview(paths) {
+function readInterview(paths, opts = {}) {
+    const persist = opts.persist !== false;
     try {
         if (!fs.existsSync(paths.interviewFile))
             return null;
@@ -157,6 +164,10 @@ function readInterview(paths) {
             return null;
         const o = parsed;
         if (isLegacyShape(o)) {
+            const upgraded = upgradeLegacy(o);
+            // A read-only caller upgrades the shape in memory only — no disk mutation.
+            if (!persist)
+                return upgraded;
             // Snapshot the legacy file ONCE (pre-mortem #3) before rewriting in the new shape.
             const bak = paths.interviewFile + ".bak";
             try {
@@ -166,7 +177,6 @@ function readInterview(paths) {
             catch {
                 // A failed snapshot must not block the upgrade — the read still succeeds.
             }
-            const upgraded = upgradeLegacy(o);
             writeInterview(paths, upgraded);
             return upgraded;
         }
@@ -198,7 +208,10 @@ function computeReady(confidence, cutoff) {
  * never disagree about readiness.
  */
 function interviewReady(paths) {
-    const existing = readInterview(paths);
+    // R-09: this predicate feeds read-only gate evaluation (e.g. `th next`,
+    // `th interview status`) — it must not persist the lazy legacy upgrade, so any
+    // read-only tool that consults the interview gate leaves the state dir untouched.
+    const existing = readInterview(paths, { persist: false });
     if (!existing)
         return false;
     return computeReady(existing.confidence, existing.cutoff);
@@ -316,7 +329,10 @@ function runInterviewRecord(paths, opts = {}) {
  * `ready:false`. Read-only; COMPUTES only `ready`.
  */
 function runInterviewStatus(paths) {
-    const existing = readInterview(paths);
+    // R-09: `th interview status` is annotated read-only — never persist the lazy
+    // legacy upgrade here. The in-memory upgraded shape still drives the report; the
+    // next mutating `record`/`start` migrates the file on disk.
+    const existing = readInterview(paths, { persist: false });
     if (!existing) {
         (0, log_1.structuredLog)({ cmd: "interview status", started: false });
         return (0, output_1.success)({

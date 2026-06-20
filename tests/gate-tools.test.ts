@@ -17,20 +17,19 @@ import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
 import { readLedger, verifyLedgerChain, type LedgerEntry } from "../src/core/ledger";
-import { writeVerifyConfig, readVerifyReport, commandSetHash } from "../src/core/verify";
+import { writeVerifyConfig, readVerifyReport } from "../src/core/verify";
+import { runVerifyApprove } from "../src/commands/verify";
 import { TOOL_DEFS } from "../src/mcp-server";
 import type { CommandResult } from "../src/core/output";
 import type { ProjectPaths } from "../src/core/paths";
 
-/** Write an APPROVED verify config (P6-2): a set with a matching approvedHash so
- *  `th_verify_run` executes it instead of refusing it as unapproved. */
+/** Write an APPROVED verify config so `th_verify_run` executes it instead of
+ *  refusing it as unapproved. Seals a real approval in the tamper-evident ledger
+ *  via `th verify approve` (P1/R-02), injecting a TTY so the human barrier passes
+ *  in this headless test. */
 function writeApprovedVerifyConfig(paths: ProjectPaths, commands: string[]): void {
-  writeVerifyConfig(paths, {
-    commands,
-    approvedHash: commandSetHash(commands),
-    approvedBy: "test",
-    approvedAt: "2026-01-01T00:00:00.000Z",
-  });
+  writeVerifyConfig(paths, { commands });
+  runVerifyApprove(paths, { as: "test", tty: { isTTY: true, stdinLine: "y" } });
 }
 
 let tp: TempProject | undefined;

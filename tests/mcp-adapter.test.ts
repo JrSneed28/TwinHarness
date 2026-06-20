@@ -750,11 +750,12 @@ describe("REQ-MCP-PATHS-001: project root resolution prefers CLAUDE_PROJECT_DIR"
   it("resolvePathsForCall honors CLAUDE_PROJECT_DIR, falling back to cwd", () => {
     const saved = process.env.CLAUDE_PROJECT_DIR;
     try {
-      // Normalize through realpath up front: on macOS os.tmpdir() is a symlink
-      // (/var -> /private/var) and resolveProjectPaths uses path.resolve (not
-      // realpath), so the dir must already be real for the equality to hold on
-      // every OS (Linux/Windows tmpdirs aren't symlinked, so this is a no-op there).
-      const dir = fs.realpathSync(fs.mkdtempSync(path.join(require("node:os").tmpdir(), "th-mcp-root-")));
+      // Normalize through the NATIVE realpath up front: resolveProjectPaths (R-13)
+      // canonicalizes the selected root via fs.realpathSync.native, which resolves a
+      // symlinked tmpdir (macOS /var -> /private/var) AND expands Windows 8.3 short
+      // names (RUNNER~1 -> runneradmin — something the JS fs.realpathSync does NOT do).
+      // The expected dir must use the same resolver for the equality to hold on every OS.
+      const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(require("node:os").tmpdir(), "th-mcp-root-")));
       process.env.CLAUDE_PROJECT_DIR = dir;
       expect(resolvePathsForCall().root).toBe(dir);
       fs.rmSync(dir, { recursive: true, force: true });
@@ -862,19 +863,35 @@ describe("Interview/init MCP tools: th_interview_* + th_init (store-only, idempo
     if (!res.ok) expect(res.errors).toContain("idea");
   });
 
-  // INVERSE of the GATE_OWNED refusal battery: interview_cutoff is NOT gate-owned,
-  // so runStateSet / th_state_set ALLOWS it (it is a free policy value, not a gate).
-  it("runStateSet ALLOWS interview_cutoff (not gate-owned) and th_state_set does not refuse it", () => {
+  // INVERSE of the GATE_OWNED refusal battery: max_tokens is NOT gate-owned, so
+  // runStateSet / th_state_set ALLOWS it (a context-budget knob, not a governance
+  // gate — the spec leaves it free, unlike interview_cutoff which R-04/DR-02 moved
+  // UNDER the guard). interview_cutoff's gate-owned refusal is asserted in
+  // state-set-gate-fields.test.ts / mcp-schema-enforcement.test.ts.
+  it("runStateSet ALLOWS max_tokens (not gate-owned) and th_state_set does not refuse it", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
 
-    const res = runStateSet(tp.paths, "interview_cutoff", "0.7");
+    const res = runStateSet(tp.paths, "max_tokens", "120000");
     expect(res.ok).toBe(true);
-    expect(readState(tp.paths).state?.interview_cutoff).toBe(0.7);
+    expect(readState(tp.paths).state?.max_tokens).toBe(120000);
 
     // Via the MCP th_state_set wrapper too: not a gate_owned_field refusal.
-    const viaMcp = defFor("th_state_set").run(tp.paths, { key: "interview_cutoff", value: "0.85" });
+    const viaMcp = defFor("th_state_set").run(tp.paths, { key: "max_tokens", value: "150000" });
     expect(viaMcp.ok).toBe(true);
-    expect(readState(tp.paths).state?.interview_cutoff).toBe(0.85);
+    expect(readState(tp.paths).state?.max_tokens).toBe(150000);
+  });
+
+  // R-04 / DR-02 regression: interview_cutoff is now gate-owned — th_state_set
+  // refuses it over MCP, and the raw CLI setter requires --emergency.
+  it("R-04: interview_cutoff is gate-owned — th_state_set refuses it, raw CLI needs --emergency", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const viaMcp = defFor("th_state_set").run(tp.paths, { key: "interview_cutoff", value: "0.85" });
+    expect(viaMcp.ok).toBe(false);
+    expect(viaMcp.data?.error).toBe("gate_owned_field");
+    const rawCli = runStateSet(tp.paths, "interview_cutoff", "0.85");
+    expect(rawCli.ok).toBe(false);
+    expect(rawCli.data?.error).toBe("gate_owned_requires_emergency");
   });
 });

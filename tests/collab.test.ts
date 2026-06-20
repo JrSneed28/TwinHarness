@@ -1,4 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
@@ -7,9 +9,13 @@ import {
   runCollabList,
   runCollabMerge,
 } from "../src/commands/collab";
+import { runInit } from "../src/commands/init";
 import { type Fragment, writeFragment } from "../src/core/collab";
 import { PathContainmentError } from "../src/core/paths";
 import { failure, renderResult } from "../src/core/output";
+
+const execFileP = promisify(execFile);
+const CLI = path.resolve(__dirname, "../dist/cli.js");
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
@@ -258,4 +264,66 @@ describe("REQ-PCO-040: fragment writes are collision-safe (no silent clobber bet
       writeFragment(tp.paths, { stage: "design", round: "r1", name: "a.md", content: "REQ-001 forced", force: true }),
     ).not.toThrow();
   });
+});
+
+describe("R-16: the collision guard holds under a REAL concurrent race (atomic create-or-fail, no silent clobber)", () => {
+  // The old `existsSync`-then-`writeFileSync` guard was a check-then-write TOCTOU:
+  // two processes could both see `!existsSync` and both write, the second silently
+  // clobbering with NO collision error. The single-threaded test above cannot
+  // exercise that schedule — so this spawns N REAL `node dist/cli.js collab fragment`
+  // processes dropping the SAME stage/round/name at once and asserts EXACTLY ONE wins
+  // (exit 0), every loser is REFUSED (`fragment_exists`, exit 1), and the winner's
+  // content survives unclobbered. Runs against the COMPILED CLI (dist/cli.js); CI
+  // builds before testing, a local run without a build degrades gracefully (skipIf).
+  it.skipIf(!fs.existsSync(CLI))("N parallel `collab fragment` with the same name → exactly one succeeds, the rest are refused", async () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    const N = 16;
+    const results = await Promise.allSettled(
+      Array.from({ length: N }, (_, i) =>
+        execFileP(
+          "node",
+          [
+            CLI, "collab", "fragment",
+            "--stage", "design",
+            "--round", "r1",
+            "--name", "racer.md",
+            "--text", `REQ-001 from writer ${i}`,
+            "--json",
+            "--cwd", tp!.root,
+          ],
+          { env: { ...process.env, TH_NO_LOG: "1" } },
+        ),
+      ),
+    );
+
+    // execFileP REJECTS on a non-zero exit; a successful write resolves. So exactly
+    // one process must resolve (the create winner) and N-1 must reject (collision).
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(N - 1);
+
+    // Every loser failed for the RIGHT reason: a structured `fragment_exists`
+    // collision, exit 1 — not a crash, a partial write, or a silent success.
+    for (const r of rejected) {
+      const err = (r as PromiseRejectedResult).reason as { code?: number; stdout?: string };
+      expect(err.code).toBe(1);
+      const out = JSON.parse(err.stdout ?? "{}") as { ok: boolean; error?: string };
+      expect(out.ok).toBe(false);
+      expect(out.error).toBe("fragment_exists");
+    }
+
+    // The single winner's content is on disk, unclobbered by any racing writer.
+    const file = path.join(tp.paths.stateDir, "collab", "design", "r1", "racer.md");
+    const onDisk = fs.readFileSync(file, "utf8");
+    expect(onDisk).toMatch(/^REQ-001 from writer \d+$/);
+    const winnerStdout = JSON.parse((fulfilled[0] as PromiseFulfilledResult<{ stdout: string }>).value.stdout) as {
+      ok: boolean;
+      path?: string;
+    };
+    expect(winnerStdout.ok).toBe(true);
+    expect(winnerStdout.path).toBe(file);
+  }, 30_000);
 });

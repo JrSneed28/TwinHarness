@@ -1,5 +1,7 @@
 import * as fs from "node:fs";
 import type { ProjectPaths } from "../core/paths";
+import { assertGovernedWriteSurface } from "../core/paths";
+import { atomicWriteFile, endsWithNewline } from "../core/atomic-io";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState, writeState, withStateLock } from "../core/state-store";
 import {
@@ -55,18 +57,31 @@ export interface DriftAddOptions {
 /** Read drift-log.md, creating it from the header if absent. */
 function readDriftLog(paths: ProjectPaths): string {
   if (!fs.existsSync(paths.driftLog)) {
-    fs.writeFileSync(paths.driftLog, DRIFT_LOG_HEADER, "utf8");
+    // R-15: self-heal a missing log atomically + in-surface (matches init's writer).
+    atomicWriteFile(paths.driftLog, DRIFT_LOG_HEADER, { root: paths.root });
     return DRIFT_LOG_HEADER;
   }
   return fs.readFileSync(paths.driftLog, "utf8");
 }
 
-/** Append a block to drift-log.md (append-only — never rewrites history). */
+/**
+ * Append a block to drift-log.md (append-only — never rewrites history). R-15:
+ * a TRUE `fs.appendFileSync` of ONLY the new block — never a read-whole-then-
+ * write-whole rewrite — so a crash mid-append can never truncate prior history.
+ * The write is asserted in-surface through the governed chokepoint first; callers
+ * already serialize via `withStateLock`. Byte-compatible with the old whole-file
+ * rewrite: the separating `\n` is emitted iff the existing file does NOT already
+ * end with one (checked by reading only the last byte, not the whole file).
+ */
 function appendDriftLog(paths: ProjectPaths, block: string): void {
-  const current = readDriftLog(paths);
-  // Ensure a separating newline before the appended block.
-  const sep = current.endsWith("\n") ? "" : "\n";
-  fs.writeFileSync(paths.driftLog, `${current}${sep}${block}`, "utf8");
+  // Ensure the file (and its header) exists before appending — self-heals a
+  // deleted log and guarantees the surface assertion below sees a real target.
+  readDriftLog(paths);
+  assertGovernedWriteSurface(paths.root, paths.driftLog);
+  // Separator only when the existing file lacks a trailing newline (byte-for-byte
+  // identical to the prior `current.endsWith("\n") ? "" : "\n"` logic).
+  const sep = endsWithNewline(paths.driftLog) ? "" : "\n";
+  fs.appendFileSync(paths.driftLog, `${sep}${block}`, "utf8");
 }
 
 /**
