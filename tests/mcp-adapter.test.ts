@@ -418,6 +418,9 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 60 + schema/no-exec battery (REQ
     "th_handoff_write",
     "th_template_get",
     "th_template_list",
+    "th_repo_search",
+    "th_context_read",
+    "th_artifact_section",
   ];
 
   // ---- REQ-RU-094: full registry, in order (originally 23; now 60 with the coordination + interview/init + gate-transition + wired-handler tools) ----

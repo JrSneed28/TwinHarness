@@ -466,6 +466,30 @@ function isAllowedDocOrStatePath(relFwd) {
     return false;
 }
 /**
+ * SG3 P1-B (C-11) — is `relFwd` (a root-relative, forward-slash target) inside the
+ * delegate's declared allowed-files scope? Each `allowed` entry is normalized to a
+ * root-relative POSIX path (resolved against `root` so `./x`, backslashes, and
+ * redundant segments collapse), then matched as either an EXACT file or a DIRECTORY
+ * PREFIX (an entry that is a directory — or written with a trailing "/" — admits every
+ * path beneath it). An entry that escapes the root is ignored (it can never match an
+ * in-root target). Caller guarantees the list is non-empty before calling.
+ */
+function isWithinAllowedFiles(relFwd, allowed, root) {
+    for (const entry of allowed) {
+        const rel = toRootRelative(path.resolve(root, entry), root);
+        if (rel === null || rel.length === 0)
+            continue; // escapes root / empty → cannot match.
+        if (relFwd === rel)
+            return true; // exact file match.
+        // Directory-prefix match: the entry names a dir (or was written dir-like) and the
+        // target lives under it. Compare on a "/"-terminated prefix so "src/a" does not
+        // admit "src/abc".
+        if (relFwd.startsWith(rel.endsWith("/") ? rel : rel + "/"))
+            return true;
+    }
+    return false;
+}
+/**
  * R-02 / R-19: is `relFwd` (a root-relative, forward-slash path) one of the verify
  * approval trust anchors — `verify.json` or `verify-approvals.jsonl` under the state
  * dir? These records authorize which commands `th verify run` executes, so they are
@@ -804,6 +828,30 @@ function runHookPretoolGate(paths, input, env = process.env) {
             }
         }
     }
+    // Step c1c (SG3 P1-B / C-11): delegate allowed-files scope for a parseable Bash
+    // write target. A Bash tool call carries `command` and no `file_path`, so it would
+    // short-circuit at step d before the step-e1 allowed-files check; mirror that check
+    // here for the conservative parseable targets (extractBashWriteTargets) so a shell
+    // redirection cannot escape the delegate's scope. Same HARD deny + caveat as the
+    // R-19/R-24 Bash guards (metachar/heredoc-obscured targets are out of scope). Only
+    // fires when a non-empty allowed_files set was declared (additive; no-op otherwise).
+    const allowedFilesC1c = input?.allowed_files;
+    if (bashCommand && Array.isArray(allowedFilesC1c) && allowedFilesC1c.length > 0) {
+        const baseC1c = input?.cwd ?? paths.root;
+        for (const token of extractBashWriteTargets(bashCommand)) {
+            const absC1c = path.isAbsolute(token) ? token : path.resolve(baseC1c, token);
+            const relC1c = toRootRelative(absC1c, paths.root);
+            if (relC1c === null)
+                continue; // outside root → not in scope to deny here.
+            if (!isWithinAllowedFiles(relC1c, allowedFilesC1c, paths.root)) {
+                const reason = `TwinHarness write-gate (C-11 — delegate scope) DENIED a Bash-mediated write: ${relC1c} is OUTSIDE the delegated agent's allowed-files scope. ` +
+                    `This delegate was packed with an explicit allowed-files set (${allowedFilesC1c.join(", ")}); a shell redirection cannot escape it any more than a Write/Edit can. ` +
+                    `AGENT INSTRUCTION: do NOT retry — write only within your allowed scope, or escalate to widen the delegation. ` +
+                    `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1.`;
+                return fireGate("deny", reason);
+            }
+        }
+    }
     const c2 = phaseABashGate(state, bashCommand, input, paths, gateMode);
     if (c2)
         return c2;
@@ -825,6 +873,22 @@ function runHookPretoolGate(paths, input, env = process.env) {
     const relFwd = toRootRelative(absTarget, paths.root);
     if (relFwd === null)
         return allow(); // Outside project root → not our concern.
+    // Step e1 (SG3 P1-B / C-11): delegate allowed-files read-scoping. When the stdin
+    // payload declares a non-empty `allowed_files` set (emitted by `th delegate pack`),
+    // a write to an in-root target OUTSIDE that set is DENIED — ahead of the doc/state
+    // allowlist and the phase gates, because the scope is TIGHTER than those (a delegate
+    // confined to `src/auth/*` must not write a `docs/` file outside its scope either).
+    // An ABSENT/empty list is a no-op, so the historical gating is untouched (additive
+    // injection point). HARD deny: there is nothing to "ask" about — the delegate was
+    // explicitly scoped, so an out-of-scope write is a boundary violation to escalate.
+    const allowedFiles = input?.allowed_files;
+    if (Array.isArray(allowedFiles) && allowedFiles.length > 0 && !isWithinAllowedFiles(relFwd, allowedFiles, paths.root)) {
+        const reason = `TwinHarness write-gate (C-11 — delegate scope) DENIED this write: ${relFwd} is OUTSIDE the delegated agent's allowed-files scope. ` +
+            `This delegate was packed with an explicit allowed-files set (${allowedFiles.join(", ")}); writes outside it are refused. ` +
+            `AGENT INSTRUCTION: do NOT retry — write only within your allowed scope, or escalate to the human to widen the delegation (\`th delegate pack ... --allowed-files <list>\`). ` +
+            `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1.`;
+        return fireGate("deny", reason);
+    }
     // Step e2 (R-02): the verify approval trust anchors are NEVER silently writable by
     // a tool call. A direct Write/Edit to verify.json or verify-approvals.jsonl is the
     // "forge an approval around the gate" vector — those records authorize which

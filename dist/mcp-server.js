@@ -15598,10 +15598,10 @@ function resolveProjectPaths(root) {
 
 // src/core/output.ts
 function success(opts) {
-  return { ok: true, exitCode: 0, data: opts?.data, human: opts?.human };
+  return { ok: true, exitCode: 0, data: opts?.data, human: opts?.human, receipts: opts?.receipts };
 }
 function failure(opts) {
-  return { ok: false, exitCode: opts?.exitCode ?? 1, data: opts?.data, human: opts?.human };
+  return { ok: false, exitCode: opts?.exitCode ?? 1, data: opts?.data, human: opts?.human, receipts: opts?.receipts };
 }
 
 // src/core/state-store.ts
@@ -21392,6 +21392,228 @@ function repoFreshnessSummary(paths) {
     capHit
   };
 }
+var SEARCH_KINDS = ["literal", "regex", "symbol", "req", "artifact", "template"];
+var DEFAULT_SEARCH_MAX_RESULTS = 50;
+var MAX_SEARCH_MAX_RESULTS = 500;
+var MAX_SEARCH_FILE_BYTES = 2 * 1024 * 1024;
+var MAX_SCANNED_FILES = FILE_COUNT_CAP;
+function runRepoSearch(paths, opts = {}) {
+  const pattern = opts.pattern;
+  if (pattern === void 0 || pattern.length === 0) {
+    structuredLog({ cmd: "repo search", error: "no_pattern" });
+    return failure({ human: "Provide a search pattern: --pattern <p>.", data: { error: "no_pattern" } });
+  }
+  const kind = opts.kind ?? "literal";
+  if (!SEARCH_KINDS.includes(kind)) {
+    structuredLog({ cmd: "repo search", error: "bad_kind", kind: opts.kind });
+    return failure({
+      human: `invalid --kind "${opts.kind}". Expected one of: ${SEARCH_KINDS.join(", ")}.`,
+      data: { error: "bad_kind", kind: opts.kind }
+    });
+  }
+  let regex = null;
+  if (kind === "regex") {
+    try {
+      regex = new RegExp(pattern);
+    } catch (e) {
+      structuredLog({ cmd: "repo search", error: "bad_regex" });
+      return failure({
+        human: `invalid --pattern regex: ${e.message}`,
+        data: { error: "bad_regex", pattern }
+      });
+    }
+  }
+  const loaded = loadPersistedMap(paths, "repo search");
+  if (loaded.result) return loaded.result;
+  const map = loaded.map;
+  const maxResults = clampSearchMax(opts.maxResults);
+  const receiptByFile = /* @__PURE__ */ new Map();
+  const citations = [];
+  let truncated = false;
+  let filesScanned = 0;
+  const receiptFor = (rel, content) => {
+    if (!receiptByFile.has(rel)) receiptByFile.set(rel, { file: rel, hash: hashContent(content) });
+  };
+  const readInScope = (rel) => {
+    const abs = resolveWithinRoot(paths.root, rel);
+    if (abs === null) return null;
+    try {
+      if (fs18.statSync(abs).size > MAX_SEARCH_FILE_BYTES) return null;
+      return fs18.readFileSync(abs, "utf8");
+    } catch {
+      return null;
+    }
+  };
+  const scanLines = (rel, content, lineMatches) => {
+    receiptFor(rel, content);
+    const lines = content.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      if (citations.length >= maxResults) {
+        truncated = true;
+        return false;
+      }
+      if (lineMatches(lines[i])) {
+        citations.push({ path: rel, line: i + 1, text: lines[i].trim().slice(0, 240) });
+      }
+    }
+    return true;
+  };
+  if (kind === "literal" || kind === "regex") {
+    const matcher = kind === "regex" ? (line) => regex.test(line) : (line) => line.includes(pattern);
+    for (const fe of map.files) {
+      if (filesScanned >= MAX_SCANNED_FILES) {
+        truncated = true;
+        break;
+      }
+      const content = readInScope(fe.path);
+      if (content === null) continue;
+      filesScanned++;
+      if (!scanLines(fe.path, content, matcher)) break;
+    }
+  } else if (kind === "symbol") {
+    const needle = pattern.toLowerCase();
+    outerSym: for (const fe of map.files) {
+      if (!fe.symbols || fe.symbols.length === 0) continue;
+      const hits = fe.symbols.filter((s) => s.name.toLowerCase().includes(needle));
+      if (hits.length === 0) continue;
+      if (filesScanned >= MAX_SCANNED_FILES) {
+        truncated = true;
+        break;
+      }
+      const content = readInScope(fe.path);
+      if (content === null) continue;
+      filesScanned++;
+      receiptFor(fe.path, content);
+      const names = new Set(hits.map((h) => h.name));
+      const lines = content.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        if (citations.length >= maxResults) {
+          truncated = true;
+          break outerSym;
+        }
+        if ([...names].some((n) => lines[i].includes(n))) {
+          citations.push({ path: fe.path, line: i + 1, text: lines[i].trim().slice(0, 240) });
+        }
+      }
+    }
+  } else if (kind === "req") {
+    const needle = pattern.toUpperCase();
+    const matched = map.req_anchors.filter((a) => a.req_id.toUpperCase().includes(needle));
+    const idsByFile = /* @__PURE__ */ new Map();
+    for (const a of matched) {
+      for (const loc of a.locations) {
+        let set = idsByFile.get(loc);
+        if (!set) {
+          set = /* @__PURE__ */ new Set();
+          idsByFile.set(loc, set);
+        }
+        set.add(a.req_id);
+      }
+    }
+    outerReq: for (const [rel, ids] of idsByFile) {
+      if (filesScanned >= MAX_SCANNED_FILES) {
+        truncated = true;
+        break;
+      }
+      const content = readInScope(rel);
+      if (content === null) continue;
+      filesScanned++;
+      receiptFor(rel, content);
+      const lines = content.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        if (citations.length >= maxResults) {
+          truncated = true;
+          break outerReq;
+        }
+        if ([...ids].some((id) => lines[i].includes(id))) {
+          citations.push({ path: rel, line: i + 1, text: lines[i].trim().slice(0, 240) });
+        }
+      }
+    }
+  } else if (kind === "artifact") {
+    const r = readState(paths);
+    const approved = r.state?.approved_artifacts ?? [];
+    const needle = pattern.toLowerCase();
+    for (const a of approved) {
+      if (citations.length >= maxResults) {
+        truncated = true;
+        break;
+      }
+      if (!a.file.toLowerCase().includes(needle)) continue;
+      citations.push({ path: a.file, line: 0, text: `approved artifact v${a.version} (${a.hash})` });
+      const content = readInScope(a.file);
+      if (content !== null) {
+        filesScanned++;
+        receiptFor(a.file, content);
+      }
+    }
+  } else {
+    const names = collectTemplateNames(paths.root);
+    const needle = pattern.toLowerCase();
+    for (const t of names) {
+      if (citations.length >= maxResults) {
+        truncated = true;
+        break;
+      }
+      if (!t.name.toLowerCase().includes(needle)) continue;
+      citations.push({ path: t.rel, line: 0, text: `template "${t.name}" (${t.source})` });
+      try {
+        const content = fs18.readFileSync(t.abs, "utf8");
+        filesScanned++;
+        if (!receiptByFile.has(t.rel)) receiptByFile.set(t.rel, { file: t.rel, hash: hashContent(content) });
+      } catch {
+      }
+    }
+  }
+  const receipts = [...receiptByFile.values()];
+  structuredLog({
+    cmd: "repo search",
+    kind,
+    citations: citations.length,
+    filesScanned,
+    receipts: receipts.length,
+    truncated
+  });
+  const human = citations.length === 0 ? `No matches for ${kind} pattern "${pattern}".` : [
+    `${citations.length} match(es) for ${kind} pattern "${pattern}"${truncated ? " (truncated by maxResults)" : ""}:`,
+    ...citations.map((c) => `  ${c.path}:${c.line}  ${c.text}`),
+    "",
+    `Read receipts: ${receipts.length} file(s) hashed.`
+  ].join("\n");
+  return success({
+    receipts,
+    data: { kind, pattern, citations, truncated, filesScanned, receipts },
+    human
+  });
+}
+function clampSearchMax(n) {
+  if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) return DEFAULT_SEARCH_MAX_RESULTS;
+  return Math.min(Math.floor(n), MAX_SEARCH_MAX_RESULTS);
+}
+function collectTemplateNames(root) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  const pluginRoot3 = path19.resolve(__dirname, "..", "..");
+  const dirs = [
+    { dir: path19.join(root, ".twinharness", "templates"), source: "project-override", relPrefix: ".twinharness/templates" },
+    { dir: path19.join(pluginRoot3, "templates"), source: "plugin-bundled", relPrefix: "templates" }
+  ];
+  for (const { dir, source, relPrefix } of dirs) {
+    let entries;
+    try {
+      entries = fs18.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (!e.isFile()) continue;
+      if (seen.has(e.name)) continue;
+      seen.add(e.name);
+      out.push({ name: e.name, rel: `${relPrefix}/${e.name}`, abs: path19.join(dir, e.name), source });
+    }
+  }
+  return out;
+}
 
 // src/commands/interview.ts
 var fs19 = __toESM(require("node:fs"));
@@ -22236,6 +22458,37 @@ function headFallback(lines, headLines) {
   }
   return out.join("\n").trim();
 }
+function extractSection(markdown, name) {
+  const lines = markdown.split(/\r?\n/);
+  const want = name.trim().toLowerCase();
+  const headingRe = /^(#{1,6})\s+(.+?)\s*$/;
+  let startIdx = -1;
+  let level = 0;
+  let heading = null;
+  for (let i = 0; i < lines.length; i++) {
+    const m = headingRe.exec(lines[i]);
+    if (!m) continue;
+    const text = m[2].replace(/\s*\{#[^}]*\}\s*$/, "").trim().toLowerCase();
+    if (text === want) {
+      startIdx = i;
+      level = m[1].length;
+      heading = lines[i];
+      break;
+    }
+  }
+  if (startIdx < 0) return { found: false, heading: null, body: "" };
+  const body = [];
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    const h = ANY_HEADING_RE.exec(line);
+    if (h) {
+      const hLevel = /^#+/.exec(line)?.[0].length ?? 99;
+      if (hLevel <= level) break;
+    }
+    body.push(line);
+  }
+  return { found: true, heading, body: body.join("\n").trim() };
+}
 
 // src/commands/context.ts
 var TOKENS_PER_CHAR = 1 / 4;
@@ -22379,6 +22632,94 @@ function runContextPack(paths, opts = {}) {
       repoRelevantFiles,
       repoRelevantNote: repoRelevantNote ?? null
     },
+    human
+  });
+}
+function estimateTokens(text) {
+  return Math.round(text.length * TOKENS_PER_CHAR);
+}
+function runContextRead(paths, opts = {}) {
+  const files = (opts.files ?? []).map((f) => f.trim()).filter(Boolean);
+  if (files.length === 0) {
+    structuredLog({ cmd: "context read", error: "no_files" });
+    return failure({ human: "Provide at least one file: --files <comma-separated list>.", data: { error: "no_files" } });
+  }
+  const budget = typeof opts.maxTokens === "number" && opts.maxTokens > 0 ? opts.maxTokens : null;
+  const results = [];
+  const receipts = [];
+  let running = 0;
+  let budgetExhausted = false;
+  for (const f of files) {
+    const relKey = path21.relative(paths.root, path21.resolve(paths.root, f)).split(path21.sep).join("/");
+    const abs = resolveWithinRoot(paths.root, f);
+    if (abs === null || !fs21.existsSync(abs) || !fs21.statSync(abs).isFile()) {
+      results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
+      continue;
+    }
+    let content;
+    try {
+      content = fs21.readFileSync(abs, "utf8");
+    } catch {
+      results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
+      continue;
+    }
+    const fullHash = hashContent(content);
+    if (budgetExhausted) {
+      results.push({ file: relKey, exists: true, text: "", tokens: 0, truncated: false, omitted: true });
+      receipts.push({ file: relKey, hash: fullHash, tokensConsumed: 0 });
+      continue;
+    }
+    const fullTokens = estimateTokens(content);
+    let text = content;
+    let tokens = fullTokens;
+    let truncated = false;
+    if (budget !== null && running + fullTokens > budget) {
+      const remaining = budget - running;
+      const lines = content.split("\n");
+      const kept = [];
+      let used = 0;
+      for (const line of lines) {
+        const cost = estimateTokens(line + "\n");
+        if (used + cost > remaining) break;
+        kept.push(line);
+        used += cost;
+      }
+      text = kept.join("\n");
+      tokens = estimateTokens(text);
+      truncated = true;
+      budgetExhausted = true;
+    }
+    running += tokens;
+    results.push({ file: relKey, exists: true, text, tokens, truncated, omitted: false });
+    receipts.push({ file: relKey, hash: fullHash, tokensConsumed: tokens });
+    if (budget !== null && running >= budget) budgetExhausted = true;
+  }
+  const totalTokens = results.reduce((sum, r) => sum + r.tokens, 0);
+  const missing = results.filter((r) => !r.exists).map((r) => r.file);
+  const omittedFiles = results.filter((r) => r.omitted).map((r) => r.file);
+  const anyTruncated = results.some((r) => r.truncated);
+  structuredLog({
+    cmd: "context read",
+    files: files.length,
+    read: results.filter((r) => r.exists && !r.omitted).length,
+    missing: missing.length,
+    omitted: omittedFiles.length,
+    tokens: totalTokens,
+    truncated: anyTruncated
+  });
+  const human = [
+    `Read ${results.filter((r) => r.exists && !r.omitted).length}/${files.length} file(s), ~${totalTokens} tokens${budget !== null ? ` (budget ${budget})` : ""}.`,
+    ...missing.length ? [`Missing/outside-root (skipped): ${missing.join(", ")}`] : [],
+    ...omittedFiles.length ? [`Omitted for budget: ${omittedFiles.join(", ")}`] : [],
+    ...results.filter((r) => r.exists && !r.omitted).flatMap((r) => [
+      "",
+      `### ${r.file} (~${r.tokens} tok${r.truncated ? ", TRUNCATED" : ""})`,
+      r.text || "(empty)"
+    ])
+  ].join("\n");
+  return success({
+    receipts,
+    data: { files: results, totalTokens, maxTokens: budget, truncated: anyTruncated, missing, omitted: omittedFiles, receipts },
     human
   });
 }
@@ -22553,6 +22894,7 @@ function runDelegatePack(paths, opts) {
     if (!pack.ok) return pack;
     contextPack = pack.human ?? null;
   }
+  const allowedFiles = normalizeAllowedFiles(opts.allowedFiles, opts.file);
   const envelope = [
     "DELEGATED AGENT HANDOFF",
     `Agent: ${opts.agent ?? "(unspecified \u2014 set --agent)"}`,
@@ -22562,6 +22904,7 @@ function runDelegatePack(paths, opts) {
     ...opts.req ? [`REQ: ${opts.req}`] : [],
     ...opts.file ? [`File: ${opts.file}`] : [],
     `Allowed scope: ${opts.slice ? `the components of ${opts.slice}; do not edit outside them` : opts.file ? `${opts.file} and its direct neighbors; do not edit outside them` : opts.req ? `the files anchored to ${opts.req}; do not edit outside them` : "(state the file/dir/component boundary)"}`,
+    ...allowedFiles.length ? [`Allowed files (write-gate enforced): ${allowedFiles.join(", ")}`] : [],
     "",
     "Context pack:",
     contextPack ?? "(run `th context pack` for approved-artifact Summary blocks)",
@@ -22579,7 +22922,8 @@ function runDelegatePack(paths, opts) {
     agent: opts.agent ?? null,
     slice: opts.slice ?? null,
     intent: parsed.intent ?? null,
-    hasContextPack: contextPack !== null
+    hasContextPack: contextPack !== null,
+    allowedFiles: allowedFiles.length
   });
   return success({
     data: {
@@ -22588,10 +22932,24 @@ function runDelegatePack(paths, opts) {
       intent: parsed.intent ?? null,
       slice: opts.slice ?? null,
       capsuleSections: [...CAPSULE_SECTIONS],
-      hasContextPack: contextPack !== null
+      hasContextPack: contextPack !== null,
+      // SG3 P1-B (C-11) — the explicit write-scope the gate enforces (always present).
+      allowedFiles
     },
     human: envelope.join("\n")
   });
+}
+function normalizeAllowedFiles(list, fallbackFile) {
+  const raw = list && list.length > 0 ? list : fallbackFile ? [fallbackFile] : [];
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const f of raw) {
+    const t = f.trim();
+    if (t.length === 0 || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
 }
 function runDelegateCheck(paths, opts) {
   let text = opts.text;
@@ -22656,7 +23014,7 @@ function verdictFor(pct) {
   if (pct >= BUDGET_WARN_PCT) return "warn";
   return "ok";
 }
-function estimateTokens(counts) {
+function estimateTokens2(counts) {
   const filesRead = nonNegInt(counts.filesRead);
   const slicesBuilt = nonNegInt(counts.slicesBuilt);
   const toolCalls = nonNegInt(counts.toolCalls);
@@ -22682,7 +23040,7 @@ function runBudgetCheck(paths, opts = {}) {
   const r = readState(paths);
   const tier = r.state?.tier ?? null;
   const stateMaxTokens = r.state?.max_tokens;
-  const estTokens = estimateTokens(opts);
+  const estTokens = estimateTokens2(opts);
   const { budget, source } = resolveBudget({ maxK: opts.max, stateMaxTokens, tier });
   const pct = budget > 0 ? estTokens / budget : 1;
   const verdict = verdictFor(pct);
@@ -23817,6 +24175,93 @@ ${formatIssues(r.issues)}`,
   const artifacts = r.state.approved_artifacts;
   const human = artifacts.length ? artifacts.map((a) => `${a.file}  v${a.version}  ${a.hash}`).join("\n") : "(none)";
   return success({ data: { artifacts }, human });
+}
+function estimateTokens3(text) {
+  return Math.round(text.length / 4);
+}
+function runArtifactSection(paths, opts = {}) {
+  if (!opts.file) {
+    structuredLog({ cmd: "artifact section", error: "no_file" });
+    return failure({ human: "usage: th artifact section --file <path> --section <heading> [--max-tokens N]", data: { error: "no_file" } });
+  }
+  if (!opts.section) {
+    structuredLog({ cmd: "artifact section", error: "no_section" });
+    return failure({ human: "usage: th artifact section --file <path> --section <heading> [--max-tokens N]", data: { error: "no_section" } });
+  }
+  const abs = resolveWithinRoot(paths.root, opts.file);
+  if (abs === null) {
+    structuredLog({ cmd: "artifact section", error: "path_outside_root", file: opts.file });
+    return failure({ human: `Path outside project root: ${opts.file}`, data: { error: "path_outside_root", file: opts.file } });
+  }
+  if (!fs29.existsSync(abs) || !fs29.statSync(abs).isFile()) {
+    structuredLog({ cmd: "artifact section", error: "file_not_found", file: opts.file });
+    return failure({ human: `File not found: ${opts.file}`, data: { error: "file_not_found", file: opts.file } });
+  }
+  const relKey = toRelKey(paths.root, opts.file);
+  let content;
+  try {
+    content = fs29.readFileSync(abs, "utf8");
+  } catch {
+    structuredLog({ cmd: "artifact section", error: "read_failed", file: relKey });
+    return failure({ human: `Could not read ${relKey}`, data: { error: "read_failed", file: relKey } });
+  }
+  const extracted = extractSection(content, opts.section);
+  if (!extracted.found) {
+    structuredLog({ cmd: "artifact section", error: "section_not_found", file: relKey, section: opts.section });
+    return failure({
+      human: `No \`${opts.section}\` heading in ${relKey}.`,
+      data: { error: "section_not_found", file: relKey, section: opts.section }
+    });
+  }
+  const fullBody = extracted.body;
+  const fullTokens = estimateTokens3(fullBody);
+  const budget = typeof opts.maxTokens === "number" && opts.maxTokens > 0 ? opts.maxTokens : null;
+  let bodyOut = fullBody;
+  let truncated = false;
+  if (budget !== null && fullTokens > budget) {
+    const lines = fullBody.split("\n");
+    const kept = [];
+    let running = 0;
+    for (const line of lines) {
+      const cost = estimateTokens3(line + "\n");
+      if (running + cost > budget) break;
+      kept.push(line);
+      running += cost;
+    }
+    bodyOut = kept.join("\n");
+    truncated = true;
+  }
+  const receipt = { file: relKey, hash: hashContent(fullBody), tokensConsumed: estimateTokens3(bodyOut) };
+  structuredLog({
+    cmd: "artifact section",
+    file: relKey,
+    section: opts.section,
+    fullTokens,
+    returnedTokens: receipt.tokensConsumed,
+    truncated
+  });
+  const human = [
+    extracted.heading ?? `## ${opts.section}`,
+    "",
+    bodyOut || "(empty section)",
+    "",
+    truncated ? `(truncated to --max-tokens=${budget}; full section ~${fullTokens} tokens, hash ${receipt.hash.slice(0, 12)})` : `(~${fullTokens} tokens, hash ${receipt.hash.slice(0, 12)})`
+  ].join("\n");
+  return success({
+    receipts: [receipt],
+    data: {
+      file: relKey,
+      section: opts.section,
+      heading: extracted.heading,
+      body: bodyOut,
+      fullTokens,
+      returnedTokens: receipt.tokensConsumed,
+      truncated,
+      maxTokens: budget,
+      receipts: [receipt]
+    },
+    human
+  });
 }
 
 // src/commands/verify.ts
@@ -25715,6 +26160,56 @@ var TOOL_DEFS = [
     description: "List every resolvable template across both layers (project `.twinharness/templates/` overrides + plugin-bundled `templates/`), deduped with the resolver's precedence and marking any project override that shadows a same-named bundled template. Read-only.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runTemplateList(paths)
+  },
+  // SG3 P1-B (C-11) — governed, receipt-bearing repo search over the persisted map's scope.
+  {
+    name: "th_repo_search",
+    description: "Search the GOVERNED repo (the file set the persisted repo-map covers) for a pattern, returning path:line citations under a cap \u2014 each backed by a SHA-256 read receipt (in data.receipts). Kinds: literal (substring) | regex | symbol (parsed export names) | req (REQ-ID anchors) | artifact (registered approved-artifact paths) | template (resolvable template names). Read-only; never executes content. Run th_repo_map first to build the search scope.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pattern: stringProp("The pattern to search for (required)."),
+        kind: { type: "string", description: "Search kind (default literal).", enum: ["literal", "regex", "symbol", "req", "artifact", "template"] },
+        maxResults: numberProp("Cap on emitted citations (default 50; clamped to [1, 500]).")
+      },
+      required: ["pattern"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runRepoSearch(paths, { pattern: optString(args, "pattern"), kind: optString(args, "kind"), maxResults: optNumber(args, "maxResults") })
+  },
+  // SG3 P1-B (C-11) — batch read a file list under ONE token budget with per-file receipts.
+  {
+    name: "th_context_read",
+    description: "Batch-read a set of files under ONE shared token budget, with deterministic truncation and a per-file {file, hash, tokensConsumed} read receipt (in data.receipts). Files are read in order; while budget remains a file is included whole, the file that would overflow is truncated to a deterministic line-prefix, and any file after the budget is exhausted is reported omitted. A missing/escaping file is skipped (not fatal). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        files: stringProp("Comma-separated file list (root-relative); split/trim/drop-empties."),
+        maxTokens: numberProp("Single token budget shared across all files (>0; \u22640/absent \u21D2 no budget).")
+      },
+      required: ["files"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runContextRead(paths, {
+      files: (optString(args, "files") ?? "").split(",").map((f) => f.trim()).filter(Boolean),
+      maxTokens: optNumber(args, "maxTokens")
+    })
+  },
+  // SG3 P1-B (C-12) — bounded named-heading extraction with a content-hash receipt.
+  {
+    name: "th_artifact_section",
+    description: "Extract the BODY of a named heading from a markdown artifact under an optional token budget, with a content-hash read receipt (in data.receipts). The section is the first heading whose text equals `section` (case-insensitive); its body runs to the next same-or-higher-level heading. With maxTokens set, the body is truncated to fit by keeping a deterministic line-prefix (truncated:true). The receipt always hashes the FULL section body. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: stringProp("Artifact file to read (root-relative or absolute within root)."),
+        section: stringProp('Heading name whose body to extract (the H1-H6 text, e.g. "External Dependencies").'),
+        maxTokens: numberProp("Token budget for the returned body (>0 truncates; absent \u21D2 full section).")
+      },
+      required: ["file", "section"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runArtifactSection(paths, { file: optString(args, "file"), section: optString(args, "section"), maxTokens: optNumber(args, "maxTokens") })
   }
 ];
 var ro = (category) => ({ category, readOnlyHint: true, destructiveHint: false, idempotentHint: true });
@@ -25763,8 +26258,12 @@ var TOOL_ANNOTATIONS = {
   th_repo_relevant: ro("repo"),
   th_repo_impact: ro("repo"),
   th_repo_check: ro("repo"),
+  // SG3 P1-B — governed search is a pure read over the persisted map's scope.
+  th_repo_search: ro("repo"),
   // context
   th_context_pack: ro("context"),
+  // SG3 P1-B — batch read under one budget; pure read with receipts.
+  th_context_read: ro("context"),
   // decision ledger (append) + read
   th_decision_detect: ro("decision"),
   th_decision_add: wr("decision", { idempotent: false }),
@@ -25773,6 +26272,8 @@ var TOOL_ANNOTATIONS = {
   // artifacts: register (content-hash record, idempotent) + leases + read
   th_artifact_register: wr("artifact", { idempotent: true }),
   th_artifact_list: ro("artifact"),
+  // SG3 P1-B — bounded named-heading extraction with a content-hash receipt; pure read.
+  th_artifact_section: ro("artifact"),
   th_artifact_claim: wr("artifact", { idempotent: false }),
   th_artifact_release: wr("artifact", { idempotent: false }),
   th_artifact_leases: ro("artifact"),
@@ -25896,6 +26397,7 @@ var CLI_COMMAND_LEAVES = [
   "implementation unlock",
   "artifact register",
   "artifact list",
+  "artifact section",
   "artifact claim",
   "artifact release",
   "artifact leases",
@@ -25946,6 +26448,7 @@ var CLI_COMMAND_LEAVES = [
   "telemetry status",
   "context estimate",
   "context pack",
+  "context read",
   "budget check",
   "handoff write",
   "handoff verify",
@@ -25958,6 +26461,7 @@ var CLI_COMMAND_LEAVES = [
   "repo check",
   "repo relevant",
   "repo impact",
+  "repo search",
   "decision detect",
   "decision add",
   "decision approve",

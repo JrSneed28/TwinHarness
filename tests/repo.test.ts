@@ -157,6 +157,9 @@ describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 60 tools registered (on to
     "th_handoff_write",
     "th_template_get",
     "th_template_list",
+    "th_repo_search",
+    "th_context_read",
+    "th_artifact_section",
   ] as const;
 
   it("REQ-NFR-002 — TOOL_DEFS.length === 60 (the MCP-tool-expansion adds 5 typed gate-transition tools + 16 wired handlers on top of the prior 39 → 60)", () => {
@@ -2570,7 +2573,9 @@ describe("SLICE-5 / TASK-013 — docs truthfulness: documented surface ⊆ dispa
     // `check` (runRepoCheck, cli.ts case "repo"→"check") was added after this list
     // was first written; USAGE.md now documents it (exit codes 4/5), so it must be
     // listed here for the subset guard to reflect the real dispatch table.
-    const implementedSubcommands = ["map", "relevant", "impact", "check"];
+    // `search` (runRepoSearch, cli.ts case "repo"→"search") is the SG3 P1-B governed
+    // search; USAGE.md documents it, so it joins the dispatch-table set.
+    const implementedSubcommands = ["map", "relevant", "impact", "check", "search"];
 
     for (const mentioned of repoCommandMentions) {
       expect(implementedSubcommands).toContain(mentioned);

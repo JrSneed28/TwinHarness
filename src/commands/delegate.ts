@@ -120,6 +120,15 @@ export interface DelegatePackOptions {
   req?: string;
   /** P4-7 — frame the handoff's repo-relevant layer for a file path (failure/file pack). */
   file?: string;
+  /**
+   * SG3 P1-B (C-11) — the explicit read/write SCOPE the delegate is allowed to touch
+   * (root-relative paths). When provided, the pack emits `allowedFiles[]` in its data and
+   * the envelope; the PreToolUse write-gate (`runHookPretoolGate`) reads the SAME list off
+   * its stdin payload and DENIES a child write outside it (read-scoping, not write-policy).
+   * When absent the pack derives a sensible default from `--file` (that file) — a `--slice`
+   * scope stays component-named (the gate's component-boundary path already enforces it).
+   */
+  allowedFiles?: string[];
 }
 
 export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions): CommandResult {
@@ -140,6 +149,12 @@ export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions):
     contextPack = pack.human ?? null;
   }
 
+  // SG3 P1-B (C-11) — the explicit allowed-files scope. Use the supplied list; else
+  // default to `--file` when given (the file pack's natural boundary). Normalized to
+  // trimmed non-empty entries, deduped, deterministic order. This is the list the
+  // write-gate enforces off its stdin payload.
+  const allowedFiles = normalizeAllowedFiles(opts.allowedFiles, opts.file);
+
   const envelope: string[] = [
     "DELEGATED AGENT HANDOFF",
     `Agent: ${opts.agent ?? "(unspecified — set --agent)"}`,
@@ -157,6 +172,9 @@ export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions):
             ? `the files anchored to ${opts.req}; do not edit outside them`
             : "(state the file/dir/component boundary)"
     }`,
+    ...(allowedFiles.length
+      ? [`Allowed files (write-gate enforced): ${allowedFiles.join(", ")}`]
+      : []),
     "",
     "Context pack:",
     contextPack ?? "(run `th context pack` for approved-artifact Summary blocks)",
@@ -176,6 +194,7 @@ export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions):
     slice: opts.slice ?? null,
     intent: parsed.intent ?? null,
     hasContextPack: contextPack !== null,
+    allowedFiles: allowedFiles.length,
   });
 
   return success({
@@ -186,9 +205,31 @@ export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions):
       slice: opts.slice ?? null,
       capsuleSections: [...CAPSULE_SECTIONS],
       hasContextPack: contextPack !== null,
+      // SG3 P1-B (C-11) — the explicit write-scope the gate enforces (always present).
+      allowedFiles,
     },
     human: envelope.join("\n"),
   });
+}
+
+/**
+ * SG3 P1-B (C-11) — normalize the allowed-files scope: trim, drop empties, dedupe,
+ * deterministic insertion order. Falls back to `[fallbackFile]` when no explicit list
+ * was supplied but a `--file` pack target was (the file pack's natural boundary). The
+ * paths are kept verbatim (root-relative, as the operator wrote them); the write-gate
+ * resolves + compares them against the tool's target, so no resolution happens here.
+ */
+function normalizeAllowedFiles(list: string[] | undefined, fallbackFile: string | undefined): string[] {
+  const raw = list && list.length > 0 ? list : fallbackFile ? [fallbackFile] : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const f of raw) {
+    const t = f.trim();
+    if (t.length === 0 || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ *

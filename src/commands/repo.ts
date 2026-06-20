@@ -20,14 +20,14 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { resolveWithinRoot } from "../core/paths";
-import { type CommandResult, success, failure } from "../core/output";
+import { type CommandResult, type ReadReceipt, success, failure } from "../core/output";
 import { structuredLog } from "../core/log";
 import { requireState } from "../core/guards";
 import { readState } from "../core/state-store";
 import { matchApprovedArtifact, APPROVED_ARTIFACT_CLOBBER_CODE } from "../core/artifact-guard";
-import { scanRepo, type ScanOptions } from "../core/repo-map/scanner";
+import { scanRepo, FILE_COUNT_CAP, type ScanOptions } from "../core/repo-map/scanner";
 import { serializeRepoMap, renderRepoMapMarkdown, parseRepoMap, type RepoMap, type ScanReport } from "../core/repo-map/schema";
-import { hashFileBytes } from "../core/hash";
+import { hashFileBytes, hashContent } from "../core/hash";
 import { parseLcovContained } from "../core/repo-map/lcov";
 import { atomicWriteFile } from "../core/atomic-io";
 import { computeRelevance, computeImpact, type Selector, type ImpactSelector } from "../core/repo-map/query";
@@ -987,4 +987,335 @@ export function repoFreshnessSummary(paths: ProjectPaths): RepoFreshnessSummary 
     scanIncomplete: partial,
     capHit,
   };
+}
+
+// ---------------------------------------------------------------------------
+// `th repo search` (SG3 P1-B / C-11) — governed, receipt-bearing repo search
+// ---------------------------------------------------------------------------
+
+/**
+ * Search KINDS (C-11). The default `literal` is a plain substring match; `regex` is
+ * a JS regular expression; `symbol`/`req` query the PARSED facts the repo-map
+ * already holds (exported symbol names / REQ-ID anchors) and then re-locate the
+ * `path:line`; `artifact` matches registered approved-artifact paths; `template`
+ * matches resolvable template names (project override + plugin-bundled).
+ */
+const SEARCH_KINDS = ["literal", "regex", "symbol", "req", "artifact", "template"] as const;
+export type RepoSearchKind = (typeof SEARCH_KINDS)[number];
+
+/**
+ * Bounds on a single `th repo search` so an agent can never blow its context (or
+ * the CLI's cost) on a pathological pattern. These mirror the scanner's cost
+ * philosophy (bounded, declared-when-hit). `maxResults` caps emitted CITATIONS;
+ * `MAX_SEARCH_FILE_BYTES` skips any single file larger than the scanner's read cap
+ * (a file the map itself only saw name-only); `MAX_SCANNED_FILES` caps how many
+ * in-scope files we will OPEN, so the file-count cap is honored even on a search.
+ */
+const DEFAULT_SEARCH_MAX_RESULTS = 50;
+const MAX_SEARCH_MAX_RESULTS = 500;
+const MAX_SEARCH_FILE_BYTES = 2 * 1024 * 1024; // mirror scanner MAX_READ_BYTES (name-only above)
+const MAX_SCANNED_FILES = FILE_COUNT_CAP; // never open more files than the map's scan cap
+
+export interface RepoSearchOptions {
+  /** The pattern to search for (required). */
+  pattern?: string;
+  /** Search kind (default literal). */
+  kind?: string;
+  /** Cap on emitted citations (default 50; clamped to [1, 500]). */
+  maxResults?: number;
+}
+
+/** One `path:line` citation with the matched line text. */
+interface SearchCitation {
+  path: string;
+  line: number;
+  text: string;
+}
+
+/**
+ * `th repo search --pattern <p> --kind <k> [--maxResults N]` — search the GOVERNED
+ * repo (the file set the persisted `repo-map.json` covers) for a pattern, returning
+ * `path:line` citations under a cap, each backed by a SHA-256 READ RECEIPT of the
+ * file the citation came from (C-11). It REUSES the persisted map's file list (the
+ * same bounded, generated-dir-excluding scope the scanner produced) — it never
+ * re-walks the tree or reads outside that scope — and respects the scanner's
+ * 25k-file / 64MB cost envelope. Read-only; never executes content (RULE-004).
+ *
+ * Follows Critical Pattern 1: named `runRepoSearch`, `paths` first, typed opts
+ * second defaulting `{}`; returns `success()`/`failure()` (never throws / exits);
+ * calls `structuredLog()` exactly once before return.
+ */
+export function runRepoSearch(paths: ProjectPaths, opts: RepoSearchOptions = {}): CommandResult {
+  // ---- validate pattern ----
+  const pattern = opts.pattern;
+  if (pattern === undefined || pattern.length === 0) {
+    structuredLog({ cmd: "repo search", error: "no_pattern" });
+    return failure({ human: "Provide a search pattern: --pattern <p>.", data: { error: "no_pattern" } });
+  }
+
+  // ---- validate kind ----
+  const kind = (opts.kind ?? "literal") as RepoSearchKind;
+  if (!(SEARCH_KINDS as readonly string[]).includes(kind)) {
+    structuredLog({ cmd: "repo search", error: "bad_kind", kind: opts.kind });
+    return failure({
+      human: `invalid --kind "${opts.kind}". Expected one of: ${SEARCH_KINDS.join(", ")}.`,
+      data: { error: "bad_kind", kind: opts.kind },
+    });
+  }
+
+  // ---- compile a regex up front for the regex kind (clean failure on a bad pattern) ----
+  let regex: RegExp | null = null;
+  if (kind === "regex") {
+    try {
+      regex = new RegExp(pattern);
+    } catch (e) {
+      structuredLog({ cmd: "repo search", error: "bad_regex" });
+      return failure({
+        human: `invalid --pattern regex: ${(e as Error).message}`,
+        data: { error: "bad_regex", pattern },
+      });
+    }
+  }
+
+  // ---- load the persisted map (the governed search scope) ----
+  const loaded = loadPersistedMap(paths, "repo search");
+  if (loaded.result) return loaded.result;
+  const map = loaded.map;
+
+  const maxResults = clampSearchMax(opts.maxResults);
+
+  // The receipt set is keyed by file so a file scanned once yields one receipt even
+  // when it produces several citations. Receipts ride in `data.receipts` (P1-B).
+  const receiptByFile = new Map<string, ReadReceipt>();
+  const citations: SearchCitation[] = [];
+  let truncated = false;
+  let filesScanned = 0;
+
+  // Add (or reuse) the read receipt for a file from its on-disk content.
+  const receiptFor = (rel: string, content: string): void => {
+    if (!receiptByFile.has(rel)) receiptByFile.set(rel, { file: rel, hash: hashContent(content) });
+  };
+
+  // Resolve + read an in-scope file as text, honoring the per-file byte cap and the
+  // root-containment guard. Returns null for unreadable / oversize / escaping paths.
+  const readInScope = (rel: string): string | null => {
+    const abs = resolveWithinRoot(paths.root, rel);
+    if (abs === null) return null; // defense-in-depth: map paths are in-scope by construction.
+    try {
+      if (fs.statSync(abs).size > MAX_SEARCH_FILE_BYTES) return null; // name-only in the map too.
+      return fs.readFileSync(abs, "utf8");
+    } catch {
+      return null;
+    }
+  };
+
+  // Push line-level citations for `rel` against `content` using the supplied matcher,
+  // recording a receipt and respecting the citation cap. Returns false once capped.
+  const scanLines = (rel: string, content: string, lineMatches: (line: string) => boolean): boolean => {
+    receiptFor(rel, content);
+    const lines = content.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      if (citations.length >= maxResults) {
+        truncated = true;
+        return false;
+      }
+      if (lineMatches(lines[i]!)) {
+        citations.push({ path: rel, line: i + 1, text: lines[i]!.trim().slice(0, 240) });
+      }
+    }
+    return true;
+  };
+
+  if (kind === "literal" || kind === "regex") {
+    // Content scan over the map's in-scope file set (bounded by MAX_SCANNED_FILES).
+    const matcher =
+      kind === "regex"
+        ? (line: string): boolean => regex!.test(line)
+        : (line: string): boolean => line.includes(pattern);
+    for (const fe of map.files) {
+      if (filesScanned >= MAX_SCANNED_FILES) {
+        truncated = true;
+        break;
+      }
+      const content = readInScope(fe.path);
+      if (content === null) continue;
+      filesScanned++;
+      if (!scanLines(fe.path, content, matcher)) break;
+    }
+  } else if (kind === "symbol") {
+    // Symbol scan: the map already parsed exported symbol names per file. Match the
+    // pattern (case-insensitive substring) against those names, then re-locate the
+    // symbol's `path:line` from the file content (and receipt it).
+    const needle = pattern.toLowerCase();
+    outerSym: for (const fe of map.files) {
+      if (!fe.symbols || fe.symbols.length === 0) continue;
+      const hits = fe.symbols.filter((s) => s.name.toLowerCase().includes(needle));
+      if (hits.length === 0) continue;
+      if (filesScanned >= MAX_SCANNED_FILES) {
+        truncated = true;
+        break;
+      }
+      const content = readInScope(fe.path);
+      if (content === null) continue;
+      filesScanned++;
+      receiptFor(fe.path, content);
+      const names = new Set(hits.map((h) => h.name));
+      const lines = content.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        if (citations.length >= maxResults) {
+          truncated = true;
+          break outerSym;
+        }
+        if ([...names].some((n) => lines[i]!.includes(n))) {
+          citations.push({ path: fe.path, line: i + 1, text: lines[i]!.trim().slice(0, 240) });
+        }
+      }
+    }
+  } else if (kind === "req") {
+    // REQ-anchor scan: the map already indexed REQ-IDs → files. Match the pattern as
+    // a case-insensitive substring of the REQ-ID, then re-locate each `path:line`.
+    const needle = pattern.toUpperCase();
+    const matched = map.req_anchors.filter((a) => a.req_id.toUpperCase().includes(needle));
+    const idsByFile = new Map<string, Set<string>>();
+    for (const a of matched) {
+      for (const loc of a.locations) {
+        let set = idsByFile.get(loc);
+        if (!set) {
+          set = new Set();
+          idsByFile.set(loc, set);
+        }
+        set.add(a.req_id);
+      }
+    }
+    outerReq: for (const [rel, ids] of idsByFile) {
+      if (filesScanned >= MAX_SCANNED_FILES) {
+        truncated = true;
+        break;
+      }
+      const content = readInScope(rel);
+      if (content === null) continue;
+      filesScanned++;
+      receiptFor(rel, content);
+      const lines = content.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        if (citations.length >= maxResults) {
+          truncated = true;
+          break outerReq;
+        }
+        if ([...ids].some((id) => lines[i]!.includes(id))) {
+          citations.push({ path: rel, line: i + 1, text: lines[i]!.trim().slice(0, 240) });
+        }
+      }
+    }
+  } else if (kind === "artifact") {
+    // Artifact scan: match registered approved-artifact PATHS (state.json). A match
+    // emits a path:0 citation + a receipt of the artifact's current content (file
+    // artifacts only; a directory artifact is cited path:0 without a content receipt).
+    const r = readState(paths);
+    const approved = r.state?.approved_artifacts ?? [];
+    const needle = pattern.toLowerCase();
+    for (const a of approved) {
+      if (citations.length >= maxResults) {
+        truncated = true;
+        break;
+      }
+      if (!a.file.toLowerCase().includes(needle)) continue;
+      citations.push({ path: a.file, line: 0, text: `approved artifact v${a.version} (${a.hash})` });
+      const content = readInScope(a.file);
+      if (content !== null) {
+        filesScanned++;
+        receiptFor(a.file, content);
+      }
+    }
+  } else {
+    // kind === "template": match resolvable template names. The precedence mirrors
+    // the template resolver (C-10): project override `.twinharness/templates/<name>`
+    // shadows the plugin-bundled `templates/<name>`. We enumerate both dirs, dedupe
+    // by name (override wins), substring-match the pattern, and receipt the resolved
+    // file's content.
+    const names = collectTemplateNames(paths.root);
+    const needle = pattern.toLowerCase();
+    for (const t of names) {
+      if (citations.length >= maxResults) {
+        truncated = true;
+        break;
+      }
+      if (!t.name.toLowerCase().includes(needle)) continue;
+      citations.push({ path: t.rel, line: 0, text: `template "${t.name}" (${t.source})` });
+      try {
+        const content = fs.readFileSync(t.abs, "utf8");
+        filesScanned++;
+        if (!receiptByFile.has(t.rel)) receiptByFile.set(t.rel, { file: t.rel, hash: hashContent(content) });
+      } catch {
+        /* unreadable — citation stands without a content receipt. */
+      }
+    }
+  }
+
+  const receipts = [...receiptByFile.values()];
+  structuredLog({
+    cmd: "repo search",
+    kind,
+    citations: citations.length,
+    filesScanned,
+    receipts: receipts.length,
+    truncated,
+  });
+
+  const human =
+    citations.length === 0
+      ? `No matches for ${kind} pattern "${pattern}".`
+      : [
+          `${citations.length} match(es) for ${kind} pattern "${pattern}"${truncated ? " (truncated by maxResults)" : ""}:`,
+          ...citations.map((c) => `  ${c.path}:${c.line}  ${c.text}`),
+          "",
+          `Read receipts: ${receipts.length} file(s) hashed.`,
+        ].join("\n");
+
+  return success({
+    receipts,
+    data: { kind, pattern, citations, truncated, filesScanned, receipts },
+    human,
+  });
+}
+
+/** Clamp the citation cap into [1, MAX_SEARCH_MAX_RESULTS], defaulting when ≤0/absent. */
+function clampSearchMax(n: number | undefined): number {
+  if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) return DEFAULT_SEARCH_MAX_RESULTS;
+  return Math.min(Math.floor(n), MAX_SEARCH_MAX_RESULTS);
+}
+
+/**
+ * Enumerate resolvable template names with override precedence (mirrors C-10's
+ * resolver): a project `.twinharness/templates/<name>` shadows the plugin-bundled
+ * `templates/<name>`. Returns `{ name, rel, abs, source }`, override-first, deduped
+ * by name. `rel` is the project-root-relative POSIX citation path; for a plugin
+ * template (outside the project root) `rel` is the plugin-relative `templates/<name>`
+ * so the citation is still meaningful. Best-effort: missing dirs yield nothing.
+ */
+function collectTemplateNames(
+  root: string,
+): Array<{ name: string; rel: string; abs: string; source: "project-override" | "plugin-bundled" }> {
+  const out: Array<{ name: string; rel: string; abs: string; source: "project-override" | "plugin-bundled" }> = [];
+  const seen = new Set<string>();
+  const pluginRoot = path.resolve(__dirname, "..", "..");
+  const dirs: Array<{ dir: string; source: "project-override" | "plugin-bundled"; relPrefix: string }> = [
+    { dir: path.join(root, ".twinharness", "templates"), source: "project-override", relPrefix: ".twinharness/templates" },
+    { dir: path.join(pluginRoot, "templates"), source: "plugin-bundled", relPrefix: "templates" },
+  ];
+  for (const { dir, source, relPrefix } of dirs) {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue; // dir absent — best-effort.
+    }
+    for (const e of entries) {
+      if (!e.isFile()) continue;
+      if (seen.has(e.name)) continue; // override wins (project dir scanned first).
+      seen.add(e.name);
+      out.push({ name: e.name, rel: `${relPrefix}/${e.name}`, abs: path.join(dir, e.name), source });
+    }
+  }
+  return out;
 }

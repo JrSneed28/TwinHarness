@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runArtifactRegister = runArtifactRegister;
 exports.runArtifactList = runArtifactList;
+exports.runArtifactSection = runArtifactSection;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const paths_1 = require("../core/paths");
@@ -160,4 +161,124 @@ function runArtifactList(paths) {
         ? artifacts.map((a) => `${a.file}  v${a.version}  ${a.hash}`).join("\n")
         : "(none)";
     return (0, output_1.success)({ data: { artifacts }, human });
+}
+// ---------------------------------------------------------------------------
+// `th artifact section` (SG3 P1-B / C-12) — bounded named-heading extraction
+// ---------------------------------------------------------------------------
+/**
+ * Token estimator: ~4 chars per token (mirrors `context.ts` TOKENS_PER_CHAR and the
+ * §9 pack budget heuristic). The single estimation point so the budget math here and
+ * in `th context pack` / `th context read` agree.
+ */
+function estimateTokens(text) {
+    return Math.round(text.length / 4);
+}
+/**
+ * `th artifact section --file <p> --section <h> [--max-tokens N]` (C-12) — extract the
+ * BODY of a named heading from a markdown artifact under an optional token budget, with
+ * a content-hash RECEIPT of the FULL extracted section. This closes the "no bounded
+ * section read" gap: an agent can pull JUST `## External Dependencies` (or any heading)
+ * without reading — or paying the token cost of — the whole document.
+ *
+ * Determinism: the section is the first heading whose text equals `--section`
+ * (case-insensitive); its body runs to the next same-or-higher-level heading
+ * (`extractSection`). When `--max-tokens` is set and the body exceeds it, the body is
+ * truncated to the budget by KEEPING A LINE PREFIX (deterministic — never a random
+ * slice), and `truncated:true` is reported. The receipt always hashes the FULL section
+ * body (the evidence of what was extracted), regardless of truncation. Read-only.
+ *
+ * Follows Critical Pattern 1: named `runArtifactSection`, `paths` first, typed opts
+ * second; returns `success()`/`failure()` (never throws / exits); one structuredLog.
+ */
+function runArtifactSection(paths, opts = {}) {
+    if (!opts.file) {
+        (0, log_1.structuredLog)({ cmd: "artifact section", error: "no_file" });
+        return (0, output_1.failure)({ human: "usage: th artifact section --file <path> --section <heading> [--max-tokens N]", data: { error: "no_file" } });
+    }
+    if (!opts.section) {
+        (0, log_1.structuredLog)({ cmd: "artifact section", error: "no_section" });
+        return (0, output_1.failure)({ human: "usage: th artifact section --file <path> --section <heading> [--max-tokens N]", data: { error: "no_section" } });
+    }
+    const abs = (0, paths_1.resolveWithinRoot)(paths.root, opts.file);
+    if (abs === null) {
+        (0, log_1.structuredLog)({ cmd: "artifact section", error: "path_outside_root", file: opts.file });
+        return (0, output_1.failure)({ human: `Path outside project root: ${opts.file}`, data: { error: "path_outside_root", file: opts.file } });
+    }
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+        (0, log_1.structuredLog)({ cmd: "artifact section", error: "file_not_found", file: opts.file });
+        return (0, output_1.failure)({ human: `File not found: ${opts.file}`, data: { error: "file_not_found", file: opts.file } });
+    }
+    const relKey = toRelKey(paths.root, opts.file);
+    let content;
+    try {
+        content = fs.readFileSync(abs, "utf8");
+    }
+    catch {
+        (0, log_1.structuredLog)({ cmd: "artifact section", error: "read_failed", file: relKey });
+        return (0, output_1.failure)({ human: `Could not read ${relKey}`, data: { error: "read_failed", file: relKey } });
+    }
+    const extracted = (0, summary_1.extractSection)(content, opts.section);
+    if (!extracted.found) {
+        (0, log_1.structuredLog)({ cmd: "artifact section", error: "section_not_found", file: relKey, section: opts.section });
+        return (0, output_1.failure)({
+            human: `No \`${opts.section}\` heading in ${relKey}.`,
+            data: { error: "section_not_found", file: relKey, section: opts.section },
+        });
+    }
+    const fullBody = extracted.body;
+    const fullTokens = estimateTokens(fullBody);
+    // Token budget: when set (>0), truncate the body to fit by keeping a deterministic
+    // LINE PREFIX. The receipt always hashes the FULL body (the evidence of what the
+    // section is), so a downstream consumer can detect a later edit even if it only saw
+    // the truncated head.
+    const budget = typeof opts.maxTokens === "number" && opts.maxTokens > 0 ? opts.maxTokens : null;
+    let bodyOut = fullBody;
+    let truncated = false;
+    if (budget !== null && fullTokens > budget) {
+        const lines = fullBody.split("\n");
+        const kept = [];
+        let running = 0;
+        for (const line of lines) {
+            const cost = estimateTokens(line + "\n");
+            if (running + cost > budget)
+                break;
+            kept.push(line);
+            running += cost;
+        }
+        bodyOut = kept.join("\n");
+        truncated = true;
+    }
+    const receipt = { file: relKey, hash: (0, hash_1.hashContent)(fullBody), tokensConsumed: estimateTokens(bodyOut) };
+    (0, log_1.structuredLog)({
+        cmd: "artifact section",
+        file: relKey,
+        section: opts.section,
+        fullTokens,
+        returnedTokens: receipt.tokensConsumed,
+        truncated,
+    });
+    const human = [
+        extracted.heading ?? `## ${opts.section}`,
+        "",
+        bodyOut || "(empty section)",
+        "",
+        truncated
+            ? `(truncated to --max-tokens=${budget}; full section ~${fullTokens} tokens, hash ${receipt.hash.slice(0, 12)})`
+            : `(~${fullTokens} tokens, hash ${receipt.hash.slice(0, 12)})`,
+    ].join("\n");
+    return (0, output_1.success)({
+        receipts: [receipt],
+        data: {
+            file: relKey,
+            section: opts.section,
+            heading: extracted.heading,
+            body: bodyOut,
+            fullTokens,
+            returnedTokens: receipt.tokensConsumed,
+            truncated,
+            maxTokens: budget,
+            receipts: [receipt],
+        },
+        human,
+    });
 }

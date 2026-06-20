@@ -7,7 +7,7 @@ import { runInit } from "./commands/init";
 import { runStateGet, runStateSet, runStateStatus, runStateVerify, runStateUnlock } from "./commands/state";
 import { runReviseBump, runReviseStatus, runReviseReset } from "./commands/revise";
 import { runTierClassify, runTierVetoCheck, runTierRecord, runTierFeatures } from "./commands/tier";
-import { runArtifactRegister, runArtifactList } from "./commands/artifact";
+import { runArtifactRegister, runArtifactList, runArtifactSection } from "./commands/artifact";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
 import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from "./commands/collab";
 import { runDebateAdd, runDebateList, runDebateResolve } from "./commands/debate";
@@ -40,7 +40,7 @@ import {
 import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
 import { runMigrate } from "./commands/migrate";
 import { runDoctor } from "./commands/doctor";
-import { runContextEstimate, runContextPack } from "./commands/context";
+import { runContextEstimate, runContextPack, runContextRead } from "./commands/context";
 import {
   runStageCurrent,
   runStageDescribe,
@@ -61,7 +61,7 @@ import {
   runDelegateCapsule,
   runDelegateCheck,
 } from "./commands/delegate";
-import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck } from "./commands/repo";
+import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck, runRepoSearch } from "./commands/repo";
 import {
   runDecisionAdd,
   runDecisionDetect,
@@ -125,6 +125,8 @@ Usage:
   th artifact claim <file#section> --holder <id>  Take a section-level artifact lease (REQ-PCO-041; collision guard for intra-artifact fan-out)
   th artifact release <file#section> --holder <id>  Release a section-level artifact lease
   th artifact leases                List active section-level artifact leases
+  th artifact section --file <path> --section <heading> [--max-tokens <N>]
+                                    Extract a named heading's body under a token budget, with a content-hash read receipt (C-12)
   th collab init --stage <s>        Initialize a blackboard stage dir (REQ-PCO-040)
   th collab fragment --stage <s> --round <r> --name <n> --text <t> [--force]  Drop a fragment file on the blackboard (refuses to overwrite without --force)
   th collab list --stage <s> [--round <r>]  List blackboard fragments
@@ -147,6 +149,8 @@ Usage:
   th context estimate               Approximate the prompt-surface token cost (flags oversized files)
   th context pack [--slice <ID>|--req <REQ-ID>|--file <path>] [--max-tokens <N>]
                                     Assemble the §9 handoff bundle (artifact Summary blocks + slice/REQ/file framing; --max-tokens bounds the pack)
+  th context read --files-list <a,b,c> [--max-tokens <N>]
+                                    Batch-read files under ONE token budget with deterministic truncation + per-file read receipts (C-11)
   th budget check [--max <k>] [--files-read N] [--slices-built N] [--tool-calls N] [--artifacts N]
                                     Deterministic context-budget estimate from agent-supplied proxy counts → { estTokens, pct, verdict } (--max in thousands; tier-aware default when omitted)
   th handoff write                  Assemble .twinharness/HANDOFF.md (run state + next action + artifact Summary blocks + open questions + "don't re-read docs/" directive)
@@ -154,8 +158,8 @@ Usage:
   th resume                         Detect .twinharness/HANDOFF.md and print the next mechanical action (from th next)
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
-  th delegate pack [--agent A] [--slice ID] [--task T] [--intent I]
-                                    Assemble a bounded child-agent handoff (reuses context pack for a slice)
+  th delegate pack [--agent A] [--slice ID] [--task T] [--intent I] [--allowed-files <a,b,c>]
+                                    Assemble a bounded child-agent handoff (reuses context pack for a slice; --allowed-files emits the write-gate-enforced scope, C-11)
   th delegate capsule               Print the blank Delegation Capsule skeleton (the strict return format)
   th delegate check --capsule <path>  Validate a returned capsule has every required section (presence only)
   th repo map [--write|--no-write] [--force] [--format <summary|json|md>] [--max-files <N>] [--max-bytes <N>]
@@ -167,6 +171,8 @@ Usage:
                                     Precision context: read-first/related/tests/risks for a selector (reads persisted map)
   th repo impact (--file <path> | --component <name|path>) [--format <file|json>]
                                     Pre-edit blast-radius: impacted components, tests, features, risk flags (reads persisted map; no state read)
+  th repo search --pattern <p> --kind <literal|regex|symbol|req|artifact|template> [--maxResults <N>]
+                                    Governed repo search over the map's scope: path:line citations under a cap, each with a SHA-256 read receipt (C-11)
   th decision detect                Surface advisory decision candidates from ADRs/drift-log/scope/blast-radius flags (read-only; exit 0)
   th decision add --title <t> --rationale <r> [--links a,b] [--proposer <n>]
                                     Record a proposed decision (mints DECISION-NNN; never auto-approves)
@@ -238,6 +244,11 @@ Global flags:
   --query <kw>      (repo relevant) Keyword/phrase selector (exact one of --slice/--req/--file/--query required)
   --maxResults <n>  (repo relevant) Cap on combined emitted items (default 20; ≤0 = default)
   --component <n>   (repo impact) Component name or path selector (exact one of --file/--component required)
+  --pattern <p>     (repo search) The pattern to search for (required)
+  --kind <k>        (repo search) literal (default) | regex | symbol | req | artifact | template
+  --section <h>     (artifact section) The heading name whose body to extract (also: artifact claim/release section id)
+  --files-list <l>  (context read) Comma-separated file list to batch-read under one budget
+  --allowed-files <l>  (delegate pack) Comma-separated write scope emitted as allowedFiles[] and enforced by the write-gate (C-11)
   --title <t>       (decision add) Decision title (required)
   --rationale <r>   (decision add) Decision rationale (required)
   --links <a,b>     (decision add) Comma-separated REQ-IDs / ADR-ids / stage ids the decision concerns
@@ -323,6 +334,13 @@ export interface ParsedArgs {
     maxResults?: number;
     file?: string;
     component?: string;
+    // SG3 P1-B (C-11/C-12) — governed search + bounded reads + delegate scope.
+    pattern?: string;
+    kind?: string;
+    /** Comma-separated file list for `th context read --files-list <list>`. */
+    filesList?: string;
+    /** Comma-separated allowed-files scope for `th delegate pack --allowed-files <list>`. */
+    allowedFiles?: string;
     title?: string;
     rationale?: string;
     links?: string;
@@ -449,6 +467,11 @@ const STRING_FLAGS: Record<string, FlagField> = {
   "--corpus-root": "corpusRoot",
   "--output-root": "outputRoot",
   "--scenario-root": "scenarioRoot",
+  // SG3 P1-B (C-11/C-12) — governed search + bounded reads + delegate scope.
+  "--pattern": "pattern",
+  "--kind": "kind",
+  "--files-list": "filesList",
+  "--allowed-files": "allowedFiles",
 };
 
 /** Flags that consume a numeric value. */
@@ -725,6 +748,12 @@ function dispatch(parsed: ParsedArgs): CommandResult {
             file: parsed.flags.file,
             maxTokens: parsed.flags.maxTokens,
           });
+        case "read":
+          // SG3 P1-B (C-11) — batch read a comma-separated file list under one budget.
+          return runContextRead(paths, {
+            files: (parsed.flags.filesList ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+            maxTokens: parsed.flags.maxTokens,
+          });
         default:
           return failure({ human: `unknown 'context' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
@@ -747,6 +776,8 @@ function dispatch(parsed: ParsedArgs): CommandResult {
             slice: parsed.flags.slice,
             req: parsed.flags.req,
             file: parsed.flags.file,
+            // SG3 P1-B (C-11) — explicit allowed-files write scope (comma-separated).
+            allowedFiles: (parsed.flags.allowedFiles ?? "").split(",").map((s) => s.trim()).filter(Boolean),
           });
         case "capsule":
           return runDelegateCapsule();
@@ -806,6 +837,13 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           // against the matching scan scope (mismatched caps would phantom-flag files
           // outside the build's scope as added/removed).
           return runRepoCheck(paths, { scanOptions: buildScanOptions(parsed.flags) });
+        case "search":
+          // SG3 P1-B (C-11) — governed, receipt-bearing repo search over the map's scope.
+          return runRepoSearch(paths, {
+            pattern: parsed.flags.pattern,
+            kind: parsed.flags.kind,
+            maxResults: parsed.flags.maxResults,
+          });
         default:
           return failure({ human: `unknown 'repo' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
@@ -922,6 +960,13 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           return runArtifactRelease(paths, { section: rest[0] ?? parsed.flags.section, holder: parsed.flags.holder });
         case "leases":
           return runArtifactLeases(paths);
+        case "section":
+          // SG3 P1-B (C-12) — bounded named-heading extraction with a content-hash receipt.
+          return runArtifactSection(paths, {
+            file: parsed.flags.file,
+            section: parsed.flags.section,
+            maxTokens: parsed.flags.maxTokens,
+          });
         default:
           return failure({ human: `unknown 'artifact' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }

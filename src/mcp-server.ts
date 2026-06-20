@@ -49,8 +49,8 @@ import { runCoverageCheck, runCoverageReport } from "./commands/coverage";
 import { runRoute } from "./commands/route";
 import { runNext } from "./commands/next";
 import { runDelegatePlan, runDelegatePack, runDelegateCheck } from "./commands/delegate";
-import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck, repoFreshnessSummary } from "./commands/repo";
-import { runContextPack } from "./commands/context";
+import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck, runRepoSearch, repoFreshnessSummary } from "./commands/repo";
+import { runContextPack, runContextRead } from "./commands/context";
 import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite } from "./commands/handoff";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
@@ -64,7 +64,7 @@ import { runInterviewStart, runInterviewRecord, runInterviewStatus } from "./com
 import { runInitMcp } from "./commands/init";
 
 // --- Component A wiring tool handlers (16 existing handlers exposed as ToolDefs) ---
-import { runArtifactRegister, runArtifactList } from "./commands/artifact";
+import { runArtifactRegister, runArtifactList, runArtifactSection } from "./commands/artifact";
 import { runVerifyAdd, runVerifyList, runVerifyClear, runVerifyRun } from "./commands/verify";
 import { runStageCurrent, runStageDescribe, runStageList } from "./commands/stage";
 import { runDoctor } from "./commands/doctor";
@@ -1516,6 +1516,61 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runTemplateList(paths),
   },
+  // SG3 P1-B (C-11) — governed, receipt-bearing repo search over the persisted map's scope.
+  {
+    name: "th_repo_search",
+    description:
+      "Search the GOVERNED repo (the file set the persisted repo-map covers) for a pattern, returning path:line citations under a cap — each backed by a SHA-256 read receipt (in data.receipts). Kinds: literal (substring) | regex | symbol (parsed export names) | req (REQ-ID anchors) | artifact (registered approved-artifact paths) | template (resolvable template names). Read-only; never executes content. Run th_repo_map first to build the search scope.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pattern: stringProp("The pattern to search for (required)."),
+        kind: { type: "string", description: "Search kind (default literal).", enum: ["literal", "regex", "symbol", "req", "artifact", "template"] },
+        maxResults: numberProp("Cap on emitted citations (default 50; clamped to [1, 500])."),
+      },
+      required: ["pattern"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runRepoSearch(paths, { pattern: optString(args, "pattern"), kind: optString(args, "kind"), maxResults: optNumber(args, "maxResults") }),
+  },
+  // SG3 P1-B (C-11) — batch read a file list under ONE token budget with per-file receipts.
+  {
+    name: "th_context_read",
+    description:
+      "Batch-read a set of files under ONE shared token budget, with deterministic truncation and a per-file {file, hash, tokensConsumed} read receipt (in data.receipts). Files are read in order; while budget remains a file is included whole, the file that would overflow is truncated to a deterministic line-prefix, and any file after the budget is exhausted is reported omitted. A missing/escaping file is skipped (not fatal). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        files: stringProp("Comma-separated file list (root-relative); split/trim/drop-empties."),
+        maxTokens: numberProp("Single token budget shared across all files (>0; ≤0/absent ⇒ no budget)."),
+      },
+      required: ["files"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runContextRead(paths, {
+        files: (optString(args, "files") ?? "").split(",").map((f) => f.trim()).filter(Boolean),
+        maxTokens: optNumber(args, "maxTokens"),
+      }),
+  },
+  // SG3 P1-B (C-12) — bounded named-heading extraction with a content-hash receipt.
+  {
+    name: "th_artifact_section",
+    description:
+      "Extract the BODY of a named heading from a markdown artifact under an optional token budget, with a content-hash read receipt (in data.receipts). The section is the first heading whose text equals `section` (case-insensitive); its body runs to the next same-or-higher-level heading. With maxTokens set, the body is truncated to fit by keeping a deterministic line-prefix (truncated:true). The receipt always hashes the FULL section body. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: stringProp("Artifact file to read (root-relative or absolute within root)."),
+        section: stringProp("Heading name whose body to extract (the H1-H6 text, e.g. \"External Dependencies\")."),
+        maxTokens: numberProp("Token budget for the returned body (>0 truncates; absent ⇒ full section)."),
+      },
+      required: ["file", "section"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runArtifactSection(paths, { file: optString(args, "file"), section: optString(args, "section"), maxTokens: optNumber(args, "maxTokens") }),
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -1631,8 +1686,12 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_repo_relevant: ro("repo"),
   th_repo_impact: ro("repo"),
   th_repo_check: ro("repo"),
+  // SG3 P1-B — governed search is a pure read over the persisted map's scope.
+  th_repo_search: ro("repo"),
   // context
   th_context_pack: ro("context"),
+  // SG3 P1-B — batch read under one budget; pure read with receipts.
+  th_context_read: ro("context"),
   // decision ledger (append) + read
   th_decision_detect: ro("decision"),
   th_decision_add: wr("decision", { idempotent: false }),
@@ -1641,6 +1700,8 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // artifacts: register (content-hash record, idempotent) + leases + read
   th_artifact_register: wr("artifact", { idempotent: true }),
   th_artifact_list: ro("artifact"),
+  // SG3 P1-B — bounded named-heading extraction with a content-hash receipt; pure read.
+  th_artifact_section: ro("artifact"),
   th_artifact_claim: wr("artifact", { idempotent: false }),
   th_artifact_release: wr("artifact", { idempotent: false }),
   th_artifact_leases: ro("artifact"),
@@ -1798,7 +1859,7 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "tier classify", "tier veto-check", "tier record", "tier features",
   "stage advance", "stage current", "stage describe", "stage list",
   "implementation unlock",
-  "artifact register", "artifact list", "artifact claim", "artifact release", "artifact leases",
+  "artifact register", "artifact list", "artifact section", "artifact claim", "artifact release", "artifact leases",
   "coverage check", "coverage report",
   "verify add", "verify list", "verify approve", "verify clear", "verify run",
   "build plan", "build next-wave", "build dispatch", "build claim", "build release",
@@ -1814,11 +1875,11 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "hook stop-gate", "hook pretool-gate", "hook subagent-stop",
   "migrate", "doctor", "next", "preview", "scorecard", "route",
   "telemetry on", "telemetry off", "telemetry status",
-  "context estimate", "context pack",
+  "context estimate", "context pack", "context read",
   "budget check",
   "handoff write", "handoff verify", "resume",
   "delegate plan", "delegate pack", "delegate capsule", "delegate check",
-  "repo map", "repo check", "repo relevant", "repo impact",
+  "repo map", "repo check", "repo relevant", "repo impact", "repo search",
   "decision detect", "decision add", "decision approve", "decision check", "decision list",
   "manifest export",
   "template get", "template list",
