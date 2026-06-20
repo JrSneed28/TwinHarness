@@ -250,6 +250,15 @@ function resolveProjectPaths(root) {
             break; // reached the filesystem root: keep startAbs
         cursor = parent;
     }
+    // R-13: canonicalize the selected root ONCE, here at selection — the walk picks
+    // `abs` LEXICALLY, so a junction/symlink in the ancestor chain (NTFS junctions
+    // are not symlinks: lstat().isSymbolicLink() is false for them) would leave the
+    // containment anchor non-canonical. `resolveWithinRoot` realpaths both sides
+    // today so writes are safe, but any future writer using `paths.root` directly
+    // would inherit the redirected base. Anchoring the canonical form here makes the
+    // root the single source of truth. `realpathExistingPrefix` tolerates a
+    // not-yet-created root (fresh `th init`) by resolving its longest existing prefix.
+    abs = realpathExistingPrefix(abs);
     let stateDir;
     const newDir = path.join(abs, ".twinharness");
     const legacyStateFile = path.join(abs, ".agentic-sdlc", "state.json");

@@ -1169,6 +1169,29 @@ function readHookStdin<T extends object>(): T | undefined {
   }
 }
 
+/**
+ * Resolve the project paths for a hook dispatch, reading the hook's stdin payload
+ * once and applying the SAME stdin-`cwd` precedence to every hook (PreToolUse /
+ * Stop / SubagentStop). Claude Code does NOT pass `--cwd` to the shipped hooks
+ * (`hooks/hooks.json`), so the session's project dir arrives ONLY on the stdin
+ * payload's `cwd`. If all three hooks resolved from process cwd while one read
+ * stdin, they could govern different roots for one session — the write-gate and
+ * the completion-gate must agree.
+ *
+ * Precedence (identical for all hooks): prefer the payload's `cwd` UNLESS the
+ * caller explicitly passed `--cwd` (then the explicit flag wins). Returns the
+ * resolved paths alongside the parsed payload so callers don't re-read stdin.
+ */
+function resolveHookPaths<T extends { cwd?: string }>(
+  flagCwd: string,
+): { paths: ProjectPaths; payload: T | undefined } {
+  const payload = readHookStdin<T>();
+  const cwdFromStdin = payload?.cwd;
+  const effectiveCwd =
+    cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : flagCwd;
+  return { paths: resolveProjectPaths(effectiveCwd), payload };
+}
+
 function main(): void {
   // P0-4 (#20) — fail fast with a friendly, actionable message on an unsupported
   // Node, BEFORE any command runs. A too-old runtime can otherwise surface as an
@@ -1195,27 +1218,34 @@ function main(): void {
   }
 
   // Hook commands speak the Claude Code hook protocol on stdout (not --json).
+  // A matched hook command is TERMINAL: it must be the SOLE thing on stdout so a
+  // strict JSON consumer (Claude Code) parses the decision. `writeAndExit` defers
+  // its `process.exit` to the stdout-flush callback, so a bare fall-through would
+  // synchronously reach `dispatch` below and append "unknown command: hook" + the
+  // full help to the hook's stdout — corrupting the decision into unparseable JSON
+  // (a fail-open). Compute the decision, then exit; never fall through.
   if (parsed.positionals[0] === "hook") {
+    let hookOut: { stdout: string; exitCode: number } | undefined;
     if (parsed.positionals[1] === "stop-gate") {
-      const paths = resolveProjectPaths(parsed.flags.cwd);
-      const out = runHookStopGate(paths, readHookStdin<StopHookInput>());
-      writeAndExit(out.stdout + "\n", out.exitCode);
+      const { paths, payload } = resolveHookPaths<StopHookInput>(parsed.flags.cwd);
+      hookOut = runHookStopGate(paths, payload);
+    } else if (parsed.positionals[1] === "pretool-gate") {
+      const { paths, payload } = resolveHookPaths<PreToolHookInput>(parsed.flags.cwd);
+      hookOut = runHookPretoolGate(paths, payload);
+    } else if (parsed.positionals[1] === "subagent-stop") {
+      const { paths, payload } = resolveHookPaths<SubagentStopHookInput>(parsed.flags.cwd);
+      hookOut = runHookSubagentStop(paths, payload);
     }
-    if (parsed.positionals[1] === "pretool-gate") {
-      // Prefer the payload's cwd for path resolution when --cwd was not explicitly passed.
-      const stdinPayload = readHookStdin<PreToolHookInput>();
-      const cwdFromStdin = stdinPayload?.cwd;
-      const effectiveCwd =
-        cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : parsed.flags.cwd;
-      const paths = resolveProjectPaths(effectiveCwd);
-      const out = runHookPretoolGate(paths, stdinPayload);
-      writeAndExit(out.stdout + "\n", out.exitCode);
+    if (hookOut) {
+      writeAndExit(hookOut.stdout + "\n", hookOut.exitCode);
+      // `writeAndExit` defers `process.exit` to the stdout-drain callback (an
+      // intentional POSIX large-output correctness measure — see its doc), so it
+      // returns synchronously. Without this `return`, control would fall through
+      // to `dispatch` below and append help text to the hook's stdout BEFORE the
+      // drain callback exits. Stop the synchronous continuation here.
+      return;
     }
-    if (parsed.positionals[1] === "subagent-stop") {
-      const paths = resolveProjectPaths(parsed.flags.cwd);
-      const out = runHookSubagentStop(paths, readHookStdin<SubagentStopHookInput>());
-      writeAndExit(out.stdout + "\n", out.exitCode);
-    }
+    // An unknown `hook <x>` subcommand falls through to the normal help/error path.
   }
 
   let result: CommandResult;

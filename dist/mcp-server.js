@@ -15572,6 +15572,7 @@ function resolveProjectPaths(root) {
     if (parent === cursor) break;
     cursor = parent;
   }
+  abs = realpathExistingPrefix(abs);
   let stateDir;
   const newDir = path.join(abs, ".twinharness");
   const legacyStateFile = path.join(abs, ".agentic-sdlc", "state.json");

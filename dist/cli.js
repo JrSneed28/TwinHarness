@@ -1066,6 +1066,25 @@ function readHookStdin() {
         return undefined;
     }
 }
+/**
+ * Resolve the project paths for a hook dispatch, reading the hook's stdin payload
+ * once and applying the SAME stdin-`cwd` precedence to every hook (PreToolUse /
+ * Stop / SubagentStop). Claude Code does NOT pass `--cwd` to the shipped hooks
+ * (`hooks/hooks.json`), so the session's project dir arrives ONLY on the stdin
+ * payload's `cwd`. If all three hooks resolved from process cwd while one read
+ * stdin, they could govern different roots for one session — the write-gate and
+ * the completion-gate must agree.
+ *
+ * Precedence (identical for all hooks): prefer the payload's `cwd` UNLESS the
+ * caller explicitly passed `--cwd` (then the explicit flag wins). Returns the
+ * resolved paths alongside the parsed payload so callers don't re-read stdin.
+ */
+function resolveHookPaths(flagCwd) {
+    const payload = readHookStdin();
+    const cwdFromStdin = payload?.cwd;
+    const effectiveCwd = cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : flagCwd;
+    return { paths: (0, paths_1.resolveProjectPaths)(effectiveCwd), payload };
+}
 function main() {
     // P0-4 (#20) — fail fast with a friendly, actionable message on an unsupported
     // Node, BEFORE any command runs. A too-old runtime can otherwise surface as an
@@ -1088,26 +1107,36 @@ function main() {
         writeAndExit((0, output_1.renderResult)(result, parsed.flags.json) + "\n", result.exitCode);
     }
     // Hook commands speak the Claude Code hook protocol on stdout (not --json).
+    // A matched hook command is TERMINAL: it must be the SOLE thing on stdout so a
+    // strict JSON consumer (Claude Code) parses the decision. `writeAndExit` defers
+    // its `process.exit` to the stdout-flush callback, so a bare fall-through would
+    // synchronously reach `dispatch` below and append "unknown command: hook" + the
+    // full help to the hook's stdout — corrupting the decision into unparseable JSON
+    // (a fail-open). Compute the decision, then exit; never fall through.
     if (parsed.positionals[0] === "hook") {
+        let hookOut;
         if (parsed.positionals[1] === "stop-gate") {
-            const paths = (0, paths_1.resolveProjectPaths)(parsed.flags.cwd);
-            const out = (0, hook_1.runHookStopGate)(paths, readHookStdin());
-            writeAndExit(out.stdout + "\n", out.exitCode);
+            const { paths, payload } = resolveHookPaths(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookStopGate)(paths, payload);
         }
-        if (parsed.positionals[1] === "pretool-gate") {
-            // Prefer the payload's cwd for path resolution when --cwd was not explicitly passed.
-            const stdinPayload = readHookStdin();
-            const cwdFromStdin = stdinPayload?.cwd;
-            const effectiveCwd = cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : parsed.flags.cwd;
-            const paths = (0, paths_1.resolveProjectPaths)(effectiveCwd);
-            const out = (0, hook_1.runHookPretoolGate)(paths, stdinPayload);
-            writeAndExit(out.stdout + "\n", out.exitCode);
+        else if (parsed.positionals[1] === "pretool-gate") {
+            const { paths, payload } = resolveHookPaths(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookPretoolGate)(paths, payload);
         }
-        if (parsed.positionals[1] === "subagent-stop") {
-            const paths = (0, paths_1.resolveProjectPaths)(parsed.flags.cwd);
-            const out = (0, hook_1.runHookSubagentStop)(paths, readHookStdin());
-            writeAndExit(out.stdout + "\n", out.exitCode);
+        else if (parsed.positionals[1] === "subagent-stop") {
+            const { paths, payload } = resolveHookPaths(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookSubagentStop)(paths, payload);
         }
+        if (hookOut) {
+            writeAndExit(hookOut.stdout + "\n", hookOut.exitCode);
+            // `writeAndExit` defers `process.exit` to the stdout-drain callback (an
+            // intentional POSIX large-output correctness measure — see its doc), so it
+            // returns synchronously. Without this `return`, control would fall through
+            // to `dispatch` below and append help text to the hook's stdout BEFORE the
+            // drain callback exits. Stop the synchronous continuation here.
+            return;
+        }
+        // An unknown `hook <x>` subcommand falls through to the normal help/error path.
     }
     let result;
     try {

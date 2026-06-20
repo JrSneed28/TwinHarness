@@ -142,6 +142,13 @@ export function evaluateStopGate(paths: ProjectPaths): StopGateDecision {
  */
 export interface StopHookInput {
   stop_hook_active?: boolean;
+  /**
+   * The session's project directory, as Claude Code passes it on the hook stdin
+   * payload. Used (with the same precedence as PreToolUse) to resolve the SAME
+   * project root the write-gate resolves — see {@link resolveHookCwd}. Absent in
+   * older payloads; the resolver falls back to `--cwd`/process cwd.
+   */
+  cwd?: string;
 }
 
 /**
@@ -188,6 +195,12 @@ export function runHookStopGate(
  */
 export interface SubagentStopHookInput {
   stop_hook_active?: boolean;
+  /**
+   * The session's project directory (see {@link StopHookInput.cwd}). Resolved
+   * with the identical stdin-cwd precedence so PreToolUse / Stop / SubagentStop
+   * agree on one project root. Absent in older payloads.
+   */
+  cwd?: string;
 }
 
 /**
