@@ -293,7 +293,16 @@ function checkFinalVerification(paths, state) {
         const open = state.slices.filter((sl) => sl.status !== "done" && sl.status !== "blocked").map((sl) => sl.id);
         return { ok: false, error: "slices_unsettled", detail: { open } };
     }
-    const verifyCfg = (0, verify_1.readVerifyConfig)(paths);
+    // R-23: read through loadVerifyConfig (NOT readVerifyConfig) so a present-but-
+    // CORRUPT verify.json fails CLOSED. readVerifyConfig collapses a corrupt config to
+    // `{ commands: [] }`, which made the `verify_suite_never_run` rung skip (length 0)
+    // and the final-verification gate PASS on an unreadable config — the same fail-OPEN
+    // that `runVerifyRun` already refuses. A corrupt config is now its own failing rung.
+    const verifyLoaded = (0, verify_1.loadVerifyConfig)(paths);
+    if (verifyLoaded.status === "corrupt") {
+        return { ok: false, error: "verify_config_corrupt", detail: {} };
+    }
+    const verifyCfg = verifyLoaded.config;
     if (verifyCfg.commands.length > 0 && !(0, verify_1.readVerifyReport)(paths)) {
         return { ok: false, error: "verify_suite_never_run", detail: { commands: verifyCfg.commands.length } };
     }

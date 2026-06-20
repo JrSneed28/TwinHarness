@@ -414,14 +414,23 @@ function runStateVerify(paths) {
  * OWNER-LESS lock, which is never stealable (R-08) and which the acquire-loop timeout
  * only throws on (never reclaims). R-21's mandatory owner-stamp makes that state
  * transient going forward, but a repo bricked by a pre-R-21 crash still needs a manual
- * reclaim, and this is it. By default this REFUSES to remove a lock that looks LIVE
- * (stamped AND younger than STALE_MS) and prints the observed owner + age so the operator
- * can decide; `--force` removes it unconditionally (last resort — only when no `th`
- * process is running). `th doctor` detects the lock and points here. The age is computed
- * identically to doctor's check (`Date.now() - statSync(lockDir).mtimeMs`) — though note
- * doctor only WARNS on any present lock, whereas this applies the STALE_MS threshold to
- * decide removal. This is the ONLY mutating `th state` verb that operates without the
- * state lock (it is the lock's recovery tool) and tolerates a corrupt state.json.
+ * reclaim, and this is it.
+ *
+ * Removal predicate (R-26): a lock is removable without `--force` iff it is STALE by AGE
+ * ALONE (`ageMs > STALE_MS`) — the owner stamp is NOT part of the test. This default
+ * REFUSES to remove a lock younger than STALE_MS even when it is owner-less, because
+ * R-21 acquires the lock in two steps (mkdir, then writeOwner), so a genuinely LIVE lock
+ * is transiently owner-less mid-acquire — and the owner read returns null on ANY read
+ * error (EACCES/EBUSY), not just ENOENT. The genuine pre-R-21 brick (an OLD owner-less
+ * lock) still exceeds STALE_MS and is reclaimed without force. `--force` removes
+ * unconditionally (last resort — only when no `th` process is running). The refusal /
+ * removal messages print the observed owner + age so the operator can decide.
+ *
+ * `th doctor` detects the lock and points here. The age is computed identically to
+ * doctor's check (`Date.now() - statSync(lockDir).mtimeMs`) — though note doctor only
+ * WARNS on any present lock, whereas this applies the STALE_MS threshold to decide
+ * removal. This is the ONLY mutating `th state` verb that operates without the state lock
+ * (it is the lock's recovery tool) and tolerates a corrupt state.json.
  */
 function runStateUnlock(paths, opts = {}) {
     const lockDir = path.join(paths.stateDir, ".state.lock");
@@ -446,13 +455,30 @@ function runStateUnlock(paths, opts = {}) {
     const ageSec = Math.round(ageMs / 1000);
     const staleSec = Math.round(state_store_1.STALE_MS / 1000);
     const ownerLabel = owner === null ? "owner-less" : `owner ${owner}`;
-    const stale = owner === null || ageMs > state_store_1.STALE_MS;
+    // R-26: staleness is decided by AGE ALONE, regardless of the owner stamp. The prior
+    // `owner === null || ageMs > STALE_MS` treated ANY owner-less lock as stale at any age,
+    // but R-21 made the owner-stamp MANDATORY and acquired in TWO steps (mkdir, then
+    // writeOwner), opening a transient owner-less window on a genuinely LIVE lock — and the
+    // owner read catch above sets owner=null on ANY read error (EACCES/EBUSY), not just
+    // ENOENT. So a fresh, live lock could be removed without `--force`, contradicting this
+    // function's own docstring. Now a YOUNG owner-less lock is correctly REFUSED without
+    // `--force`; an OLD owner-less lock (the genuine pre-R-21 brick) still exceeds STALE_MS
+    // and is removable without force. `--force` still removes unconditionally (last resort).
+    const stale = ageMs > state_store_1.STALE_MS;
     const force = opts.force === true;
     if (!force && !stale) {
         (0, log_1.structuredLog)({ cmd: "state unlock", result: "refused_live", ageMs, ownerLess: owner === null });
+        // R-26: a YOUNG lock is refused regardless of the owner stamp — an owner-less lock
+        // under STALE_MS is most likely a LIVE holder caught in the transient acquire→stamp
+        // window (or whose owner file was momentarily unreadable), NOT a pre-R-21 brick. The
+        // genuine brick (an old owner-less lock) exceeds STALE_MS and removes without --force.
+        const ownerLessNote = owner === null
+            ? ` This lock is owner-less but still YOUNG — most likely a live holder mid-acquire (the owner stamp lands a moment after the lock dir), not a crashed one.`
+            : ``;
         return (0, output_1.failure)({
-            human: `Refusing to remove a lock that looks LIVE: ${lockDir} (${ownerLabel}, ${ageSec}s old, under the ${staleSec}s stale threshold). ` +
-                `A \`th\` process may be holding it. If you are CERTAIN no \`th\` process is running, re-run with --force.`,
+            human: `Refusing to remove a lock that looks LIVE: ${lockDir} (${ownerLabel}, ${ageSec}s old, under the ${staleSec}s stale threshold).` +
+                ownerLessNote +
+                ` A \`th\` process may be holding it. If you are CERTAIN no \`th\` process is running, re-run with --force.`,
             data: { error: "lock_live", lockDir, ageMs, ownerLess: owner === null },
         });
     }

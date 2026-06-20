@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.escapeForTerminal = escapeForTerminal;
 exports.runVerifyAdd = runVerifyAdd;
 exports.runVerifyList = runVerifyList;
 exports.runVerifyClear = runVerifyClear;
@@ -41,6 +42,39 @@ const log_1 = require("../core/log");
 function resolveVerifyActor(explicit) {
     return (explicit ?? process.env.TH_VERIFY_ACTOR ?? "unknown").trim() || "unknown";
 }
+/**
+ * R-25: render an agent-controlled command string SAFE for a human terminal. Verify
+ * commands are author/agent-supplied and `th verify add` has NO TTY barrier (only
+ * `approve` does), so an agent can embed control characters — a carriage return that
+ * rewrites the visible line, an ESC that starts an ANSI sequence, a backspace — into a
+ * command. When that raw string is printed at the `approve` confirmation prompt (or in
+ * `verify list`), the operator can be shown something OTHER than what they are about to
+ * authorize, defeating R-20's content-bound confirmation (a terminal-spoofing TOCTOU).
+ *
+ * This escapes every non-printable / control character into a VISIBLE form before
+ * rendering: the C0 range (U+0000–U+001F, incl. CR/LF/TAB/ESC), DEL (U+007F), and the
+ * C1 range (U+0080–U+009F) — known forms get a readable mnemonic (`\r`, `\n`, `\t`,
+ * `\x1b`), the rest a `\xHH` byte. Ordinary printable command text is untouched. Used
+ * ONLY for human/terminal-facing text — the structured `data` payloads carry the raw
+ * command verbatim (callers that re-render it apply this themselves).
+ */
+function escapeForTerminal(s) {
+    const NAMED = {
+        "\t": "\\t",
+        "\n": "\\n",
+        "\r": "\\r",
+        "\x1b": "\\x1b",
+    };
+    // C0 controls (U+0000-U+001F) + DEL (U+007F) + C1 controls (U+0080-U+009F). Each
+    // match is a single offending code unit; explicit \u escapes keep the class safe in
+    // source (no literal control bytes embedded in the file).
+    return s.replace(/[\u0000-\u001F\u007F\u0080-\u009F]/g, (ch) => {
+        const named = NAMED[ch];
+        if (named)
+            return named;
+        return "\\x" + ch.charCodeAt(0).toString(16).padStart(2, "0");
+    });
+}
 /** `th verify add "<command>"` — append a command to verify.json (with provenance). */
 function runVerifyAdd(paths, command, opts = {}) {
     const trimmed = command?.trim();
@@ -54,21 +88,41 @@ function runVerifyAdd(paths, command, opts = {}) {
     // Adding a command CHANGES the set — no approval-field bookkeeping is needed: the
     // tamper-evident ledger's latest approval no longer matches the new set, so it
     // reads as UNAPPROVED automatically (evaluateCommandSetApproval).
-    const result = (0, state_store_1.withStateLock)(paths, () => {
-        const config = (0, verify_1.loadVerifyConfig)(paths).config;
+    //
+    // R-27: REFUSE on a CORRUPT config BEFORE mutating, and do the check UNDER the lock
+    // (read status + config from the SAME locked load) so there is no read-then-write
+    // TOCTOU. The prior code took `loadVerifyConfig(paths).config`, ignoring `.status`:
+    // on a corrupt file that collapses to `{ commands: [] }`, pushed the new command, and
+    // wrote `{ commands: [newCmd] }` — destroying the corrupt file's content and reporting
+    // success. `runVerifyApprove`/`runVerifyRun` both refuse on corrupt; `add` was the
+    // outlier. (`runVerifyClear`'s unconditional overwrite stays the intentional recovery
+    // path.)
+    const outcome = (0, state_store_1.withStateLock)(paths, () => {
+        const loaded = (0, verify_1.loadVerifyConfig)(paths);
+        if (loaded.status === "corrupt")
+            return { corrupt: true };
+        const config = loaded.config;
         config.commands.push(trimmed);
         config.provenance = [...(config.provenance ?? []), { command: trimmed, actor, addedAt }];
         (0, verify_1.writeVerifyConfig)(paths, config);
-        return { commands: config.commands, provenance: config.provenance };
+        return { corrupt: false, commands: config.commands, provenance: config.provenance };
     });
-    (0, log_1.structuredLog)({ cmd: "verify add", command: trimmed, actor, count: result.commands.length });
+    if (outcome.corrupt) {
+        (0, log_1.structuredLog)({ cmd: "verify add", error: "corrupt_config" });
+        return (0, output_1.failure)({
+            human: "verify.json is present but unreadable/corrupt — refusing to add (it would overwrite the corrupt file). " +
+                "Inspect it, or run `th verify clear` and re-add the commands, then approve.",
+            data: { error: "corrupt_config" },
+        });
+    }
+    (0, log_1.structuredLog)({ cmd: "verify add", command: trimmed, actor, count: outcome.commands.length });
     return (0, output_1.success)({
         data: {
-            commands: result.commands,
-            provenance: result.provenance,
-            approved: (0, verify_1.isCommandSetApproved)(paths, result.commands),
+            commands: outcome.commands,
+            provenance: outcome.provenance,
+            approved: (0, verify_1.isCommandSetApproved)(paths, outcome.commands),
         },
-        human: `added: ${trimmed} (by ${actor})\n${result.commands.length} command(s) configured.\n` +
+        human: `added: ${trimmed} (by ${actor})\n${outcome.commands.length} command(s) configured.\n` +
             `This command set is UNAPPROVED for execution — run \`th verify approve\` to confirm it before \`th verify run\`.`,
     });
 }
@@ -83,7 +137,10 @@ function runVerifyList(paths) {
             .map((c, i) => {
             const p = provByCommand.get(c);
             const prov = p ? `  (added by ${p.actor} at ${p.addedAt})` : "";
-            return `  ${i + 1}. ${c}${prov}`;
+            // R-25: escape control chars in the human-rendered command (defense-in-depth —
+            // the same agent-controlled string is content-bound at `approve`). The `data`
+            // payload below carries the RAW commands verbatim for machine consumers.
+            return `  ${i + 1}. ${escapeForTerminal(c)}${prov}`;
         })
             .join("\n") +
             "\n" +
@@ -145,8 +202,12 @@ function runVerifyApprove(paths, opts = {}) {
     // to stderr so the confirmation is CONTENT-bound, not a blind "approve the verify
     // command set?" on an opaque id.
     const preConfirmHash = (0, verify_1.commandSetHash)(pre.config.commands);
+    // R-25: escape control characters in the printed commands so an agent-supplied CR/ESC/
+    // control char cannot conceal or rewrite what the human reads here — the confirmation
+    // must show the TRUE content it is content-binding (R-20). The hash fingerprint is over
+    // the RAW commands (unchanged); only the human-facing rendering is escaped.
     process.stderr.write(`About to approve ${pre.config.commands.length} verify command(s) [${preConfirmHash.slice(0, 12)}]:\n` +
-        pre.config.commands.map((c) => `  • ${c}\n`).join(""));
+        pre.config.commands.map((c) => `  • ${escapeForTerminal(c)}\n`).join(""));
     // ---- R-01 BARRIER (runs before any approval write) ------------------------
     const confirm = (0, decision_1.requireTTYConfirmation)("the verify command set", "approve", opts.tty);
     if (!confirm.ok) {

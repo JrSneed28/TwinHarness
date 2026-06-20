@@ -59,6 +59,10 @@ function permissionReason(out: { stdout: string }): string | undefined {
 function writeInput(filePath: string): PreToolHookInput {
   return { tool_name: "Write", tool_input: { file_path: filePath } };
 }
+/** A Bash tool input running `command`, resolved against `cwd` (R-24 vector). */
+function bashInput(command: string, cwd: string): PreToolHookInput {
+  return { tool_name: "Bash", tool_input: { command }, cwd };
+}
 
 // ---------------------------------------------------------------------------
 // REQ-R14-CLOBBER-001 — tool-write vector (PreToolUse gate)
@@ -106,6 +110,66 @@ describe("REQ-R14-CLOBBER-001: a tool write to a REGISTERED artifact is held for
 
     const nested = path.join(tp.root, "docs", "05-adrs", "0001-choice.md");
     const out = runHookPretoolGate(tp.paths, writeInput(nested));
+    expect(permissionDecision(out)).toBe("ask");
+    expect(permissionReason(out)).toContain("docs/05-adrs");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// REQ-R24-CLOBBER-BASH — Bash-mediated write vector (the R-14 hole closed by R-24)
+//
+// A Bash tool call carries `command` and no `file_path`, so it short-circuits at step d
+// (`!filePath → allow`) BEFORE ever reaching the step-e3 R-14 guard — and the doc/state
+// allowlist blanket-allows `docs/` for Bash. So `echo x > docs/01-requirements.md`
+// silently clobbered a REGISTERED approved artifact. R-24 mirrors the Write/Edit guard
+// for Bash (same matcher, same `ask` disposition). Closure is PARSEABLE targets only
+// (metachar-obscured targets like `> $f` are dropped by extractBashWriteTargets — the
+// honest M-4/R-19 caveat).
+// ---------------------------------------------------------------------------
+
+describe("REQ-R24-CLOBBER-BASH: a Bash redirection over a REGISTERED artifact is held for confirmation", () => {
+  it("echo > a registered docs/NN-*.md (Phase B) → ask (the bypass the R-14 guard missed)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    // Phase B (implementation allowed) so the gate runs past the Phase-A blanket gate.
+    writeState(tp.paths, { ...readState(tp.paths).state!, implementation_allowed: true, current_stage: "stage-10" });
+    const rel = writeFile(tp, "docs/01-requirements.md", "# Requirements\nv1\n");
+    runArtifactRegister(tp.paths, rel, 1);
+
+    const out = runHookPretoolGate(tp.paths, bashInput("echo x > docs/01-requirements.md", tp.root));
+    expect(permissionDecision(out)).toBe("ask");
+    expect(permissionReason(out)).toContain("R-24");
+    expect(permissionReason(out)).toContain("docs/01-requirements.md v1");
+  });
+
+  it("a relative redirect resolved against cwd=root still matches → ask (tee form too)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeState(tp.paths, { ...readState(tp.paths).state!, implementation_allowed: true, current_stage: "stage-10" });
+    runArtifactRegister(tp.paths, writeFile(tp, "docs/01-requirements.md", "v1\n"), 1);
+
+    const out = runHookPretoolGate(tp.paths, bashInput("echo x | tee docs/01-requirements.md", tp.root));
+    expect(permissionDecision(out)).toBe("ask");
+  });
+
+  it("a Bash write to an UNregistered docs/ path is still allowed (no regression)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeState(tp.paths, { ...readState(tp.paths).state!, implementation_allowed: true, current_stage: "stage-10" });
+    runArtifactRegister(tp.paths, writeFile(tp, "docs/01-requirements.md", "v1\n"), 1);
+
+    const out = runHookPretoolGate(tp.paths, bashInput("echo x > docs/99-scratch.md", tp.root));
+    expect(isAllow(out)).toBe(true);
+  });
+
+  it("a registered DIRECTORY artifact is protected against a nested Bash write → ask", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    writeState(tp.paths, { ...readState(tp.paths).state!, implementation_allowed: true, current_stage: "stage-10" });
+    writeFile(tp, "docs/05-adrs/0001-choice.md", "adr\n");
+    runArtifactRegister(tp.paths, "docs/05-adrs/", 1);
+
+    const out = runHookPretoolGate(tp.paths, bashInput("echo x > docs/05-adrs/0001-choice.md", tp.root));
     expect(permissionDecision(out)).toBe("ask");
     expect(permissionReason(out)).toContain("docs/05-adrs");
   });

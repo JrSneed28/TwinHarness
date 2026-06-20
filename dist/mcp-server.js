@@ -21715,7 +21715,11 @@ function checkFinalVerification(paths, state) {
     const open = state.slices.filter((sl) => sl.status !== "done" && sl.status !== "blocked").map((sl) => sl.id);
     return { ok: false, error: "slices_unsettled", detail: { open } };
   }
-  const verifyCfg = readVerifyConfig(paths);
+  const verifyLoaded = loadVerifyConfig(paths);
+  if (verifyLoaded.status === "corrupt") {
+    return { ok: false, error: "verify_config_corrupt", detail: {} };
+  }
+  const verifyCfg = verifyLoaded.config;
   if (verifyCfg.commands.length > 0 && !readVerifyReport(paths)) {
     return { ok: false, error: "verify_suite_never_run", detail: { commands: verifyCfg.commands.length } };
   }
@@ -22026,6 +22030,16 @@ function runNext(paths, opts = {}) {
             action: `Final verification is blocked while slices are unfinished \u2014 finish or block: ${open.join(", ")} (\`th slice set-status <SLICE-ID> done|blocked\`).`,
             why: "At final-verification the stop-gate mechanically refuses completion while any slice is neither done nor blocked, so settling the open slices outranks producing the verification report.",
             data: { open }
+          },
+          explain
+        );
+      }
+      case "verify_config_corrupt": {
+        return emit(
+          {
+            kind: "run-verify",
+            action: "Final verification is blocked \u2014 verify.json is present but unreadable/corrupt. Inspect it, or run `th verify clear` and re-add the commands, then `th verify approve` and `th verify run` before sign-off.",
+            why: "An unreadable verify config must fail CLOSED: treating it as an empty/approved set would let a run claim completion without ever exercising the suite the operator wired up."
           },
           explain
         );
@@ -23714,27 +23728,52 @@ ${formatIssues(r.issues)}`,
 function resolveVerifyActor(explicit) {
   return (explicit ?? process.env.TH_VERIFY_ACTOR ?? "unknown").trim() || "unknown";
 }
+function escapeForTerminal(s) {
+  const NAMED = {
+    "	": "\\t",
+    "\n": "\\n",
+    "\r": "\\r",
+    "\x1B": "\\x1b"
+  };
+  return s.replace(/[\u0000-\u001F\u007F\u0080-\u009F]/g, (ch) => {
+    const named = NAMED[ch];
+    if (named) return named;
+    return "\\x" + ch.charCodeAt(0).toString(16).padStart(2, "0");
+  });
+}
 function runVerifyAdd(paths, command, opts = {}) {
   const trimmed = command?.trim();
   if (!trimmed) return failure({ human: 'usage: th verify add "<command>"' });
   const actor = resolveVerifyActor(opts.as);
   const addedAt = (opts.now ?? (() => /* @__PURE__ */ new Date()))().toISOString();
-  const result = withStateLock(paths, () => {
-    const config2 = loadVerifyConfig(paths).config;
-    config2.commands.push(trimmed);
-    config2.provenance = [...config2.provenance ?? [], { command: trimmed, actor, addedAt }];
-    writeVerifyConfig(paths, config2);
-    return { commands: config2.commands, provenance: config2.provenance };
-  });
-  structuredLog({ cmd: "verify add", command: trimmed, actor, count: result.commands.length });
+  const outcome = withStateLock(
+    paths,
+    () => {
+      const loaded = loadVerifyConfig(paths);
+      if (loaded.status === "corrupt") return { corrupt: true };
+      const config2 = loaded.config;
+      config2.commands.push(trimmed);
+      config2.provenance = [...config2.provenance ?? [], { command: trimmed, actor, addedAt }];
+      writeVerifyConfig(paths, config2);
+      return { corrupt: false, commands: config2.commands, provenance: config2.provenance };
+    }
+  );
+  if (outcome.corrupt) {
+    structuredLog({ cmd: "verify add", error: "corrupt_config" });
+    return failure({
+      human: "verify.json is present but unreadable/corrupt \u2014 refusing to add (it would overwrite the corrupt file). Inspect it, or run `th verify clear` and re-add the commands, then approve.",
+      data: { error: "corrupt_config" }
+    });
+  }
+  structuredLog({ cmd: "verify add", command: trimmed, actor, count: outcome.commands.length });
   return success({
     data: {
-      commands: result.commands,
-      provenance: result.provenance,
-      approved: isCommandSetApproved(paths, result.commands)
+      commands: outcome.commands,
+      provenance: outcome.provenance,
+      approved: isCommandSetApproved(paths, outcome.commands)
     },
     human: `added: ${trimmed} (by ${actor})
-${result.commands.length} command(s) configured.
+${outcome.commands.length} command(s) configured.
 This command set is UNAPPROVED for execution \u2014 run \`th verify approve\` to confirm it before \`th verify run\`.`
   });
 }
@@ -23746,7 +23785,7 @@ function runVerifyList(paths) {
   const human = config2.commands.length ? config2.commands.map((c, i) => {
     const p = provByCommand.get(c);
     const prov = p ? `  (added by ${p.actor} at ${p.addedAt})` : "";
-    return `  ${i + 1}. ${c}${prov}`;
+    return `  ${i + 1}. ${escapeForTerminal(c)}${prov}`;
   }).join("\n") + "\n" + (approved ? `
 Set APPROVED for execution${latest ? ` (by ${latest.approvedBy} at ${latest.approvedAt})` : ""}.` : "\nSet UNAPPROVED \u2014 run `th verify approve` before `th verify run`.") : '(no verify commands configured \u2014 add one with `th verify add "<command>"`)';
   return success({

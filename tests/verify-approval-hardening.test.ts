@@ -16,7 +16,14 @@ import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
-import { runVerifyAdd, runVerifyApprove, runVerifyClear, runVerifyRun } from "../src/commands/verify";
+import {
+  runVerifyAdd,
+  runVerifyApprove,
+  runVerifyClear,
+  runVerifyRun,
+  runVerifyList,
+  escapeForTerminal,
+} from "../src/commands/verify";
 import {
   readVerifyConfig,
   isCommandSetApproved,
@@ -254,6 +261,22 @@ describe("REQ-VERIFY-P1-R03: a corrupt verify.json is refused, not read as empty
     expect(res.data?.error).toBe("corrupt_config");
   });
 
+  // R-27: `add` was the outlier that silently OVERWROTE a corrupt config. It now refuses
+  // (under the lock, same locked load → no TOCTOU) and leaves the corrupt bytes intact.
+  it("add on a corrupt config → corrupt_config, and the corrupt file is NOT overwritten", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    fs.mkdirSync(tp.paths.stateDir, { recursive: true });
+    const corruptBytes = "}{ broken — not valid json";
+    fs.writeFileSync(verifyConfigPath(tp.paths), corruptBytes, "utf8");
+
+    const res = runVerifyAdd(tp.paths, PASS_CMD);
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("corrupt_config");
+    // The corrupt file's content is preserved (NOT replaced with `{ commands: [PASS_CMD] }`).
+    expect(fs.readFileSync(verifyConfigPath(tp.paths), "utf8")).toBe(corruptBytes);
+  });
+
   it("a legacy verify.json carrying the old approvedHash field reads UNAPPROVED", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
@@ -330,4 +353,68 @@ describe("REQ-VERIFY-P1-R20: confirm→seal TOCTOU is closed", () => {
   // convention these command tests assert on the returned CommandResult, not on stderr
   // bytes (vitest's stdio handling makes stderr capture unreliable here), so the preview
   // is intentionally not asserted. The SECURITY guarantee — reject-on-drift — is covered above.
+});
+
+// ===========================================================================
+// R-25 — verify command strings are control-char-escaped before they reach a human
+// terminal, so an agent-supplied CR/ESC cannot spoof the approve confirmation or the
+// `verify list` output (a terminal-spoofing TOCTOU that would defeat R-20).
+// ===========================================================================
+
+describe("REQ-VERIFY-P1-R25: terminal-spoofing in agent-controlled command strings is neutralized", () => {
+  it("escapeForTerminal renders CR / LF / ESC / TAB / DEL / C1 visibly, leaving printable text intact", () => {
+    expect(escapeForTerminal("npm test")).toBe("npm test");
+    expect(escapeForTerminal("a\rb")).toBe("a\\rb");
+    expect(escapeForTerminal("a\nb")).toBe("a\\nb");
+    expect(escapeForTerminal("a\tb")).toBe("a\\tb");
+    expect(escapeForTerminal("a\x1b[2Kb")).toBe("a\\x1b[2Kb"); // ESC kept visible
+    expect(escapeForTerminal("a\x07b")).toBe("a\\x07b"); // BEL → \x07
+    expect(escapeForTerminal("a\x7fb")).toBe("a\\x7fb"); // DEL → \x7f
+    expect(escapeForTerminal("a\x9bb")).toBe("a\\x9bb"); // C1 CSI → \x9b
+  });
+
+  it("a command carrying an embedded ESC/CR is escaped in the `verify list` human output", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    // `verify add` has NO TTY barrier — an agent can inject control chars. The classic
+    // spoof: a CR rewrites the visible line so the operator reads `npm test` while the
+    // real command is something else.
+    const malicious = "evil\r\x1b[2Knpm test";
+    runVerifyAdd(tp.paths, malicious);
+
+    const listed = runVerifyList(tp.paths);
+    // The human rendering must NOT contain a raw ESC or CR…
+    expect(listed.human).not.toContain("\x1b");
+    expect(listed.human).not.toContain("\r");
+    // …and must show the escaped forms instead.
+    expect(listed.human).toContain("\\r");
+    expect(listed.human).toContain("\\x1b");
+    // The structured data payload keeps the RAW command verbatim for machine consumers.
+    expect((listed.data?.commands as string[])[0]).toBe(malicious);
+  });
+
+  it("the approve preview escapes control chars (stderr is spied, not captured by vitest stdio)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const malicious = "evil\rnpm test";
+    runVerifyAdd(tp.paths, malicious);
+
+    const chunks: string[] = [];
+    const orig = process.stderr.write.bind(process.stderr);
+    // @ts-expect-error narrow override for the test spy
+    process.stderr.write = (s: string) => {
+      chunks.push(String(s));
+      return true;
+    };
+    try {
+      // Decline at the prompt so nothing is sealed — we only care about the preview text.
+      runVerifyApprove(tp.paths, { as: "human", tty: { isTTY: true, stdinLine: "n" } });
+    } finally {
+      process.stderr.write = orig;
+    }
+    const preview = chunks.join("");
+    expect(preview).toContain("About to approve");
+    expect(preview).not.toContain("\r"); // the raw CR must not survive into the preview
+    expect(preview).toContain("\\r"); // it is rendered visibly instead
+  });
 });

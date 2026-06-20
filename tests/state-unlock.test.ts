@@ -30,11 +30,44 @@ describe("R-21: th state unlock", () => {
     expect(res.data?.reason).toBe("no_lock");
   });
 
-  it("an OWNER-LESS lock is reclaimed by default (the permanent-brick signature)", () => {
+  // R-26: staleness is decided by AGE ALONE. A YOUNG owner-less lock is now REFUSED
+  // without --force — R-21 acquires in two steps (mkdir, then writeOwner), so a LIVE
+  // lock is transiently owner-less mid-acquire, and the owner read returns null on ANY
+  // read error (EACCES/EBUSY), not just ENOENT. Removing it without --force could brick
+  // a live holder. (Previously this was reclaimed by default — that was the defect.)
+  it("a YOUNG owner-less lock is REFUSED without --force (R-26: may be a live mid-acquire holder)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const lock = lockDirOf(tp);
+    fs.mkdirSync(lock); // no `owner` file inside → owner-less, but fresh mtime
+    const res = runStateUnlock(tp.paths, {});
+    expect(res.ok).toBe(false);
+    expect(res.data?.error).toBe("lock_live");
+    expect(res.data?.ownerLess).toBe(true);
+    expect(res.human).toContain("--force");
+    expect(fs.existsSync(lock)).toBe(true); // left untouched
+  });
+
+  it("--force removes a young owner-less lock (the last-resort override still works)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const lock = lockDirOf(tp);
+    fs.mkdirSync(lock); // owner-less, fresh
+    const res = runStateUnlock(tp.paths, { force: true });
+    expect(res.ok).toBe(true);
+    expect(res.data?.removed).toBe(true);
+    expect(res.data?.forced).toBe(true);
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  it("an OLD owner-less lock (the genuine pre-R-21 brick) is reclaimed by default", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
     const lock = lockDirOf(tp);
     fs.mkdirSync(lock); // no `owner` file inside → owner-less
+    // Backdate past STALE_MS: this is the genuine permanent-brick signature.
+    const past = new Date(Date.now() - STALE_MS - 5_000);
+    fs.utimesSync(lock, past, past);
     const res = runStateUnlock(tp.paths, {});
     expect(res.ok).toBe(true);
     expect(res.data?.removed).toBe(true);

@@ -18,10 +18,11 @@ import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
 import { appendDecisionEvent } from "../src/core/decisions";
-import { writeVerifyReport } from "../src/core/verify";
+import { writeVerifyReport, writeVerifyConfig, verifyConfigPath } from "../src/core/verify";
 import {
   canAdvanceStage,
   canUnlockImplementation,
+  checkFinalVerification,
   checkImplementationSettled,
   validateTierTransition,
 } from "../src/core/gate-preconditions";
@@ -124,6 +125,38 @@ describe("AC-B13 — canUnlockImplementation refuses on ANY ladder rung (complet
     const s = state(paths);
     expect(canAdvanceStage(paths, s)).toEqual({ ok: true });
     expect(canUnlockImplementation(paths, s).error).toBe("stage_before_implementation_planning");
+  });
+});
+
+describe("R-23 — checkFinalVerification fails CLOSED on a corrupt verify.json", () => {
+  /** A state settled at final-verification (one done slice) so the verify-config rung is reached. */
+  function settledFinal(): ProjectPaths {
+    tp = makeTempProject();
+    const paths = tp.paths;
+    writeState(paths, {
+      ...initialState(),
+      current_stage: "final-verification",
+      slices: [{ id: "SLICE-1", status: "done", components: [] }],
+    });
+    return paths;
+  }
+
+  it("a present-but-corrupt verify.json → verify_config_corrupt (NOT verify_suite_never_run/pass)", () => {
+    const paths = settledFinal();
+    // Corrupt config bytes: the old readVerifyConfig collapsed this to `{ commands: [] }`,
+    // skipping the suite rung so the gate PASSED on an unreadable config.
+    fs.writeFileSync(verifyConfigPath(paths), "}{ broken json", "utf8");
+    const res = checkFinalVerification(paths, state(paths));
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("verify_config_corrupt");
+  });
+
+  it("a well-formed config with a command but no report → verify_suite_never_run (regression: corrupt path is distinct)", () => {
+    const paths = settledFinal();
+    writeVerifyConfig(paths, { commands: ["npm test"] });
+    const res = checkFinalVerification(paths, state(paths));
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("verify_suite_never_run");
   });
 });
 

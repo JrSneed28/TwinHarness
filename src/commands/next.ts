@@ -401,6 +401,22 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
           explain,
         );
       }
+      case "verify_config_corrupt": {
+        // R-23: verify.json is present but unreadable/corrupt — fail CLOSED. A corrupt
+        // config used to read as an empty (and thus trivially "passing") suite; now it
+        // is its own blocker so `th next` points at the repair rather than waving the
+        // run through to the human sign-off.
+        return emit(
+          {
+            kind: "run-verify",
+            action:
+              "Final verification is blocked — verify.json is present but unreadable/corrupt. " +
+              "Inspect it, or run `th verify clear` and re-add the commands, then `th verify approve` and `th verify run` before sign-off.",
+            why: "An unreadable verify config must fail CLOSED: treating it as an empty/approved set would let a run claim completion without ever exercising the suite the operator wired up.",
+          },
+          explain,
+        );
+      }
       case "verify_suite_never_run": {
         const commands = fv.detail!.commands as number;
         return emit(

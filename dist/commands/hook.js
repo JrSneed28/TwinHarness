@@ -137,7 +137,26 @@ function evaluateStopGate(paths) {
         }
         // Verify-suite gate: if the operator configured project test commands, the
         // run may not claim completion with a red or never-run suite.
-        const commands = (0, verify_1.readVerifyConfig)(paths).commands;
+        //
+        // R-23: read through loadVerifyConfig (NOT readVerifyConfig) so a present-but-
+        // CORRUPT verify.json fails CLOSED here too. readVerifyConfig collapses a corrupt
+        // config to `{ commands: [] }`, which made this whole suite block skip (length 0)
+        // and let a run STOP/complete on an unreadable config — the same fail-OPEN that
+        // `runVerifyRun`/`runVerifyApprove` already refuse. A corrupt config is now a hard
+        // block: the operator wired a suite, so an unreadable suite config is a stop
+        // condition, not a silent "no commands".
+        const loadedVerify = (0, verify_1.loadVerifyConfig)(paths);
+        if (loadedVerify.status === "corrupt") {
+            return {
+                block: true,
+                reasons: [
+                    `Stop-gate (final-verification suite check): verify.json is present but unreadable/corrupt — ` +
+                        `refusing to complete (fail-closed). It is NOT treated as an empty/approved set. ` +
+                        `Inspect it, or run \`th verify clear\` and re-configure, then \`th verify approve\` and \`th verify run\` before completing.`,
+                ],
+            };
+        }
+        const commands = loadedVerify.config.commands;
         if (commands.length > 0) {
             const report = (0, verify_1.readVerifyReport)(paths);
             if (!report) {
@@ -747,6 +766,41 @@ function runHookPretoolGate(paths, input, env = process.env) {
                     `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1. ` +
                     `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision.`;
                 return fireGate("deny", reason);
+            }
+        }
+    }
+    // Step c1b (R-24): a Bash-mediated write that would OVERWRITE a REGISTERED approved
+    // artifact is held for human confirmation — mirroring step e3 (R-14) for Write/Edit.
+    // A Bash tool call carries `command` and no `file_path`, so it short-circuits at step
+    // d (`!filePath → allow`) BEFORE ever reaching the step-e3 R-14 guard, and the
+    // doc/state allowlist otherwise blanket-allows the whole `docs/` surface for Bash —
+    // so `echo x > docs/01-requirements.md` silently clobbered a reviewed artifact. We
+    // close that with the SAME conservative target extraction + matcher and the SAME
+    // `ask` disposition as Write/Edit (NOT a deny — a deliberate re-author must still be
+    // approvable interactively). Runs in EVERY phase/mode (like e3), ahead of the
+    // phase/strict-gated Bash gates below. Reuses extractBashWriteTargets +
+    // matchApprovedArtifact — no reimplementation. Honest caveat (shared with R-19/M-4):
+    // a metachar/variable-obscured target (`> $f`, heredoc, `python -c`) is dropped by
+    // extractBashWriteTargets and is NOT caught here — this is the parseable-target guard.
+    if (bashCommand) {
+        const baseC1b = input?.cwd ?? paths.root;
+        for (const token of extractBashWriteTargets(bashCommand)) {
+            const absC1b = path.isAbsolute(token) ? token : path.resolve(baseC1b, token);
+            const relC1b = toRootRelative(absC1b, paths.root);
+            if (relC1b === null)
+                continue; // outside root → not our concern
+            const matched = (0, artifact_guard_1.matchApprovedArtifact)(state.approved_artifacts, paths.root, absC1b);
+            if (matched) {
+                const reason = `TwinHarness write-gate held this write for confirmation (R-24 — approved-artifact overwrite via Bash). ` +
+                    `Target path: ${relC1b}. ` +
+                    `This path is a REGISTERED approved artifact (${matched.file} v${matched.version}, hash ${matched.hash}); ` +
+                    `a Bash-mediated write (e.g. echo/sed/tee redirection) must not silently overwrite reviewed/human-edited content ` +
+                    `any more than a Write/Edit can (R-14). ` +
+                    `If this re-author is intended, APPROVE the write, then record the new content with ` +
+                    `\`th artifact register ${matched.file} --version ${matched.version + 1}\` (a version bump). ` +
+                    `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1. ` +
+                    `AGENT INSTRUCTION: do NOT blindly retry — confirm the overwrite is intended before proceeding.`;
+                return fireGate("ask", reason);
             }
         }
     }
