@@ -444,47 +444,119 @@ export function redactSecrets(text: string): string {
  * from a possibly-untrusted project. An operator who needs a specific var present
  * can export it via a wrapper script they author, keeping the allowlist explicit.
  */
-const ENV_ALLOWLIST: ReadonlySet<string> = new Set([
-  "PATH",
-  "HOME",
-  "TMPDIR",
-  "TMP",
-  "TEMP",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "SHELL",
-  "TERM",
-  "USER",
-  "LOGNAME",
-  // Windows essentials.
-  "SystemRoot",
-  "SYSTEMROOT",
-  "ComSpec",
-  "COMSPEC",
-  "PATHEXT",
-  "WINDIR",
-  "USERPROFILE",
-  "HOMEDRIVE",
-  "HOMEPATH",
-  "APPDATA",
-  "LOCALAPPDATA",
-  "ProgramData",
-  "ProgramFiles",
-  "ProgramFiles(x86)",
-]);
+/**
+ * Allowlisted env-var names (the minimum a shell + test runner needs). Matched
+ * CASE-INSENSITIVELY (F1): native-Windows/PowerShell surfaces `Path`/`ProgramFiles`
+ * in mixed case via `Object.keys(process.env)`, and a case-sensitive Set silently
+ * dropped the critical PATH var — so a `th verify run` launched from PowerShell/cmd
+ * couldn't resolve `node_modules/.bin` shims, `git`, `bash`, or corp tools. The names
+ * here are stored upper-cased and compared against `k.toUpperCase()`. The Windows
+ * dual-cased pairs (`SystemRoot`/`SYSTEMROOT`, …) collapse to one entry under folding.
+ */
+const ENV_ALLOWLIST: ReadonlySet<string> = new Set(
+  [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "SHELL",
+    "TERM",
+    "USER",
+    "LOGNAME",
+    // Windows essentials.
+    "SYSTEMROOT",
+    "COMSPEC",
+    "PATHEXT",
+    "WINDIR",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    // Benign, explicitly-named tool vars a JS suite legitimately reads (R-05). These
+    // are data/selectors, NOT code-injection or trust-redirect surfaces — unlike
+    // NODE_OPTIONS/NODE_EXTRA_CA_CERTS/npm_config_registry, which are denied below.
+    "NODE_ENV", // build/test mode selector (development|production|test)
+    "FORCE_COLOR", // color-output toggle honored by node/npm/vitest
+    "NO_COLOR", // de-facto standard color opt-out
+    "CI", // many runners branch on this; pure boolean selector
+  ].map((n) => n.toUpperCase()),
+);
 
 /**
- * Build the curated child env from `parentEnv` (default `process.env`): keep only
- * allowlisted names; carry through a tool-prefix family (`NODE_*`, `npm_*`) that a
- * JS test suite commonly relies on, but never blanket-inherit. Returns a plain
- * record suitable for `spawnSync`'s `env`.
+ * Closed denylist of `NODE_*` / `npm_*` vars that turn a verify child into a code-
+ * execution, TLS-trust, or supply-chain redirect surface (R-05). The pre-fix code
+ * forwarded EVERY `NODE_*`/`npm_*` var verbatim, so a poisoned parent env
+ * (`NODE_OPTIONS=--require /evil.js`, `NODE_EXTRA_CA_CERTS=…`, `npm_config_registry=…`)
+ * injected straight into every node/npm/vitest child. We now forward NOTHING by
+ * prefix: only the explicit `ENV_ALLOWLIST` members above pass. This set is kept as
+ * a belt-and-suspenders tripwire (a NODE_/npm_ var that somehow reached the allowlist
+ * would still be dropped) and to document the precise vectors being closed.
+ *
+ * Matched CASE-INSENSITIVELY (F1): Windows env-var names are case-insensitive, so a
+ * `nodE_OptionS` must drop exactly like `NODE_OPTIONS`. Stored upper-cased; compared
+ * against `k.toUpperCase()`. Anything matching `--inspect` (a debugger/RCE bridge) in
+ * its VALUE is also dropped regardless of name (see {@link curatedEnv}).
+ */
+const ENV_DENYLIST: ReadonlySet<string> = new Set(
+  [
+    // node code-injection / module-resolution / trust
+    "NODE_OPTIONS",
+    "NODE_EXTRA_CA_CERTS",
+    "NODE_TLS_REJECT_UNAUTHORIZED",
+    "NODE_PATH",
+    "NODE_REPL_EXTERNAL_MODULE",
+    "NODE_INSPECT",
+    // npm trust / supply-chain redirect / script-execution toggles
+    "npm_config_registry",
+    "npm_config_cafile",
+    "npm_config_ca",
+    "npm_config_proxy",
+    "npm_config_https_proxy",
+    "npm_config_https-proxy",
+    "npm_config_userconfig",
+    "npm_config_globalconfig",
+    "npm_config_prefix",
+    "npm_config_node_options",
+    "npm_config_ignore_scripts",
+  ].map((n) => n.toUpperCase()),
+);
+
+/**
+ * Build the curated child env from `parentEnv` (default `process.env`): keep ONLY
+ * explicitly-allowlisted names — never a blanket `NODE_*`/`npm_*` passthrough (R-05).
+ *
+ * The old open prefix (`^(?:NODE_|npm_)`) forwarded code-injection and trust-redirect
+ * vars verbatim into every child (`NODE_OPTIONS=--require /evil.js`, `NODE_EXTRA_CA_CERTS`,
+ * `npm_config_registry`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, …). Now a name passes iff it
+ * is in {@link ENV_ALLOWLIST}; the {@link ENV_DENYLIST} and an `--inspect`-in-value check
+ * are redundant tripwires that drop a dangerous var even if it were ever allowlisted.
+ *
+ * All name matching is CASE-INSENSITIVE (F1) so it is correct on Windows (where env
+ * names are case-insensitive and surfaced in mixed case — `Path`, `ProgramFiles`): the
+ * allowlisted PATH survives in any casing, and a `nodE_OptionS` is still denied. The
+ * ORIGINAL key casing and value are emitted unchanged (we only case-fold the compare).
+ * An operator who needs another var present exports it via a wrapper script they author,
+ * keeping the allowlist explicit. Returns a plain record suitable for `spawnSync`'s `env`.
  */
 export function curatedEnv(parentEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(parentEnv)) {
     if (v === undefined) continue;
-    if (ENV_ALLOWLIST.has(k) || /^(?:NODE_|npm_)/.test(k)) out[k] = v;
+    const kUpper = k.toUpperCase();
+    if (ENV_DENYLIST.has(kUpper)) continue; // tripwire: never forward a known-dangerous var
+    // Drop any NODE_*/npm_* var whose VALUE tries to attach a debugger / open an RCE
+    // bridge (--inspect), even under an unanticipated alias name. Scoped (case-folded)
+    // to the tool-prefix family so a benign allowlisted var (PATH, etc.) is judged by name.
+    if (/^(?:NODE_|NPM_)/.test(kUpper) && /--inspect\b/.test(v)) continue;
+    if (ENV_ALLOWLIST.has(kUpper)) out[k] = v; // preserve original key casing + value
   }
   return out;
 }
@@ -522,46 +594,187 @@ export function looksRepoMutating(command: string): boolean {
 // Process-tree kill (#19, P6-4) — kill grandchildren on timeout
 // ---------------------------------------------------------------------------
 
+/** A parent→children adjacency map plus the helper that builds it (shared by all parsers). */
+type ChildrenMap = Map<number, number[]>;
+function addEdge(childrenOf: ChildrenMap, parentPid: number, childPid: number): void {
+  if (!Number.isInteger(parentPid) || !Number.isInteger(childPid)) return;
+  const arr = childrenOf.get(parentPid) ?? [];
+  arr.push(childPid);
+  childrenOf.set(parentPid, arr);
+}
+
 /**
- * Kill the process TREE rooted at the timed-out child `pid` (#19, P6-4).
- * `spawnSync`'s own timeout only SIGKILLs the direct child (the shell); a test
- * runner or server the shell spawned (vitest workers, a dev server) can survive
- * as an orphan and hold the project cwd. This reaps the rest of the tree.
- *
- * Windows: `taskkill /pid <pid> /T /F` — a real recursive tree kill (the case the
- * original code missed entirely; spawnSync's SIGKILL on Windows does not cascade).
- *
- * POSIX: `spawnSync` cannot put the child in its own detached process group (that
- * option is `spawn`-only), so the child shares OUR group — signalling `-ourGroup`
- * would suicide. We instead reap descendants by walking the child's children from
- * `ps` (PID/PPID) and SIGKILLing each, depth-first, then the child itself. We never
- * signal a process group, so this can never kill the verify process or its siblings.
- * Best-effort — never throws.
+ * Parse POSIX `ps -e -o pid=,ppid=` output ("<pid> <ppid>" per line) into a
+ * parent→children map. Exported for unit coverage of the parser.
  */
-export function killProcessTree(pid: number): void {
-  if (!pid || pid <= 0) return;
+export function parsePsProcessTable(stdout: string): ChildrenMap {
+  const childrenOf: ChildrenMap = new Map();
+  for (const line of (stdout ?? "").split("\n")) {
+    const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    if (!m) continue;
+    addEdge(childrenOf, Number(m[2]), Number(m[1])); // ppid, pid
+  }
+  return childrenOf;
+}
+
+/**
+ * Parse `Get-CimInstance Win32_Process | Select ProcessId,ParentProcessId |
+ * ConvertTo-Csv -NoTypeInformation` output into a parent→children map (F4). CSV is
+ * used over JSON because `ConvertTo-Json` emits a bare object for a single row and an
+ * array otherwise; CSV is uniformly header + quoted rows for 0/1/many. The two value
+ * columns appear in selection order (ProcessId, ParentProcessId). Exported for tests.
+ */
+export function parseCsvProcessTable(stdout: string): ChildrenMap {
+  const childrenOf: ChildrenMap = new Map();
+  const lines = (stdout ?? "").split(/\r?\n/).filter((l) => l.trim() !== "");
+  if (lines.length === 0) return childrenOf;
+  // Locate the header to know column order; tolerate a leading "#TYPE …" comment line.
+  let headerIdx = lines.findIndex((l) => /ProcessId/i.test(l) && /ParentProcessId/i.test(l));
+  if (headerIdx < 0) headerIdx = 0;
+  const header = lines[headerIdx]!.split(",").map((c) => c.replace(/^"|"$/g, "").trim().toLowerCase());
+  const pidCol = header.indexOf("processid");
+  const ppidCol = header.indexOf("parentprocessid");
+  if (pidCol < 0 || ppidCol < 0) return childrenOf;
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const cells = lines[i]!.split(",").map((c) => c.replace(/^"|"$/g, "").trim());
+    const pid = Number(cells[pidCol]);
+    const ppid = Number(cells[ppidCol]);
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
+    addEdge(childrenOf, ppid, pid);
+  }
+  return childrenOf;
+}
+
+/**
+ * Parse legacy `wmic process get ParentProcessId,ProcessId` output (columns come back
+ * alphabetically as "ParentProcessId  ProcessId", whitespace-padded, with a header row
+ * skipped by the all-digits match) into a parent→children map. Exported for tests.
+ */
+export function parseWmicProcessTable(stdout: string): ChildrenMap {
+  const childrenOf: ChildrenMap = new Map();
+  for (const line of (stdout ?? "").split("\n")) {
+    const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    if (!m) continue;
+    addEdge(childrenOf, Number(m[1]), Number(m[2])); // ParentProcessId, ProcessId
+  }
+  return childrenOf;
+}
+
+/**
+ * Run a process-table snapshot command and return its stdout (or "" on failure).
+ * argv-array, no `shell:true`. A module-level seam so a test can stub the command
+ * matrix without spawning real processes.
+ */
+let runSnapshotCommand = (cmd: string, args: string[]): string => {
+  const out = spawnSync(cmd, args, { encoding: "utf8" });
+  return out.error ? "" : (out.stdout ?? "");
+};
+
+/** Test seam: override the snapshot command runner; returns a restore fn. */
+export function __setSnapshotCommandRunner(fn: (cmd: string, args: string[]) => string): () => void {
+  const prev = runSnapshotCommand;
+  runSnapshotCommand = fn;
+  return () => {
+    runSnapshotCommand = prev;
+  };
+}
+
+/**
+ * Snapshot the live process table as a `parentPid → childPids` map, on both
+ * platforms (R-07). POSIX uses `ps -e -o pid=,ppid=`. Windows tries, in order:
+ * PowerShell `Get-CimInstance Win32_Process` (CSV), then the older `Get-WmiObject`,
+ * then legacy `wmic` — because `wmic` is DEPRECATED and removed-by-default (Feature-
+ * on-Demand) on recent Win11, so it may be absent (F4). The FIRST command that yields
+ * a non-empty map wins. Empty map on total failure; the caller then falls back to an
+ * OS-level `taskkill /T` and a single-pid kill. Never throws.
+ *
+ * Why a snapshot walk and not `taskkill /T` alone (the pre-fix Windows path): by the
+ * time the reap runs, `spawnSync` has ALREADY SIGKILLed the direct child (the shell),
+ * so `taskkill /pid <deadRoot> /T` reports "process not found" and reaps NOTHING — the
+ * grandchildren (vitest workers, a dev server) leak and can hold the cwd lock. The
+ * process table still records each grandchild's ParentProcessId pointing at the
+ * (now-dead) intermediate, so we can reconstruct and kill the whole subtree by PID.
+ */
+function snapshotChildrenMap(): ChildrenMap {
   try {
     if (process.platform === "win32") {
-      spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
-      return;
-    }
-    // Build a pid → children map from `ps -e -o pid=,ppid=` (POSIX-portable).
-    const childrenOf = new Map<number, number[]>();
-    try {
-      const out = spawnSync("ps", ["-e", "-o", "pid=,ppid="], { encoding: "utf8" });
-      for (const line of (out.stdout ?? "").split("\n")) {
-        const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
-        if (!m) continue;
-        const childPid = Number(m[1]);
-        const parentPid = Number(m[2]);
-        const arr = childrenOf.get(parentPid) ?? [];
-        arr.push(childPid);
-        childrenOf.set(parentPid, arr);
+      // PowerShell CIM is the primary path; Get-WmiObject is an older PS fallback;
+      // wmic is the legacy last resort. Each yields the same CSV columns we parse.
+      const psSelect = "Select-Object ProcessId,ParentProcessId | ConvertTo-Csv -NoTypeInformation";
+      const attempts: Array<{ cmd: string; args: string[]; parse: (s: string) => ChildrenMap }> = [
+        {
+          cmd: "powershell",
+          args: ["-NoProfile", "-NonInteractive", "-Command", `Get-CimInstance Win32_Process | ${psSelect}`],
+          parse: parseCsvProcessTable,
+        },
+        {
+          cmd: "powershell",
+          args: ["-NoProfile", "-NonInteractive", "-Command", `Get-WmiObject Win32_Process | ${psSelect}`],
+          parse: parseCsvProcessTable,
+        },
+        {
+          cmd: "wmic",
+          args: ["process", "get", "ParentProcessId,ProcessId"],
+          parse: parseWmicProcessTable,
+        },
+      ];
+      for (const a of attempts) {
+        const map = a.parse(runSnapshotCommand(a.cmd, a.args));
+        if (map.size > 0) return map;
       }
-    } catch {
-      // `ps` unavailable → fall back to single-pid kill below.
+      return new Map();
     }
-    // Depth-first: collect the whole subtree, then SIGKILL leaves-first.
+    return parsePsProcessTable(runSnapshotCommand("ps", ["-e", "-o", "pid=,ppid="]));
+  } catch {
+    // Snapshot tool unavailable → empty map; caller degrades to taskkill /T + single-pid kill.
+    return new Map();
+  }
+}
+
+/** SIGKILL (POSIX) / `taskkill /F` (Windows) a single pid. Best-effort — never throws. */
+function killOne(pid: number): void {
+  try {
+    if (process.platform === "win32") {
+      spawnSync("taskkill", ["/pid", String(pid), "/F"], { stdio: "ignore" });
+    } else {
+      process.kill(pid, "SIGKILL");
+    }
+  } catch {
+    /* already dead / not permitted — best-effort */
+  }
+}
+
+/**
+ * Kill the process TREE rooted at the killed child `pid` (#19, P6-4; hardened in
+ * R-07). `spawnSync`'s own timeout/overflow kill only SIGKILLs the direct child
+ * (the shell); a test runner or server the shell spawned (vitest workers, a dev
+ * server) can survive as an orphan and hold the project cwd. This reaps the rest
+ * of the tree on BOTH platforms by walking a live PID/PPID snapshot and killing
+ * each descendant, depth-first, leaves-first, then the root.
+ *
+ * We never signal a process GROUP (POSIX `spawnSync` can't detach the child into
+ * its own group — that's `spawn`-only — so the child shares OUR group; signalling
+ * the group would suicide). Killing explicit PIDs from the snapshot can never reach
+ * the verify process or its siblings. Best-effort — never throws.
+ */
+export function killProcessTree(pid: number): void {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  try {
+    const childrenOf = snapshotChildrenMap();
+    // F4 safety net: if no snapshot was available (e.g. wmic absent AND PowerShell
+    // CIM failed on a locked-down Windows host), we have no descendant PIDs to walk.
+    // Attempt the OS-level recursive tree kill so a missing snapshot doesn't mean zero
+    // reap. It may still find nothing if the root is already dead, but it's strictly
+    // better than killing only the root — and on POSIX there's no equivalent, so we
+    // just fall through to the single-pid kill. argv-array, numeric pid, no shell.
+    if (childrenOf.size === 0 && process.platform === "win32") {
+      try {
+        spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+      } catch {
+        /* best-effort */
+      }
+    }
+    // Depth-first: collect the whole subtree, then kill leaves-first.
     const order: number[] = [];
     const stack = [pid];
     const seen = new Set<number>();
@@ -572,17 +785,22 @@ export function killProcessTree(pid: number): void {
       order.push(cur);
       for (const c of childrenOf.get(cur) ?? []) stack.push(c);
     }
-    for (const target of order.reverse()) {
-      try {
-        process.kill(target, "SIGKILL");
-      } catch {
-        /* already dead / not permitted — best-effort */
-      }
-    }
+    for (const target of order.reverse()) killOne(target);
   } catch {
     // Best-effort cleanup; a kill failure must not crash the run.
   }
 }
+
+/**
+ * Conventional exit codes recorded for a child that `spawnSync` killed (status:null).
+ * 124 = command timed out (matches GNU `timeout`); we keep it ONLY for a real
+ * ETIMEDOUT. A `maxBuffer` overflow (ENOBUFS) or any other non-timeout kill is NOT
+ * a timeout, so it gets a DISTINCT code (R-07) — recording 124 for an overflow
+ * mislabels it as a timeout and hides the leak in the report.
+ */
+export const EXIT_TIMEOUT = 124;
+export const EXIT_OUTPUT_OVERFLOW = 125; // ENOBUFS: child produced more output than maxBuffer
+export const EXIT_KILLED = 137; // 128 + SIGKILL(9): any other non-timeout kill (status null)
 
 export interface RunCommandsOptions {
   now?: () => Date;
@@ -591,6 +809,18 @@ export interface RunCommandsOptions {
   env?: NodeJS.ProcessEnv;
   /** When true, refuse to execute a command that looks repo-mutating (#19, P6-5). */
   readOnly?: boolean;
+  /**
+   * Max bytes of combined stdout+stderr buffered per child before `spawnSync` kills
+   * it with ENOBUFS (default 64 MiB). Exposed mainly so tests can force the overflow
+   * path; production callers keep the default.
+   */
+  maxBuffer?: number;
+  /**
+   * Seam for the process-tree reap (default {@link killProcessTree}). Injectable so a
+   * test can assert the reap fires on every killed-child path without spawning a real
+   * grandchild on every platform. Production callers never set this.
+   */
+  killTree?: (pid: number) => void;
 }
 
 /**
@@ -603,6 +833,13 @@ export interface RunCommandsOptions {
  * recorded as a failure, so a hanging command can never block the run forever.
  * stdin is closed (`input: ""`) so a command that reads stdin gets EOF instead of
  * blocking.
+ *
+ * Kill paths (R-07): the process-tree reap fires on ANY child that `spawnSync`
+ * killed (status null with a pid) — a timeout (ETIMEDOUT), a `maxBuffer` overflow
+ * (ENOBUFS), or any other non-completion — so grandchildren never leak. The recorded
+ * exit code is HONEST: {@link EXIT_TIMEOUT} (124) ONLY for a real timeout,
+ * {@link EXIT_OUTPUT_OVERFLOW} (125) for an output overflow, {@link EXIT_KILLED} (137)
+ * for any other kill — never 124 for a non-timeout.
  *
  * Hardening (#19): the child env is curated (not a full inherit; P6-3); the
  * recorded `outputTail` is secret-redacted (P6-3); and in `readOnly` mode (P6-5) a
@@ -623,6 +860,8 @@ export function runCommands(
   const now = opts.now ?? (() => new Date());
   const timeoutMs = opts.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
   const env = opts.env ?? curatedEnv();
+  const maxBuffer = opts.maxBuffer ?? 64 * 1024 * 1024;
+  const killTree = opts.killTree ?? killProcessTree;
 
   const results: VerifyResult[] = [];
   for (const command of commands) {
@@ -646,27 +885,47 @@ export function runCommands(
       cwd: root,
       shell: true,
       encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
+      maxBuffer,
       timeout: timeoutMs,
       killSignal: "SIGKILL",
       input: "",
       env,
     });
     const durationMs = Date.now() - start;
-    // A timeout kill surfaces as proc.error with code ETIMEDOUT and a null status.
-    const timedOut = (proc.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT";
-    if (timedOut && typeof proc.pid === "number") {
+    const errCode = (proc.error as NodeJS.ErrnoException | undefined)?.code;
+    // A timeout kill surfaces as ETIMEDOUT; a maxBuffer overflow as ENOBUFS — BOTH
+    // leave status null with the direct child already SIGKILLed (R-07).
+    const timedOut = errCode === "ETIMEDOUT";
+    const outputOverflow = errCode === "ENOBUFS";
+    // Reap the tree on ANY killed/failed-to-complete child (status null with a pid),
+    // not just on timeout — the pre-fix code skipped the reap on ENOBUFS, leaking
+    // grandchildren (vitest workers, dev servers) that could hold the cwd lock (R-07).
+    if (proc.status === null && typeof proc.pid === "number") {
       // spawnSync already SIGKILLed the direct child; reap the rest of the tree so
-      // a grandchild (test runner, server) can't linger and hold the cwd (#19, P6-4).
-      killProcessTree(proc.pid);
+      // a grandchild can't linger and hold the cwd (#19, P6-4; widened in R-07).
+      killTree(proc.pid);
     }
-    const combined = `${proc.stdout ?? ""}${proc.stderr ?? ""}${timedOut ? `\n[th verify] command (and its process tree) killed after ${timeoutMs}ms timeout` : ""}`;
+    // Append an honest reason note — a timeout ONLY when it really timed out; an
+    // output-overflow note for ENOBUFS; a generic kill note for any other null-status
+    // termination. Never claim "timeout" for a non-timeout (R-07).
+    const reasonNote = timedOut
+      ? `\n[th verify] command (and its process tree) killed after ${timeoutMs}ms timeout`
+      : outputOverflow
+        ? `\n[th verify] command (and its process tree) killed: output exceeded the ${maxBuffer}-byte buffer (ENOBUFS)`
+        : proc.status === null
+          ? `\n[th verify] command (and its process tree) killed before completion${errCode ? ` (${errCode})` : ""}`
+          : "";
+    const combined = `${proc.stdout ?? ""}${proc.stderr ?? ""}${reasonNote}`;
     // Redact secrets BEFORE truncation so a redaction that straddles the tail
     // boundary still applies, then take the tail (#19, P6-3).
     const redacted = redactSecrets(combined);
     const outputTail = redacted.length > OUTPUT_TAIL_CHARS ? redacted.slice(-OUTPUT_TAIL_CHARS) : redacted;
     // spawnSync returns status null when the process was killed or failed to spawn.
-    const exitCode = proc.status ?? 124; // 124 = conventional timeout/kill exit code
+    // Record an HONEST exit code: 124 ONLY for a real timeout; a distinct code for an
+    // output-overflow or any other non-timeout kill so the report can tell them apart.
+    const exitCode =
+      proc.status ??
+      (timedOut ? EXIT_TIMEOUT : outputOverflow ? EXIT_OUTPUT_OVERFLOW : EXIT_KILLED);
     results.push({ command, exitCode, ok: proc.status === 0, durationMs, outputTail });
   }
   return {

@@ -17758,40 +17758,77 @@ function redactSecrets(text) {
   for (const { re, replace } of REDACTION_RULES) out = out.replace(re, replace);
   return out;
 }
-var ENV_ALLOWLIST = /* @__PURE__ */ new Set([
-  "PATH",
-  "HOME",
-  "TMPDIR",
-  "TMP",
-  "TEMP",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "SHELL",
-  "TERM",
-  "USER",
-  "LOGNAME",
-  // Windows essentials.
-  "SystemRoot",
-  "SYSTEMROOT",
-  "ComSpec",
-  "COMSPEC",
-  "PATHEXT",
-  "WINDIR",
-  "USERPROFILE",
-  "HOMEDRIVE",
-  "HOMEPATH",
-  "APPDATA",
-  "LOCALAPPDATA",
-  "ProgramData",
-  "ProgramFiles",
-  "ProgramFiles(x86)"
-]);
+var ENV_ALLOWLIST = new Set(
+  [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "SHELL",
+    "TERM",
+    "USER",
+    "LOGNAME",
+    // Windows essentials.
+    "SYSTEMROOT",
+    "COMSPEC",
+    "PATHEXT",
+    "WINDIR",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    // Benign, explicitly-named tool vars a JS suite legitimately reads (R-05). These
+    // are data/selectors, NOT code-injection or trust-redirect surfaces — unlike
+    // NODE_OPTIONS/NODE_EXTRA_CA_CERTS/npm_config_registry, which are denied below.
+    "NODE_ENV",
+    // build/test mode selector (development|production|test)
+    "FORCE_COLOR",
+    // color-output toggle honored by node/npm/vitest
+    "NO_COLOR",
+    // de-facto standard color opt-out
+    "CI"
+    // many runners branch on this; pure boolean selector
+  ].map((n) => n.toUpperCase())
+);
+var ENV_DENYLIST = new Set(
+  [
+    // node code-injection / module-resolution / trust
+    "NODE_OPTIONS",
+    "NODE_EXTRA_CA_CERTS",
+    "NODE_TLS_REJECT_UNAUTHORIZED",
+    "NODE_PATH",
+    "NODE_REPL_EXTERNAL_MODULE",
+    "NODE_INSPECT",
+    // npm trust / supply-chain redirect / script-execution toggles
+    "npm_config_registry",
+    "npm_config_cafile",
+    "npm_config_ca",
+    "npm_config_proxy",
+    "npm_config_https_proxy",
+    "npm_config_https-proxy",
+    "npm_config_userconfig",
+    "npm_config_globalconfig",
+    "npm_config_prefix",
+    "npm_config_node_options",
+    "npm_config_ignore_scripts"
+  ].map((n) => n.toUpperCase())
+);
 function curatedEnv(parentEnv = process.env) {
   const out = {};
   for (const [k, v] of Object.entries(parentEnv)) {
     if (v === void 0) continue;
-    if (ENV_ALLOWLIST.has(k) || /^(?:NODE_|npm_)/.test(k)) out[k] = v;
+    const kUpper = k.toUpperCase();
+    if (ENV_DENYLIST.has(kUpper)) continue;
+    if (/^(?:NODE_|NPM_)/.test(kUpper) && /--inspect\b/.test(v)) continue;
+    if (ENV_ALLOWLIST.has(kUpper)) out[k] = v;
   }
   return out;
 }
@@ -17806,26 +17843,104 @@ function looksRepoMutating(command) {
   if (/\bgit\s+(add|commit|push|pull|fetch|merge|rebase|reset|checkout|clean|stash|apply|am|cherry-pick|tag|branch\s+-[dD])\b/.test(c)) return true;
   return false;
 }
-function killProcessTree(pid) {
-  if (!pid || pid <= 0) return;
+function addEdge(childrenOf, parentPid, childPid) {
+  if (!Number.isInteger(parentPid) || !Number.isInteger(childPid)) return;
+  const arr = childrenOf.get(parentPid) ?? [];
+  arr.push(childPid);
+  childrenOf.set(parentPid, arr);
+}
+function parsePsProcessTable(stdout) {
+  const childrenOf = /* @__PURE__ */ new Map();
+  for (const line of (stdout ?? "").split("\n")) {
+    const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    if (!m) continue;
+    addEdge(childrenOf, Number(m[2]), Number(m[1]));
+  }
+  return childrenOf;
+}
+function parseCsvProcessTable(stdout) {
+  const childrenOf = /* @__PURE__ */ new Map();
+  const lines = (stdout ?? "").split(/\r?\n/).filter((l) => l.trim() !== "");
+  if (lines.length === 0) return childrenOf;
+  let headerIdx = lines.findIndex((l) => /ProcessId/i.test(l) && /ParentProcessId/i.test(l));
+  if (headerIdx < 0) headerIdx = 0;
+  const header = lines[headerIdx].split(",").map((c) => c.replace(/^"|"$/g, "").trim().toLowerCase());
+  const pidCol = header.indexOf("processid");
+  const ppidCol = header.indexOf("parentprocessid");
+  if (pidCol < 0 || ppidCol < 0) return childrenOf;
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const cells = lines[i].split(",").map((c) => c.replace(/^"|"$/g, "").trim());
+    const pid = Number(cells[pidCol]);
+    const ppid = Number(cells[ppidCol]);
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
+    addEdge(childrenOf, ppid, pid);
+  }
+  return childrenOf;
+}
+function parseWmicProcessTable(stdout) {
+  const childrenOf = /* @__PURE__ */ new Map();
+  for (const line of (stdout ?? "").split("\n")) {
+    const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    if (!m) continue;
+    addEdge(childrenOf, Number(m[1]), Number(m[2]));
+  }
+  return childrenOf;
+}
+var runSnapshotCommand = (cmd, args) => {
+  const out = (0, import_node_child_process.spawnSync)(cmd, args, { encoding: "utf8" });
+  return out.error ? "" : out.stdout ?? "";
+};
+function snapshotChildrenMap() {
   try {
     if (process.platform === "win32") {
-      (0, import_node_child_process.spawnSync)("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
-      return;
-    }
-    const childrenOf = /* @__PURE__ */ new Map();
-    try {
-      const out = (0, import_node_child_process.spawnSync)("ps", ["-e", "-o", "pid=,ppid="], { encoding: "utf8" });
-      for (const line of (out.stdout ?? "").split("\n")) {
-        const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
-        if (!m) continue;
-        const childPid = Number(m[1]);
-        const parentPid = Number(m[2]);
-        const arr = childrenOf.get(parentPid) ?? [];
-        arr.push(childPid);
-        childrenOf.set(parentPid, arr);
+      const psSelect = "Select-Object ProcessId,ParentProcessId | ConvertTo-Csv -NoTypeInformation";
+      const attempts = [
+        {
+          cmd: "powershell",
+          args: ["-NoProfile", "-NonInteractive", "-Command", `Get-CimInstance Win32_Process | ${psSelect}`],
+          parse: parseCsvProcessTable
+        },
+        {
+          cmd: "powershell",
+          args: ["-NoProfile", "-NonInteractive", "-Command", `Get-WmiObject Win32_Process | ${psSelect}`],
+          parse: parseCsvProcessTable
+        },
+        {
+          cmd: "wmic",
+          args: ["process", "get", "ParentProcessId,ProcessId"],
+          parse: parseWmicProcessTable
+        }
+      ];
+      for (const a of attempts) {
+        const map = a.parse(runSnapshotCommand(a.cmd, a.args));
+        if (map.size > 0) return map;
       }
-    } catch {
+      return /* @__PURE__ */ new Map();
+    }
+    return parsePsProcessTable(runSnapshotCommand("ps", ["-e", "-o", "pid=,ppid="]));
+  } catch {
+    return /* @__PURE__ */ new Map();
+  }
+}
+function killOne(pid) {
+  try {
+    if (process.platform === "win32") {
+      (0, import_node_child_process.spawnSync)("taskkill", ["/pid", String(pid), "/F"], { stdio: "ignore" });
+    } else {
+      process.kill(pid, "SIGKILL");
+    }
+  } catch {
+  }
+}
+function killProcessTree(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  try {
+    const childrenOf = snapshotChildrenMap();
+    if (childrenOf.size === 0 && process.platform === "win32") {
+      try {
+        (0, import_node_child_process.spawnSync)("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+      } catch {
+      }
     }
     const order = [];
     const stack = [pid];
@@ -17837,20 +17952,20 @@ function killProcessTree(pid) {
       order.push(cur);
       for (const c of childrenOf.get(cur) ?? []) stack.push(c);
     }
-    for (const target of order.reverse()) {
-      try {
-        process.kill(target, "SIGKILL");
-      } catch {
-      }
-    }
+    for (const target of order.reverse()) killOne(target);
   } catch {
   }
 }
+var EXIT_TIMEOUT = 124;
+var EXIT_OUTPUT_OVERFLOW = 125;
+var EXIT_KILLED = 137;
 function runCommands(root, commands, nowOrOpts = () => /* @__PURE__ */ new Date(), timeoutMsArg = DEFAULT_COMMAND_TIMEOUT_MS) {
   const opts = typeof nowOrOpts === "function" ? { now: nowOrOpts, timeoutMs: timeoutMsArg } : nowOrOpts;
   const now = opts.now ?? (() => /* @__PURE__ */ new Date());
   const timeoutMs = opts.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
   const env = opts.env ?? curatedEnv();
+  const maxBuffer = opts.maxBuffer ?? 64 * 1024 * 1024;
+  const killTree = opts.killTree ?? killProcessTree;
   const results = [];
   for (const command of commands) {
     if (opts.readOnly && looksRepoMutating(command)) {
@@ -17869,22 +17984,27 @@ function runCommands(root, commands, nowOrOpts = () => /* @__PURE__ */ new Date(
       cwd: root,
       shell: true,
       encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
+      maxBuffer,
       timeout: timeoutMs,
       killSignal: "SIGKILL",
       input: "",
       env
     });
     const durationMs = Date.now() - start;
-    const timedOut = proc.error?.code === "ETIMEDOUT";
-    if (timedOut && typeof proc.pid === "number") {
-      killProcessTree(proc.pid);
+    const errCode = proc.error?.code;
+    const timedOut = errCode === "ETIMEDOUT";
+    const outputOverflow = errCode === "ENOBUFS";
+    if (proc.status === null && typeof proc.pid === "number") {
+      killTree(proc.pid);
     }
-    const combined = `${proc.stdout ?? ""}${proc.stderr ?? ""}${timedOut ? `
-[th verify] command (and its process tree) killed after ${timeoutMs}ms timeout` : ""}`;
+    const reasonNote = timedOut ? `
+[th verify] command (and its process tree) killed after ${timeoutMs}ms timeout` : outputOverflow ? `
+[th verify] command (and its process tree) killed: output exceeded the ${maxBuffer}-byte buffer (ENOBUFS)` : proc.status === null ? `
+[th verify] command (and its process tree) killed before completion${errCode ? ` (${errCode})` : ""}` : "";
+    const combined = `${proc.stdout ?? ""}${proc.stderr ?? ""}${reasonNote}`;
     const redacted = redactSecrets(combined);
     const outputTail = redacted.length > OUTPUT_TAIL_CHARS ? redacted.slice(-OUTPUT_TAIL_CHARS) : redacted;
-    const exitCode = proc.status ?? 124;
+    const exitCode = proc.status ?? (timedOut ? EXIT_TIMEOUT : outputOverflow ? EXIT_OUTPUT_OVERFLOW : EXIT_KILLED);
     results.push({ command, exitCode, ok: proc.status === 0, durationMs, outputTail });
   }
   return {
