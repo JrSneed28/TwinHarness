@@ -1578,12 +1578,12 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_drift_resolve: wr("drift", { idempotent: false }),
   // build oracles (read-only) + leases (mutating)
   th_build_next_wave: ro("oracle"),
-  th_build_claim: wr("build", { idempotent: true }),
-  th_build_release: wr("build", { idempotent: true }),
+  th_build_claim: wr("build", { idempotent: false }),
+  th_build_release: wr("build", { idempotent: false }),
   th_build_dispatch: ro("oracle"),
   th_build_plan: ro("oracle"),
   th_build_sub_claim: wr("build", { idempotent: false }),
-  th_build_sub_release: wr("build", { idempotent: true }),
+  th_build_sub_release: wr("build", { idempotent: false }),
   // routing
   th_route: ro("routing"),
   // coverage
@@ -1610,8 +1610,8 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // artifacts: register (content-hash record, idempotent) + leases + read
   th_artifact_register: wr("artifact", { idempotent: true }),
   th_artifact_list: ro("artifact"),
-  th_artifact_claim: wr("artifact", { idempotent: true }),
-  th_artifact_release: wr("artifact", { idempotent: true }),
+  th_artifact_claim: wr("artifact", { idempotent: false }),
+  th_artifact_release: wr("artifact", { idempotent: false }),
   th_artifact_leases: ro("artifact"),
   // collab blackboard
   th_collab_init: wr("collab", { idempotent: true }),

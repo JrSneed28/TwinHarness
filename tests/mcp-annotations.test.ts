@@ -65,7 +65,16 @@ describe("REQ-PCO-071: hint semantics are coherent", () => {
   });
 
   it("REQ-PCO-071: append/ledger tools are NOT idempotent; set/upsert tools ARE", () => {
-    for (const name of ["th_drift_add", "th_decision_add", "th_debate_add", "th_verify_add"]) {
+    // Append/ledger tools, INCLUDING every lease claim/release: each appends a JSONL
+    // event per call (appendLeaseEvent / append*), so a second identical call is NOT a
+    // no-op and must report idempotentHint:false (DR-03 / R-10). The lease tools were
+    // previously mis-annotated idempotent:true, contradicting this module's own rule
+    // ("FALSE for append/ledger/lease tools where a second call records another event").
+    for (const name of [
+      "th_drift_add", "th_decision_add", "th_debate_add", "th_verify_add",
+      "th_build_claim", "th_build_release", "th_build_sub_claim", "th_build_sub_release",
+      "th_artifact_claim", "th_artifact_release",
+    ]) {
       expect(toolAnnotations(name)?.idempotentHint, `${name} (append) must not be idempotent`).toBe(false);
     }
     for (const name of ["th_init", "th_slices_sync", "th_repo_map", "th_slice_set_status"]) {
