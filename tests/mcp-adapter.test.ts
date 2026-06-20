@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, expectedToolDefsCount, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runRepoMap } from "../src/commands/repo";
 import { success, failure, type CommandResult } from "../src/core/output";
@@ -420,6 +420,7 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 60 + schema/no-exec battery (REQ
 
   // ---- REQ-RU-094: full registry, in order (originally 23; now 60 with the coordination + interview/init + gate-transition + wired-handler tools) ----
   it("REQ-RU-094: test_REQ-RU-094_mcp_tool_count_62 — TOOL_DEFS exposes exactly 62 tools in order", () => {
+    expect(TOOL_DEFS.length).toBe(expectedToolDefsCount());
     expect(TOOL_DEFS.map((t) => t.name)).toEqual(expectedAll);
   });
 

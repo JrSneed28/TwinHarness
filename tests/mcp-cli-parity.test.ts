@@ -93,9 +93,12 @@ describe("REQ-PCO-070: CLI↔MCP command parity (every CLI leaf covered or exclu
     const covered = CLI_COMMAND_LEAVES.filter((l) => !(l in MCP_EXCLUDED));
     const excluded = CLI_COMMAND_LEAVES.filter((l) => l in MCP_EXCLUDED);
     expect(covered.length + excluded.length).toBe(CLI_COMMAND_LEAVES.length);
-    // 62 = (CLI-leaf mirrors) + (MCP-only tools).
+    // The tool count is DERIVED, not pinned to a literal: (CLI-leaf mirrors) +
+    // (MCP-only tools) = (|CLI_COMMAND_LEAVES| − |MCP_EXCLUDED|) + |MCP_ONLY_TOOLS|.
+    // Adding a tool updates this with zero literal churn (it is 62 today).
+    const expected = CLI_COMMAND_LEAVES.length - Object.keys(MCP_EXCLUDED).length + Object.keys(MCP_ONLY_TOOLS).length;
     expect(covered.length + Object.keys(MCP_ONLY_TOOLS).length).toBe(TOOL_DEFS.length);
-    expect(TOOL_DEFS.length).toBe(62);
+    expect(TOOL_DEFS.length).toBe(expected);
   });
 });
 
@@ -200,7 +203,9 @@ describe("REQ-PCO-070: CLI/MCP asymmetry is pinned (intentional, not accidental 
     // partition the whole registry exactly (no tool is un-annotated).
     const readOnly = TOOL_DEFS.filter((t) => TOOL_ANNOTATIONS[t.name]?.readOnlyHint === true);
     expect(readOnly.length + mutating.length).toBe(TOOL_DEFS.length);
-    expect(TOOL_DEFS.length).toBe(62);
+    // Derived parity count (62 today): (|CLI_COMMAND_LEAVES| − |MCP_EXCLUDED|) + |MCP_ONLY_TOOLS|.
+    const expected = CLI_COMMAND_LEAVES.length - Object.keys(MCP_EXCLUDED).length + Object.keys(MCP_ONLY_TOOLS).length;
+    expect(TOOL_DEFS.length).toBe(expected);
   });
 
   it("AC#5: th_state_set refuses every GATE_OWNED field over MCP (no raw gate flip)", () => {

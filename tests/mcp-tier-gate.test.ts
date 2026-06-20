@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, afterEach } from "vitest";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, expectedToolDefsCount, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runStateSet } from "../src/commands/state";
 import { TOOL_DEFS } from "../src/mcp-server";
@@ -51,7 +51,7 @@ function defFor(name: string) {
 
 describe("REQ-PCO-061: gated tools STAY advertised (parity contract preserved)", () => {
   it("REQ-PCO-061: TOOL_DEFS.length is still 62 (gating is runtime-only)", () => {
-    expect(TOOL_DEFS.length).toBe(62);
+    expect(TOOL_DEFS.length).toBe(expectedToolDefsCount());
   });
 
   it("REQ-PCO-061: every gated tool name is still present in the registry", () => {

@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, afterEach } from "vitest";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, expectedToolDefsCount, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runStateSet } from "../src/commands/state";
 import { TOOL_DEFS, TOOL_ANNOTATIONS } from "../src/mcp-server";
@@ -122,7 +122,7 @@ describe("Deferred #3: the ack gate is tier-INDEPENDENT (T0/T1 with confirm are 
 
 describe("Deferred #3: parity unchanged (count + names/order)", () => {
   it("Deferred #3: TOOL_DEFS.length is still 62", () => {
-    expect(TOOL_DEFS.length).toBe(62);
+    expect(TOOL_DEFS.length).toBe(expectedToolDefsCount());
   });
 
   it("Deferred #3: th_collab_fragment keeps BOTH gates — ack fires even at a locked tier", () => {

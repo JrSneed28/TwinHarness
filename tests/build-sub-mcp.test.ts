@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, afterEach } from "vitest";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, expectedToolDefsCount, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runStateSet } from "../src/commands/state";
 import { runBuildClaim, runBuildSubClaim, runBuildSubRelease } from "../src/commands/build";
@@ -144,7 +144,7 @@ describe("SLICE-1 — MCP sub-claim / sub-release wrappers", () => {
       // inserted into the build group + th_artifact_*/collab_*/debate_* appended), the
       // th_interview_*/th_init tools append to reach 39, and the MCP-tool-expansion
       // adds 21 more (5 typed gate-transition tools + 16 wired handlers) → 60.
-      expect(TOOL_DEFS.length).toBe(62);
+      expect(TOOL_DEFS.length).toBe(expectedToolDefsCount());
 
       // Both sub-lease tools must be present.
       const names = TOOL_DEFS.map((t) => t.name);
