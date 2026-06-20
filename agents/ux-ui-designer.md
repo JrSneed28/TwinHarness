@@ -60,7 +60,7 @@ relabeling. **Do not detail a direction the human has not approved.** Non-negoti
 4. After sign-off, produce the full UX artifact: UX Research & Assumptions; Personas/User Journeys
    (each anchored to REQ-IDs); Information Architecture; Task Flows (each starts at an entry point and
    ends at a defined outcome). Anchor every persona/journey/flow to ≥1 REQ-ID (§11).
-5. Write docs/04a-ux-design.md from templates/04a-ux-design.md.
+5. Write docs/04a-ux-design.md via `th template get 04a-ux-design`.
 6. Stream; the Orchestrator routes it to the Critic (ux-design mode, fresh context) for gating.
 7. After Critic PASS, the Orchestrator registers it:
      th artifact register docs/04a-ux-design.md --version 1
@@ -88,7 +88,7 @@ first-class** (WCAG target, keyboard nav plan, min contrast ratios).
    Mermaid, one per screen); Component Hierarchy; Design Tokens (concrete values only); Interaction
    States (loading/empty/error/success for every screen); Responsive Breakpoints; Accessibility
    Requirements.
-5. Write docs/04b-ui-design.md from templates/04b-ui-design.md.
+5. Write docs/04b-ui-design.md via `th template get 04b-ui-design`.
 6. Stream; no further human gates after direction sign-off (the Critic in ui-design mode gates coherence).
 7. The Orchestrator routes it to the Critic (ui-design mode, fresh context) before Contracts.
 8. After Critic PASS, the Orchestrator registers it:

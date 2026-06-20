@@ -69,6 +69,7 @@ import {
   runDecisionApprove,
   runDecisionCheck,
 } from "./commands/decision";
+import { runTemplateGet, runTemplateList } from "./commands/template";
 
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
@@ -175,6 +176,8 @@ Usage:
   th decision list                  List the decision set (ids/titles/statuses/links/audit), sorted (exit 0; non-zero if the hash chain is broken)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
+  th template get <name>            Resolve a template by bare name (e.g. task-file or task-file.md): project override (.twinharness/templates/) → plugin-bundled (templates/) → structured template_not_found; --json returns path+content+source
+  th template list                  List resolvable templates across both layers (deduped; marks project overrides that shadow a bundled template)
   th version                        Print the CLI version
   th help                           Show this help
 
@@ -859,6 +862,16 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           return runManifestExport(paths);
         default:
           return failure({ human: `unknown 'manifest' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    case "template":
+      switch (sub) {
+        case "get":
+          // C-10 — deterministic template resolver (project-override → plugin-bundled → structured miss).
+          return runTemplateGet(paths, rest[0]);
+        case "list":
+          return runTemplateList(paths);
+        default:
+          return failure({ human: `unknown 'template' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
     case "state":
       switch (sub) {

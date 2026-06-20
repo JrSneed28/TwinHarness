@@ -93,7 +93,7 @@ Use `--layer requirement` (blocking) only when the finding contradicts `docs/01-
 
 - Re-run the unit suite (vitest) as your primary QA — that is the Verifier's lane (`th verify run` only
   confirms build state before you begin).
-- Write or modify stage artifacts (`docs/`, `templates/`, contracts).
+- Write or modify stage artifacts (`docs/`, template skeletons via `th template get`, contracts).
 - Spawn sub-agents (`Agent` is disallowed).
 - Mutate `state.json` gate-owned fields.
 - Require tmux — select a tmux-free driver first.

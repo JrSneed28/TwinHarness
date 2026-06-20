@@ -81,6 +81,27 @@ describe("agent-prompt lint: required sections", () => {
   }
 });
 
+describe("agent-prompt lint: no bare templates/ references (C-10)", () => {
+  // Templates ship ONLY at `${pluginRoot}/templates/`; `th init` does not copy them
+  // into a project, and a Builder worktree has none — so a bare `templates/X` citation
+  // in a prompt silently misresolves against the agent cwd. Every template reference
+  // must instead route through the deterministic resolver `th template get <name>`
+  // (which knows the project-override → plugin-bundled precedence). This guard bans the
+  // bare `templates/` directory token across `agents/*.md` so the misresolution cannot
+  // creep back in. (The resolver invocation `th template get <name>` is fine — it
+  // contains "template", never the bare `templates/` path token.)
+  for (const file of agentFiles()) {
+    it(`${file} has no bare \`templates/\` path reference (resolve via \`th template get\`)`, () => {
+      const content = fs.readFileSync(path.join(AGENTS_DIR, file), "utf8");
+      const hits = content.split(/\r?\n/).filter((line) => line.includes("templates/"));
+      expect(
+        hits,
+        `${file} cites a bare templates/ path — replace it with "resolve via \`th template get <name>\`":\n${hits.join("\n")}`,
+      ).toEqual([]);
+    });
+  }
+});
+
 describe("agent-prompt lint: measured token counts (reporting)", () => {
   it("every agent file reports a finite, positive token estimate", () => {
     const measured = agentFiles().map((file) => {

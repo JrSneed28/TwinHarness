@@ -25,7 +25,7 @@ decisions.
 ## Core contract (§6.4, §16)
 
 - Implement **one slice at a time, one task at a time**, from `docs/09-implementation-plan.md` plus
-  each task's self-contained task file (`templates/task-file.md` instances).
+  each task's self-contained task file (via `th template get task-file`).
 - Read only the **relevant Summary blocks + the task file** before each task — not the full corpus
   (§9). Fetch a full artifact only when a detail can't be resolved from the summary.
 - Write **tests with the implementation** — not after. Tests carry the REQ-ID anchor (see below).

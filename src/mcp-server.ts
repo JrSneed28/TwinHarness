@@ -54,6 +54,7 @@ import { runContextPack } from "./commands/context";
 import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite } from "./commands/handoff";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
+import { runTemplateGet, runTemplateList } from "./commands/template";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
 import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from "./commands/collab";
 import { runDebateAdd, runDebateList, runDebateResolve } from "./commands/debate";
@@ -1493,6 +1494,28 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runHandoffWrite(paths),
   },
+  // ---- C-10: deterministic template resolver (project-override → plugin-bundled → structured miss) ----
+  {
+    name: "th_template_get",
+    description:
+      "Resolve a TwinHarness template by bare name (e.g. `task-file` or `task-file.md`) and return its absolute path, content, and source layer. Precedence (no probing): a project override at `.twinharness/templates/<name>` (source `project-override`) wins over the plugin-bundled `templates/<name>` (source `plugin-bundled`); a miss returns the structured `template_not_found` with the paths searched. A traversal/absolute name is refused. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: stringProp("Bare template filename to resolve (e.g. `task-file` or `task-file.md`). A single component — no path separators, no `..`."),
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runTemplateGet(paths, optString(args, "name")),
+  },
+  {
+    name: "th_template_list",
+    description:
+      "List every resolvable template across both layers (project `.twinharness/templates/` overrides + plugin-bundled `templates/`), deduped with the resolver's precedence and marking any project override that shadows a same-named bundled template. Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runTemplateList(paths),
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -1539,7 +1562,8 @@ export type ToolCategory =
   | "health"
   | "slices"
   | "interview"
-  | "lifecycle";
+  | "lifecycle"
+  | "template";
 
 /** The behavior hints + category attached to a tool. */
 export interface ToolAnnotation {
@@ -1655,6 +1679,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // context budget + handoff
   th_budget_check: ro("context"),
   th_handoff_write: wr("context", { idempotent: true }),
+  // template resolver (read-only; resolves bundled/overridden templates, never writes)
+  th_template_get: ro("template"),
+  th_template_list: ro("template"),
 };
 
 /** The MCP-standard annotation object for a tool (or undefined if unknown). */
@@ -1794,6 +1821,7 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "repo map", "repo check", "repo relevant", "repo impact",
   "decision detect", "decision add", "decision approve", "decision check", "decision list",
   "manifest export",
+  "template get", "template list",
   "version", "help",
 ];
 

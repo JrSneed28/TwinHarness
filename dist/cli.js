@@ -74,6 +74,7 @@ const route_1 = require("./commands/route");
 const delegate_1 = require("./commands/delegate");
 const repo_1 = require("./commands/repo");
 const decision_1 = require("./commands/decision");
+const template_1 = require("./commands/template");
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
@@ -179,6 +180,8 @@ Usage:
   th decision list                  List the decision set (ids/titles/statuses/links/audit), sorted (exit 0; non-zero if the hash chain is broken)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
+  th template get <name>            Resolve a template by bare name (e.g. task-file or task-file.md): project override (.twinharness/templates/) → plugin-bundled (templates/) → structured template_not_found; --json returns path+content+source
+  th template list                  List resolvable templates across both layers (deduped; marks project overrides that shadow a bundled template)
   th version                        Print the CLI version
   th help                           Show this help
 
@@ -755,6 +758,16 @@ function dispatch(parsed) {
                     return (0, manifest_1.runManifestExport)(paths);
                 default:
                     return (0, output_1.failure)({ human: `unknown 'manifest' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "template":
+            switch (sub) {
+                case "get":
+                    // C-10 — deterministic template resolver (project-override → plugin-bundled → structured miss).
+                    return (0, template_1.runTemplateGet)(paths, rest[0]);
+                case "list":
+                    return (0, template_1.runTemplateList)(paths);
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'template' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
         case "state":
             switch (sub) {

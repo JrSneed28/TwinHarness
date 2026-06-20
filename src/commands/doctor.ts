@@ -102,6 +102,47 @@ function nodeMajor(): number {
 }
 
 /**
+ * C-10 — surface project template OVERRIDES that SHADOW a plugin-bundled template.
+ *
+ * `th template get` resolves a project `.twinharness/templates/<name>` ahead of the
+ * plugin-bundled `templates/<name>`, so a same-named file under the project state
+ * dir silently supersedes the shipped skeleton. That is a supported feature, but it
+ * should be INTENTIONAL and VISIBLE — an accidental stray file there changes what
+ * every agent renders. Doctor reports it like the other run-health findings: a WARN
+ * naming the shadowed templates when any exist, else OK. Informational only; never a
+ * hard fail. `root` is the project root; `pluginDir` is the bundled `templates/` dir.
+ */
+function templateShadowCheck(root: string, pluginDir: string): Check {
+  const projectDir = path.join(root, ".twinharness", "templates");
+  const mdFiles = (dir: string): Set<string> => {
+    try {
+      if (!fs.statSync(dir).isDirectory()) return new Set();
+      return new Set(
+        fs.readdirSync(dir, { withFileTypes: true })
+          .filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md"))
+          .map((e) => e.name),
+      );
+    } catch {
+      return new Set();
+    }
+  };
+  const overrides = mdFiles(projectDir);
+  if (overrides.size === 0) {
+    return { name: "templates", status: "ok", detail: "no project template overrides (.twinharness/templates/ — bundled templates in use)" };
+  }
+  const bundled = mdFiles(pluginDir);
+  const shadowed = [...overrides].filter((n) => bundled.has(n)).sort();
+  if (shadowed.length === 0) {
+    return { name: "templates", status: "ok", detail: `${overrides.size} project template override(s), none shadowing a bundled template` };
+  }
+  return {
+    name: "templates",
+    status: "warn",
+    detail: `${shadowed.length} project override(s) SHADOW a bundled template (intentional? \`th template get\` resolves these ahead of the shipped skeleton): ${shadowed.join(", ")}`,
+  };
+}
+
+/**
  * The gate-ledger audit checks ("audit ledger" count + "ledger chain"
  * tamper-evidence), computed INDEPENDENTLY of state.json validity (finding #1).
  *
@@ -213,6 +254,12 @@ export function runDoctor(paths: ProjectPaths, opts: { strict?: boolean } = {}):
   // in the style of the artifact-drift check: a WARN listing the missing entries, plus
   // a per-dir presence/count summary so an operator can see the package is intact.
   checks.push(packagingCheck(root, pkgFiles));
+
+  // C-10 — project template overrides that shadow a plugin-bundled template. Runs in
+  // the environment section (independent of run state) so a stray override is visible
+  // even before `th init`. `root` is the plugin root for the bundled `templates/` dir;
+  // the project override dir is derived from `paths.root` inside the helper.
+  checks.push(templateShadowCheck(paths.root, path.join(root, "templates")));
 
   // Claude Code compatibility expectation. Informational only: this binary can't
   // observe the host Claude Code version, so it reports the contract the plugin
