@@ -65,6 +65,37 @@ exports.STATE_FIELD_POLICY = {
         owner: "operator policy",
         refusedByStateSet: false,
     },
+    // RC-C / R-04 (DR-02): the gate-DEFINING config tier. Each of these four fields
+    // either removes a gate or makes it vacuous, so a raw agent write must never move
+    // one silently. They have NO typed runtime write site (they default to the SAFE
+    // value when absent and no agent prompt sets them — DR-02 evidence), so the only
+    // legitimate writer is `th init` at creation time. Bringing them under the
+    // gate-owned/audited guard means: MCP `th_state_set` refuses them, and a raw CLI
+    // `th state set` requires `--emergency` (loud + gate-ledger-sealed).
+    delivery_mode: {
+        managed: true,
+        gateOwned: true,
+        owner: "set once at creation via `th init --delivery-mode <code|no-code|documentation-only>` (raw `th state set` requires --emergency)",
+        refusedByStateSet: false,
+    },
+    has_ui: {
+        managed: true,
+        gateOwned: true,
+        owner: "set once at creation via `th init --no-ui` / `--has-ui` (raw `th state set` requires --emergency)",
+        refusedByStateSet: false,
+    },
+    interview_required: {
+        managed: true,
+        gateOwned: true,
+        owner: "set once at creation via `th init --interview-required` / `--no-interview-required` (raw `th state set` requires --emergency)",
+        refusedByStateSet: false,
+    },
+    interview_cutoff: {
+        managed: true,
+        gateOwned: true,
+        owner: "set once at creation via `th init --interview-cutoff <0..1>` (raw `th state set` requires --emergency)",
+        refusedByStateSet: false,
+    },
 };
 /** Fields the MCP raw setter must refuse (the proven H-2 surface). */
 exports.GATE_OWNED = new Set(Object.entries(exports.STATE_FIELD_POLICY)

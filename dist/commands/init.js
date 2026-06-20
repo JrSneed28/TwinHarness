@@ -40,6 +40,7 @@ const output_1 = require("../core/output");
 const state_schema_1 = require("../core/state-schema");
 const state_store_1 = require("../core/state-store");
 const log_1 = require("../core/log");
+const guards_1 = require("../core/guards");
 const budget_1 = require("./budget");
 const DRIFT_LOG_HEADER = `# Drift Log
 
@@ -57,6 +58,33 @@ Escalation: ...
 \`\`\`
 `;
 /**
+ * Stamp the gate-defining config fields (R-04 capture path) onto a fresh state, in
+ * place. Each is applied ONLY when the operator passed it; an unset field is left
+ * absent so the serialized state stays byte-identical to a plain init and the safe
+ * default applies. `delivery_mode` gets a focused enum pre-check (clearer than the
+ * generic `would_be_invalid` from `validateState`); the boolean/number fields are
+ * stamped verbatim and left for `validateState` to range-check. Returns a failure
+ * CommandResult on a bad value, else null.
+ */
+function applyGateDefiningFields(state, opts) {
+    if (opts.deliveryMode !== undefined) {
+        if (!state_schema_1.DELIVERY_MODES.includes(opts.deliveryMode)) {
+            return (0, output_1.failure)({
+                human: `Invalid --delivery-mode "${opts.deliveryMode}". Valid: ${state_schema_1.DELIVERY_MODES.join(", ")}.`,
+                data: { error: "invalid_delivery_mode", value: opts.deliveryMode, validModes: state_schema_1.DELIVERY_MODES },
+            });
+        }
+        state.delivery_mode = opts.deliveryMode;
+    }
+    if (opts.hasUi !== undefined)
+        state.has_ui = opts.hasUi;
+    if (opts.interviewRequired !== undefined)
+        state.interview_required = opts.interviewRequired;
+    if (opts.interviewCutoff !== undefined)
+        state.interview_cutoff = opts.interviewCutoff;
+    return null;
+}
+/**
  * `th init` — scaffold `docs/`, `.agentic-sdlc/state.json`, and `drift-log.md`.
  * Idempotent: existing state.json is preserved unless `--force` is given.
  *
@@ -70,6 +98,16 @@ Escalation: ...
  * `kToTokens`), never in the parser — so `--max-tokens 150` persists as
  * `max_tokens: 150000`. It is applied on a fresh init AND as a targeted update on
  * an already-initialized run (so a resume can re-set the budget without --force).
+ *
+ * The four gate-DEFINING config fields (R-04 / DR-02) — `deliveryMode`, `hasUi`,
+ * `interviewRequired`, `interviewCutoff` — are the typed CAPTURE PATH for fields that
+ * are otherwise gate-owned (refused over MCP, `--emergency`-only via raw `state
+ * set`). They are CREATION-time only: applied on a fresh init, ignored on a
+ * preserve-existing re-init (a project's nature is fixed once; change it later only
+ * via the loud `--emergency` raw write). Each is stamped only when the operator
+ * passes it (absent ⇒ field omitted ⇒ the safe default applies), and the assembled
+ * state is run through `validateState` before writing so a bad enum / out-of-range
+ * cutoff is refused cleanly rather than persisting an invalid file.
  */
 function runInit(paths, opts) {
     const created = [];
@@ -103,6 +141,22 @@ function runInit(paths, opts) {
             state.project_mode = "brownfield";
         if (maxTokens !== undefined)
             state.max_tokens = maxTokens;
+        // R-04 typed capture path: stamp the gate-defining config fields ONLY when the
+        // operator passed them (absent ⇒ omitted ⇒ safe default). Each is the typed,
+        // non-`--emergency` write site for an otherwise gate-owned field.
+        const captureFailure = applyGateDefiningFields(state, opts);
+        if (captureFailure)
+            return captureFailure;
+        // Validate the assembled state before writing (writeState does NOT validate):
+        // a bad --delivery-mode enum or an out-of-range --interview-cutoff is refused
+        // here rather than persisting an invalid state.json.
+        const validation = (0, state_schema_1.validateState)(state);
+        if (!validation.ok) {
+            return (0, output_1.failure)({
+                human: `Refusing to init: the requested gate-defining flags would make state invalid:\n${(0, guards_1.formatIssues)(validation.issues)}`,
+                data: { error: "would_be_invalid", issues: validation.issues },
+            });
+        }
         (0, state_store_1.writeState)(paths, state);
         created.push(".twinharness/state.json");
     }

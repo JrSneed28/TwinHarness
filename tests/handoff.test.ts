@@ -125,6 +125,82 @@ describe("Track A-2: handoff verify pass + fail", () => {
   });
 });
 
+describe("R-06: handoff snapshot stateHash catches gate-relevant changes not in the per-field snapshot", () => {
+  it("FAIL when a gate-relevant field NOT in the legacy snapshot changes (drift_open_blocking 0→1)", () => {
+    tp = makeTempProject();
+    seed(tp.root, tp.paths);
+    runHandoffWrite(tp.paths);
+    // Open a blocking drift directly via the data layer (the per-field snapshot does
+    // NOT track drift_open_blocking — only current_stage / slices / artifacts). The
+    // whole-state hash must catch it.
+    const r = readState(tp.paths);
+    writeState(tp.paths, { ...r.state!, drift_open_blocking: r.state!.drift_open_blocking + 1 });
+    const res = runHandoffVerify(tp.paths);
+    expect(res.ok).toBe(false);
+    const mismatches = (res.data as Record<string, unknown>).mismatches as string[];
+    expect(mismatches.some((m) => m.includes("state hash mismatch"))).toBe(true);
+  });
+
+  it("FAIL when implementation_allowed flips after the handoff (also untracked per-field)", () => {
+    tp = makeTempProject();
+    seed(tp.root, tp.paths);
+    runHandoffWrite(tp.paths);
+    const r = readState(tp.paths);
+    writeState(tp.paths, { ...r.state!, implementation_allowed: !r.state!.implementation_allowed });
+    const res = runHandoffVerify(tp.paths);
+    expect(res.ok).toBe(false);
+    const mismatches = (res.data as Record<string, unknown>).mismatches as string[];
+    expect(mismatches.some((m) => m.includes("state hash mismatch"))).toBe(true);
+  });
+
+  it("PASS when nothing changed (the stateHash matches the live state)", () => {
+    tp = makeTempProject();
+    seed(tp.root, tp.paths);
+    runHandoffWrite(tp.paths);
+    const res = runHandoffVerify(tp.paths);
+    expect(res.ok).toBe(true);
+    expect((res.data as Record<string, unknown>).pass).toBe(true);
+  });
+
+  it("the written snapshot embeds a stateHash (current format)", () => {
+    tp = makeTempProject();
+    seed(tp.root, tp.paths);
+    runHandoffWrite(tp.paths);
+    const md = fs.readFileSync(handoffPath(tp.paths), "utf8");
+    const open = md.indexOf("<!-- TH-HANDOFF-STATE");
+    const close = md.indexOf("TH-HANDOFF-STATE -->");
+    const json = md.slice(open + "<!-- TH-HANDOFF-STATE".length, close).trim();
+    const snap = JSON.parse(json) as Record<string, unknown>;
+    expect(typeof snap.stateHash).toBe("string");
+    expect((snap.stateHash as string).length).toBe(64); // full sha256 hex
+  });
+
+  it("LEGACY TOLERANCE: a snapshot WITHOUT stateHash skips the hash check (falls back to per-field; no hard-fail)", () => {
+    tp = makeTempProject();
+    seed(tp.root, tp.paths);
+    runHandoffWrite(tp.paths);
+    // Simulate an OLD handoff: strip the stateHash from the embedded snapshot, then
+    // change an untracked field. With no stateHash the verify must NOT fail on the
+    // untracked change (it relies on per-field comparisons only) — i.e. legacy files
+    // are tolerated, not hard-failed on absence.
+    const file = handoffPath(tp.paths);
+    const md = fs.readFileSync(file, "utf8");
+    const open = md.indexOf("<!-- TH-HANDOFF-STATE");
+    const close = md.indexOf("TH-HANDOFF-STATE -->");
+    const prefix = md.slice(0, open + "<!-- TH-HANDOFF-STATE".length);
+    const json = md.slice(open + "<!-- TH-HANDOFF-STATE".length, close).trim();
+    const suffix = md.slice(close);
+    const snap = JSON.parse(json) as Record<string, unknown>;
+    delete snap.stateHash;
+    fs.writeFileSync(file, `${prefix}\n${JSON.stringify(snap)}\n${suffix}`, "utf8");
+    // Change an untracked field — without a stateHash this is NOT detected.
+    const r = readState(tp.paths);
+    writeState(tp.paths, { ...r.state!, drift_open_blocking: r.state!.drift_open_blocking + 1 });
+    const res = runHandoffVerify(tp.paths);
+    expect(res.ok).toBe(true); // legacy snapshot: per-field still match, no hard-fail
+  });
+});
+
 describe("Track A-2: resume detection", () => {
   it("detects HANDOFF.md and prints the next action", () => {
     tp = makeTempProject();

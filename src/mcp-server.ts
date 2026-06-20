@@ -436,7 +436,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_state_set",
     description:
-      "Patch a single dotted key in state.json. `value` is JSON-parsed when possible, else stored as a string. Refuses gate-owned fields (implementation_allowed, tier, current_stage, write_gate) over MCP — those are changed only through the human-driven CLI flow, never an agent tool — plus unknown top-level fields, unsafe key segments, the managed drift/debate counters, and any write that would make state invalid.",
+      "Patch a single dotted key in state.json. `value` is JSON-parsed when possible, else stored as a string. Refuses gate-owned fields (implementation_allowed, tier, current_stage, write_gate, blast_radius_flags, and the gate-defining config fields delivery_mode, has_ui, interview_required, interview_cutoff) over MCP — those are changed only through the human-driven CLI flow (`th init` flags or `th state set --emergency`), never an agent tool — plus unknown top-level fields, unsafe key segments, the managed drift/debate counters, and any write that would make state invalid.",
     inputSchema: {
       type: "object",
       properties: {
@@ -454,10 +454,13 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       if (key === undefined || rawValue === undefined) {
         return { ok: false, exitCode: 1, human: "th_state_set requires both `key` and `value` (strings)." };
       }
-      // H-2: the MCP raw setter must NOT move a gate-security field. The CLI keeps
-      // these settable (the documented human unlock/advance path), but an agent
-      // over MCP must never flip implementation_allowed / tier / current_stage /
-      // write_gate. Defense-in-depth: refuse here before the handler.
+      // H-2 / R-04: the MCP raw setter must NOT move a gate-security field. The CLI
+      // keeps these settable (the documented human unlock/advance path + `th init`
+      // flags), but an agent over MCP must never flip implementation_allowed / tier /
+      // current_stage / write_gate / blast_radius_flags, nor the gate-defining config
+      // fields delivery_mode / has_ui / interview_required / interview_cutoff (a
+      // silent gate downgrade). The full set is GATE_OWNED. Defense-in-depth: refuse
+      // here before the handler.
       // Trim the segment so a whitespace-padded key (" tier", "tier ") still hits
       // the gate refusal instead of slipping through to a generic unknown-field error.
       const firstSegment = (key.split(".")[0] ?? "").trim();

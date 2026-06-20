@@ -862,19 +862,35 @@ describe("Interview/init MCP tools: th_interview_* + th_init (store-only, idempo
     if (!res.ok) expect(res.errors).toContain("idea");
   });
 
-  // INVERSE of the GATE_OWNED refusal battery: interview_cutoff is NOT gate-owned,
-  // so runStateSet / th_state_set ALLOWS it (it is a free policy value, not a gate).
-  it("runStateSet ALLOWS interview_cutoff (not gate-owned) and th_state_set does not refuse it", () => {
+  // INVERSE of the GATE_OWNED refusal battery: max_tokens is NOT gate-owned, so
+  // runStateSet / th_state_set ALLOWS it (a context-budget knob, not a governance
+  // gate — the spec leaves it free, unlike interview_cutoff which R-04/DR-02 moved
+  // UNDER the guard). interview_cutoff's gate-owned refusal is asserted in
+  // state-set-gate-fields.test.ts / mcp-schema-enforcement.test.ts.
+  it("runStateSet ALLOWS max_tokens (not gate-owned) and th_state_set does not refuse it", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
 
-    const res = runStateSet(tp.paths, "interview_cutoff", "0.7");
+    const res = runStateSet(tp.paths, "max_tokens", "120000");
     expect(res.ok).toBe(true);
-    expect(readState(tp.paths).state?.interview_cutoff).toBe(0.7);
+    expect(readState(tp.paths).state?.max_tokens).toBe(120000);
 
     // Via the MCP th_state_set wrapper too: not a gate_owned_field refusal.
-    const viaMcp = defFor("th_state_set").run(tp.paths, { key: "interview_cutoff", value: "0.85" });
+    const viaMcp = defFor("th_state_set").run(tp.paths, { key: "max_tokens", value: "150000" });
     expect(viaMcp.ok).toBe(true);
-    expect(readState(tp.paths).state?.interview_cutoff).toBe(0.85);
+    expect(readState(tp.paths).state?.max_tokens).toBe(150000);
+  });
+
+  // R-04 / DR-02 regression: interview_cutoff is now gate-owned — th_state_set
+  // refuses it over MCP, and the raw CLI setter requires --emergency.
+  it("R-04: interview_cutoff is gate-owned — th_state_set refuses it, raw CLI needs --emergency", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+    const viaMcp = defFor("th_state_set").run(tp.paths, { key: "interview_cutoff", value: "0.85" });
+    expect(viaMcp.ok).toBe(false);
+    expect(viaMcp.data?.error).toBe("gate_owned_field");
+    const rawCli = runStateSet(tp.paths, "interview_cutoff", "0.85");
+    expect(rawCli.ok).toBe(false);
+    expect(rawCli.data?.error).toBe("gate_owned_requires_emergency");
   });
 });

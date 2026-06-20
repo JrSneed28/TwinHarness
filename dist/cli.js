@@ -77,7 +77,8 @@ const decision_1 = require("./commands/decision");
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
-  th init [--force] [--brownfield]  Scaffold docs/, .twinharness/state.json, drift-log.md
+  th init [--force] [--brownfield] [--delivery-mode <m>] [--no-ui] [--interview-required|--no-interview-required] [--interview-cutoff <0..1>]
+                                    Scaffold docs/, .twinharness/state.json, drift-log.md (the gate-defining flags set delivery_mode/has_ui/interview_required/interview_cutoff once at creation)
   th state get [dotted.path]        Print state.json (or one value)
   th state set <dotted.key> <value> Patch state.json (refuses invalid results; rejects unknown keys; gate-owned fields require --emergency — prefer the typed gate commands below)
   th state status                   Human-readable tier/stage/gate snapshot
@@ -245,7 +246,11 @@ Global flags:
   --supersede <id>  (decision approve) Mark this (approved) decision superseded by <id> (mutually exclusive with --reject)
   --as <actor>      (decision approve) Approver attribution (attribution only — NOT a barrier; default TH_APPROVAL_ACTOR or "human")
   --lock            (implementation unlock) Re-lock implementation (set implementation_allowed=false) instead of unlocking
-  --emergency       (state set) Force a raw write to a gate-owned field, bypassing the typed gate ladder (loud + audit-ledgered)`;
+  --emergency       (state set) Force a raw write to a gate-owned field, bypassing the typed gate ladder (loud + audit-ledgered)
+  --delivery-mode <m>  (init) Set delivery_mode once at creation: code (default) | no-code | documentation-only
+  --has-ui / --no-ui   (init) Set has_ui at creation (default absent ⇒ true; --no-ui drops the UX/UI stages)
+  --interview-required / --no-interview-required  (init) Force the clarity-interview gate on/off (default absent ⇒ computed from tier)
+  --interview-cutoff <0..1>  (init) Set the interview-readiness confidence cutoff at creation`;
 /** Boolean flags (presence = true). */
 const BOOLEAN_FLAGS = {
     "--json": "json",
@@ -258,6 +263,11 @@ const BOOLEAN_FLAGS = {
     "--dry-run": "dryRun",
     "--remove-missing": "removeMissing",
     "--brownfield": "brownfield",
+    // R-04 typed capture path (init-only): the boolean gate-defining config fields.
+    "--has-ui": "hasUi",
+    "--no-ui": "noUi",
+    "--interview-required": "interviewRequired",
+    "--no-interview-required": "noInterviewRequired",
     "--component-blast": "componentBlast",
     "--summarization": "summarization",
     "--explain": "explain",
@@ -276,6 +286,8 @@ const BOOLEAN_FLAGS = {
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
 const STRING_FLAGS = {
     "--cwd": "cwd",
+    // R-04 typed capture path (init-only): delivery_mode enum.
+    "--delivery-mode": "deliveryMode",
     "--reqs": "reqs",
     "--plan": "plan",
     "--tests": "tests",
@@ -337,6 +349,9 @@ const NUMBER_FLAGS = {
     // thousands "k"); the ×1000 conversion happens at the write/compute site
     // (budget.ts / init), NOT in this parser.
     "--max-tokens": "maxTokens",
+    // R-04 typed capture path (init-only): interview_cutoff in [0,1] (validated at the
+    // init write site, like every gate-defining field — the parser only coerces).
+    "--interview-cutoff": "interviewCutoff",
     "--max": "max",
     "--files-read": "filesRead",
     "--slices-built": "slicesBuilt",
@@ -381,6 +396,10 @@ function parseArgs(argv) {
         dryRun: false,
         removeMissing: false,
         brownfield: false,
+        hasUi: false,
+        noUi: false,
+        interviewRequired: false,
+        noInterviewRequired: false,
         componentBlast: false,
         summarization: false,
         explain: false,
@@ -504,12 +523,33 @@ function dispatch(parsed) {
             const ver = readCliVersion();
             return (0, output_1.success)({ data: { version: ver }, human: ver });
         }
-        case "init":
+        case "init": {
+            // R-04 typed capture path: fold the boolean flag PAIRS into tri-state
+            // optionals (undefined = "leave at the safe default / omit from state"), so
+            // an operator sets a gate-defining field once cleanly at creation without
+            // `--emergency`. Passing BOTH halves of a pair is contradictory → refused.
+            if (parsed.flags.hasUi && parsed.flags.noUi) {
+                return (0, output_1.failure)({ human: "Pass only one of --has-ui / --no-ui." });
+            }
+            if (parsed.flags.interviewRequired && parsed.flags.noInterviewRequired) {
+                return (0, output_1.failure)({ human: "Pass only one of --interview-required / --no-interview-required." });
+            }
+            const hasUi = parsed.flags.hasUi ? true : parsed.flags.noUi ? false : undefined;
+            const interviewRequired = parsed.flags.interviewRequired
+                ? true
+                : parsed.flags.noInterviewRequired
+                    ? false
+                    : undefined;
             return (0, init_1.runInit)(paths, {
                 force: parsed.flags.force,
                 brownfield: parsed.flags.brownfield,
                 maxTokens: parsed.flags.maxTokens,
+                deliveryMode: parsed.flags.deliveryMode,
+                hasUi,
+                interviewRequired,
+                interviewCutoff: parsed.flags.interviewCutoff,
             });
+        }
         case "budget":
             switch (sub) {
                 case "check":

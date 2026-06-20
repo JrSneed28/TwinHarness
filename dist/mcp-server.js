@@ -16180,7 +16180,17 @@ var GATE_LEDGER_KEYS = /* @__PURE__ */ new Set([
   "debate_open_blocking",
   "write_gate",
   "tier",
-  "blast_radius_flags"
+  "blast_radius_flags",
+  // RC-C / R-04 (DR-02): the gate-DEFINING config fields. An `--emergency` raw
+  // write of any of these moves a gate (skip slices / drop UX-UI stages / vanish
+  // the interview gate / lower the interview cutoff), so it must seal a ledger
+  // entry + high-water anchor just like the other gate-owned fields above. These
+  // are flat scalars (string / boolean / number), so `ledgerCanonicalText` seals
+  // them deterministically.
+  "delivery_mode",
+  "has_ui",
+  "interview_required",
+  "interview_cutoff"
 ]);
 function ledgerPath(paths) {
   return path5.join(paths.stateDir, "gate-ledger.jsonl");
@@ -16335,6 +16345,37 @@ var STATE_FIELD_POLICY = {
     managed: true,
     gateOwned: true,
     owner: "operator policy",
+    refusedByStateSet: false
+  },
+  // RC-C / R-04 (DR-02): the gate-DEFINING config tier. Each of these four fields
+  // either removes a gate or makes it vacuous, so a raw agent write must never move
+  // one silently. They have NO typed runtime write site (they default to the SAFE
+  // value when absent and no agent prompt sets them — DR-02 evidence), so the only
+  // legitimate writer is `th init` at creation time. Bringing them under the
+  // gate-owned/audited guard means: MCP `th_state_set` refuses them, and a raw CLI
+  // `th state set` requires `--emergency` (loud + gate-ledger-sealed).
+  delivery_mode: {
+    managed: true,
+    gateOwned: true,
+    owner: "set once at creation via `th init --delivery-mode <code|no-code|documentation-only>` (raw `th state set` requires --emergency)",
+    refusedByStateSet: false
+  },
+  has_ui: {
+    managed: true,
+    gateOwned: true,
+    owner: "set once at creation via `th init --no-ui` / `--has-ui` (raw `th state set` requires --emergency)",
+    refusedByStateSet: false
+  },
+  interview_required: {
+    managed: true,
+    gateOwned: true,
+    owner: "set once at creation via `th init --interview-required` / `--no-interview-required` (raw `th state set` requires --emergency)",
+    refusedByStateSet: false
+  },
+  interview_cutoff: {
+    managed: true,
+    gateOwned: true,
+    owner: "set once at creation via `th init --interview-cutoff <0..1>` (raw `th state set` requires --emergency)",
     refusedByStateSet: false
   }
 };
@@ -22464,7 +22505,10 @@ function runHandoffWrite(paths) {
   const snapshot = {
     current_stage: s.current_stage,
     slices,
-    approved_artifacts: s.approved_artifacts.map((a) => ({ file: a.file, version: a.version, hash: a.hash }))
+    approved_artifacts: s.approved_artifacts.map((a) => ({ file: a.file, version: a.version, hash: a.hash })),
+    // R-06 — whole-state catch-all. Hash the SAME canonical serialization the data
+    // layer writes (CRLF-normalized via hashContent), so verify re-hashes identically.
+    stateHash: hashContent(serializeState(s))
   };
   const sliceLines = slices.length ? slices.map((sl) => `- ${sl.id} \u2014 ${sl.status}`) : ["- (no slices yet)"];
   const oqLines = openQuestions.length ? openQuestions.map((q) => `- ${q}`) : ["- (none)"];
@@ -23250,6 +23294,21 @@ Action    : ...
 Escalation: ...
 \`\`\`
 `;
+function applyGateDefiningFields(state, opts) {
+  if (opts.deliveryMode !== void 0) {
+    if (!DELIVERY_MODES.includes(opts.deliveryMode)) {
+      return failure({
+        human: `Invalid --delivery-mode "${opts.deliveryMode}". Valid: ${DELIVERY_MODES.join(", ")}.`,
+        data: { error: "invalid_delivery_mode", value: opts.deliveryMode, validModes: DELIVERY_MODES }
+      });
+    }
+    state.delivery_mode = opts.deliveryMode;
+  }
+  if (opts.hasUi !== void 0) state.has_ui = opts.hasUi;
+  if (opts.interviewRequired !== void 0) state.interview_required = opts.interviewRequired;
+  if (opts.interviewCutoff !== void 0) state.interview_cutoff = opts.interviewCutoff;
+  return null;
+}
 function runInit(paths, opts) {
   const created = [];
   const skipped = [];
@@ -23271,6 +23330,16 @@ function runInit(paths, opts) {
     const state = initialState();
     if (opts.brownfield) state.project_mode = "brownfield";
     if (maxTokens !== void 0) state.max_tokens = maxTokens;
+    const captureFailure = applyGateDefiningFields(state, opts);
+    if (captureFailure) return captureFailure;
+    const validation = validateState(state);
+    if (!validation.ok) {
+      return failure({
+        human: `Refusing to init: the requested gate-defining flags would make state invalid:
+${formatIssues(validation.issues)}`,
+        data: { error: "would_be_invalid", issues: validation.issues }
+      });
+    }
     writeState(paths, state);
     created.push(".twinharness/state.json");
   }
@@ -24230,7 +24299,7 @@ var TOOL_DEFS = [
   },
   {
     name: "th_state_set",
-    description: "Patch a single dotted key in state.json. `value` is JSON-parsed when possible, else stored as a string. Refuses gate-owned fields (implementation_allowed, tier, current_stage, write_gate) over MCP \u2014 those are changed only through the human-driven CLI flow, never an agent tool \u2014 plus unknown top-level fields, unsafe key segments, the managed drift/debate counters, and any write that would make state invalid.",
+    description: "Patch a single dotted key in state.json. `value` is JSON-parsed when possible, else stored as a string. Refuses gate-owned fields (implementation_allowed, tier, current_stage, write_gate, blast_radius_flags, and the gate-defining config fields delivery_mode, has_ui, interview_required, interview_cutoff) over MCP \u2014 those are changed only through the human-driven CLI flow (`th init` flags or `th state set --emergency`), never an agent tool \u2014 plus unknown top-level fields, unsafe key segments, the managed drift/debate counters, and any write that would make state invalid.",
     inputSchema: {
       type: "object",
       properties: {

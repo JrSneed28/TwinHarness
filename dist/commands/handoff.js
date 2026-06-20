@@ -41,6 +41,7 @@ const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
+const state_schema_1 = require("../core/state-schema");
 const atomic_io_1 = require("../core/atomic-io");
 const log_1 = require("../core/log");
 const hash_1 = require("../core/hash");
@@ -97,6 +98,9 @@ function runHandoffWrite(paths) {
         current_stage: s.current_stage,
         slices,
         approved_artifacts: s.approved_artifacts.map((a) => ({ file: a.file, version: a.version, hash: a.hash })),
+        // R-06 — whole-state catch-all. Hash the SAME canonical serialization the data
+        // layer writes (CRLF-normalized via hashContent), so verify re-hashes identically.
+        stateHash: (0, hash_1.hashContent)((0, state_schema_1.serializeState)(s)),
     };
     const sliceLines = slices.length
         ? slices.map((sl) => `- ${sl.id} — ${sl.status}`)
@@ -238,6 +242,19 @@ function runHandoffVerify(paths) {
         }
         if (live !== recorded.hash) {
             mismatches.push(`artifact ${recorded.file}: content changed since handoff (hash mismatch)`);
+        }
+    }
+    // R-06 — whole-state catch-all. When the snapshot carries a stateHash (current
+    // format), compare it to the live state's hash: ANY gate-relevant field that
+    // changed since the handoff (and is not surfaced by the per-field comparisons
+    // above — e.g. implementation_allowed, drift_open_blocking, tier, delivery_mode,
+    // has_ui, interview_required/_cutoff, write_gate) is caught here. LEGACY TOLERANCE:
+    // a snapshot WITHOUT stateHash (older format) skips this check and relies on the
+    // per-field comparisons — its absence is never itself a failure.
+    if (snapshot.stateHash !== undefined) {
+        const liveStateHash = (0, hash_1.hashContent)((0, state_schema_1.serializeState)(s));
+        if (liveStateHash !== snapshot.stateHash) {
+            mismatches.push("run state changed since handoff (state hash mismatch)");
         }
     }
     const pass = mismatches.length === 0;

@@ -3,9 +3,10 @@ import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { readState } from "../core/state-store";
+import { serializeState } from "../core/state-schema";
 import { atomicWriteFile } from "../core/atomic-io";
 import { structuredLog } from "../core/log";
-import { shortHashPath } from "../core/hash";
+import { shortHashPath, hashContent } from "../core/hash";
 import { runNext } from "./next";
 import { runContextPack } from "./context";
 
@@ -41,6 +42,16 @@ interface HandoffSnapshot {
   current_stage: string;
   slices: Array<{ id: string; status: string }>;
   approved_artifacts: Array<{ file: string; version: number; hash: string }>;
+  /**
+   * R-06 — whole-state catch-all: `sha256(serializeState(s))` at handoff-write
+   * time. `handoff verify` re-hashes the live state and flags any mismatch, so a
+   * change to ANY gate-relevant field the per-field comparisons below do NOT cover
+   * (implementation_allowed, drift_open_blocking, tier, delivery_mode, has_ui,
+   * interview_required/_cutoff, write_gate, …) still fails verify. OPTIONAL for
+   * legacy tolerance: a snapshot written before this field skips the hash check and
+   * falls back to the per-field comparisons (never hard-fails on its absence).
+   */
+  stateHash?: string;
 }
 
 /**
@@ -76,6 +87,9 @@ export function runHandoffWrite(paths: ProjectPaths): CommandResult {
     current_stage: s.current_stage,
     slices,
     approved_artifacts: s.approved_artifacts.map((a) => ({ file: a.file, version: a.version, hash: a.hash })),
+    // R-06 — whole-state catch-all. Hash the SAME canonical serialization the data
+    // layer writes (CRLF-normalized via hashContent), so verify re-hashes identically.
+    stateHash: hashContent(serializeState(s)),
   };
 
   const sliceLines = slices.length
@@ -222,6 +236,20 @@ export function runHandoffVerify(paths: ProjectPaths): CommandResult {
     }
     if (live !== recorded.hash) {
       mismatches.push(`artifact ${recorded.file}: content changed since handoff (hash mismatch)`);
+    }
+  }
+
+  // R-06 — whole-state catch-all. When the snapshot carries a stateHash (current
+  // format), compare it to the live state's hash: ANY gate-relevant field that
+  // changed since the handoff (and is not surfaced by the per-field comparisons
+  // above — e.g. implementation_allowed, drift_open_blocking, tier, delivery_mode,
+  // has_ui, interview_required/_cutoff, write_gate) is caught here. LEGACY TOLERANCE:
+  // a snapshot WITHOUT stateHash (older format) skips this check and relies on the
+  // per-field comparisons — its absence is never itself a failure.
+  if (snapshot.stateHash !== undefined) {
+    const liveStateHash = hashContent(serializeState(s));
+    if (liveStateHash !== snapshot.stateHash) {
+      mismatches.push("run state changed since handoff (state hash mismatch)");
     }
   }
 
