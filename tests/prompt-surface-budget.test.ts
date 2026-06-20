@@ -39,7 +39,7 @@ const TOKENS_PER_CHAR = 1 / 4;
  * raise it for ordinary edits — trim redundancy instead.
  */
 const BASELINE_TOKENS = 97_823;
-const BUDGET_TOKENS = 80_600; // SG3 interim re-baseline (P2-A: trimmed cheap redundancy, raised for the research-routing.md residual; finalized at P3-B)
+const BUDGET_TOKENS = 81_400; // SG3 interim re-baseline (P2-C: trimmed cheap redundancy, raised for the production-reality guidance residual in builder/orchestrator/vertical-slice; finalized at P3-B)
 
 /** Recursively collect every *.md file under a directory (sorted, deterministic). */
 function listMd(dir: string): string[] {

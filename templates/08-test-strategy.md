@@ -56,6 +56,25 @@ enforced.>
 describes the e2e strategy: entry point, scope (happy path only? error paths?), and what
 constitutes a passing e2e run for a slice.>
 
+### Real-Path Proof Tests
+
+<Required for any task with an External Dependency (see the task file's `## External Dependencies`).
+A green test suite that only exercises mocks proves consistency, not reality — these tests prove the
+USER-VISIBLE PRODUCTION PATH actually works end-to-end against the real (or official sandbox)
+boundary. For each external boundary, specify:>
+
+- **Persistence restart test** — data written in one process survives a process restart (proves real
+  persistence, not an in-memory fake).
+- **Real-auth-rejection test** — a deliberately bad credential is actually REJECTED by the real/sandbox
+  provider (proves auth is wired to reality, not a no-op that always succeeds).
+- **Real-provider request evidence** — a recorded real/sandbox request+response (or its capture) proves
+  the live boundary was exercised, not a stub.
+- **Real data-flow verification** — data flows through the real path end-to-end (not a hardcoded return).
+
+<Any boundary still backed by a simulation at completion must be in the ledger (`th sim list`) and
+gates completion (`th gate production-reality`). State "Not applicable — no external boundary" only
+when the task file's External Dependencies says "None".>
+
 ### Performance / Load Tests
 
 <Required only if REQ-NFR-### specifies a measurable SLO. If no performance REQ-ID exists,

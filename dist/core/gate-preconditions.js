@@ -68,6 +68,7 @@ exports.checkCoverage = checkCoverage;
 exports.implementationRequiresSlices = implementationRequiresSlices;
 exports.checkImplementationSettled = checkImplementationSettled;
 exports.checkFinalVerification = checkFinalVerification;
+exports.checkProductionReality = checkProductionReality;
 exports.interviewRequired = interviewRequired;
 exports.checkInterview = checkInterview;
 exports.canAdvanceStage = canAdvanceStage;
@@ -83,6 +84,9 @@ const verify_1 = require("./verify");
 const decisions_1 = require("./decisions");
 const repo_1 = require("../commands/repo");
 const interview_1 = require("../commands/interview");
+const sim_1 = require("../commands/sim");
+const simulation_1 = require("./simulation");
+const tester_1 = require("./tester");
 const PASS = { ok: true };
 // ---------------------------------------------------------------------------
 // Global rungs (stage-independent) — checked before any stage-specific work, in
@@ -318,6 +322,87 @@ function checkFinalVerification(paths, state) {
             return exists
                 ? { ok: false, error: "report_not_registered", detail: { file: produced } }
                 : { ok: false, error: "report_not_produced", detail: { produces: produced } };
+        }
+    }
+    return PASS;
+}
+/**
+ * Rung m (NEW — SG3 P2-C, audit C-05..C-08) — the PRODUCTION-REALITY rung. A run may
+ * not be certified complete while its user-visible production path still depends on
+ * unresolved simulated behavior. FOUR sub-checks, each a DISTINCT stable error token
+ * (the order is the short-circuit order; the first failing one is returned):
+ *
+ *   1. `simulation_unretired`         — a non-retired simulation ledger entry maps to
+ *                                       a user-visible path (`blocksProductionReality`).
+ *   2. `production_verify_not_green`  — the last `th verify run` is not green (or a
+ *                                       configured suite was never run / the config is
+ *                                       corrupt) — production-targeted commands must pass.
+ *   3. `tester_record_missing`        — no live-QA Tester run record is attached
+ *                                       (`tester.ts` — the audit's mandatory live QA).
+ *   4. `unledgered_simulation_in_dist`— `dist/` carries simulation patterns
+ *                                       (mock/fake/stub/…) with no active ledger entry.
+ *
+ * This is the mechanical form of the audit's required invariant. It is a STANDALONE
+ * predicate in this commit (warn stage): it is NOT yet inserted into `canAdvanceStage`
+ * / `canUnlockImplementation` / `checkFinalVerification` (the enforce commit does the
+ * isolated if-line insertion). `th gate production-reality` is a PURE READER of this
+ * predicate; the MCP gate tools inherit it FREE once the enforce commit composes it.
+ *
+ * A corrupt simulation ledger fails CLOSED with `simulation_ledger_corrupt` (the same
+ * fail-closed posture `checkFinalVerification` takes on a corrupt verify config).
+ */
+function checkProductionReality(paths, state) {
+    // 1. A non-retired simulation entry on a user-visible production path blocks.
+    let entries;
+    try {
+        entries = (0, sim_1.readSimulationLedger)(paths);
+    }
+    catch (e) {
+        if (e instanceof sim_1.SimulationLedgerCorruptError) {
+            return { ok: false, error: "simulation_ledger_corrupt", detail: {} };
+        }
+        throw e;
+    }
+    const blocking = entries.filter(simulation_1.blocksProductionReality);
+    if (blocking.length > 0) {
+        return {
+            ok: false,
+            error: "simulation_unretired",
+            detail: { ids: blocking.map((e) => e.id), classifications: blocking.map((e) => e.classification) },
+        };
+    }
+    // 2. The verify suite must be green against production-targeted commands. Mirror
+    // checkFinalVerification's fail-closed reading: a corrupt config, a configured-but-
+    // never-run suite, or a red report each blocks (one stable token).
+    const verifyLoaded = (0, verify_1.loadVerifyConfig)(paths);
+    if (verifyLoaded.status === "corrupt") {
+        return { ok: false, error: "production_verify_not_green", detail: { reason: "config_corrupt" } };
+    }
+    const verifyCfg = verifyLoaded.config;
+    const report = (0, verify_1.readVerifyReport)(paths);
+    if (verifyCfg.commands.length > 0 && !report) {
+        return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
+    }
+    if (report && !report.ok) {
+        const failed = report.results.filter((x) => !x.ok).length;
+        return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
+    }
+    // 3. A live-QA Tester run record must be attached (audit C-08).
+    if (!(0, tester_1.testerRecordPresent)(paths)) {
+        return { ok: false, error: "tester_record_missing", detail: {} };
+    }
+    // 4. dist/ must not carry unledgered simulation patterns. A dist hit is "ledgered"
+    // only when an ACTIVE simulation entry exists; with none, every dist hit is an
+    // undeclared simulation (mirrors `th sim scan`). Capped walk (never throws).
+    const hasActiveSimEntry = entries.some((e) => e.status !== "retired" && (0, simulation_1.isSimulatedClassification)(e.classification));
+    if (!hasActiveSimEntry) {
+        const scan = (0, sim_1.scanForSimulationHits)(paths);
+        if (scan.distHits.length > 0) {
+            return {
+                ok: false,
+                error: "unledgered_simulation_in_dist",
+                detail: { hits: scan.distHits.slice(0, 20), total: scan.distHits.length },
+            };
         }
     }
     return PASS;

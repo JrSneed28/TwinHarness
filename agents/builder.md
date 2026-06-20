@@ -115,6 +115,30 @@ against the existing implementation, log a derived entry (`--discovery "existing
 code that *contradicts* a requirement-level REQ is **BLOCKING** drift, handled like any requirement
 contradiction below.
 
+### Missing real-boundary detail → STOP, escalate, BLOCKING (do NOT fake it)
+
+**When** an external boundary the task touches — provider, auth, persistence, network, credentials —
+is under-specified: the task file's `## External Dependencies` lacks the provider, auth model,
+persistence target, or real-vs-sandbox classification you need to implement the REAL path. This is
+**NOT** derived drift you may auto-resolve: "proceed with only what is specified" here produces a
+**fake/no-op/stubbed adapter that passes tests but does nothing real** — the failure the
+production-reality gate exists to stop. So it **BLOCKS** like a requirement contradiction:
+
+1. **Stop building the current task** — do **not** invent a provider/auth/persistence detail and do
+   **not** ship a stub or hardcoded value to make the anchored test pass.
+2. **Log a blocking entry** (increments `drift_open_blocking`; the stop-gate blocks completion):
+   ```
+   th drift add --layer requirement --ref "SLICE-<N> / TASK-<MMM>" \
+     --discovery "<the missing real-boundary detail: which provider/auth/persistence is unspecified>" \
+     --action "build paused — real boundary undefined"
+   ```
+3. **Escalate to the Orchestrator** for the real boundary spec. **Only a human/spec owner supplies it.**
+4. If the run DELIBERATELY ships a temporary simulation for this boundary (an approved Slice-0 /
+   labeled prototype only), it must be **ledgered, not hidden**: `th sim add --classification
+   <Stubbed|Mocked|Emulated|Hardcoded> --user-visible --replaces "<real dependency>" --retire-slice
+   "<SLICE/owner>"`. A user-visible simulation BLOCKS `th gate production-reality` until retired
+   (`th sim retire <SIM-NNN>`) — it is never silently passed off as production.
+
 ### Requirement / scope drift → STOP, escalate, BLOCKING
 
 **When** you find a contradiction with `docs/01-requirements.md` or `docs/02-scope.md` (e.g. REQ-004

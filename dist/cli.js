@@ -76,6 +76,8 @@ const delegate_1 = require("./commands/delegate");
 const repo_1 = require("./commands/repo");
 const decision_1 = require("./commands/decision");
 const template_1 = require("./commands/template");
+const sim_1 = require("./commands/sim");
+const gate_1 = require("./commands/gate");
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
@@ -186,6 +188,12 @@ Usage:
                                     HUMAN-ONLY: interactive-TTY-gated transition (proposed→approved/rejected; approved→superseded). Never an MCP tool.
   th decision check                 Fail (exit 6) when an unapproved decision gates the current stage; else exit 0
   th decision list                  List the decision set (ids/titles/statuses/links/audit), sorted (exit 0; non-zero if the hash chain is broken)
+  th sim add --classification <Real|Sandbox|Emulated|Mocked|Stubbed|Hardcoded> [--replaces ...] [--intro-slice ...] [--retire-slice ...] [--owner ...] [--user-visible]
+                                    Append a simulation-ledger entry (.twinharness/simulation-ledger.json); a user-visible simulated entry BLOCKS the production-reality gate until retired
+  th sim list                       List simulation-ledger entries + the ids that block production-reality
+  th sim retire <SIM-NNN> [--retire-slice ...]  Mark a simulation entry retired (status transition; entries are never deleted)
+  th sim scan                       Grep dist/+tests for unledgered simulation patterns (mock|fake|stub|fixture|placeholder|demo|TODO|canned|hardcoded); advisory (exit 0)
+  th gate production-reality        Reader: report the production-reality gate (no unretired user-visible simulation, verify green, Tester record, no unledgered dist/ patterns)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
   th template get <name>            Resolve a template by bare name (e.g. task-file or task-file.md): project override (.twinharness/templates/) → plugin-bundled (templates/) → structured template_not_found; --json returns path+content+source
@@ -269,7 +277,13 @@ Global flags:
   --delivery-mode <m>  (init) Set delivery_mode once at creation: code (default) | no-code | documentation-only
   --has-ui / --no-ui   (init) Set has_ui at creation (default absent ⇒ true; --no-ui drops the UX/UI stages)
   --interview-required / --no-interview-required  (init) Force the clarity-interview gate on/off (default absent ⇒ computed from tier)
-  --interview-cutoff <0..1>  (init) Set the interview-readiness confidence cutoff at creation`;
+  --interview-cutoff <0..1>  (init) Set the interview-readiness confidence cutoff at creation
+  --classification <C>  (sim add) Real | Sandbox | Emulated | Mocked | Stubbed | Hardcoded (required)
+  --replaces <s>    (sim add) What real dependency this simulation stands in for
+  --intro-slice <s> (sim add) Slice/task that introduced the simulation
+  --retire-slice <s> (sim add / sim retire) Slice/owner that will (or did) replace it with reality
+  --owner <s>       (sim add) Who owns retiring the simulation
+  --user-visible    (sim add) A user-visible production path depends on this (BLOCKS production-reality until retired)`;
 /** Boolean flags (presence = true). */
 const BOOLEAN_FLAGS = {
     "--json": "json",
@@ -301,6 +315,8 @@ const BOOLEAN_FLAGS = {
     "--lock": "lock",
     "--emergency": "emergency",
     "--read-only": "readOnly",
+    // SG3 P2-C — a user-visible simulation entry is what the production-reality gate blocks on.
+    "--user-visible": "userVisible",
 };
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
 const STRING_FLAGS = {
@@ -363,6 +379,12 @@ const STRING_FLAGS = {
     "--kind": "kind",
     "--files-list": "filesList",
     "--allowed-files": "allowedFiles",
+    // SG3 P2-C — simulation-ledger entry fields.
+    "--classification": "classification",
+    "--replaces": "replaces",
+    "--intro-slice": "introSlice",
+    "--retire-slice": "retireSlice",
+    "--owner": "owner",
 };
 /** Flags that consume a numeric value. */
 const NUMBER_FLAGS = {
@@ -439,6 +461,7 @@ function parseArgs(argv) {
         lock: false,
         emergency: false,
         readOnly: false,
+        userVisible: false,
     };
     const positionals = [];
     const unknownFlags = [];
@@ -787,6 +810,36 @@ function dispatch(parsed) {
                     return (0, stage_1.runStageAdvance)(paths);
                 default:
                     return (0, output_1.failure)({ human: `unknown 'stage' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "sim":
+            switch (sub) {
+                case "add":
+                    // SG3 P2-C — append an active simulation-ledger entry (classification required).
+                    return (0, sim_1.runSimAdd)(paths, {
+                        classification: parsed.flags.classification,
+                        replaces: parsed.flags.replaces,
+                        introSlice: parsed.flags.introSlice,
+                        retireSlice: parsed.flags.retireSlice,
+                        owner: parsed.flags.owner,
+                        userVisible: parsed.flags.userVisible,
+                    });
+                case "list":
+                    return (0, sim_1.runSimList)(paths, {});
+                case "retire":
+                    return (0, sim_1.runSimRetire)(paths, rest[0], { retireSlice: parsed.flags.retireSlice });
+                case "scan":
+                    // Advisory: grep dist/+tests for unledgered simulation patterns (exit 0).
+                    return (0, sim_1.runSimScan)(paths, {});
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'sim' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "gate":
+            switch (sub) {
+                case "production-reality":
+                    // SG3 P2-C — PURE READER of checkProductionReality (no verb-calls-verb).
+                    return (0, gate_1.runGateProductionReality)(paths);
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'gate' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
         case "manifest":
             switch (sub) {

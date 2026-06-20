@@ -44,6 +44,9 @@ import { type CommandResult, failure } from "./core/output";
 
 import { runStateGet, runStateSet, applyGateMutation } from "./commands/state";
 import { runDriftAdd, runDriftList, runDriftResolve } from "./commands/drift";
+import { runSimAdd, runSimList, runSimRetire, runSimScan } from "./commands/sim";
+import { runGateProductionReality } from "./commands/gate";
+import { SIMULATION_CLASSIFICATIONS } from "./core/simulation";
 import { runBuildNextWave, runBuildClaim, runBuildRelease, runBuildSubClaim, runBuildSubRelease, runBuildDispatch, runBuildPlan } from "./commands/build";
 import { runCoverageCheck, runCoverageReport } from "./commands/coverage";
 import { runRoute } from "./commands/route";
@@ -1583,6 +1586,70 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       return runResearchWrite(paths, { topic, markdown });
     },
   },
+  // --- SG3 P2-C: simulation ledger + production-reality gate reader (appended) ---
+  {
+    name: "th_sim_add",
+    description:
+      "Append a simulation-ledger entry (.twinharness/simulation-ledger.json). `classification` is required (Real|Sandbox|Emulated|Mocked|Stubbed|Hardcoded). A user-visible SIMULATED entry (Mocked/Stubbed/Hardcoded/Emulated) BLOCKS the production-reality gate until retired. Optional replaces/introSlice/retireSlice/owner/userVisible mirror the CLI flags. Append-only; mints SIM-NNN.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        classification: { type: "string", description: "Production-reality classification (required).", enum: [...SIMULATION_CLASSIFICATIONS] },
+        replaces: stringProp("What real dependency this stands in for."),
+        introSlice: stringProp("Slice/task that introduced the simulation."),
+        retireSlice: stringProp("Slice/owner that will replace it with reality."),
+        owner: stringProp("Who owns retiring the simulation."),
+        userVisible: boolProp("true when a user-visible production path depends on this (the gate blocks on it)."),
+      },
+      required: ["classification"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runSimAdd(paths, {
+        classification: optString(args, "classification"),
+        replaces: optString(args, "replaces"),
+        introSlice: optString(args, "introSlice"),
+        retireSlice: optString(args, "retireSlice"),
+        owner: optString(args, "owner"),
+        userVisible: optBool(args, "userVisible"),
+      }),
+  },
+  {
+    name: "th_sim_list",
+    description:
+      "List simulation-ledger entries plus the ids that BLOCK the production-reality gate (non-retired, user-visible, simulated). Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runSimList(paths, {}),
+  },
+  {
+    name: "th_sim_retire",
+    description:
+      "Mark a simulation entry retired by id (status transition active→retired; entries are never deleted). Optional retireSlice records who/what replaced it with reality. Errors on an unknown id or a double-retire. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: stringProp("The SIM-NNN id to retire."),
+        retireSlice: stringProp("Slice/owner that replaced the simulation with reality."),
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runSimRetire(paths, optString(args, "id"), { retireSlice: optString(args, "retireSlice") }),
+  },
+  {
+    name: "th_sim_scan",
+    description:
+      "Grep dist/ and tests/ for simulation patterns (mock|fake|stub|fixture|placeholder|demo|TODO|canned|hardcoded) and flag any hit in dist/ that has no active ledger entry. Advisory/read-only (exit 0); the production-reality GATE — not scan — refuses advance.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runSimScan(paths, {}),
+  },
+  {
+    name: "th_gate_production_reality",
+    description:
+      "Reader: report the production-reality gate (checkProductionReality). FOUR conditions, each a stable error token: simulation_unretired (a non-retired user-visible simulation), production_verify_not_green, tester_record_missing, unledgered_simulation_in_dist. The SAME predicate canAdvanceStage/canUnlockImplementation/checkFinalVerification compose, so a blocked th_stage_advance/th_implementation_unlock returns the IDENTICAL token. Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runGateProductionReality(paths),
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -1612,6 +1679,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
 export type ToolCategory =
   | "state"
   | "gate"
+  | "simulation"
   | "drift"
   | "build"
   | "routing"
@@ -1673,6 +1741,12 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_drift_add: wr("drift", { idempotent: false }),
   th_drift_list: ro("drift"),
   th_drift_resolve: wr("drift", { idempotent: false }),
+  // SG3 P2-C — simulation ledger (append/transition) + read/scan + production-reality reader
+  th_sim_add: wr("simulation", { idempotent: false }),
+  th_sim_list: ro("simulation"),
+  th_sim_retire: wr("simulation", { idempotent: false }),
+  th_sim_scan: ro("simulation"),
+  th_gate_production_reality: ro("gate"),
   // build oracles (read-only) + leases (mutating)
   th_build_next_wave: ro("oracle"),
   th_build_claim: wr("build", { idempotent: false }),
@@ -1886,6 +1960,8 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "stale",
   "slices sync", "slice set-status",
   "drift add", "drift list", "drift resolve",
+  "sim add", "sim list", "sim retire", "sim scan",
+  "gate production-reality",
   "collab init", "collab fragment", "collab list", "collab merge",
   "debate add", "debate list", "debate resolve",
   "hook stop-gate", "hook pretool-gate", "hook subagent-stop",

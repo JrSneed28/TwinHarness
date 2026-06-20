@@ -123,6 +123,9 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   // drift ledger (append to stateDir)
   th_drift_add: { layer: "derived", discovery: "probe", action: "probe" },
   th_drift_resolve: { id: "DRIFT-001" },
+  // simulation ledger (SG3 P2-C; append/transition under stateDir — not path-taking)
+  th_sim_add: { classification: "Mocked" },
+  th_sim_retire: { id: "SIM-001" },
   // build leases (append to stateDir)
   th_build_claim: { sliceId: "SLICE-1" },
   th_build_release: { sliceId: "SLICE-1" },
