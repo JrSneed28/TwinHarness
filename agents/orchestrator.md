@@ -220,12 +220,10 @@ Not pipeline stages — invoke them in fresh context, like the Critic, when the 
 - **Tester (`agents/tester.md`) — broad-QA on-demand AND REQUIRED at final verification.** Launches/drives
   the *real* built project (CLI/TUI/service/web) to find defects at any stage: driver per type
   (process/stdio; `claude-in-chrome` for web; tmux optional), model by tier/blast (sonnet→opus), findings →
-  `th drift add`/blackboard, no sub-agents. Invoke directly or via `/twinharness:th-test`. **At
-  `final-verification` the Tester is MANDATORY, not optional:** a live run that exercises the user-visible
-  production path against the real (or official sandbox) boundary, recorded as the verification report's
-  **Tester Evidence** (driver, provider tier, raw output). Without it `th gate production-reality` blocks
-  (`tester_record_missing`), and any unretired user-visible simulation (`th sim list`) also blocks until
-  retired — a green anchored-test suite on mocks is not production reality.
+  `th drift add`/blackboard, no sub-agents. Invoke directly or via `/twinharness:th-test`. **MANDATORY at
+  `final-verification`:** a recorded live run on the real/sandbox boundary (report's **Tester Evidence**) —
+  without it `th gate production-reality` blocks (`tester_record_missing`), as does any unretired
+  user-visible simulation. A green test suite on mocks is not production reality.
 
 ## Brownfield mode (adopting an existing codebase)
 

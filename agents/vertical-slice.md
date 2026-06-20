@@ -63,13 +63,9 @@ the system already boots, so Slice 0 **characterizes the adoption seam**: an end
 the integration point where new work attaches to existing code, *with existing components untouched*.
 Reference the seam by path from the analysis; do not build a parallel skeleton alongside working code.
 
-**Production-reality note — a Slice-0 simulation must be ledgered, not hidden.** A walking skeleton may
-legitimately stub/hardcode a boundary to prove integration before the real provider is wired. That is
-allowed ONLY when it is **labeled in the ledger**: `th sim add --classification <Stubbed|Hardcoded|
-Mocked|Emulated> --user-visible --replaces "<real dependency>" --retire-slice "<the slice that wires
-reality>"`. Any user-visible simulation BLOCKS `th gate production-reality` until retired, so a later
-slice must replace it with reality and `th sim retire <SIM-NNN>` before final verification — the
-skeleton never silently graduates into a "complete" feature backed by a fake.
+**Production-reality note.** A skeleton may stub a boundary to prove integration, but only when **ledgered**
+(`th sim add --classification <Stubbed|…> --user-visible --retire-slice "<slice>"`). A user-visible
+simulation BLOCKS `th gate production-reality` until a later slice wires reality and `th sim retire <SIM-NNN>`.
 
 ### Subsequent slices
 

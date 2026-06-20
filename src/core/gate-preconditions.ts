@@ -305,6 +305,11 @@ export function checkFinalVerification(paths: ProjectPaths, state: TwinHarnessSt
         : { ok: false, error: "report_not_produced", detail: { produces: produced } };
     }
   }
+  // SG3 P2-C (enforce) — the production-reality rung: at final-verification, a run may
+  // not be certified complete while a user-visible production path depends on unresolved
+  // simulation / verify is red / no Tester record / dist carries unledgered simulation.
+  const pr = checkProductionReality(paths, state);
+  if (!pr.ok) return pr;
   return PASS;
 }
 
@@ -324,16 +329,30 @@ export function checkFinalVerification(paths: ProjectPaths, state: TwinHarnessSt
  *   4. `unledgered_simulation_in_dist`— `dist/` carries simulation patterns
  *                                       (mock/fake/stub/…) with no active ledger entry.
  *
- * This is the mechanical form of the audit's required invariant. It is a STANDALONE
- * predicate in this commit (warn stage): it is NOT yet inserted into `canAdvanceStage`
- * / `canUnlockImplementation` / `checkFinalVerification` (the enforce commit does the
- * isolated if-line insertion). `th gate production-reality` is a PURE READER of this
- * predicate; the MCP gate tools inherit it FREE once the enforce commit composes it.
+ * This is the mechanical form of the audit's required invariant — a COMPLETION gate.
+ * It is now COMPOSED into `checkFinalVerification` (and, via it, `canAdvanceStage`'s
+ * final-stage branch) plus `canUnlockImplementation`. Because production reality is a
+ * CERTIFY-COMPLETION condition, the rung ONLY enforces at the completion boundary
+ * (`final-verification`): at any earlier stage there is no built `dist/` and no Tester
+ * record yet, so it returns PASS — exactly the stage-aware shape `checkInterview` uses
+ * to gate only the front of the pipeline. This keeps the composed if-lines a no-op for
+ * every non-final run (no spurious obligation-ladder churn) while making the
+ * final-verification gate refuse a fake-backed "complete".
+ *
+ * `th gate production-reality` is a PURE READER of this predicate; the MCP gate tools
+ * (`th_stage_advance`/`th_implementation_unlock`) inherit it FREE through the composed
+ * ladder, so a blocked `th next` and a blocked MCP gate tool return the IDENTICAL token.
  *
  * A corrupt simulation ledger fails CLOSED with `simulation_ledger_corrupt` (the same
  * fail-closed posture `checkFinalVerification` takes on a corrupt verify config).
  */
 export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessState): GateResult {
+  // Stage-aware: production reality is a CERTIFY-COMPLETION condition, so it only
+  // enforces at the completion boundary (final-verification). Earlier stages have no
+  // built dist/ / Tester record yet — gating them would be nonsensical and would red
+  // every in-flight run's obligation ladder. Mirrors checkInterview's front-gate shape.
+  if (!isFinalVerification(state.current_stage)) return PASS;
+
   // 1. A non-retired simulation entry on a user-visible production path blocks.
   let entries;
   try {
@@ -461,6 +480,11 @@ export function canAdvanceStage(paths: ProjectPaths, state: TwinHarnessState): G
 
   const current = canonicalizeStage(state.current_stage);
   if (isFinalVerification(current)) {
+    // SG3 P2-C (enforce) — checkFinalVerification composes the production-reality rung
+    // as its LAST sub-rung (after slices/verify/coverage/report), so canAdvanceStage's
+    // final branch inherits it in the SAME order `th next` renders it. Inserting an
+    // explicit check HERE would put production-reality AHEAD of coverage and diverge
+    // from the oracle's order — so the rung lives inside checkFinalVerification only.
     return checkFinalVerification(paths, state);
   }
   if (!(r = checkGoverningArtifact(paths, state)).ok) return r;
@@ -486,6 +510,11 @@ export function canUnlockImplementation(paths: ProjectPaths, state: TwinHarnessS
   if (!adv.ok) return adv;
   const cov = checkCoverage(paths);
   if (!cov.ok) return cov;
+  // SG3 P2-C (enforce) — production-reality is part of the unlock composition too
+  // (stage-aware: a no-op until final-verification, so it never blocks the normal
+  // implementation-planning unlock; it holds if unlock is attempted at the final stage).
+  const pr = checkProductionReality(paths, state);
+  if (!pr.ok) return pr;
   const ordinal = stageOrdinal(state.current_stage);
   if (ordinal < 0 || ordinal < IMPLEMENTATION_PLANNING_ORDINAL) {
     return {

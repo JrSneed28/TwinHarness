@@ -21500,9 +21500,12 @@ function checkFinalVerification(paths, state) {
       return exists ? { ok: false, error: "report_not_registered", detail: { file: produced } } : { ok: false, error: "report_not_produced", detail: { produces: produced } };
     }
   }
+  const pr = checkProductionReality(paths, state);
+  if (!pr.ok) return pr;
   return PASS;
 }
 function checkProductionReality(paths, state) {
+  if (!isFinalVerification(state.current_stage)) return PASS;
   let entries;
   try {
     entries = readSimulationLedger(paths);
@@ -21597,6 +21600,8 @@ function canUnlockImplementation(paths, state) {
   if (!adv.ok) return adv;
   const cov = checkCoverage(paths);
   if (!cov.ok) return cov;
+  const pr = checkProductionReality(paths, state);
+  if (!pr.ok) return pr;
   const ordinal = stageOrdinal(state.current_stage);
   if (ordinal < 0 || ordinal < IMPLEMENTATION_PLANNING_ORDINAL) {
     return {
@@ -22769,6 +22774,64 @@ function runNext(paths, opts = {}) {
         const produced = fv.detail.produces;
         return emit(
           { kind: "produce-artifact", action: `Produce ${produced} separating coherence (Critic) from correctness (tests + human), then register it.`, why: "Slices are settled and coverage is clean, so the run now owes the verification report itself \u2014 the last artifact, which must separate Critic-certified coherence from test/human-certified correctness.", data: { produces: produced } },
+          explain
+        );
+      }
+      // SG3 P2-C (enforce) — the production-reality rung (audit C-05..C-08). The same
+      // stable tokens checkProductionReality returns (so `th next` and the MCP gate
+      // tools agree); each maps to the action that clears it.
+      case "simulation_unretired": {
+        const ids = fv.detail.ids ?? [];
+        return emit(
+          {
+            kind: "retire-simulation",
+            action: `Final verification is blocked \u2014 user-visible simulation still active: ${ids.join(", ")}. Replace it with the real (or sandbox) dependency and \`th sim retire <SIM-NNN>\` before sign-off (\`th sim list\`).`,
+            why: "A feature must not be certified complete while its user-visible production path depends on unresolved simulated behavior \u2014 the production-reality gate refuses completion until every such simulation is retired.",
+            data: { ids }
+          },
+          explain
+        );
+      }
+      case "production_verify_not_green": {
+        return emit(
+          {
+            kind: "run-verify",
+            action: "Final verification is blocked \u2014 the verify suite is not green against production-targeted commands. Run `th verify run` and confirm green before sign-off.",
+            why: "Production reality requires the suite to pass against the real path; a red/never-run/corrupt verify result cannot certify completion.",
+            data: { ...fv.detail ?? {} }
+          },
+          explain
+        );
+      }
+      case "tester_record_missing": {
+        return emit(
+          {
+            kind: "run-tester",
+            action: "Final verification is blocked \u2014 no live-QA Tester record is attached. Run the Tester against the real (or sandbox) boundary and record the evidence (driver/provider/output) in the verification report's Tester Evidence section.",
+            why: "At final-verification the live Tester is mandatory: a green anchored-test suite can pass on mocks, so production reality needs a recorded live run exercising the user-visible production path."
+          },
+          explain
+        );
+      }
+      case "unledgered_simulation_in_dist": {
+        const total = fv.detail.total ?? 0;
+        return emit(
+          {
+            kind: "ledger-simulation",
+            action: `Final verification is blocked \u2014 dist/ carries ${total} unledgered simulation pattern(s) (\`th sim scan\`). Declare each with \`th sim add\` (and retire it) or remove it before sign-off.`,
+            why: "Undeclared simulation in the built artifact means a fake could pass as production; the gate refuses completion until every dist/ simulation is ledgered (and retired) or removed.",
+            data: { total }
+          },
+          explain
+        );
+      }
+      case "simulation_ledger_corrupt": {
+        return emit(
+          {
+            kind: "fix-simulation-ledger",
+            action: "Final verification is blocked \u2014 .twinharness/simulation-ledger.json is corrupt/unreadable. Inspect and repair it before sign-off (it must be a JSON array of simulation entries).",
+            why: "An unreadable simulation ledger must fail CLOSED: treating it as empty would let an undeclared simulation pass as production."
+          },
           explain
         );
       }
