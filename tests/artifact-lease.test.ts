@@ -167,6 +167,36 @@ describe("R-11: the shared lease validator rejects an absolute / parent-escaping
   });
 });
 
+describe("R-22: the lease validator rejects CROSS-PLATFORM absolute file parts (host-native path.isAbsolute missed these on POSIX)", () => {
+  it("claim REJECTS a Windows drive-absolute file part on ANY host (the R-11 gap)", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    // On a POSIX host the OLD `path.isAbsolute("C:\\Windows\\x")` was false and the
+    // `..`-split missed it too → it slipped through. The shared cross-platform
+    // predicate now rejects it identically on POSIX and Windows.
+    const drive = runArtifactClaim(tp.paths, { section: "C:\\Windows\\x#sec", holder: "agent-A" });
+    expect(drive.ok).toBe(false);
+    expect(drive.data?.error).toBe("path_escape");
+
+    const driveFwd = runArtifactClaim(tp.paths, { section: "c:/Windows/x#sec", holder: "agent-A" });
+    expect(driveFwd.ok).toBe(false);
+    expect(driveFwd.data?.error).toBe("path_escape");
+
+    expect(activeSectionLeases(tp.paths)).toEqual([]);
+  });
+
+  it("claim REJECTS a UNC file part on ANY host", () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    const unc = runArtifactClaim(tp.paths, { section: "\\\\server\\share#sec", holder: "agent-A" });
+    expect(unc.ok).toBe(false);
+    expect(unc.data?.error).toBe("path_escape");
+    expect(activeSectionLeases(tp.paths)).toEqual([]);
+  });
+});
+
 describe("REQ-PCO-041: commands return NOT_INIT on an uninitialized project", () => {
   it("claim returns not_initialized when state.json is absent", () => {
     tp = makeTempProject();

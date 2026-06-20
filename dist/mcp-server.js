@@ -3230,8 +3230,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path31) {
-      let input = path31;
+    function removeDotSegments(path30) {
+      let input = path30;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3483,8 +3483,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path31, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path31 && path31 !== "/" ? path31 : void 0;
+        const [path30, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path30 && path30 !== "/" ? path30 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -7152,10 +7152,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path31) {
-  if (!path31)
+function getElementAtPath(obj, path30) {
+  if (!path30)
     return obj;
-  return path31.reduce((acc, key) => acc?.[key], obj);
+  return path30.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7564,11 +7564,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path31, issues) {
+function prefixIssues(path30, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path31);
+    iss.path.unshift(path30);
     return iss;
   });
 }
@@ -7715,16 +7715,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path31 = []) => {
+  const processError = (error3, path30 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path31, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path30, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path31, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path31, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
       } else {
-        const fullpath = [...path31, ...issue2.path];
+        const fullpath = [...path30, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -15474,7 +15474,7 @@ var StdioServerTransport = class {
 
 // src/mcp-server.ts
 var fs32 = __toESM(require("node:fs"));
-var path30 = __toESM(require("node:path"));
+var path29 = __toESM(require("node:path"));
 
 // src/core/paths.ts
 var fs = __toESM(require("node:fs"));
@@ -15535,6 +15535,9 @@ function resolveWithinRoot(root, p) {
   if (realRel === "") return abs;
   if (realRel.startsWith("..") || path.isAbsolute(realRel)) return null;
   return abs;
+}
+function isAbsoluteOrEscaping(p) {
+  return path.isAbsolute(p) || /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith("\\\\") || p.split(/[\\/]/).includes("..");
 }
 function realpathSafe(p) {
   try {
@@ -20184,9 +20187,9 @@ var path17 = __toESM(require("node:path"));
 function containLcovPath(absRoot, lcovDirRel, sfPath) {
   if (sfPath.length === 0) return null;
   const norm = sfPath.replace(/\\/g, "/");
-  const isAbsolute7 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
+  const isAbsolute5 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
   let abs;
-  if (isAbsolute7) {
+  if (isAbsolute5) {
     abs = path17.resolve(norm);
   } else {
     abs = path17.resolve(absRoot, lcovDirRel, norm);
@@ -22985,7 +22988,6 @@ function sealWarningData(events) {
 }
 
 // src/commands/artifact-lease.ts
-var path24 = __toESM(require("node:path"));
 var CLAIM_USAGE = "usage: th artifact claim <file>#<section> --holder <id>";
 var RELEASE_USAGE = "usage: th artifact release <file>#<section> --holder <id>";
 function validate(opts, usage) {
@@ -23004,7 +23006,7 @@ function validate(opts, usage) {
     };
   }
   const file = parseSectionId(section).file;
-  if (path24.isAbsolute(file) || file.split(/[\\/]/).includes("..")) {
+  if (isAbsoluteOrEscaping(file)) {
     return {
       ok: false,
       result: failure({
@@ -23056,9 +23058,9 @@ function runArtifactLeases(paths) {
 
 // src/core/collab.ts
 var fs25 = __toESM(require("node:fs"));
-var path25 = __toESM(require("node:path"));
+var path24 = __toESM(require("node:path"));
 function validatePathSegment(segment, label) {
-  if (path25.isAbsolute(segment)) {
+  if (path24.isAbsolute(segment)) {
     throw new PathContainmentError(`collab: ${label} must not be an absolute path: "${segment}"`, segment);
   }
   if (segment === ".." || segment.includes("/") || segment.includes("\\")) {
@@ -23079,13 +23081,13 @@ var FragmentExistsError = class extends Error {
 function collabDir(paths, stage, round) {
   validatePathSegment(stage, "stage");
   if (round !== void 0) validatePathSegment(round, "round");
-  const base = path25.join(paths.stateDir, "collab", stage);
-  return round === void 0 ? base : path25.join(base, round);
+  const base = path24.join(paths.stateDir, "collab", stage);
+  return round === void 0 ? base : path24.join(base, round);
 }
 function writeFragment(paths, input) {
   validatePathSegment(input.name, "name");
   const dir = collabDir(paths, input.stage, input.round);
-  const file = path25.join(dir, input.name);
+  const file = path24.join(dir, input.name);
   fs25.mkdirSync(dir, { recursive: true });
   try {
     fs25.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
@@ -23102,7 +23104,7 @@ function listFragments(paths, stage, round) {
     if (!fs25.existsSync(dir) || !fs25.statSync(dir).isDirectory()) return;
     const names = fs25.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
     for (const name of names) {
-      out.push({ stage, round: r, name, path: path25.join(dir, name) });
+      out.push({ stage, round: r, name, path: path24.join(dir, name) });
     }
   };
   if (round !== void 0) {
@@ -23233,7 +23235,7 @@ function runCollabMerge(paths, opts) {
 
 // src/commands/debate.ts
 var fs26 = __toESM(require("node:fs"));
-var path26 = __toESM(require("node:path"));
+var path25 = __toESM(require("node:path"));
 
 // src/core/debate-log.ts
 var DEBATE_LEDGER = {
@@ -23301,7 +23303,7 @@ Links      : ...
 \`\`\`
 `;
 function debateLogPath(paths) {
-  return path26.join(paths.root, "debate-log.md");
+  return path25.join(paths.root, "debate-log.md");
 }
 function readDebateLog(paths) {
   const file = debateLogPath(paths);
@@ -23605,10 +23607,10 @@ function runInitMcp(paths, opts = {}) {
 
 // src/commands/artifact.ts
 var fs28 = __toESM(require("node:fs"));
-var path27 = __toESM(require("node:path"));
+var path26 = __toESM(require("node:path"));
 function toRelKey(root, file) {
-  const abs = path27.resolve(root, file);
-  return path27.relative(root, abs).split(path27.sep).join("/");
+  const abs = path26.resolve(root, file);
+  return path26.relative(root, abs).split(path26.sep).join("/");
 }
 function runArtifactRegister(paths, file, version2) {
   return withStateLock(paths, () => runArtifactRegisterLocked(paths, file, version2));
@@ -23830,10 +23832,10 @@ function runStageCurrent(paths) {
 
 // src/commands/doctor.ts
 var fs29 = __toESM(require("node:fs"));
-var path28 = __toESM(require("node:path"));
+var path27 = __toESM(require("node:path"));
 var DOCTOR_STRICT_KEY_ALLOWLIST = /* @__PURE__ */ new Set([]);
 function pluginRoot() {
-  return path28.resolve(__dirname, "..", "..");
+  return path27.resolve(__dirname, "..", "..");
 }
 function packagingCheck(root, files) {
   if (files.length === 0) {
@@ -23842,7 +23844,7 @@ function packagingCheck(root, files) {
   const missing = [];
   const counts = [];
   for (const entry of files) {
-    const abs = path28.join(root, entry);
+    const abs = path27.join(root, entry);
     let st;
     try {
       st = fs29.statSync(abs);
@@ -23919,7 +23921,7 @@ function runDoctor(paths, opts = {}) {
     detail: major >= 20 ? `${process.version} (>= 20)` : `${process.version} \u2014 TwinHarness requires Node >= 20`
   });
   const root = pluginRoot();
-  const distCli = path28.join(root, "dist", "cli.js");
+  const distCli = path27.join(root, "dist", "cli.js");
   checks.push({
     name: "plugin cli",
     status: fs29.existsSync(distCli) ? "ok" : "warn",
@@ -23928,7 +23930,7 @@ function runDoctor(paths, opts = {}) {
   let version2 = "unknown";
   let pkgFiles = [];
   try {
-    const pkg = JSON.parse(fs29.readFileSync(path28.join(root, "package.json"), "utf8"));
+    const pkg = JSON.parse(fs29.readFileSync(path27.join(root, "package.json"), "utf8"));
     if (typeof pkg.version === "string") version2 = pkg.version;
     if (Array.isArray(pkg.files)) pkgFiles = pkg.files.filter((f) => typeof f === "string");
   } catch {
@@ -23970,7 +23972,7 @@ function runDoctor(paths, opts = {}) {
       status: "ok",
       detail: `mode: ${writeMode} \u2014 GUARDRAIL for a compliant agent, NOT a security sandbox. The Bash heuristic is conservative and fail-open (unparsed here-docs/subshells/variable indirection and program-mediated writes like \`python -c\`/\`node -e\` bypass it). Do not run TwinHarness against untrusted repos and review \`th verify list\` before \`th verify run\`.`
     });
-    const lockDir = path28.join(paths.stateDir, ".state.lock");
+    const lockDir = path27.join(paths.stateDir, ".state.lock");
     if (fs29.existsSync(lockDir)) {
       let age = 0;
       try {
@@ -24259,7 +24261,7 @@ function renderScorecard(d) {
 
 // src/commands/slices.ts
 var fs31 = __toESM(require("node:fs"));
-var path29 = __toESM(require("node:path"));
+var path28 = __toESM(require("node:path"));
 function parseComponentTokens(raw) {
   const quoted = [];
   for (const m of raw.matchAll(/`([^`]+)`/g)) {
@@ -24310,9 +24312,9 @@ function runSlicesSync(paths, opts = {}) {
   return withStateLock(paths, () => runSlicesSyncLocked(paths, opts));
 }
 function runSlicesSyncLocked(paths, opts = {}) {
-  const planAbs = path29.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  const planAbs = path28.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
   if (!fs31.existsSync(planAbs) || !fs31.statSync(planAbs).isFile()) {
-    const rel = path29.relative(paths.root, planAbs).split(path29.sep).join("/");
+    const rel = path28.relative(paths.root, planAbs).split(path28.sep).join("/");
     return failure({
       human: `Plan file not found: ${rel}. Provide the path with --plan or author the implementation plan first.`,
       data: { error: "plan_file_not_found", planFile: rel }
@@ -25127,7 +25129,7 @@ var TOOL_DEFS = [
       const file = optString(args, "path");
       const version2 = optNumber(args, "version");
       if (file === void 0) return failure({ human: "th_artifact_register requires `path`.", data: { error: "missing_path" } });
-      if (path30.isAbsolute(file) || file.split(/[\\/]/).includes("..")) {
+      if (isAbsoluteOrEscaping(file)) {
         return failure({ human: `Refusing a path that is absolute or escapes the project root: ${file}`, data: { error: "path_escape", path: file } });
       }
       return runArtifactRegister(paths, file, version2);
@@ -25790,8 +25792,8 @@ function listTools() {
 var SERVER_NAME = "twinharness-th";
 function readServerVersion() {
   const candidates = [
-    path30.join(__dirname, "..", "package.json"),
-    path30.join(__dirname, "..", "..", "package.json")
+    path29.join(__dirname, "..", "package.json"),
+    path29.join(__dirname, "..", "..", "package.json")
   ];
   for (const candidate of candidates) {
     try {

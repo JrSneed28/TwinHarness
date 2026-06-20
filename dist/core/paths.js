@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.WriteSurfaceError = exports.PathContainmentError = void 0;
 exports.assertGovernedWriteSurface = assertGovernedWriteSurface;
 exports.resolveWithinRoot = resolveWithinRoot;
+exports.isAbsoluteOrEscaping = isAbsoluteOrEscaping;
 exports.realpathExistingPrefix = realpathExistingPrefix;
 exports.resolveProjectPaths = resolveProjectPaths;
 const fs = __importStar(require("node:fs"));
@@ -186,6 +187,28 @@ function resolveWithinRoot(root, p) {
     if (realRel.startsWith("..") || path.isAbsolute(realRel))
         return null;
     return abs; // success: return the lexical in-root path (contract unchanged)
+}
+/**
+ * Pure (no-I/O) predicate (R-22): does `p` look absolute or parent-escaping on
+ * EITHER platform? Encodes the same cross-platform reject rule as
+ * `resolveWithinRoot`'s `path.sep === "/"` branch above, but WITHOUT filesystem
+ * realpath resolution — so it is safe (and correct) to run against an opaque
+ * ledger KEY that is never joined to disk (the `<file>` part of an artifact lease
+ * section id, and the artifact-register MCP pre-check). Catches:
+ *   - native absolute (`path.isAbsolute`): POSIX `/x`; on Windows also `C:\x`, `\\unc`;
+ *   - Windows drive-absolute (`C:\x`) — host-native `path.isAbsolute` returns FALSE
+ *     for this on a POSIX host, which was the R-11 cross-platform gap this closes;
+ *   - UNC (`\\server\share`) on a POSIX host;
+ *   - any `..` segment (parent escape) on either platform.
+ * The drive/UNC/`..` checks are host-independent (regex + string ops), so a hostile
+ * `C:\Windows\x` is rejected identically on POSIX and Windows — containment no longer
+ * depends on the host OS.
+ */
+function isAbsoluteOrEscaping(p) {
+    return (path.isAbsolute(p) ||
+        /^[a-zA-Z]:[\\/]/.test(p) ||
+        p.startsWith("\\\\") ||
+        p.split(/[\\/]/).includes(".."));
 }
 /** realpath `p`, preferring the native resolver; fall back to `p` if it errors. */
 function realpathSafe(p) {

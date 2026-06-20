@@ -39,7 +39,7 @@ import {
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { resolveProjectPaths, type ProjectPaths } from "./core/paths";
+import { resolveProjectPaths, isAbsoluteOrEscaping, type ProjectPaths } from "./core/paths";
 import { type CommandResult, failure } from "./core/output";
 
 import { runStateGet, runStateSet, applyGateMutation } from "./commands/state";
@@ -1064,9 +1064,11 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       const file = optString(args, "path");
       const version = optNumber(args, "version");
       if (file === undefined) return failure({ human: "th_artifact_register requires `path`.", data: { error: "missing_path" } });
-      // AC-A6: reject absolute or parent-escaping paths BEFORE the handler
+      // AC-A6 / R-22: reject absolute or parent-escaping paths BEFORE the handler
       // (defense-in-depth; runArtifactRegister also re-checks via resolveWithinRoot).
-      if (path.isAbsolute(file) || file.split(/[\\/]/).includes("..")) {
+      // Uses the shared cross-platform predicate so a `C:\…`/UNC path is rejected on
+      // POSIX too (host-native `path.isAbsolute` missed those — the R-11 gap).
+      if (isAbsoluteOrEscaping(file)) {
         return failure({ human: `Refusing a path that is absolute or escapes the project root: ${file}`, data: { error: "path_escape", path: file } });
       }
       return runArtifactRegister(paths, file, version);

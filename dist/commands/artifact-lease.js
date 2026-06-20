@@ -18,44 +18,11 @@
  * `CommandResult` producers; cli.ts wires the `th artifact ...` subcommands and
  * prints / sets the exit code.
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runArtifactClaim = runArtifactClaim;
 exports.runArtifactRelease = runArtifactRelease;
 exports.runArtifactLeases = runArtifactLeases;
-const path = __importStar(require("node:path"));
+const paths_1 = require("../core/paths");
 const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const guards_1 = require("../core/guards");
@@ -79,15 +46,16 @@ function validate(opts, usage) {
             }),
         };
     }
-    // R-11: reject an absolute or parent-escaping FILE part, mirroring the
-    // `th_artifact_register` pre-check exactly (`path.isAbsolute(file) ||
-    // file.split(/[\\/]/).includes("..")`). The section id is an opaque ledger key
-    // (never joined to disk for a write), but the validation contract must be
-    // UNIFORM across the artifact tools: a `/etc/passwd#x` or `..\..\x#s` that
-    // `register` refuses must not slip in as a lease key. `parseSectionId` cannot
-    // return undefined here (isSectionId passed), so the `file` part is well-formed.
+    // R-11 / R-22: reject an absolute or parent-escaping FILE part via the shared
+    // cross-platform `isAbsoluteOrEscaping` predicate (same one the `th_artifact_register`
+    // MCP pre-check now uses). The section id is an opaque ledger key (never joined to
+    // disk for a write), but the validation contract must be UNIFORM across the artifact
+    // tools AND cross-platform: a `/etc/passwd#x`, `C:\Windows\x#s` (R-22 — host-native
+    // `path.isAbsolute` missed this on POSIX), `\\server\share#s`, or `..\..\x#s` that
+    // `register` refuses must not slip in as a lease key. `parseSectionId` cannot return
+    // undefined here (isSectionId passed), so the `file` part is well-formed.
     const file = (0, leases_1.parseSectionId)(section).file;
-    if (path.isAbsolute(file) || file.split(/[\\/]/).includes("..")) {
+    if ((0, paths_1.isAbsoluteOrEscaping)(file)) {
         return {
             ok: false,
             result: (0, output_1.failure)({
