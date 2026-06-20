@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import type { ProjectPaths } from "../core/paths";
+import { atomicWriteFile } from "../core/atomic-io";
 import { type CommandResult, success, failure } from "../core/output";
 import { initialState, validateState, DELIVERY_MODES, type TwinHarnessState, type DeliveryMode } from "../core/state-schema";
 import { readState, writeState } from "../core/state-store";
@@ -138,7 +139,11 @@ export function runInit(
   }
 
   if (!fs.existsSync(paths.driftLog)) {
-    fs.writeFileSync(paths.driftLog, DRIFT_LOG_HEADER, "utf8");
+    // R-15: write the header atomically through the governed write-surface
+    // chokepoint (temp→fsync→rename) so a crash mid-write can never leave a
+    // truncated drift-log.md, and the write is asserted in-surface like every
+    // other governed writer (drift-log.md is in GOVERNED_WRITE_SURFACES).
+    atomicWriteFile(paths.driftLog, DRIFT_LOG_HEADER, { root: paths.root });
     created.push("drift-log.md");
   } else {
     skipped.push("drift-log.md (already exists)");

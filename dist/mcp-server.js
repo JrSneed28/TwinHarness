@@ -15725,6 +15725,23 @@ function atomicWriteFile(absPath, content, optsOrRename = {}) {
   }
   fsyncDir(dir, fsync);
 }
+function endsWithNewline(absPath) {
+  let fd;
+  try {
+    fd = fs2.openSync(absPath, "r");
+  } catch {
+    return false;
+  }
+  try {
+    const size = fs2.fstatSync(fd).size;
+    if (size === 0) return false;
+    const buf = Buffer.alloc(1);
+    fs2.readSync(fd, buf, 0, 1, size - 1);
+    return buf[0] === 10;
+  } finally {
+    fs2.closeSync(fd);
+  }
+}
 function readFileWithRetry(absPath, read = (p) => fs2.readFileSync(p, "utf8")) {
   for (let attempt = 1; ; attempt++) {
     try {
@@ -16030,6 +16047,10 @@ function withStateLock(paths, fn, ops = realLockOps) {
       if (!isLockHeldError(code)) throw e;
       try {
         const ownerBefore = ops.readOwner(ownerFile);
+        if (ownerBefore === null) {
+          backoff();
+          continue;
+        }
         const age = ops.now() - ops.mtimeMs(lockDir);
         if (age > STALE_MS) {
           if (ops.readOwner(ownerFile) === ownerBefore) {
@@ -16763,15 +16784,16 @@ Escalation: ...
 `;
 function readDriftLog(paths) {
   if (!fs7.existsSync(paths.driftLog)) {
-    fs7.writeFileSync(paths.driftLog, DRIFT_LOG_HEADER, "utf8");
+    atomicWriteFile(paths.driftLog, DRIFT_LOG_HEADER, { root: paths.root });
     return DRIFT_LOG_HEADER;
   }
   return fs7.readFileSync(paths.driftLog, "utf8");
 }
 function appendDriftLog(paths, block) {
-  const current = readDriftLog(paths);
-  const sep13 = current.endsWith("\n") ? "" : "\n";
-  fs7.writeFileSync(paths.driftLog, `${current}${sep13}${block}`, "utf8");
+  readDriftLog(paths);
+  assertGovernedWriteSurface(paths.root, paths.driftLog);
+  const sep13 = endsWithNewline(paths.driftLog) ? "" : "\n";
+  fs7.appendFileSync(paths.driftLog, `${sep13}${block}`, "utf8");
 }
 function runDriftAdd(paths, opts) {
   return withStateLock(paths, () => runDriftAddLocked(paths, opts));
@@ -23213,15 +23235,17 @@ function debateLogPath(paths) {
 function readDebateLog(paths) {
   const file = debateLogPath(paths);
   if (!fs26.existsSync(file)) {
-    fs26.writeFileSync(file, DEBATE_LOG_HEADER, "utf8");
+    atomicWriteFile(file, DEBATE_LOG_HEADER, { root: paths.root });
     return DEBATE_LOG_HEADER;
   }
   return fs26.readFileSync(file, "utf8");
 }
 function appendDebateLog(paths, block) {
-  const current = readDebateLog(paths);
-  const sep13 = current.endsWith("\n") ? "" : "\n";
-  fs26.writeFileSync(debateLogPath(paths), `${current}${sep13}${block}`, "utf8");
+  const file = debateLogPath(paths);
+  readDebateLog(paths);
+  assertGovernedWriteSurface(paths.root, file);
+  const sep13 = endsWithNewline(file) ? "" : "\n";
+  fs26.appendFileSync(file, `${sep13}${block}`, "utf8");
 }
 function runDebateAdd(paths, opts) {
   return withStateLock(paths, () => runDebateAddLocked(paths, opts));
@@ -23466,7 +23490,7 @@ ${formatIssues(validation.issues)}`,
     created.push(".twinharness/state.json");
   }
   if (!fs27.existsSync(paths.driftLog)) {
-    fs27.writeFileSync(paths.driftLog, DRIFT_LOG_HEADER2, "utf8");
+    atomicWriteFile(paths.driftLog, DRIFT_LOG_HEADER2, { root: paths.root });
     created.push("drift-log.md");
   } else {
     skipped.push("drift-log.md (already exists)");

@@ -149,12 +149,15 @@ describe("SLICE-4 — decisions.jsonl concurrency + durability", () => {
     expect(verifyChain(finalEvents)).toEqual({ ok: true });
   }, 30_000);
 
-  it("REQ-NFR-005: test_REQNFR005_stale_lock_is_stolen_not_wedged — a stale .state.lock is stolen, not hung", () => {
+  it("REQ-NFR-005: test_REQNFR005_stale_lock_is_stolen_not_wedged — a stale, STAMPED .state.lock is stolen, not hung", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
-    // Plant a STALE lock dir (mtime far in the past, beyond the 30s threshold).
+    // Plant a STALE lock dir (mtime far in the past, beyond the stale threshold). It
+    // carries an OWNER stamp so it is steal-eligible — R-08: only stamped locks may be
+    // stolen; an owner-less crashed lock is reclaimed via the 25s timeout, never stolen.
     const lockDir = path.join(tp.paths.stateDir, ".state.lock");
     fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(path.join(lockDir, "owner"), "crashed-holder-token", "utf8");
     const past = new Date(Date.now() - 120_000);
     fs.utimesSync(lockDir, past, past);
 

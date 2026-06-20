@@ -253,10 +253,17 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T, ops: LockOps 
     }
     try {
       ops.acquire(lockDir); // atomic test-and-set: throws EEXIST (POSIX) / EPERM|EACCES (Windows) if held
+      // Stamp the owner token BEFORE declaring acquisition success so a LIVE lock is
+      // reliably steal-eligible-and-verifiable: a waiter only steals a STAMPED stale
+      // lock whose token is unchanged (the TOCTOU guard below). Best-effort — if the
+      // stamp throws (swallowed; common on Windows under AV/contention) the lock is
+      // owner-less, and per R-08 an owner-less lock is NEVER stolen, only reclaimed via
+      // the ~25s TIMEOUT_MS path. So a swallowed stamp can only DELAY a crashed holder's
+      // reclamation to the timeout — it can never let two actors enter the section.
       try {
         ops.writeOwner(ownerFile, myToken);
       } catch {
-        /* best-effort owner stamp; absence just means a steal can't TOCTOU-verify */
+        /* best-effort owner stamp; absence makes this lock un-stealable (R-08), not unsafe */
       }
       break;
     } catch (e) {
@@ -270,12 +277,27 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T, ops: LockOps 
       // (REQ-STATE-LOCK-003).
       try {
         const ownerBefore = ops.readOwner(ownerFile);
+        // R-08 — NEVER steal an OWNER-LESS lock. `readOwner` returns null both on a
+        // read failure AND when the owner stamp is simply absent (the holder's
+        // best-effort `writeOwner` threw and was swallowed — common on Windows under
+        // AV/contention — or a crashed/legacy owner-less lock). With a null
+        // `ownerBefore` the TOCTOU guard below degrades to `null === null` → TRUE for
+        // EVERY waiter, so two waiters could both pass it and both `remove()`, letting
+        // a fresh third holder's LIVE lock be clobbered → two actors in `fn()` (the
+        // lost-update the lock exists to prevent). Only a STAMPED lock is steal-eligible;
+        // an unstamped lock is reclaimed via the ~25s TIMEOUT_MS path, never stolen. Back
+        // off and retry (bounded by the loop-head deadline) instead of the age/steal check.
+        if (ownerBefore === null) {
+          backoff(); // owner-less → not steal-eligible; wait it out to the timeout (#3)
+          continue;
+        }
         const age = ops.now() - ops.mtimeMs(lockDir);
         if (age > STALE_MS) {
           // TOCTOU guard: only steal if the owner token is unchanged since we
           // observed the stale lock. If another waiter already stole and
           // re-acquired (fresh token, or a fresh mtime), we must NOT clobber its
-          // live lock — fall through and retry/wait instead.
+          // live lock — fall through and retry/wait instead. (`ownerBefore` is now
+          // provably non-null here, so this compares two real stamps, never null===null.)
           if (ops.readOwner(ownerFile) === ownerBefore) {
             ops.remove(lockDir);
           }

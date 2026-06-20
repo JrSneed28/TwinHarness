@@ -131,15 +131,19 @@ describe("REQ-PCO-000: withStateLock treats Windows EPERM/EACCES as 'held' and r
     expect(isLockHeldError(undefined)).toBe(false); // unknown → rethrow
   });
 
-  it("steals a STALE lock and runs fn (the held → steal → retry loop, no fs mocking)", () => {
+  it("steals a STALE, STAMPED lock and runs fn (the held → steal → retry loop, no fs mocking)", () => {
     const tp = makeTempProject();
     try {
       runInit(tp.paths, {}); // creates stateDir so withStateLock engages the lock
       const lockDir = path.join(tp.paths.stateDir, ".state.lock");
 
       // Simulate a crashed holder: a lock dir whose mtime is older than the stale
-      // threshold (STALE_MS, now 15s). The contention branch must steal it and let fn run.
+      // threshold (STALE_MS, now 15s). It carries an OWNER stamp so it is
+      // steal-eligible — R-08: only STAMPED locks may be stolen; an owner-less lock
+      // is reclaimed via the 25s timeout, never stolen (covered in state-store-seam).
+      // The contention branch must steal this stamped stale lock and let fn run.
       fs.mkdirSync(lockDir, { recursive: true });
+      fs.writeFileSync(path.join(lockDir, "owner"), "crashed-holder-token", "utf8");
       const old = Date.now() - 60_000;
       fs.utimesSync(lockDir, new Date(old), new Date(old));
 

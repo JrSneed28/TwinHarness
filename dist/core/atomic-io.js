@@ -55,6 +55,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.StateWriteContendedError = void 0;
 exports.atomicWriteFile = atomicWriteFile;
+exports.endsWithNewline = endsWithNewline;
 exports.readFileWithRetry = readFileWithRetry;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
@@ -218,6 +219,35 @@ optsOrRename = {}) {
     // inside fsyncDir. Outside the rename-retry loop so it is never confused with
     // rename contention (no temp file remains to clean — the rename already consumed it).
     fsyncDir(dir, fsync);
+}
+/**
+ * Whether the file at `absPath` ends with a newline (`\n`) — reading ONLY its last
+ * byte, not the whole file. A missing/empty file → `false` (a fresh file needs no
+ * leading separator before its first block). Used by the append-only markdown-ledger
+ * writers (`drift-log.md` / `debate-log.md`) to decide whether a separating `\n` must
+ * precede an appended block, WITHOUT reading the whole file back (the R-15 durability
+ * fix: a true `fs.appendFileSync` of only the new block, never a whole-file rewrite).
+ * Byte-compatible with the old whole-file `current.endsWith("\n")` test.
+ */
+function endsWithNewline(absPath) {
+    let fd;
+    try {
+        fd = fs.openSync(absPath, "r");
+    }
+    catch {
+        return false; // missing/unreadable → treat as "no trailing newline needed"
+    }
+    try {
+        const size = fs.fstatSync(fd).size;
+        if (size === 0)
+            return false; // empty file → no separator before the first block
+        const buf = Buffer.alloc(1);
+        fs.readSync(fd, buf, 0, 1, size - 1);
+        return buf[0] === 0x0a; // 0x0a === "\n"
+    }
+    finally {
+        fs.closeSync(fd);
+    }
 }
 /**
  * Read a UTF-8 file, retrying a transient contention error (a reader that collided

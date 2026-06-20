@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runInit = runInit;
 exports.runInitMcp = runInitMcp;
 const fs = __importStar(require("node:fs"));
+const atomic_io_1 = require("../core/atomic-io");
 const output_1 = require("../core/output");
 const state_schema_1 = require("../core/state-schema");
 const state_store_1 = require("../core/state-store");
@@ -161,7 +162,11 @@ function runInit(paths, opts) {
         created.push(".twinharness/state.json");
     }
     if (!fs.existsSync(paths.driftLog)) {
-        fs.writeFileSync(paths.driftLog, DRIFT_LOG_HEADER, "utf8");
+        // R-15: write the header atomically through the governed write-surface
+        // chokepoint (temp→fsync→rename) so a crash mid-write can never leave a
+        // truncated drift-log.md, and the write is asserted in-surface like every
+        // other governed writer (drift-log.md is in GOVERNED_WRITE_SURFACES).
+        (0, atomic_io_1.atomicWriteFile)(paths.driftLog, DRIFT_LOG_HEADER, { root: paths.root });
         created.push("drift-log.md");
     }
     else {
