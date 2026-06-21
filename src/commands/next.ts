@@ -708,7 +708,7 @@ export function renderStopReason(token: string, detail?: Record<string, unknown>
       return `Final verification is blocked while slices are unfinished — finish or block${open.length ? `: ${open.join(", ")}` : ""} (\`th slice set-status <SLICE-ID> done|blocked\`).`;
     }
     case "verify_config_corrupt":
-      return "Final verification is blocked — verify.json is present but unreadable/corrupt (fail-closed). Inspect it, or run \`th verify clear\` and re-configure, then \`th verify approve\` and \`th verify run\` before sign-off.";
+      return "Final verification is blocked — verify.json is present but unreadable/corrupt. Inspect it, or run \`th verify clear\` and re-add the commands, then \`th verify approve\` and \`th verify run\` before sign-off.";
     case "verify_suite_never_run": {
       const n = num("commands");
       return `Final verification needs a green suite — ${n} verify command(s) are configured but \`th verify run\` has never been recorded. Run \`th verify run\` and confirm it is green before sign-off.`;
@@ -735,7 +735,7 @@ export function renderStopReason(token: string, detail?: Record<string, unknown>
     case "production_verify_not_green":
       return "Final verification is blocked — the verify suite is not green against production-targeted commands. Run \`th verify run\` and confirm green before sign-off.";
     case "tester_record_missing":
-      return "Final verification is blocked — no live-QA Tester record is attached. Run the Tester against the real (or sandbox) boundary, then attach the record with \`th tester record --driver <d> --passed [--provider real|sandbox] [--evidence-ref <p>]\`.";
+      return "Final verification is blocked — no live-QA Tester record is attached. Run the Tester against the real (or sandbox) boundary, then attach the record with \`th tester record --driver <d> [--provider real|sandbox] [--evidence-ref <p>]\` (and note the same evidence in the verification report's Tester Evidence section).";
     case "unledgered_simulation_in_dist": {
       const n = num("total");
       return `Final verification is blocked — dist/ carries ${n} unledgered simulation pattern(s) (\`th sim scan\`). Declare each with \`th sim add\` (and retire it) or remove it before sign-off.`;

@@ -19,7 +19,8 @@ import { runSlicesSync, runSliceSetStatus } from "../src/commands/slices";
 import { runBuildNextWave, runBuildClaim, runBuildRelease } from "../src/commands/build";
 import { runCoverageCheck } from "../src/commands/coverage";
 import { evaluateStopGate, runHookPretoolGate, type PreToolHookInput } from "../src/commands/hook";
-import { writeVerifyConfig, writeVerifyReport } from "../src/core/verify";
+import { writeVerifyConfig, writeVerifyReportEnvelope } from "../src/core/verify";
+import { runTesterRecord } from "../src/commands/tester";
 import { readState, writeState } from "../src/core/state-store";
 import type { ProjectPaths } from "../src/core/paths";
 import type { TwinHarnessState } from "../src/core/state-schema";
@@ -123,25 +124,45 @@ describe("REQ-E2E-001: a run advances init → build → coverage → final-veri
     position(paths, { current_stage: "final-verification" });
     expect(evaluateStopGate(paths).block).toBe(true);
 
-    // Finish SLICE-1 → with no verify suite configured, the gate now allows.
+    // R-29: finishing SLICE-1 is necessary but no longer SUFFICIENT — the Stop gate now
+    // runs the full checkFinalVerification ladder (slices → verify → coverage → report →
+    // production-reality). The run must also produce+register the verification report and
+    // attach a PASSED, bound live-QA Tester record before the gate allows.
     runSliceSetStatus(paths, "SLICE-1", "done");
     runBuildRelease(paths, "SLICE-1");
-    expect(evaluateStopGate(paths).block).toBe(false);
-
-    // 10. A configured-but-RED suite re-blocks; a green suite clears it.
-    writeVerifyConfig(paths, { commands: ["run-the-tests"] });
-    writeVerifyReport(paths, {
-      ok: false,
-      ranAt: new Date().toISOString(),
-      results: [{ command: "run-the-tests", exitCode: 1, ok: false, durationMs: 5, outputTail: "boom" }],
-    });
+    // Still blocked: the verification report is not produced/registered yet.
     expect(evaluateStopGate(paths).block).toBe(true);
 
-    writeVerifyReport(paths, {
-      ok: true,
-      ranAt: new Date().toISOString(),
-      results: [{ command: "run-the-tests", exitCode: 0, ok: true, durationMs: 5, outputTail: "ok" }],
-    });
+    writeFile(tp, "docs/10-verification-report.md", "# Verification Report\n\nREQ-001 + REQ-002 verified.\n");
+    expect(runArtifactRegister(paths, "docs/10-verification-report.md", 1).ok).toBe(true);
+    // Still blocked: no live-QA Tester record (production-reality rung).
+    expect(evaluateStopGate(paths).block).toBe(true);
+    expect(runTesterRecord(paths, { driver: "cli-e2e", passed: true }).ok).toBe(true);
+    // Now the full ladder is green with no verify suite configured → allows.
+    expect(evaluateStopGate(paths).block).toBe(false);
+
+    // 10. A configured-but-RED suite re-blocks; a green BOUND suite clears it.
+    writeVerifyConfig(paths, { commands: ["run-the-tests"] });
+    writeVerifyReportEnvelope(
+      paths,
+      {
+        ok: false,
+        ranAt: new Date().toISOString(),
+        results: [{ command: "run-the-tests", exitCode: 1, ok: false, durationMs: 5, outputTail: "boom" }],
+      },
+      ["run-the-tests"],
+    );
+    expect(evaluateStopGate(paths).block).toBe(true);
+
+    writeVerifyReportEnvelope(
+      paths,
+      {
+        ok: true,
+        ranAt: new Date().toISOString(),
+        results: [{ command: "run-the-tests", exitCode: 0, ok: true, durationMs: 5, outputTail: "ok" }],
+      },
+      ["run-the-tests"],
+    );
     const final = evaluateStopGate(paths);
     expect(final.block).toBe(false);
     expect(final.reasons).toEqual([]);

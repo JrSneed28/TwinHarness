@@ -86,6 +86,7 @@ exports.isCommandSetApproved = isCommandSetApproved;
 exports.latestApprovalFor = latestApprovalFor;
 exports.readVerifyReport = readVerifyReport;
 exports.writeVerifyReport = writeVerifyReport;
+exports.writeVerifyReportEnvelope = writeVerifyReportEnvelope;
 exports.currentVerifyBinding = currentVerifyBinding;
 exports.readVerifyReportValidated = readVerifyReportValidated;
 exports.redactSecrets = redactSecrets;
@@ -361,6 +362,28 @@ function readVerifyReport(paths) {
 function writeVerifyReport(paths, report) {
     fs.mkdirSync(paths.stateDir, { recursive: true });
     (0, atomic_io_1.atomicWriteFile)(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n", { root: paths.root });
+}
+/**
+ * Write a BOUND verify-report envelope (F2/R-30): the report payload PLUS the current
+ * binding coordinates (command-set hash, approval-ledger tail, git head, dirty-tree
+ * digest), sealed at run time. `runVerifyRun` calls this so the persisted report can
+ * be validated against the snapshot it certified — a later `verify add`/`clear`, a
+ * re-approval, or a repo change makes the stored binding diverge and the validated
+ * reader classifies the report `stale`. Same atomic + governed-surface write as the
+ * bare report (the envelope is a superset, so legacy readers still parse it).
+ */
+function writeVerifyReportEnvelope(paths, report, commands) {
+    const binding = currentVerifyBinding(paths, commands);
+    const envelope = {
+        ...report,
+        schemaVersion: exports.VERIFY_REPORT_SCHEMA_VERSION,
+        commandSetHash: binding.commandSetHash,
+        configLockDigest: binding.configLockDigest,
+        gitHead: binding.gitHead,
+        dirtyTreeDigest: binding.dirtyTreeDigest,
+    };
+    fs.mkdirSync(paths.stateDir, { recursive: true });
+    (0, atomic_io_1.atomicWriteFile)(verifyReportPath(paths), JSON.stringify(envelope, null, 2) + "\n", { root: paths.root });
 }
 // ---------------------------------------------------------------------------
 // F2 (R-30) — bound verify-report envelope + validated reader

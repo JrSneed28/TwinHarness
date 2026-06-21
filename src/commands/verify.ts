@@ -4,7 +4,7 @@ import {
   readVerifyConfig,
   loadVerifyConfig,
   writeVerifyConfig,
-  writeVerifyReport,
+  writeVerifyReportEnvelope,
   runCommands,
   commandSetHash,
   isCommandSetApproved,
@@ -383,7 +383,10 @@ export function runVerifyRun(paths: ProjectPaths, opts: VerifyRunOptions = {}): 
   }
 
   const report = runCommands(paths.root, config.commands, { readOnly: opts.readOnly });
-  writeVerifyReport(paths, report);
+  // F2/R-30: persist a BOUND envelope (schemaVersion 2 + the snapshot binding) so the
+  // completion gate can tell this report apart from a legacy/stale/copied one. A later
+  // `verify add`/`clear` or re-approval changes the binding → the report reads stale.
+  writeVerifyReportEnvelope(paths, report, config.commands);
   structuredLog({ cmd: "verify run", ok: report.ok, commands: report.results.length, readOnly: Boolean(opts.readOnly) });
 
   const data = { ok: report.ok, ranAt: report.ranAt, results: report.results };

@@ -135,13 +135,16 @@ function readTesterRecordValidated(paths) {
 }
 /**
  * True iff a live-QA Tester record satisfying the F8 binding is attached — the
- * production-reality gate's 3rd condition (R-31).
+ * production-reality gate's 3rd condition (R-31, ENFORCED).
  *
- * Commit 1 (advisory) keeps the HISTORICAL lenient predicate (presence + a non-empty
- * driver) so the enforce flip and its re-baseline land together in Commit 2. The
- * strict classification lives in {@link readTesterRecordValidated}; the gate is
- * switched to it (`status === "valid"`) in the enforce commit.
+ * STRICT: a record counts ONLY when the live run is recorded as PASSED, carries an
+ * execution-receipt digest, and its repo-snapshot binding matches the current tree
+ * (`readTesterRecordValidated(...).status === "valid"`). A driver-only marker, a
+ * missing/false pass verdict, an unbound (no-receipt) record, or one staled by a code
+ * change since the run no longer clears the rung — closing the F8 gap where a bare
+ * `{driver}` marker (copyable, unbound to any real run) could fake the mandatory live
+ * QA. The richer classification + token are available via `readTesterRecordValidated`.
  */
 function testerRecordPresent(paths) {
-    return readTesterRecord(paths) !== null;
+    return readTesterRecordValidated(paths).status === "valid";
 }

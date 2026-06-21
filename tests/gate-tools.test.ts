@@ -19,6 +19,7 @@ import { runArtifactRegister } from "../src/commands/artifact";
 import { readLedger, verifyLedgerChain, type LedgerEntry } from "../src/core/ledger";
 import { writeVerifyConfig, readVerifyReport } from "../src/core/verify";
 import { runVerifyApprove } from "../src/commands/verify";
+import { runTesterRecord } from "../src/commands/tester";
 import { TOOL_DEFS } from "../src/mcp-server";
 import type { CommandResult } from "../src/core/output";
 import type { ProjectPaths } from "../src/core/paths";
@@ -150,13 +151,9 @@ describe("th_stage_advance — gated stage advance", () => {
     // SG3 P2-C: the production-reality rung now composes into the final-verification
     // ladder, so the terminal state must also be production-reality-clean (a live-QA
     // Tester record attached; no user-visible simulation) to reach the no_next_stage
-    // tail. Attach the Tester record so this stays a TERMINAL-stage test, not a
-    // production-reality test (that rung is covered in production-reality.test.ts).
-    fs.writeFileSync(
-      path.join(paths.stateDir, "tester-record.json"),
-      JSON.stringify({ driver: "cli-e2e", provider: "sandbox" }),
-      "utf8",
-    );
+    // tail. R-31: the Tester record must be F8-BOUND (passed + receipt + repo snapshot)
+    // — a bare {driver} marker no longer satisfies the strict predicate.
+    expect(runTesterRecord(paths, { driver: "cli-e2e", provider: "sandbox", passed: true }).ok).toBe(true);
     const r = toolRun("th_stage_advance", paths);
     expect(r.ok).toBe(false);
     expect(r.data?.error).toBe("no_next_stage");

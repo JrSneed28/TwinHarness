@@ -33,7 +33,7 @@ import {
 } from "./stages";
 import { artifactIntegrity, reviseEscalations, sliceProgress, type ReviseEscalation } from "./health";
 import { computeBreakdown } from "./coverage";
-import { loadVerifyConfig, readVerifyReport } from "./verify";
+import { loadVerifyConfig, readVerifyReport, readVerifyReportValidated } from "./verify";
 import { gatingObligations, reduceDecisions, readDecisionEvents } from "./decisions";
 import { runRepoCheckCached, repoMapPartialMarker, REPO_NO_MAP_EXIT } from "../commands/repo";
 import { interviewReady } from "../commands/interview";
@@ -372,21 +372,30 @@ export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessSt
     };
   }
 
-  // 2. The verify suite must be green against production-targeted commands. Mirror
-  // checkFinalVerification's fail-closed reading: a corrupt config, a configured-but-
-  // never-run suite, or a red report each blocks (one stable token).
+  // 2. The verify suite must be green against production-targeted commands, AND the
+  // report must be a CURRENT-binding report (F2/R-30 — not a legacy bare report, not a
+  // stale/copied one). The validated reader classifies the report; only a `valid` GREEN
+  // report passes. A corrupt config still blocks (fail-closed). One stable token
+  // (`production_verify_not_green`) with a `reason` detail naming the divergence.
   const verifyLoaded = loadVerifyConfig(paths);
   if (verifyLoaded.status === "corrupt") {
     return { ok: false, error: "production_verify_not_green", detail: { reason: "config_corrupt" } };
   }
   const verifyCfg = verifyLoaded.config;
-  const report = readVerifyReport(paths);
-  if (verifyCfg.commands.length > 0 && !report) {
-    return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
-  }
-  if (report && !report.ok) {
-    const failed = report.results.filter((x) => !x.ok).length;
-    return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
+  if (verifyCfg.commands.length > 0) {
+    const validated = readVerifyReportValidated(paths);
+    if (validated.status === "absent") {
+      return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
+    }
+    if (validated.status !== "valid") {
+      // legacy / stale / corrupt report → the green claim cannot be trusted for the
+      // current snapshot. Re-run `th verify run` to seal a fresh bound envelope.
+      return { ok: false, error: "production_verify_not_green", detail: { reason: validated.status, ...(validated.staleReasons ? { staleReasons: validated.staleReasons } : {}) } };
+    }
+    if (!validated.report!.ok) {
+      const failed = validated.report!.results.filter((x) => !x.ok).length;
+      return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
+    }
   }
 
   // 3. A live-QA Tester run record must be attached (audit C-08).

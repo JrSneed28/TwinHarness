@@ -181,8 +181,8 @@ Usage:
   th resume                         Detect .twinharness/HANDOFF.md and print the next mechanical action (from th next)
   th inspector write --content <md> [--version <n>]
                                     Codebase-Inspector governed write: emit + auto-register the source-anchored brownfield analysis at docs/00-existing-codebase-analysis.md (path is fixed; refuses any other target)
-  th tester record --driver <d> [--provider real|sandbox] [--evidence-ref <p>]
-                                    Attach the live-QA Tester record (.twinharness/tester-record.json) that satisfies the production-reality gate's Tester condition
+  th tester record --driver <d> --passed [--provider real|sandbox] [--evidence-ref <p>]
+                                    Attach the live-QA Tester record (.twinharness/tester-record.json) that satisfies the production-reality gate's Tester condition (--passed required to clear the gate; the record is bound to the run receipt + repo snapshot)
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
   th delegate pack [--agent A] [--slice ID] [--task T] [--intent I] [--allowed-files <a,b,c>]
@@ -305,6 +305,7 @@ Global flags:
   --owner <s>       (sim add) Who owns retiring the simulation
   --user-visible    (sim add) A user-visible production path depends on this (BLOCKS production-reality until retired)
   --driver <d>      (tester record) Driver/runner the live QA used (playwright | curl | cli-e2e | …) (required)
+  --passed          (tester record) Record the live run as PASSED — required to clear the production-reality gate's Tester condition
   --provider <p>    (tester record) Provider tier the live run exercised (real | sandbox)
   --evidence-ref <p>  (tester record) Path/URL to the raw live-run output or screenshots`;
 
@@ -435,6 +436,8 @@ export interface ParsedArgs {
     driver?: string;
     provider?: string;
     evidenceRef?: string;
+    // F8/R-31 — the live run's pass verdict (boolean flag).
+    passed: boolean;
   };
 }
 
@@ -478,6 +481,8 @@ const BOOLEAN_FLAGS: Record<string, FlagField> = {
   "--read-only": "readOnly",
   // SG3 P2-C — a user-visible simulation entry is what the production-reality gate blocks on.
   "--user-visible": "userVisible",
+  // F8/R-31 — the live run's pass verdict for `th tester record`.
+  "--passed": "passed",
 };
 
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
@@ -632,6 +637,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     legacy: false,
     readOnly: false,
     userVisible: false,
+    passed: false,
   };
   const positionals: string[] = [];
   const unknownFlags: string[] = [];
@@ -834,6 +840,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
             driver: parsed.flags.driver,
             provider: parsed.flags.provider,
             evidenceRef: parsed.flags.evidenceRef,
+            passed: parsed.flags.passed,
           });
         default:
           return failure({ human: `unknown 'tester' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });

@@ -54,10 +54,8 @@ function greenAtFinal(): ProjectPaths {
     slices: [{ id: "SLICE-0", status: "done", components: [] }],
   });
   expect(runArtifactRegister(paths, "docs/10-verification-report.md", 1).ok).toBe(true);
-  // Commit 1 (advisory): testerRecordPresent is still the lenient presence+driver
-  // predicate, so a driver-only record satisfies the gate. Commit 2 tightens this to
-  // require --passed + the receipt/repo binding (and updates this fixture).
-  expect(runTesterRecord(paths, { driver: "cli-e2e" }).ok).toBe(true);
+  // F8/R-31 (enforced): the gate requires a PASSED, receipt+repo-bound Tester record.
+  expect(runTesterRecord(paths, { driver: "cli-e2e", passed: true }).ok).toBe(true);
   return paths;
 }
 

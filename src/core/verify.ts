@@ -394,6 +394,29 @@ export function writeVerifyReport(paths: ProjectPaths, report: VerifyReport): vo
   atomicWriteFile(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n", { root: paths.root });
 }
 
+/**
+ * Write a BOUND verify-report envelope (F2/R-30): the report payload PLUS the current
+ * binding coordinates (command-set hash, approval-ledger tail, git head, dirty-tree
+ * digest), sealed at run time. `runVerifyRun` calls this so the persisted report can
+ * be validated against the snapshot it certified — a later `verify add`/`clear`, a
+ * re-approval, or a repo change makes the stored binding diverge and the validated
+ * reader classifies the report `stale`. Same atomic + governed-surface write as the
+ * bare report (the envelope is a superset, so legacy readers still parse it).
+ */
+export function writeVerifyReportEnvelope(paths: ProjectPaths, report: VerifyReport, commands: string[]): void {
+  const binding = currentVerifyBinding(paths, commands);
+  const envelope: VerifyReportEnvelope = {
+    ...report,
+    schemaVersion: VERIFY_REPORT_SCHEMA_VERSION,
+    commandSetHash: binding.commandSetHash,
+    configLockDigest: binding.configLockDigest,
+    gitHead: binding.gitHead,
+    dirtyTreeDigest: binding.dirtyTreeDigest,
+  };
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  atomicWriteFile(verifyReportPath(paths), JSON.stringify(envelope, null, 2) + "\n", { root: paths.root });
+}
+
 // ---------------------------------------------------------------------------
 // F2 (R-30) — bound verify-report envelope + validated reader
 // ---------------------------------------------------------------------------

@@ -45,35 +45,27 @@ const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const paths_1 = require("../core/paths");
 const state_store_1 = require("../core/state-store");
-const verify_1 = require("../core/verify");
-const decisions_1 = require("../core/decisions");
-const stages_1 = require("../core/stages");
 const artifact_guard_1 = require("../core/artifact-guard");
 const delegation_scope_1 = require("../core/delegation-scope");
 const gate_preconditions_1 = require("../core/gate-preconditions");
 const next_1 = require("./next");
 /**
- * Decide whether the orchestrator may declare completion.
+ * Decide whether the orchestrator may declare completion (R-29 — now the COMPLETION
+ * predicate `canCompleteRun`, the single source of truth shared with `th next` and
+ * the MCP gate tools).
  *
- * - No state.json  → no TwinHarness run active in this project → allow.
- * - Invalid state  → block (the orchestrator must repair state first).
- * - Open BLOCKING drift (§10) → block.
- * - Open BLOCKING debate → block.
- * - Unapproved decision gating the current stage (RULE-007) → block (mirrors
- *   `th next`, which already refuses to advance past such a decision).
- * - At `final-verification` stage: block when any slice is not yet done or
- *   blocked (i.e. status is "pending" or "in-progress"). This catches the
- *   most intuitive false-"done" — a run that claims completion while slices
- *   are still unbuilt. The check is ONLY applied at the final-verification
- *   stage so that legitimate mid-build pauses (the Stop hook fires on every
- *   turn-end) are never interrupted.
- * - At `final-verification`, ALSO block when verify commands are configured but
- *   the last `th verify run` is missing or red. The CLI still doesn't *certify*
- *   correctness (tests + the human do), but it refuses to let a run claim
- *   completion with a known-red or never-run suite when the operator wired one
- *   up. When no verify commands are configured this check is inert (nothing to
- *   run), and the human correctness gate still applies.
- * - Otherwise → allow.
+ * This is the BINARY projection (no loop-escape awareness — that lives in
+ * `decideStopGate`/`runHookStopGate`): `block` is true iff `canCompleteRun` refuses
+ * completion for the current state. `canCompleteRun` blocks at ANY stage on the
+ * always-run human-reconciliation obligations (drift, revise-escalation, decisions,
+ * debate) and, at `final-verification`, on the STRICT completion ladder — slices
+ * settled → verify_config_corrupt → verify_suite_never_run → coverage → report
+ * produced/registered → production-reality (the verify AUTHORITY at completion is
+ * `checkFinalVerification`, NOT the weaker `checkVerifySuite`). Forward-only rungs at
+ * a non-final stage do not gate a mid-build turn-end.
+ *
+ * `reasons[0]` is the token-derived sentence `renderStopReason` emits — identical to
+ * what `th next` prints for the same rung (the Stop↔next parity contract).
  */
 function evaluateStopGate(paths) {
     const r = (0, state_store_1.readState)(paths);
@@ -89,102 +81,10 @@ function evaluateStopGate(paths) {
             ],
         };
     }
-    if (r.state.drift_open_blocking > 0) {
-        const n = r.state.drift_open_blocking;
-        return {
-            block: true,
-            reasons: [`${n} open BLOCKING drift escalation${n === 1 ? "" : "s"} (§10) must be resolved before completing.`],
-        };
-    }
-    // Anchor: REQ-PCO-042 — an open debate is a blocking reconciliation obligation,
-    // exactly like a requirement-layer drift. Absent counter ⇒ 0.
-    if ((r.state.debate_open_blocking ?? 0) > 0) {
-        const n = r.state.debate_open_blocking ?? 0;
-        return {
-            block: true,
-            reasons: [`${n} open BLOCKING debate${n === 1 ? "" : "s"} must be reconciled (\`th debate resolve\`) before completing.`],
-        };
-    }
-    // RULE-007 — an unapproved decision linked to the current stage gates progress.
-    // `th next` already refuses to advance past it; completion must be blocked too
-    // (mirroring drift/debate). Reuses the SINGLE gating predicate so the stop-gate
-    // and `th next` cannot disagree. Tolerant: missing ledger / no current_stage ⇒
-    // no obligations ⇒ no block (Tier-0 and non-decision runs are unaffected).
-    const obligations = (0, decisions_1.gatingObligations)((0, decisions_1.reduceDecisions)((0, decisions_1.readDecisionEvents)(paths)), r.state);
-    if (obligations.length > 0) {
-        const ids = obligations.map((o) => o.decisionId).join(", ");
-        const n = obligations.length;
-        return {
-            block: true,
-            reasons: [
-                `${n} unapproved decision${n === 1 ? "" : "s"} gate the current stage ` +
-                    `(${ids}); approve or reject via \`th decision approve\` (see \`th decision check\`) before completing.`,
-            ],
-        };
-    }
-    if ((0, stages_1.isFinalVerification)(r.state.current_stage)) {
-        const incomplete = r.state.slices.filter((s) => s.status !== "done" && s.status !== "blocked");
-        if (incomplete.length > 0) {
-            const ids = incomplete.map((s) => s.id).join(", ");
-            const n = incomplete.length;
-            return {
-                block: true,
-                reasons: [
-                    `Stop-gate (final-verification slice check): the run is at stage final-verification but ` +
-                        `${n} slice${n === 1 ? "" : "s"} ${n === 1 ? "is" : "are"} not yet done/blocked ` +
-                        `(${ids}). ` +
-                        `Completion requires finishing or explicitly blocking all slices before the run may stop. ` +
-                        `Use \`th slice set-status <SLICE-ID> done|blocked\` for each remaining slice. ` +
-                        `Note: the human correctness gate on the verification report still applies after all slices are resolved.`,
-                ],
-            };
-        }
-        // Verify-suite gate: if the operator configured project test commands, the
-        // run may not claim completion with a red or never-run suite.
-        //
-        // R-23: read through loadVerifyConfig (NOT readVerifyConfig) so a present-but-
-        // CORRUPT verify.json fails CLOSED here too. readVerifyConfig collapses a corrupt
-        // config to `{ commands: [] }`, which made this whole suite block skip (length 0)
-        // and let a run STOP/complete on an unreadable config — the same fail-OPEN that
-        // `runVerifyRun`/`runVerifyApprove` already refuse. A corrupt config is now a hard
-        // block: the operator wired a suite, so an unreadable suite config is a stop
-        // condition, not a silent "no commands".
-        const loadedVerify = (0, verify_1.loadVerifyConfig)(paths);
-        if (loadedVerify.status === "corrupt") {
-            return {
-                block: true,
-                reasons: [
-                    `Stop-gate (final-verification suite check): verify.json is present but unreadable/corrupt — ` +
-                        `refusing to complete (fail-closed). It is NOT treated as an empty/approved set. ` +
-                        `Inspect it, or run \`th verify clear\` and re-configure, then \`th verify approve\` and \`th verify run\` before completing.`,
-                ],
-            };
-        }
-        const commands = loadedVerify.config.commands;
-        if (commands.length > 0) {
-            const report = (0, verify_1.readVerifyReport)(paths);
-            if (!report) {
-                return {
-                    block: true,
-                    reasons: [
-                        `Stop-gate (final-verification suite check): ${commands.length} verify command(s) are configured but ` +
-                            `\`th verify run\` has never been recorded. Run \`th verify run\` and confirm the suite is green before completing.`,
-                    ],
-                };
-            }
-            if (!report.ok) {
-                const failed = report.results.filter((x) => !x.ok).map((x) => x.command).join(", ");
-                return {
-                    block: true,
-                    reasons: [
-                        `Stop-gate (final-verification suite check): the last \`th verify run\` is RED — failing command(s): ${failed}. ` +
-                            `Engage the Debugger (\`th debug pack\`), fix, and re-run \`th verify run\` until green before completing.`,
-                    ],
-                };
-            }
-        }
-    }
-    return { block: false, reasons: [] };
+    const verdict = (0, gate_preconditions_1.canCompleteRun)(paths, r.state);
+    if (verdict.ok)
+        return { block: false, reasons: [] };
+    return { block: true, reasons: [(0, next_1.renderStopReason)(verdict.error ?? "blocked", verdict.detail)] };
 }
 /**
  * Decide the three-state Stop-gate verdict from the COMPLETION predicate
@@ -228,35 +128,40 @@ function decideStopGate(paths, input) {
     return { kind: "block", token, reason };
 }
 /**
- * `th hook stop-gate` — emit a Claude Code Stop-hook decision on stdout.
- * Blocks with a reason, or allows with `{}`. Always exits 0 (the JSON carries
- * the decision).
+ * `th hook stop-gate` — emit a Claude Code Stop-hook decision on stdout from the
+ * three-state {@link decideStopGate} verdict (R-29). Always exits 0 (the JSON carries
+ * the decision):
  *
- * Loop protection: the gate blocks at most once per stop sequence. If the gate
- * would block again while `stop_hook_active` is true, it allows the stop but
- * surfaces the unresolved reasons as a `systemMessage` — blocking drift needs a
- * human decision, and re-blocking forever would spin the model instead of
- * yielding the turn to that human.
+ *   - `complete`    → allow ({}).
+ *   - `block`       → `{ decision: "block", reason }` — refuse the turn-end. `reason`
+ *                     is the token-derived sentence (renderStopReason — identical to
+ *                     what `th next` prints for the same rung).
+ *   - `human-yield` → allow the stop but surface the unresolved reason as a DISTINCT
+ *                     `systemMessage`: the loop-escape (`stop_hook_active === true`)
+ *                     means re-blocking forever would spin the model, so the gate
+ *                     yields the turn to a human. This is NOT the empty `complete`
+ *                     payload — the reason is named so the human sees what is unresolved.
  */
 function runHookStopGate(paths, input) {
-    const decision = evaluateStopGate(paths);
-    if (decision.block) {
-        const reason = "TwinHarness stop-gate blocked completion: " + decision.reasons.join(" ");
-        if (input?.stop_hook_active === true) {
-            return {
-                stdout: JSON.stringify({
-                    systemMessage: "TwinHarness stop-gate is STILL blocked, but allowed the stop to avoid an infinite loop. " +
-                        "A human decision is required. " + reason,
-                }),
-                exitCode: 0,
-            };
-        }
+    const verdict = decideStopGate(paths, input);
+    if (verdict.kind === "complete") {
+        return { stdout: JSON.stringify({}), exitCode: 0 };
+    }
+    const reason = "TwinHarness stop-gate blocked completion: " + (verdict.reason ?? "");
+    if (verdict.kind === "human-yield") {
         return {
-            stdout: JSON.stringify({ decision: "block", reason }),
+            stdout: JSON.stringify({
+                systemMessage: "TwinHarness stop-gate is STILL blocked, but allowed the stop to avoid an infinite loop; " +
+                    "a human decision is required. " + reason,
+            }),
             exitCode: 0,
         };
     }
-    return { stdout: JSON.stringify({}), exitCode: 0 };
+    // kind === "block"
+    return {
+        stdout: JSON.stringify({ decision: "block", reason }),
+        exitCode: 0,
+    };
 }
 /**
  * `th hook subagent-stop` — emit a Claude Code SubagentStop-hook decision on
@@ -540,18 +445,32 @@ function isWithinAllowedFiles(relFwd, allowed, root) {
     return false;
 }
 /**
- * R-02 / R-19: is `relFwd` (a root-relative, forward-slash path) one of the verify
- * approval trust anchors — `verify.json` or `verify-approvals.jsonl` under the state
- * dir? These records authorize which commands `th verify run` executes, so they are
- * NEVER silently writable by a tool call. Derived from `paths.stateDir`, so it holds
- * for `.twinharness` AND the legacy `.agentic-sdlc`. This is the SINGLE source of the
- * anchor names, shared by step e2 (file_path Write/Edit) and step c1 (Bash).
+ * R-02 / R-19 / R-31: is `relFwd` (a root-relative, forward-slash path) one of the
+ * EVIDENCE trust anchors under the state dir — the files whose content the completion
+ * gate trusts as evidence, so a tool call must NEVER silently forge them:
+ *
+ *   - `verify.json` / `verify-approvals.jsonl` — authorize which commands
+ *     `th verify run` executes (a forged approval would run an injected command).
+ *   - `verify-report.json` — the bound verify result the gate reads as "green" (a
+ *     forged report would certify a suite that never ran / is red). F2/R-30.
+ *   - `tester-record.json` — the live-QA evidence the production-reality gate's 3rd
+ *     condition reads (a forged record would fake the mandatory live run). F8/R-31.
+ *
+ * Renamed from `isVerifyAnchorPath` (R-29): the anchor set now covers the report +
+ * tester record, not only the approval config — they are all completion EVIDENCE.
+ * Derived from `paths.stateDir`, so it holds for `.twinharness` AND the legacy
+ * `.agentic-sdlc`. The SINGLE source of the anchor names, shared by step e2 (file_path
+ * Write/Edit) and step c1 (Bash). The legitimate writers are the `th verify` /
+ * `th tester record` data layers (atomicWriteFile), never a tool-mediated write.
  */
-function isVerifyAnchorPath(relFwd, paths) {
+function isEvidenceAnchorPath(relFwd, paths) {
     const stateRel = toRootRelative(paths.stateDir, paths.root);
     if (stateRel === null)
         return false;
-    return relFwd === `${stateRel}/verify.json` || relFwd === `${stateRel}/verify-approvals.jsonl`;
+    return (relFwd === `${stateRel}/verify.json` ||
+        relFwd === `${stateRel}/verify-approvals.jsonl` ||
+        relFwd === `${stateRel}/verify-report.json` ||
+        relFwd === `${stateRel}/tester-record.json`);
 }
 /**
  * Phase B ownership: a component token is path-like if it contains "/" OR it
@@ -846,10 +765,10 @@ function runHookPretoolGate(paths, input, env = process.env) {
         for (const token of extractBashWriteTargets(bashCommand)) {
             const absC1 = path.isAbsolute(token) ? token : path.resolve(baseC1, token);
             const relC1 = toRootRelative(absC1, paths.root);
-            if (relC1 !== null && isVerifyAnchorPath(relC1, paths)) {
-                const reason = `TwinHarness write-gate (R-19) hard-blocked a Bash-mediated write to a verify approval anchor (${relC1}). ` +
-                    `This file authorizes which commands \`th verify run\` will execute; a shell redirection (echo/tee/sed >) could forge an approval around the gate. ` +
-                    `There is NO legitimate Bash writer of this file — use \`th verify add\` / \`th verify approve\` (approve requires an interactive human TTY) instead. ` +
+            if (relC1 !== null && isEvidenceAnchorPath(relC1, paths)) {
+                const reason = `TwinHarness write-gate (R-19/R-31) hard-blocked a Bash-mediated write to a completion-evidence anchor (${relC1}). ` +
+                    `This file is evidence the completion gate trusts (verify approval/config, the verify report, or the live-QA Tester record); a shell redirection (echo/tee/sed >) could forge it around the gate. ` +
+                    `There is NO legitimate Bash writer of this file — use \`th verify add\`/\`th verify approve\`/\`th verify run\` or \`th tester record\` (the governed writers) instead. ` +
                     `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1. ` +
                     `AGENT INSTRUCTION: do NOT retry this write — escalate to the human for a decision.`;
                 return fireGate("deny", reason);
@@ -952,20 +871,21 @@ function runHookPretoolGate(paths, input, env = process.env) {
             `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1.`;
         return fireGate("deny", reason);
     }
-    // Step e2 (R-02): the verify approval trust anchors are NEVER silently writable by
-    // a tool call. A direct Write/Edit to verify.json or verify-approvals.jsonl is the
-    // "forge an approval around the gate" vector — those records authorize which
-    // commands `th verify run` executes. Gate it in BOTH phases (ask by default, deny
-    // under deny/strict), ahead of the doc/state allowlist that otherwise blanket-allows
-    // the whole state dir. Derived from paths.stateDir so it holds for `.twinharness`
-    // and the legacy `.agentic-sdlc`. The CLI/MCP `th verify` data layer writes these
-    // through atomicWriteFile (not a tool call), so legitimate flows are unaffected —
-    // the only path to an approval is `th verify approve`, which itself requires a TTY.
-    // Shares isVerifyAnchorPath with step c1 (R-19) — the single source of the anchor names.
-    if (isVerifyAnchorPath(relFwd, paths)) {
-        const reason = `TwinHarness write-gate gated a direct write to a verify approval anchor (${relFwd}). ` +
-            `This file authorizes which commands \`th verify run\` will execute; a direct tool write could forge an approval. ` +
-            `Use \`th verify add\` / \`th verify approve\` (approve requires an interactive human TTY) instead of editing the file. ` +
+    // Step e2 (R-02/R-31): the completion-EVIDENCE trust anchors are NEVER silently
+    // writable by a tool call. A direct Write/Edit to verify.json, verify-approvals.jsonl,
+    // verify-report.json, or tester-record.json is the "forge the evidence around the
+    // gate" vector — those records authorize which commands `th verify run` executes, or
+    // ARE the green report / live-QA record the completion gate reads. Gate it in BOTH
+    // phases (ask by default, deny under deny/strict), ahead of the doc/state allowlist
+    // that otherwise blanket-allows the whole state dir. Derived from paths.stateDir so it
+    // holds for `.twinharness` and the legacy `.agentic-sdlc`. The CLI/MCP `th verify` /
+    // `th tester record` data layers write these through atomicWriteFile (not a tool
+    // call), so legitimate flows are unaffected. Shares isEvidenceAnchorPath with step c1
+    // (R-19) — the single source of the anchor names.
+    if (isEvidenceAnchorPath(relFwd, paths)) {
+        const reason = `TwinHarness write-gate gated a direct write to a completion-evidence anchor (${relFwd}). ` +
+            `This file is evidence the completion gate trusts (verify approval/config, the verify report, or the live-QA Tester record); a direct tool write could forge it. ` +
+            `Use the governed writers (\`th verify add\`/\`th verify approve\`/\`th verify run\`, or \`th tester record\`) instead of editing the file. ` +
             `Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1.`;
         return fireGate(gateMode, reason);
     }

@@ -322,7 +322,10 @@ function runVerifyRun(paths, opts = {}) {
         });
     }
     const report = (0, verify_1.runCommands)(paths.root, config.commands, { readOnly: opts.readOnly });
-    (0, verify_1.writeVerifyReport)(paths, report);
+    // F2/R-30: persist a BOUND envelope (schemaVersion 2 + the snapshot binding) so the
+    // completion gate can tell this report apart from a legacy/stale/copied one. A later
+    // `verify add`/`clear` or re-approval changes the binding → the report reads stale.
+    (0, verify_1.writeVerifyReportEnvelope)(paths, report, config.commands);
     (0, log_1.structuredLog)({ cmd: "verify run", ok: report.ok, commands: report.results.length, readOnly: Boolean(opts.readOnly) });
     const data = { ok: report.ok, ranAt: report.ranAt, results: report.results };
     return report.ok
