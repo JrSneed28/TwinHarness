@@ -1,10 +1,24 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { resolveProjectPaths, PathContainmentError, type ProjectPaths } from "./core/paths";
+import {
+  resolveProjectPaths,
+  resolveStateCandidates,
+  PathContainmentError,
+  StateLocationConflictError,
+  type ProjectPaths,
+} from "./core/paths";
 import { type CommandResult, renderResult, failure, success } from "./core/output";
 import { runInit } from "./commands/init";
-import { runStateGet, runStateSet, runStateStatus, runStateVerify, runStateUnlock } from "./commands/state";
+import {
+  runStateGet,
+  runStateSet,
+  runStateStatus,
+  runStateVerify,
+  runStateUnlock,
+  runStateAdopt,
+  type AdoptTarget,
+} from "./commands/state";
 import { runReviseBump, runReviseStatus, runReviseReset } from "./commands/revise";
 import { runTierClassify, runTierVetoCheck, runTierRecord, runTierFeatures } from "./commands/tier";
 import { runArtifactRegister, runArtifactList, runArtifactSection } from "./commands/artifact";
@@ -87,6 +101,7 @@ Usage:
   th state status                   Human-readable tier/stage/gate snapshot
   th state verify                   Validate state.json (exit 0 = valid)
   th state unlock [--force]         Reclaim a stale .state.lock left by a crashed process (refuses a live lock unless --force; R-21 recovery)
+  th state adopt --twinharness|--legacy  Resolve a two-location state conflict by retiring the other location's state.json to a backup (R-34 recovery)
   th revise bump <mode> [--cap N]   Increment revise-loop count (computes escalate = count >= cap)
   th revise status <mode> [--cap N] Report revise-loop count + cap (no mutation)
   th revise reset <mode>            Zero revise-loop count (stage passed / zero issues)
@@ -405,6 +420,9 @@ export interface ParsedArgs {
     artifacts?: number;
     lock: boolean;
     emergency: boolean;
+    // R-34 / F5 — `th state adopt --twinharness | --legacy` location-conflict recovery.
+    twinharness: boolean;
+    legacy: boolean;
     readOnly: boolean;
     // SG3 P2-C — simulation-ledger flags.
     classification?: string;
@@ -452,6 +470,9 @@ const BOOLEAN_FLAGS: Record<string, FlagField> = {
   "--self-test": "selfTest",
   "--lock": "lock",
   "--emergency": "emergency",
+  // R-34 / F5 — `th state adopt` location-conflict recovery target selectors.
+  "--twinharness": "twinharness",
+  "--legacy": "legacy",
   "--no-obvious-writes": "readOnly",
   // Deprecated alias for --no-obvious-writes; kept for back-compat (emits a deprecation warning at parse time).
   "--read-only": "readOnly",
@@ -607,6 +628,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     selfTest: false,
     lock: false,
     emergency: false,
+    twinharness: false,
+    legacy: false,
     readOnly: false,
     userVisible: false,
   };
@@ -709,6 +732,29 @@ export function checkNodeVersion(version: string): { ok: boolean; major: number;
 }
 
 function dispatch(parsed: ParsedArgs): CommandResult {
+  // R-34 / F5 — `th state adopt` is the MUTATING recovery for the
+  // StateLocationConflictError that `resolveProjectPaths` throws on a both-valid /
+  // both-invalid location conflict. It MUST be dispatched BEFORE the throwing
+  // resolve below (otherwise the very resolver this command repairs would throw
+  // first and the recovery could never run). It operates on the conflict-tolerant
+  // candidate set (`resolveStateCandidates`, which never throws).
+  if (parsed.positionals[0] === "state" && parsed.positionals[1] === "adopt") {
+    const target: AdoptTarget | undefined = parsed.flags.twinharness
+      ? "twinharness"
+      : parsed.flags.legacy
+        ? "legacy"
+        : undefined;
+    if (!target) {
+      return failure({
+        human:
+          "usage: th state adopt --twinharness | --legacy\n" +
+          "Consolidate two TwinHarness state locations onto one (retires the other's state.json to a backup).",
+      });
+    }
+    const candidates = resolveStateCandidates(parsed.flags.cwd);
+    return runStateAdopt(candidates, target);
+  }
+
   const paths = resolveProjectPaths(parsed.flags.cwd);
   const [group, sub, ...rest] = parsed.positionals;
   switch (group) {
@@ -1353,6 +1399,19 @@ function mapDispatchError(e: unknown): CommandResult {
   const code = (e as { code?: string }).code;
   if (e instanceof PathContainmentError) {
     return failure({ human: e.message, data: { error: e.code, segment: e.segment }, exitCode: 2 });
+  }
+  // R-34 / F5 — ambiguous / unsafe state LOCATION selection (both-valid, or both
+  // present-but-invalid with no safe location). A client/operator-correctable
+  // conflict, NOT a bug: surface the stable token + candidates and the message's
+  // pointer to the mutating `th state adopt` recovery. Exit 2 (client reject),
+  // matching the PathContainmentError convention. `th doctor` stays read-only —
+  // it surfaces this cleanly instead of silently picking the wrong location.
+  if (e instanceof StateLocationConflictError) {
+    return failure({
+      human: e.message,
+      data: { error: e.code, kind: e.kind, candidates: e.candidates },
+      exitCode: 2,
+    });
   }
   if (code === "state_lock_timeout" || code === "state_write_contended") {
     return failure({ human: (e as Error).message, data: { error: code } });

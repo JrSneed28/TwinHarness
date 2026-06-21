@@ -17,6 +17,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { resolveProjectPaths } from "../src/core/paths";
+import { initialState, serializeState } from "../src/core/state-schema";
+
+// R-34 / F5 — the upward walk anchors on a VALID `state.json` FILE (an empty `{}`
+// no longer validates and so no longer anchors). Write a valid state file.
+const writeValidState = (dir: string): void => {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "state.json"), serializeState(initialState()), "utf8");
+};
 
 let tmp: string | undefined;
 afterEach(() => {
@@ -46,8 +54,7 @@ describe("resolveProjectPaths — selected root is realpath'd (R-13)", () => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "th-root-rp-"));
     // Real on-disk project with a state dir so the upward walk selects it.
     const realProject = path.join(tmp, "real-project");
-    fs.mkdirSync(path.join(realProject, ".twinharness"), { recursive: true });
-    fs.writeFileSync(path.join(realProject, ".twinharness", "state.json"), "{}", "utf8");
+    writeValidState(path.join(realProject, ".twinharness"));
 
     // A junction that redirects to the real project. Resolving from INSIDE the
     // junction yields a lexical root under `linkedProject` that is NOT canonical.
@@ -78,8 +85,7 @@ describe("resolveProjectPaths — selected root is realpath'd (R-13)", () => {
   it("a non-junctioned project root is unchanged (realpath is a no-op)", () => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "th-root-rp-plain-"));
     const root = path.join(tmp, "proj");
-    fs.mkdirSync(path.join(root, ".twinharness"), { recursive: true });
-    fs.writeFileSync(path.join(root, ".twinharness", "state.json"), "{}", "utf8");
+    writeValidState(path.join(root, ".twinharness"));
 
     const paths = resolveProjectPaths(root);
     expect(paths.root).toBe(fs.realpathSync.native(root));

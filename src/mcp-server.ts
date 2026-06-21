@@ -39,7 +39,7 @@ import {
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { resolveProjectPaths, isAbsoluteOrEscaping, type ProjectPaths } from "./core/paths";
+import { resolveProjectPaths, isAbsoluteOrEscaping, StateLocationConflictError, type ProjectPaths } from "./core/paths";
 import { type CommandResult, failure } from "./core/output";
 
 import { runStateGet, runStateSet, applyGateMutation } from "./commands/state";
@@ -2222,6 +2222,17 @@ export async function callTool(name: string, args: ToolArgs = {}): Promise<CallT
         failure({
           human: err.message,
           data: { error: err.code, onDisk: err.onDisk, current: err.current },
+        }),
+      );
+    }
+    // R-34 / F5 — the SHARED resolver refused an ambiguous/unsafe state LOCATION.
+    // Map it to a structured tool failure (parity with the CLI's mapDispatchError)
+    // so the MCP surface agrees with the CLI surface on the same input.
+    if (err instanceof StateLocationConflictError) {
+      return toToolResult(
+        failure({
+          human: err.message,
+          data: { error: err.code, kind: err.kind, candidates: err.candidates },
         }),
       );
     }

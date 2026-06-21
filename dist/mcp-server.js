@@ -15479,284 +15479,6 @@ var path35 = __toESM(require("node:path"));
 // src/core/paths.ts
 var fs = __toESM(require("node:fs"));
 var path = __toESM(require("node:path"));
-var PathContainmentError = class extends Error {
-  constructor(message, segment) {
-    super(message);
-    this.segment = segment;
-    this.name = "PathContainmentError";
-  }
-  segment;
-  /** Stable machine token surfaced in the `--json` failure envelope. */
-  code = "path_containment";
-};
-var WriteSurfaceError = class extends Error {
-  constructor(message, target) {
-    super(message);
-    this.target = target;
-    this.name = "WriteSurfaceError";
-  }
-  target;
-  /** Stable machine token surfaced in the `--json` failure envelope. */
-  code = "write_surface";
-};
-var GOVERNED_WRITE_SURFACES = /* @__PURE__ */ new Set([
-  ".twinharness",
-  ".agentic-sdlc",
-  "docs",
-  "drift-log.md",
-  "debate-log.md"
-]);
-function assertGovernedWriteSurface(root, absPath) {
-  const contained = resolveWithinRoot(root, absPath);
-  if (contained === null) {
-    throw new WriteSurfaceError(
-      `Refusing a write that escapes the project root: ${absPath}`,
-      absPath
-    );
-  }
-  const rel = path.relative(path.resolve(root), contained);
-  const firstSegment = rel.split(/[\\/]/)[0] ?? "";
-  if (firstSegment === "" || !GOVERNED_WRITE_SURFACES.has(firstSegment)) {
-    throw new WriteSurfaceError(
-      `Refusing a write outside the governed write-surface (${[...GOVERNED_WRITE_SURFACES].join(", ")}): ${rel || absPath}`,
-      absPath
-    );
-  }
-}
-function resolveWithinRoot(root, p) {
-  if (path.sep === "/" && (/^[a-zA-Z]:[\\/]/.test(p) || p.includes("\\"))) return null;
-  const absRoot = path.resolve(root);
-  const abs = path.isAbsolute(p) ? p : path.resolve(absRoot, p);
-  const rel = path.relative(absRoot, abs);
-  if (rel !== "" && (rel.startsWith("..") || path.isAbsolute(rel))) return null;
-  const realRoot = realpathExistingPrefix(absRoot);
-  const realAbs = realpathExistingPrefix(abs);
-  const realRel = path.relative(realRoot, realAbs);
-  if (realRel === "") return abs;
-  if (realRel.startsWith("..") || path.isAbsolute(realRel)) return null;
-  return abs;
-}
-function isAbsoluteOrEscaping(p) {
-  return path.isAbsolute(p) || /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith("\\\\") || p.split(/[\\/]/).includes("..");
-}
-function realpathSafe(p) {
-  try {
-    return fs.realpathSync.native(p);
-  } catch {
-    try {
-      return fs.realpathSync(p);
-    } catch {
-      return p;
-    }
-  }
-}
-function realpathExistingPrefix(abs) {
-  let existing = abs;
-  const tail = [];
-  while (!fs.existsSync(existing)) {
-    const parent = path.dirname(existing);
-    if (parent === existing) break;
-    tail.unshift(path.basename(existing));
-    existing = parent;
-  }
-  const real = realpathSafe(existing);
-  return tail.length === 0 ? real : path.join(real, ...tail);
-}
-function resolveProjectPaths(root) {
-  const startAbs = path.resolve(root);
-  let abs = startAbs;
-  let cursor = startAbs;
-  while (true) {
-    if (fs.existsSync(path.join(cursor, ".twinharness")) || fs.existsSync(path.join(cursor, ".agentic-sdlc", "state.json"))) {
-      abs = cursor;
-      break;
-    }
-    const parent = path.dirname(cursor);
-    if (parent === cursor) break;
-    cursor = parent;
-  }
-  abs = realpathExistingPrefix(abs);
-  let stateDir;
-  const newDir = path.join(abs, ".twinharness");
-  const legacyStateFile = path.join(abs, ".agentic-sdlc", "state.json");
-  if (fs.existsSync(newDir)) {
-    stateDir = newDir;
-  } else if (fs.existsSync(legacyStateFile)) {
-    stateDir = path.join(abs, ".agentic-sdlc");
-  } else {
-    stateDir = newDir;
-  }
-  return {
-    root: abs,
-    stateDir,
-    stateFile: path.join(stateDir, "state.json"),
-    docsDir: path.join(abs, "docs"),
-    driftLog: path.join(abs, "drift-log.md"),
-    interviewFile: path.join(stateDir, "interview.json")
-  };
-}
-
-// src/core/output.ts
-function success(opts) {
-  return { ok: true, exitCode: 0, data: opts?.data, human: opts?.human, receipts: opts?.receipts };
-}
-function failure(opts) {
-  return { ok: false, exitCode: opts?.exitCode ?? 1, data: opts?.data, human: opts?.human, receipts: opts?.receipts };
-}
-
-// src/core/state-store.ts
-var fs3 = __toESM(require("node:fs"));
-var path3 = __toESM(require("node:path"));
-
-// src/core/atomic-io.ts
-var fs2 = __toESM(require("node:fs"));
-var path2 = __toESM(require("node:path"));
-
-// src/core/sleep.ts
-var LOCK_WORD = (() => {
-  try {
-    return new Int32Array(new SharedArrayBuffer(4));
-  } catch {
-    return null;
-  }
-})();
-function sleepSync(ms) {
-  if (!Number.isFinite(ms) || ms <= 0) return;
-  if (LOCK_WORD !== null) {
-    try {
-      Atomics.wait(LOCK_WORD, 0, 0, ms);
-      return;
-    } catch {
-    }
-  }
-  const until = Date.now() + ms;
-  while (Date.now() < until) {
-  }
-}
-
-// src/core/atomic-io.ts
-var REAL_FSYNC = {
-  openSync: (p, flags) => fs2.openSync(p, flags),
-  fsyncFd: (fd) => fs2.fsyncSync(fd),
-  closeSync: (fd) => fs2.closeSync(fd)
-};
-var WIN32_DIR_FSYNC_NA_CODES = /* @__PURE__ */ new Set([
-  "EISDIR",
-  "EINVAL",
-  "EPERM",
-  "EACCES"
-]);
-function fsyncFile(target, shim) {
-  const fd = shim.openSync(target, "r+");
-  try {
-    shim.fsyncFd(fd);
-  } finally {
-    shim.closeSync(fd);
-  }
-}
-function fsyncDir(dir, shim) {
-  let fd;
-  try {
-    fd = shim.openSync(dir, "r");
-  } catch (e) {
-    if (process.platform === "win32" && isWin32DirFsyncNA(e.code)) {
-      return;
-    }
-    throw e;
-  }
-  try {
-    shim.fsyncFd(fd);
-  } catch (e) {
-    if (process.platform === "win32" && isWin32DirFsyncNA(e.code)) {
-      return;
-    }
-    throw e;
-  } finally {
-    shim.closeSync(fd);
-  }
-}
-function isWin32DirFsyncNA(code) {
-  return code !== void 0 && WIN32_DIR_FSYNC_NA_CODES.has(code);
-}
-function isTransientIoError(code) {
-  return code === "EPERM" || code === "EACCES" || code === "EBUSY";
-}
-var MAX_IO_ATTEMPTS = 12;
-var StateWriteContendedError = class extends Error {
-  code = "state_write_contended";
-  constructor(absPath, attempts) {
-    super(
-      `could not atomically write ${absPath} after ${attempts} attempts: the file is contended by concurrent readers/writers. This is transient \u2014 retry the command.`
-    );
-    this.name = "StateWriteContendedError";
-  }
-};
-function atomicWriteFile(absPath, content, optsOrRename = {}) {
-  const opts = typeof optsOrRename === "function" ? { rename: optsOrRename } : optsOrRename;
-  const rename = opts.rename ?? fs2.renameSync;
-  const fsync = opts.fsync ?? REAL_FSYNC;
-  if (opts.root !== void 0) assertGovernedWriteSurface(opts.root, absPath);
-  const dir = path2.dirname(absPath);
-  fs2.mkdirSync(dir, { recursive: true });
-  const tmp = `${absPath}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
-  fs2.writeFileSync(tmp, content, "utf8");
-  try {
-    fsyncFile(tmp, fsync);
-  } catch (e) {
-    try {
-      fs2.rmSync(tmp, { force: true });
-    } catch {
-    }
-    throw e;
-  }
-  for (let attempt = 1; ; attempt++) {
-    try {
-      rename(tmp, absPath);
-      break;
-    } catch (e) {
-      const code = e.code;
-      const transient = isTransientIoError(code);
-      if (!transient || attempt >= MAX_IO_ATTEMPTS) {
-        try {
-          fs2.rmSync(tmp, { force: true });
-        } catch {
-        }
-        if (transient) throw new StateWriteContendedError(absPath, attempt);
-        throw e;
-      }
-      sleepSync(Math.min(4 * attempt, 40));
-    }
-  }
-  fsyncDir(dir, fsync);
-}
-function endsWithNewline(absPath) {
-  let fd;
-  try {
-    fd = fs2.openSync(absPath, "r");
-  } catch {
-    return false;
-  }
-  try {
-    const size = fs2.fstatSync(fd).size;
-    if (size === 0) return false;
-    const buf = Buffer.alloc(1);
-    fs2.readSync(fd, buf, 0, 1, size - 1);
-    return buf[0] === 10;
-  } finally {
-    fs2.closeSync(fd);
-  }
-}
-function readFileWithRetry(absPath, read = (p) => fs2.readFileSync(p, "utf8")) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return read(absPath);
-    } catch (e) {
-      const code = e.code;
-      if (!isTransientIoError(code) || attempt >= MAX_IO_ATTEMPTS) throw e;
-      sleepSync(Math.min(4 * attempt, 40));
-    }
-  }
-}
 
 // src/core/state-schema.ts
 var CURRENT_SCHEMA_VERSION = 2;
@@ -15963,6 +15685,354 @@ function serializeState(state) {
     }
   }
   return JSON.stringify(ordered, null, 2) + "\n";
+}
+
+// src/core/paths.ts
+var PathContainmentError = class extends Error {
+  constructor(message, segment) {
+    super(message);
+    this.segment = segment;
+    this.name = "PathContainmentError";
+  }
+  segment;
+  /** Stable machine token surfaced in the `--json` failure envelope. */
+  code = "path_containment";
+};
+var WriteSurfaceError = class extends Error {
+  constructor(message, target) {
+    super(message);
+    this.target = target;
+    this.name = "WriteSurfaceError";
+  }
+  target;
+  /** Stable machine token surfaced in the `--json` failure envelope. */
+  code = "write_surface";
+};
+var StateLocationConflictError = class extends Error {
+  constructor(message, kind, candidates) {
+    super(message);
+    this.kind = kind;
+    this.candidates = candidates;
+    this.name = "StateLocationConflictError";
+  }
+  kind;
+  candidates;
+  code = "state_location_conflict";
+};
+var GOVERNED_WRITE_SURFACES = /* @__PURE__ */ new Set([
+  ".twinharness",
+  ".agentic-sdlc",
+  "docs",
+  "drift-log.md",
+  "debate-log.md"
+]);
+function assertGovernedWriteSurface(root, absPath) {
+  const contained = resolveWithinRoot(root, absPath);
+  if (contained === null) {
+    throw new WriteSurfaceError(
+      `Refusing a write that escapes the project root: ${absPath}`,
+      absPath
+    );
+  }
+  const rel = path.relative(path.resolve(root), contained);
+  const firstSegment = rel.split(/[\\/]/)[0] ?? "";
+  if (firstSegment === "" || !GOVERNED_WRITE_SURFACES.has(firstSegment)) {
+    throw new WriteSurfaceError(
+      `Refusing a write outside the governed write-surface (${[...GOVERNED_WRITE_SURFACES].join(", ")}): ${rel || absPath}`,
+      absPath
+    );
+  }
+}
+function resolveWithinRoot(root, p) {
+  if (path.sep === "/" && (/^[a-zA-Z]:[\\/]/.test(p) || p.includes("\\"))) return null;
+  const absRoot = path.resolve(root);
+  const abs = path.isAbsolute(p) ? p : path.resolve(absRoot, p);
+  const rel = path.relative(absRoot, abs);
+  if (rel !== "" && (rel.startsWith("..") || path.isAbsolute(rel))) return null;
+  const realRoot = realpathExistingPrefix(absRoot);
+  const realAbs = realpathExistingPrefix(abs);
+  const realRel = path.relative(realRoot, realAbs);
+  if (realRel === "") return abs;
+  if (realRel.startsWith("..") || path.isAbsolute(realRel)) return null;
+  return abs;
+}
+function isAbsoluteOrEscaping(p) {
+  return path.isAbsolute(p) || /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith("\\\\") || p.split(/[\\/]/).includes("..");
+}
+function realpathSafe(p) {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return p;
+    }
+  }
+}
+function realpathExistingPrefix(abs) {
+  let existing = abs;
+  const tail = [];
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) break;
+    tail.unshift(path.basename(existing));
+    existing = parent;
+  }
+  const real = realpathSafe(existing);
+  return tail.length === 0 ? real : path.join(real, ...tail);
+}
+function hasValidStateFile(stateFile) {
+  let raw;
+  try {
+    raw = fs.readFileSync(stateFile, "utf8");
+  } catch {
+    return false;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  return validateState(parsed).ok;
+}
+function resolveStateCandidates(root) {
+  const startAbs = path.resolve(root);
+  let abs = startAbs;
+  let cursor = startAbs;
+  while (true) {
+    if (hasValidStateFile(path.join(cursor, ".twinharness", "state.json")) || hasValidStateFile(path.join(cursor, ".agentic-sdlc", "state.json"))) {
+      abs = cursor;
+      break;
+    }
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+  abs = realpathExistingPrefix(abs);
+  const newDir = path.join(abs, ".twinharness");
+  const legacyDir = path.join(abs, ".agentic-sdlc");
+  const newStateFile = path.join(newDir, "state.json");
+  const legacyStateFile = path.join(legacyDir, "state.json");
+  return {
+    root: abs,
+    newDir,
+    legacyDir,
+    newStateFile,
+    legacyStateFile,
+    // R-34 — validity is by VALID state FILE; the directory's mere existence is
+    // deliberately NOT consulted (that was the fail-open vector).
+    newValid: hasValidStateFile(newStateFile),
+    legacyValid: hasValidStateFile(legacyStateFile)
+  };
+}
+function resolveProjectPaths(root) {
+  const { root: abs, newDir, legacyDir, newStateFile, legacyStateFile, newValid, legacyValid } = resolveStateCandidates(root);
+  let stateDir;
+  if (newValid && legacyValid) {
+    throw new StateLocationConflictError(
+      `Two valid TwinHarness state files were found and the location is ambiguous:
+  - ${newStateFile} (.twinharness)
+  - ${legacyStateFile} (.agentic-sdlc, legacy)
+Refusing to guess. Consolidate onto one location with the mutating recovery command:
+  th state adopt --twinharness   (keep .twinharness, retire the legacy state file)
+  th state adopt --legacy        (keep .agentic-sdlc, retire the .twinharness state file)`,
+      "both-valid",
+      { twinharness: newStateFile, legacy: legacyStateFile }
+    );
+  } else if (newValid) {
+    stateDir = newDir;
+  } else if (legacyValid) {
+    stateDir = legacyDir;
+  } else {
+    const newPresent = fs.existsSync(newStateFile);
+    const legacyPresent = fs.existsSync(legacyStateFile);
+    if (newPresent && legacyPresent) {
+      throw new StateLocationConflictError(
+        `Both TwinHarness state files are present but NEITHER validates, so there is no safe location to select:
+  - ${newStateFile} (.twinharness)
+  - ${legacyStateFile} (.agentic-sdlc, legacy)
+Refusing to fail open (treating this as a fresh untracked project would silently bypass the broken run's gates). Repair one file (\`th doctor\` to see why, then \`th migrate\`), or retire one with \`th state adopt\`.`,
+        "no-valid-location",
+        { twinharness: newStateFile, legacy: legacyStateFile }
+      );
+    } else if (legacyPresent && !newPresent) {
+      stateDir = legacyDir;
+    } else {
+      stateDir = newDir;
+    }
+  }
+  return {
+    root: abs,
+    stateDir,
+    stateFile: path.join(stateDir, "state.json"),
+    docsDir: path.join(abs, "docs"),
+    driftLog: path.join(abs, "drift-log.md"),
+    interviewFile: path.join(stateDir, "interview.json")
+  };
+}
+
+// src/core/output.ts
+function success(opts) {
+  return { ok: true, exitCode: 0, data: opts?.data, human: opts?.human, receipts: opts?.receipts };
+}
+function failure(opts) {
+  return { ok: false, exitCode: opts?.exitCode ?? 1, data: opts?.data, human: opts?.human, receipts: opts?.receipts };
+}
+
+// src/core/state-store.ts
+var fs3 = __toESM(require("node:fs"));
+var path3 = __toESM(require("node:path"));
+
+// src/core/atomic-io.ts
+var fs2 = __toESM(require("node:fs"));
+var path2 = __toESM(require("node:path"));
+
+// src/core/sleep.ts
+var LOCK_WORD = (() => {
+  try {
+    return new Int32Array(new SharedArrayBuffer(4));
+  } catch {
+    return null;
+  }
+})();
+function sleepSync(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  if (LOCK_WORD !== null) {
+    try {
+      Atomics.wait(LOCK_WORD, 0, 0, ms);
+      return;
+    } catch {
+    }
+  }
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+  }
+}
+
+// src/core/atomic-io.ts
+var REAL_FSYNC = {
+  openSync: (p, flags) => fs2.openSync(p, flags),
+  fsyncFd: (fd) => fs2.fsyncSync(fd),
+  closeSync: (fd) => fs2.closeSync(fd)
+};
+var WIN32_DIR_FSYNC_NA_CODES = /* @__PURE__ */ new Set([
+  "EISDIR",
+  "EINVAL",
+  "EPERM",
+  "EACCES"
+]);
+function fsyncFile(target, shim) {
+  const fd = shim.openSync(target, "r+");
+  try {
+    shim.fsyncFd(fd);
+  } finally {
+    shim.closeSync(fd);
+  }
+}
+function fsyncDir(dir, shim) {
+  let fd;
+  try {
+    fd = shim.openSync(dir, "r");
+  } catch (e) {
+    if (process.platform === "win32" && isWin32DirFsyncNA(e.code)) {
+      return;
+    }
+    throw e;
+  }
+  try {
+    shim.fsyncFd(fd);
+  } catch (e) {
+    if (process.platform === "win32" && isWin32DirFsyncNA(e.code)) {
+      return;
+    }
+    throw e;
+  } finally {
+    shim.closeSync(fd);
+  }
+}
+function isWin32DirFsyncNA(code) {
+  return code !== void 0 && WIN32_DIR_FSYNC_NA_CODES.has(code);
+}
+function isTransientIoError(code) {
+  return code === "EPERM" || code === "EACCES" || code === "EBUSY";
+}
+var MAX_IO_ATTEMPTS = 12;
+var StateWriteContendedError = class extends Error {
+  code = "state_write_contended";
+  constructor(absPath, attempts) {
+    super(
+      `could not atomically write ${absPath} after ${attempts} attempts: the file is contended by concurrent readers/writers. This is transient \u2014 retry the command.`
+    );
+    this.name = "StateWriteContendedError";
+  }
+};
+function atomicWriteFile(absPath, content, optsOrRename = {}) {
+  const opts = typeof optsOrRename === "function" ? { rename: optsOrRename } : optsOrRename;
+  const rename = opts.rename ?? fs2.renameSync;
+  const fsync = opts.fsync ?? REAL_FSYNC;
+  if (opts.root !== void 0) assertGovernedWriteSurface(opts.root, absPath);
+  const dir = path2.dirname(absPath);
+  fs2.mkdirSync(dir, { recursive: true });
+  const tmp = `${absPath}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
+  fs2.writeFileSync(tmp, content, "utf8");
+  try {
+    fsyncFile(tmp, fsync);
+  } catch (e) {
+    try {
+      fs2.rmSync(tmp, { force: true });
+    } catch {
+    }
+    throw e;
+  }
+  for (let attempt = 1; ; attempt++) {
+    try {
+      rename(tmp, absPath);
+      break;
+    } catch (e) {
+      const code = e.code;
+      const transient = isTransientIoError(code);
+      if (!transient || attempt >= MAX_IO_ATTEMPTS) {
+        try {
+          fs2.rmSync(tmp, { force: true });
+        } catch {
+        }
+        if (transient) throw new StateWriteContendedError(absPath, attempt);
+        throw e;
+      }
+      sleepSync(Math.min(4 * attempt, 40));
+    }
+  }
+  fsyncDir(dir, fsync);
+}
+function endsWithNewline(absPath) {
+  let fd;
+  try {
+    fd = fs2.openSync(absPath, "r");
+  } catch {
+    return false;
+  }
+  try {
+    const size = fs2.fstatSync(fd).size;
+    if (size === 0) return false;
+    const buf = Buffer.alloc(1);
+    fs2.readSync(fd, buf, 0, 1, size - 1);
+    return buf[0] === 10;
+  } finally {
+    fs2.closeSync(fd);
+  }
+}
+function readFileWithRetry(absPath, read = (p) => fs2.readFileSync(p, "utf8")) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return read(absPath);
+    } catch (e) {
+      const code = e.code;
+      if (!isTransientIoError(code) || attempt >= MAX_IO_ATTEMPTS) throw e;
+      sleepSync(Math.min(4 * attempt, 40));
+    }
+  }
 }
 
 // src/core/state-store.ts
@@ -27547,6 +27617,14 @@ async function callTool(name, args = {}) {
         failure({
           human: err.message,
           data: { error: err.code, onDisk: err.onDisk, current: err.current }
+        })
+      );
+    }
+    if (err instanceof StateLocationConflictError) {
+      return toToolResult(
+        failure({
+          human: err.message,
+          data: { error: err.code, kind: err.kind, candidates: err.candidates }
         })
       );
     }

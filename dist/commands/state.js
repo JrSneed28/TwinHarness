@@ -39,6 +39,7 @@ exports.applyGateMutation = applyGateMutation;
 exports.runStateStatus = runStateStatus;
 exports.runStateVerify = runStateVerify;
 exports.runStateUnlock = runStateUnlock;
+exports.runStateAdopt = runStateAdopt;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const output_1 = require("../core/output");
@@ -496,5 +497,65 @@ function runStateUnlock(paths, opts = {}) {
         data: { removed: true, lockDir, forced: force, ageMs, ownerLess: owner === null },
         human: `Removed state lock ${lockDir} (${ownerLabel}, ${ageSec}s old${force ? ", forced" : ", stale"}). ` +
             `State mutations can proceed again.`,
+    });
+}
+/**
+ * `th state adopt --twinharness | --legacy` (R-34, finding F5) — the MUTATING
+ * recovery for the {@link StateLocationConflictError} hard conflict.
+ *
+ * When `resolveProjectPaths` finds BOTH `.twinharness/state.json` and the legacy
+ * `.agentic-sdlc/state.json` (valid, the ambiguous case) — or BOTH present-but-invalid
+ * (the no-safe-location case) — it refuses to guess and throws. This command
+ * consolidates onto ONE location by RETIRING the other location's `state.json`
+ * (renamed to a timestamped `state.json.retired-<ts>` backup, never hard-deleted, so
+ * the data is recoverable) so the next resolve unambiguously selects the survivor.
+ *
+ * It operates on the conflict-TOLERANT {@link StateLocationCandidates} (computed via
+ * `resolveStateCandidates`, which never throws) rather than a resolved `ProjectPaths`,
+ * BECAUSE the normal resolver throws on exactly the conflict this command repairs —
+ * so it must be dispatched BEFORE the throwing resolve. This is the ONLY mutating
+ * `th state` verb (besides `state unlock`) that does not take a resolved `ProjectPaths`.
+ */
+function runStateAdopt(candidates, target) {
+    const keepFile = target === "twinharness" ? candidates.newStateFile : candidates.legacyStateFile;
+    const retireFile = target === "twinharness" ? candidates.legacyStateFile : candidates.newStateFile;
+    const keepLabel = target === "twinharness" ? ".twinharness" : ".agentic-sdlc (legacy)";
+    const retireLabel = target === "twinharness" ? ".agentic-sdlc (legacy)" : ".twinharness";
+    // The location we are KEEPING must actually have a state file to keep — refuse to
+    // retire the other side if that would leave NO state file at all (a footgun that
+    // would silently turn a recoverable conflict into an empty project).
+    if (!fs.existsSync(keepFile)) {
+        return (0, output_1.failure)({
+            human: `Refusing to adopt ${keepLabel}: no state.json is present there (${keepFile}). ` +
+                `Adopt the location that HAS the state you want to keep, or repair it first.`,
+            data: { error: "adopt_keep_absent", target, keepFile },
+        });
+    }
+    // Nothing to retire on the other side → the conflict is already resolved; idempotent.
+    if (!fs.existsSync(retireFile)) {
+        (0, log_1.structuredLog)({ cmd: "state adopt", target, result: "noop" });
+        return (0, output_1.success)({
+            data: { adopted: target, keepFile, retired: false },
+            human: `Already consolidated on ${keepLabel}; no ${retireLabel} state.json to retire.`,
+        });
+    }
+    // Retire (rename to a timestamped backup) rather than delete — the conflicting run's
+    // state is preserved on disk so the operator can recover it if they chose wrong.
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const backup = `${retireFile}.retired-${ts}`;
+    try {
+        fs.renameSync(retireFile, backup);
+    }
+    catch (e) {
+        return (0, output_1.failure)({
+            human: `Could not retire ${retireFile}: ${e.message}`,
+            data: { error: "adopt_retire_failed", target, retireFile },
+        });
+    }
+    (0, log_1.structuredLog)({ cmd: "state adopt", target, result: "retired", backup });
+    return (0, output_1.success)({
+        data: { adopted: target, keepFile, retired: true, retiredFrom: retireFile, backup },
+        human: `Adopted ${keepLabel}. Retired the ${retireLabel} state.json to:\n  ${backup}\n` +
+            `The location conflict is resolved; \`th\` will now use ${keepLabel}.`,
     });
 }
