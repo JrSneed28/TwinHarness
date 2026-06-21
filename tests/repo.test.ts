@@ -15,6 +15,7 @@ import { makeTempProject, expectedToolDefsCount, type TempProject } from "./help
 import { runInit } from "../src/commands/init";
 import { runContextPack } from "../src/commands/context";
 import { TOOL_DEFS } from "../src/mcp-server";
+import { TOOL_CATALOG } from "../src/core/tool-catalog";
 import { BLAST_RADIUS_FLAGS } from "../src/core/state-schema";
 import {
   type RepoMap,
@@ -92,91 +93,35 @@ describe("REQ-RU-001: dispatch() attachment point — `repo` group now wired (SL
 
 describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 60 tools registered (on top of the prior 39, the MCP-tool-expansion adds 5 typed gate-transition tools — th_tier_record/stage_advance/implementation_unlock/write_gate_set/blast_radius_record — plus 16 wired handlers — th_drift_list/resolve, th_coverage_report, th_artifact_register/list, th_verify_add/list/clear/run, th_stage_current/describe/list, th_doctor, th_scorecard, th_slices_sync, th_slice_set_status)", () => {
   // Anchor: REQ-NFR-002
-  const EXPECTED_TOOL_NAMES = [
-    "th_state_get",
-    "th_state_set",
-    "th_tier_record",
-    "th_stage_advance",
-    "th_implementation_unlock",
-    "th_write_gate_set",
-    "th_blast_radius_record",
-    "th_drift_add",
-    "th_drift_list",
-    "th_drift_resolve",
-    "th_build_next_wave",
-    "th_build_claim",
-    "th_build_release",
-    "th_build_dispatch",
-    "th_build_plan",
-    "th_route",
-    "th_coverage_check",
-    "th_coverage_report",
-    "th_next",
-    "th_delegate_plan",
-    "th_delegate_pack",
-    "th_delegate_check",
-    "th_repo_map",
-    "th_repo_relevant",
-    "th_repo_impact",
-    "th_context_pack",
-    "th_build_sub_claim",
-    "th_build_sub_release",
-    "th_repo_check",
-    "th_decision_detect",
-    "th_decision_add",
-    "th_decision_check",
-    "th_decision_list",
-    "th_artifact_register",
-    "th_artifact_list",
-    "th_artifact_claim",
-    "th_artifact_release",
-    "th_artifact_leases",
-    "th_collab_init",
-    "th_collab_fragment",
-    "th_collab_list",
-    "th_collab_merge",
-    "th_debate_add",
-    "th_debate_list",
-    "th_debate_resolve",
-    "th_verify_add",
-    "th_verify_list",
-    "th_verify_clear",
-    "th_verify_run",
-    "th_stage_current",
-    "th_stage_describe",
-    "th_stage_list",
-    "th_doctor",
-    "th_scorecard",
-    "th_slices_sync",
-    "th_slice_set_status",
-    "th_interview_start",
-    "th_interview_record",
-    "th_interview_status",
-    "th_init",
-    "th_budget_check",
-    "th_handoff_write",
-    "th_template_get",
-    "th_template_list",
-    "th_repo_search",
-    "th_context_read",
-    "th_artifact_section",
-    "th_research_write",
-    "th_sim_add",
-    "th_sim_list",
-    "th_sim_retire",
-    "th_sim_scan",
-    "th_gate_production_reality",
-    "th_inspector_write",
-    "th_tester_record",
-  ] as const;
+  //
+  // R-28 (refactor): the baseline is DERIVED from the TOOL_DEFS SoT (already imported
+  // above) so a tool added to TOOL_DEFS is automatically reflected here — no hand-list
+  // to drift. The sync-guard test below cross-checks TOOL_DEFS against TOOL_CATALOG
+  // (src/core/tool-catalog.ts), the independent SDK-free projection, so both sources
+  // must agree or CI fails loudly.
+  const EXPECTED_TOOL_NAMES = TOOL_DEFS.map((t) => t.name);
 
   it("REQ-NFR-002 — TOOL_DEFS.length === 60 (the MCP-tool-expansion adds 5 typed gate-transition tools + 16 wired handlers on top of the prior 39 → 60)", () => {
     expect(TOOL_DEFS.length).toBe(expectedToolDefsCount());
   });
 
-  it("REQ-NFR-002 — TOOL_DEFS contains exactly the 60 expected tool names", () => {
+  it("REQ-NFR-002 — TOOL_DEFS contains exactly the expected tool names (derived from SoT, not a hand list)", () => {
+    // Baseline is now derived from TOOL_DEFS itself; this guards the count/shape contract.
     const names = TOOL_DEFS.map((t) => t.name);
     expect(names).toEqual(EXPECTED_TOOL_NAMES);
+  });
+
+  it("REQ-NFR-002 — sync guard: TOOL_DEFS and TOOL_CATALOG carry identical names in registry order (R-28)", () => {
+    // TOOL_CATALOG (src/core/tool-catalog.ts) is the SDK-free projection of TOOL_DEFS.
+    // Both must list the same tools in the same order; a drift (tool added to one but not
+    // the other) fails loudly with a descriptive diff rather than a silent mismatch.
+    const defsNames = TOOL_DEFS.map((t) => t.name);
+    const catalogNames = TOOL_CATALOG.map((e) => e.name);
+    const inDefsNotCatalog = defsNames.filter((n) => !catalogNames.includes(n));
+    const inCatalogNotDefs = catalogNames.filter((n) => !defsNames.includes(n));
+    expect(inDefsNotCatalog, `Tools in TOOL_DEFS but NOT in TOOL_CATALOG: ${inDefsNotCatalog.join(", ")}`).toEqual([]);
+    expect(inCatalogNotDefs, `Tools in TOOL_CATALOG but NOT in TOOL_DEFS: ${inCatalogNotDefs.join(", ")}`).toEqual([]);
+    expect(defsNames, "TOOL_DEFS and TOOL_CATALOG must be in identical registry order").toEqual(catalogNames);
   });
 
   it("REQ-NFR-002 — dist/cli.js does NOT import the MCP SDK (CLI stays SDK-free)", () => {
