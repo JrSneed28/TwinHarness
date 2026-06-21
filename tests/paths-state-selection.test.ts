@@ -22,7 +22,7 @@ import {
   resolveStateCandidates,
   StateLocationConflictError,
 } from "../src/core/paths";
-import { resolvePathsForCall } from "../src/mcp-server";
+import { resolvePathsForCall, callTool } from "../src/mcp-server";
 import { initialState, serializeState } from "../src/core/state-schema";
 import { runStateAdopt } from "../src/commands/state";
 
@@ -181,6 +181,25 @@ describe("R-34 / F5 — hook / CLI / MCP selection parity", () => {
     }
     expect(mcpThrown).toBeInstanceOf(StateLocationConflictError);
     expect((mcpThrown as StateLocationConflictError).code).toBe("state_location_conflict");
+  });
+
+  // P2 regression (PR #27): the MCP surface must report the SAME exit code the CLI
+  // does for this client-correctable conflict. `mapDispatchError` maps it to exit 2;
+  // `toToolResult` exposes the envelope exitCode in `structuredContent.exitCode`, so
+  // a default `failure()` (exit 1) here would silently diverge from the CLI taxonomy.
+  it("the MCP tool surfaces structuredContent.exitCode === 2 for the conflict (CLI parity)", async () => {
+    const root = mkroot("mcp-exitcode");
+    writeValidState(root, ".twinharness");
+    writeValidState(root, ".agentic-sdlc");
+    process.env.CLAUDE_PROJECT_DIR = root;
+
+    // th_state_get has no required args, so it passes arg-validation and reaches
+    // resolvePathsForCall, which throws the shared conflict the handler maps.
+    const res = await callTool("th_state_get", {});
+    expect(res.isError).toBe(true);
+    const sc = res.structuredContent as { exitCode?: number; error?: string };
+    expect(sc.exitCode).toBe(2);
+    expect(sc.error).toBe("state_location_conflict");
   });
 });
 
