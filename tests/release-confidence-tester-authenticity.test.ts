@@ -87,18 +87,20 @@ describe("R-37 F8 P3-a — the receiptDigest is bound to the evidence FILE CONTE
     expect(unrelatedDigest).not.toBe(realDigest);
   });
 
-  it("a NONEXISTENT evidenceRef digests differently from a present one with real content", () => {
-    // A record claiming an evidence file that does not exist cannot reproduce the digest
-    // of the same ref backed by real content — the missing-file branch contributes a
-    // null content hash, a distinct receipt.
+  it("recording a NONEXISTENT local evidenceRef is REJECTED outright (stronger than a null-content digest)", () => {
+    // Under the F8 record-time guard (PR #28 review), a record naming a LOCAL evidence
+    // file that does not exist is refused — strictly stronger than the prior behavior
+    // (which still wrote a record bound to a null content hash). So a forged record can no
+    // longer even be WRITTEN against absent local evidence.
     const a = initialized();
     const evidence = path.join(a.paths.root, "ev.txt");
     fs.writeFileSync(evidence, "present content\n", "utf8");
-    const present = recordWith(a, "ev.txt");
+    expect(runTesterRecord(a.paths, { driver: "cli-e2e", passed: true, evidenceRef: "ev.txt" }).ok).toBe(true);
 
     fs.rmSync(evidence, { force: true }); // the ref now points at nothing
-    const absent = recordWith(a, "ev.txt");
-    expect(absent).not.toBe(present);
+    const res = runTesterRecord(a.paths, { driver: "cli-e2e", passed: true, evidenceRef: "ev.txt" });
+    expect(res.ok).toBe(false);
+    expect(res.data!.error).toBe("evidence_unreadable");
   });
 
   it("a hand-forged record copying a real receiptDigest but pointing at DIFFERENT content stays bound to its own fields (the gate recomputes nothing it trusts blindly)", () => {

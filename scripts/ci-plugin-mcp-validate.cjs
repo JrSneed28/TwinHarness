@@ -141,6 +141,45 @@ function mcpHandshake() {
 // ---------------------------------------------------------------------------
 // 4. Live hook Stop behavior over the compiled CLI
 // ---------------------------------------------------------------------------
+
+/**
+ * Pure validator for a `hook stop-gate` spawnSync result: a BROKEN stop-gate THROWS;
+ * a well-formed decision RETURNS the parsed object. A broken stop-gate is one that
+ *   - failed to spawn, OR
+ *   - exited NONZERO (e.g. it crashed after printing JSON — status must be checked, or a
+ *     hook that prints valid JSON then dies passes silently), OR
+ *   - emitted EMPTY stdout (must NOT be coerced to `{}` and accepted — that masked a hook
+ *     that emitted nothing), OR
+ *   - emitted unparseable / non-object JSON.
+ * Separated from {@link checkHookStop} (which maps a throw to a CI `fail`) so the
+ * accept/reject contract is unit-testable WITHOUT spawning the real CLI.
+ */
+function assertHookStopOk(res) {
+  if (!res) throw new Error("hook stop-gate produced no spawn result");
+  if (res.error) throw new Error(`hook stop-gate failed to spawn: ${res.error.message}`);
+  if (res.status !== 0) {
+    throw new Error(
+      `hook stop-gate exited ${res.status} (expected 0); stderr: ${(res.stderr || "").slice(0, 200)}`,
+    );
+  }
+  const stdout = (res.stdout || "").trim();
+  if (stdout === "") {
+    throw new Error(
+      `hook stop-gate emitted EMPTY stdout (expected a JSON decision); stderr: ${(res.stderr || "").slice(0, 200)}`,
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch (e) {
+    throw new Error(`hook stop did not emit valid JSON (stdout: ${stdout.slice(0, 200)})`);
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error("hook stop-gate JSON is not an object");
+  }
+  return parsed;
+}
+
 function checkHookStop() {
   const cli = path.join(ROOT, "dist", "cli.js");
   if (!fs.existsSync(cli)) fail("dist/cli.js does not exist");
@@ -153,22 +192,20 @@ function checkHookStop() {
       encoding: "utf8",
       env: { ...process.env, TH_NO_LOG: "1" },
     });
-    if (res.error) fail(`hook stop-gate failed to spawn: ${res.error.message}`);
-    // The hook must print parseable JSON (a decision object), with a clean exit.
-    let parsed;
+    // Require a CLEAN exit AND non-empty parseable JSON before reporting success (a broken
+    // stop-gate that emits nothing or prints JSON then exits nonzero must FAIL here).
     try {
-      parsed = JSON.parse((res.stdout || "").trim() || "{}");
+      assertHookStopOk(res);
     } catch (e) {
-      fail(`hook stop did not emit valid JSON (stdout: ${(res.stdout || "").slice(0, 200)}; stderr: ${(res.stderr || "").slice(0, 200)})`);
+      fail(e.message);
     }
-    if (typeof parsed !== "object" || parsed === null) fail("hook stop-gate JSON is not an object");
     ok(`hook stop-gate emits a well-formed JSON decision on a fresh root (exit ${res.status})`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
 
-(async () => {
+async function main() {
   console.log("== TwinHarness plugin + MCP CI validation ==");
   checkManifests();
   const agentCount = checkAgents();
@@ -192,4 +229,13 @@ function checkHookStop() {
   checkHookStop();
 
   console.log(`\nALL CHECKS PASSED (${agentCount} agents, ${tools.length} MCP tools, live handshake + hook Stop OK).`);
-})().catch((e) => fail(`unexpected error: ${e && e.stack ? e.stack : e}`));
+}
+
+// Run the CI flow only when invoked directly (`node scripts/ci-plugin-mcp-validate.cjs`),
+// so a unit test can `require` this module to exercise the pure validators (e.g.
+// assertHookStopOk) WITHOUT spawning the server / exiting the process.
+if (require.main === module) {
+  main().catch((e) => fail(`unexpected error: ${e && e.stack ? e.stack : e}`));
+}
+
+module.exports = { assertHookStopOk };
