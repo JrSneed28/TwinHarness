@@ -1,18 +1,16 @@
 import { defineConfig } from "vitest/config";
+import { sharedTest, STRESS_TEST_FILES, DEFAULT_EXCLUDE } from "./vitest.shared";
 
 export default defineConfig({
   test: {
+    ...sharedTest,
     include: ["tests/**/*.test.ts"],
-    environment: "node",
-    globalSetup: ["tests/global-setup.ts"],
-    pool: "threads",
-    // vitest 4's heavier per-run import phase (~10s for this suite) overlaps with
-    // test execution, so the FIRST real-subprocess test (e.g. `runCLI` spawning a
-    // cold `node dist/cli.js`) can exceed the old 5s default under full-suite load —
-    // a false-red, since these pass in isolation. Raise the default to 15s (still
-    // well under any genuine hang; tests that spawn many processes keep their own
-    // explicit longer per-test timeouts, which override this).
-    testTimeout: 15000,
-    hookTimeout: 15000,
+    // The spawn-heavy cross-process stress files run in a SEPARATE serial pass
+    // (vitest.stress.config.ts — the second half of `npm test`) so they never
+    // overlap each other or the rest of the suite. Excluding them here prevents
+    // the 100+-concurrent-subprocess oversubscription that scheduler-starved the
+    // state lock on 2-core windows-latest (the REQ-STATE-LOCK-001 flake). See
+    // vitest.shared.ts for the full rationale.
+    exclude: [...DEFAULT_EXCLUDE, ...STRESS_TEST_FILES],
   },
 });

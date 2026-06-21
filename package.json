@@ -24,7 +24,7 @@
     "th": "node dist/cli.js",
     "gen:docs": "npx --yes tsx scripts/gen-command-reference.ts",
     "gen:docs:check": "npx --yes tsx scripts/gen-command-reference.ts --check",
-    "test": "vitest run",
+    "test": "vitest run && vitest run --config vitest.stress.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "verify": "npm run typecheck && npm run build && npm test && git diff --exit-code dist/",
