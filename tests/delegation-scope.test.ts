@@ -152,6 +152,53 @@ describe("F7 no-id XOR PARTITION (Item 2 — the DECISION)", () => {
   });
 });
 
+describe("review fix (PR #29) — host session_id/tool_use_id are NOT delegation/scope keys", () => {
+  // P1: a REAL PreToolUse payload always carries host ids (session_id/tool_use_id) but no
+  // minted delegation_id. Treating a host id as the writer id made writerId truthy → the
+  // per-id branch returned an empty (unfettered) scope, SUPPRESSING the active-scope union.
+  // The union (ARM 2) must still bite when only host ids are present (RED before the fix:
+  // the out-of-union write was ALLOWED).
+  it("P1: ARM 2 still BLOCKS an out-of-union write when the payload carries host ids but no delegation_id", () => {
+    tp = makeTempProject();
+    seedPhaseB(tp);
+    writeDelegationScope(tp.paths, "DEL-sibling", ["src/auth"], {});
+
+    const out = runHookPretoolGate(
+      tp.paths,
+      writeInput("src/other/x.ts", tp.root, { session_id: "sess-abc", tool_use_id: "tuid-123" }),
+    );
+    expect(decision(out)).toBe("deny");
+    expect(reason(out)).toContain("delegate scope");
+  });
+
+  it("P1: a host-id-only payload writing INSIDE the union is still allowed", () => {
+    tp = makeTempProject();
+    seedPhaseB(tp);
+    writeDelegationScope(tp.paths, "DEL-sibling", ["src/auth"], {});
+    const out = runHookPretoolGate(
+      tp.paths,
+      writeInput("src/auth/login.ts", tp.root, { session_id: "sess-abc", tool_use_id: "tuid-123" }),
+    );
+    expect(isAllow(out)).toBe(true);
+  });
+
+  // P2: a SubagentStop must clear a scope ONLY by its actual minted key (delegation_id). A
+  // host id — even one crafted to equal a scope's id — must never clear it (RED before the
+  // fix: the tool_use_id fallback cleared DEL-A).
+  it("P2: a SubagentStop carrying only host ids (no delegation_id) does NOT clear a scope", () => {
+    tp = makeTempProject();
+    seedPhaseB(tp);
+    writeDelegationScope(tp.paths, "DEL-A", ["src/a"], {});
+
+    runHookSubagentStop(tp.paths, { tool_use_id: "DEL-A", session_id: "sess-xyz" });
+    expect(fs.existsSync(delegationScopeFile(tp.paths, "DEL-A")!)).toBe(true); // survives
+
+    // Only the explicit minted key clears it.
+    runHookSubagentStop(tp.paths, { delegation_id: "DEL-A" });
+    expect(fs.existsSync(delegationScopeFile(tp.paths, "DEL-A")!)).toBe(false);
+  });
+});
+
 describe("F7 per-id independence + lifecycle (R-36)", () => {
   it("two overlapping delegations with DISJOINT scopes are each enforced independently (per-id)", () => {
     tp = makeTempProject();
