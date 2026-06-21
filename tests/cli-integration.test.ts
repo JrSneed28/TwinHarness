@@ -91,6 +91,23 @@ describe("REQ-CLI-TELEMETRY-001: `th telemetry on|off|status` round-trips and is
   });
 });
 
+describe("REQ-STATE-ADOPT-CONFLICT-001: `th state adopt` rejects contradictory targets (PR #27 P2)", () => {
+  it("--twinharness --legacy together is a usage error (non-zero), printed before any resolve", () => {
+    // Contradictory mutating request: adopt KEEPS one location and RETIRES the other,
+    // so naming both can't be honored — it must fail loudly, not silently pick one.
+    const res = run(tp!.root, ["state", "adopt", "--twinharness", "--legacy"]);
+    expect(res.status).not.toBe(0);
+    expect(res.stdout).toContain("Pass only one of --twinharness / --legacy");
+  });
+
+  it("a single target is still accepted (no false positive from the conflict guard)", () => {
+    // No two valid state locations exist here, so adopt fails for a DIFFERENT reason
+    // (nothing to consolidate) — never the both-flags usage error.
+    const res = run(tp!.root, ["state", "adopt", "--twinharness"]);
+    expect(res.stdout).not.toContain("Pass only one of");
+  });
+});
+
 describe("REQ-CLI-BROWNFIELD-001: `th init --brownfield` flag is parsed and stamps project_mode", () => {
   it("--brownfield → project_mode=brownfield; plain init omits it", () => {
     run(tp!.root, ["init", "--brownfield"]);

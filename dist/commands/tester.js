@@ -53,7 +53,6 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runTesterRecord = runTesterRecord;
-const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const output_1 = require("../core/output");
 const atomic_io_1 = require("../core/atomic-io");
@@ -63,35 +62,6 @@ const ledger_1 = require("../core/ledger");
 const guards_1 = require("../core/guards");
 const git_revision_1 = require("../core/git-revision");
 const tester_1 = require("../core/tester");
-/**
- * Compute the execution-receipt digest binding a Tester record to a real run (F8/R-31).
- * It hashes the run's identifying inputs (driver + provider + the pass verdict + the
- * evidence reference) AND, when `evidenceRef` names a readable file under the project,
- * a content hash of that file — so a fabricated marker without the real evidence file
- * cannot reproduce the digest. A non-file/URL evidenceRef still contributes its string.
- */
-function computeReceiptDigest(root, parts) {
-    let evidenceContent = "";
-    if (parts.evidenceRef) {
-        const abs = path.isAbsolute(parts.evidenceRef) ? parts.evidenceRef : path.resolve(root, parts.evidenceRef);
-        try {
-            if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
-                evidenceContent = fs.readFileSync(abs, "utf8");
-            }
-        }
-        catch {
-            /* unreadable → contribute nothing extra; the ref string still binds */
-        }
-    }
-    const canonical = JSON.stringify({
-        driver: parts.driver,
-        provider: parts.provider ?? null,
-        evidenceRef: parts.evidenceRef ?? null,
-        passed: parts.passed,
-        evidenceContentHash: evidenceContent ? (0, hash_1.hashContent)(evidenceContent) : null,
-    });
-    return (0, hash_1.hashContent)(canonical);
-}
 /**
  * `th tester record --driver <d> --passed [--provider real|sandbox] [--evidence-ref <path|url>]`
  *
@@ -122,7 +92,19 @@ function runTesterRecord(paths, opts) {
     const provider = opts.provider?.trim();
     const evidenceRef = opts.evidenceRef?.trim();
     const passed = opts.passed === true;
-    const receiptDigest = computeReceiptDigest(paths.root, { driver, provider, evidenceRef, passed });
+    // F8/R-31 (review): a LOCAL evidence reference must name a readable file. A record
+    // bound to absent local evidence is not proof of a real run — and the validator
+    // re-reads it, so such a record would only fail closed later. Reject up front with a
+    // clear message. A remote (URL) ref is accepted as-is — it is not a file we re-read.
+    if (evidenceRef && !(0, tester_1.isRemoteEvidenceRef)(evidenceRef) && !(0, tester_1.localEvidenceReadable)(paths.root, evidenceRef)) {
+        return (0, output_1.failure)({
+            human: `Evidence file not found or not a readable file: ${evidenceRef}\n` +
+                `Pass --evidence-ref pointing at the live run's saved output (a readable file under the ` +
+                `project), or a URL (e.g. https://…) for remotely-hosted evidence.`,
+            data: { error: "evidence_unreadable", evidenceRef },
+        });
+    }
+    const receiptDigest = (0, tester_1.computeReceiptDigest)(paths.root, { driver, provider, evidenceRef, passed });
     const record = {
         driver,
         ...(provider ? { provider } : {}),
