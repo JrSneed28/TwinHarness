@@ -1,9 +1,18 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { realpathExistingPrefix, type ProjectPaths } from "../core/paths";
+import {
+  realpathExistingPrefix,
+  resolveProjectPaths,
+  StateLocationConflictError,
+  type ProjectPaths,
+} from "../core/paths";
 import { readState } from "../core/state-store";
 import { matchApprovedArtifact } from "../core/artifact-guard";
-import { readDelegationScope, clearDelegationScope } from "../core/delegation-scope";
+import {
+  readActiveDelegationScopes,
+  clearDelegationScope,
+  type ActiveDelegationScope,
+} from "../core/delegation-scope";
 import { canCompleteRun } from "../core/gate-preconditions";
 import { renderStopReason } from "./next";
 
@@ -177,6 +186,113 @@ export function runHookStopGate(
   };
 }
 
+// ---------------------------------------------------------------------------
+// CROSS-LANE (F1<->F5) — resolve-from-root hook entry points that CATCH the
+// StateLocationConflictError that `resolveProjectPaths` (R-34/F5) throws on a
+// both-valid / both-present-but-invalid (no-safe-location) root.
+// ---------------------------------------------------------------------------
+
+/**
+ * The F1<->F5 fail-open closure. With Phase-1's `canCompleteRun` and Phase-3-F5's
+ * valid-state-FILE selection both in-tree, a root with NO valid state must yield a
+ * NON-completing verdict — and a root where the state LOCATION is ambiguous (both
+ * `.twinharness` and legacy hold valid state, OR both are present-but-invalid) makes
+ * `resolveProjectPaths` THROW before any decision function runs. The Stop / SubagentStop
+ * hooks resolve paths at their entry, so that throw would otherwise escape as an UNCAUGHT
+ * crash (non-zero exit, NO JSON decision) — which a strict hook consumer treats as a
+ * fail-OPEN (no block emitted). These wrappers resolve from the root and translate the
+ * conflict into the correct fail-safe DECISION instead of crashing:
+ *   - Stop / SubagentStop → a `block` (non-completing) — the run may not claim completion
+ *     while its state location is unresolvable.
+ *   - PreToolUse          → a `deny` (fail-closed) — a write must not slip through while
+ *     the governed state location is ambiguous.
+ * A non-conflict resolve still succeeds normally; only the typed F5 conflict is mapped.
+ */
+function resolveOrConflict(
+  root: string,
+): { paths: ProjectPaths } | { conflict: StateLocationConflictError } {
+  try {
+    return { paths: resolveProjectPaths(root) };
+  } catch (e) {
+    if (e instanceof StateLocationConflictError) return { conflict: e };
+    throw e; // any other resolve error is a genuine fault — let it surface.
+  }
+}
+
+/**
+ * `th hook stop-gate`, resolving from `root` and CATCHING the F5 location conflict as a
+ * BLOCK (cross-lane AC). On a clean resolve it defers to {@link runHookStopGate}.
+ */
+export function runHookStopGateFromRoot(
+  root: string,
+  payload?: StopHookInput,
+): { stdout: string; exitCode: number } {
+  const r = resolveOrConflict(root);
+  if ("conflict" in r) {
+    return {
+      stdout: JSON.stringify({
+        decision: "block",
+        reason:
+          "TwinHarness stop-gate blocked completion: the state LOCATION is ambiguous/unsafe — " +
+          r.conflict.message,
+      }),
+      exitCode: 0,
+    };
+  }
+  return runHookStopGate(r.paths, payload);
+}
+
+/**
+ * `th hook subagent-stop`, resolving from `root` and CATCHING the F5 location conflict as
+ * a BLOCK (cross-lane AC). On a clean resolve it defers to {@link runHookSubagentStop}.
+ */
+export function runHookSubagentStopFromRoot(
+  root: string,
+  payload?: SubagentStopHookInput,
+): { stdout: string; exitCode: number } {
+  const r = resolveOrConflict(root);
+  if ("conflict" in r) {
+    return {
+      stdout: JSON.stringify({
+        decision: "block",
+        reason:
+          "TwinHarness subagent-stop gate blocked: the state LOCATION is ambiguous/unsafe — " +
+          r.conflict.message,
+      }),
+      exitCode: 0,
+    };
+  }
+  return runHookSubagentStop(r.paths, payload);
+}
+
+/**
+ * `th hook pretool-gate`, resolving from `root` and CATCHING the F5 location conflict as a
+ * DENY (fail-closed — a write must not slip through an unresolvable state location). On a
+ * clean resolve it defers to {@link runHookPretoolGate}.
+ */
+export function runHookPretoolGateFromRoot(
+  root: string,
+  payload?: PreToolHookInput,
+  env: NodeJS.ProcessEnv = process.env,
+): { stdout: string; exitCode: number } {
+  const r = resolveOrConflict(root);
+  if ("conflict" in r) {
+    // Honor the same global disable hatch the gate itself honors, so the conflict
+    // fail-closed never traps an operator who has deliberately disabled the gate.
+    if (env["TH_DISABLE_WRITE_GATE"] === "1") {
+      return { stdout: JSON.stringify({}), exitCode: 0 };
+    }
+    return fireGateResult(
+      "deny",
+      "TwinHarness write-gate (F5 — fail-closed) DENIED this write: the state LOCATION is " +
+        "ambiguous/unsafe, so the gate cannot determine which project governs it. " +
+        r.conflict.message +
+        " Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1.",
+    );
+  }
+  return runHookPretoolGate(r.paths, payload, env);
+}
+
 /**
  * The subset of the Claude Code SubagentStop-hook stdin payload the gate cares
  * about. `stop_hook_active` is true when a subagent is ALREADY continuing because
@@ -191,6 +307,18 @@ export interface SubagentStopHookInput {
    * agree on one project root. Absent in older payloads.
    */
   cwd?: string;
+  /**
+   * R-36 (F7) — `delegation_id` is the ONLY scope key: the minted `DEL-*` id (`th delegate
+   * pack`) the orchestrator threads, so the SubagentStop clears ONLY the stopping
+   * delegation's OWN scope (not a peer's). `session_id` / `tool_use_id` are host-supplied
+   * provenance the payload may carry; they are NOT scope keys (a scope is filed under the
+   * minted id, never a host id) and are NEVER used to clear a scope. When no `delegation_id`
+   * is present the clear is a NO-OP (we will NOT clear a peer's scope on an unidentified
+   * stop — the crashed/unthreaded-delegate case is covered by TTL recovery instead).
+   */
+  delegation_id?: string;
+  session_id?: string;
+  tool_use_id?: string;
 }
 
 /**
@@ -220,11 +348,19 @@ export function runHookSubagentStop(
   paths: ProjectPaths,
   input?: SubagentStopHookInput,
 ): { stdout: string; exitCode: number } {
-  // SG3 P1-B (C-11) — a delegated subagent finishing means its allowed-files scope no
-  // longer applies. DISARM the durable scope here so it cannot leak onto the
-  // orchestrator's (or the next delegate's) writes. Best-effort + unconditional: it must
-  // lift even when state.json is absent/invalid, and a missing scope file is a no-op.
-  clearDelegationScope(paths);
+  // SG3 P1-B (C-11) + R-36 (F7) — a delegated subagent finishing means ITS OWN
+  // allowed-files scope no longer applies. Clear ONLY the stopping delegation's scope, and
+  // ONLY by its actual key: the minted `DEL-*` `delegation_id` the orchestrator threads.
+  // The host `session_id` / `tool_use_id` are NOT scope keys — scopes are filed under the
+  // minted id — so using them would `rm` a nonexistent `<session-id>.json` (a clear that
+  // clears nothing) while the REAL completed scope lingered, AND could lift an unrelated
+  // scope if a host id ever coincided with one. When no `delegation_id` is present (today's
+  // installed hook) we DO NOT clear anything (clearing a peer on an unidentified stop is
+  // exactly the bug); a crashed/unthreaded delegate's scope self-expires via TTL on the
+  // read path instead. Best-effort + ahead of the state read so it lifts even when
+  // state.json is absent/invalid.
+  const stoppingId = input?.delegation_id;
+  if (stoppingId) clearDelegationScope(paths, stoppingId);
 
   const r = readState(paths);
 
@@ -286,6 +422,20 @@ export interface PreToolHookInput {
    * (as `th delegate pack` emitted them); the gate resolves + compares them.
    */
   allowed_files?: string[];
+  /**
+   * R-36 (F7) — `delegation_id` is the ONLY id the gate keys scope on: the minted
+   * per-delegation `DEL-*` key the orchestrator threads onto the subagent's tool calls.
+   * When it matches an active per-delegation scope, the gate enforces THAT scope alone
+   * (Tier 2). `session_id` / `tool_use_id` are host-supplied provenance the payload may
+   * carry; they are NOT scope keys (no scope is filed under a host id) and are NEVER used
+   * to select the per-id branch — doing so suppressed the union fail-open this closes. When
+   * no `delegation_id` is present (today's installed hook — Tier 1) the gate falls back to
+   * the no-id XOR partition: {0 active scopes ⇒ no-op} XOR {>=1 active scope ⇒ UNION
+   * enforcement (fail-tighter)}.
+   */
+  delegation_id?: string;
+  session_id?: string;
+  tool_use_id?: string;
 }
 
 /**
@@ -851,19 +1001,56 @@ export function runHookPretoolGate(
 
   const state = r.state;
 
-  // SG3 P1-B (C-11) — the EFFECTIVE delegate allowed-files scope is the UNION of any
-  // stdin-provided `allowed_files` (forward-compat: a future host that injects them) and
-  // the DURABLE scope armed by `th delegate pack --allowed-files`
-  // (.twinharness/delegation-scope.json). The installed hook receives only host stdin,
-  // which carries NO allowed_files, so WITHOUT the persisted scope the delegate-scope
-  // enforcement below could never activate (audit P1). An empty union is a no-op (the
-  // historical gating is untouched). Read once here, used by steps c1c (Bash) and e1
-  // (file_path) below.
+  // SG3 P1-B (C-11) + R-36 (F7) — resolve the EFFECTIVE delegate allowed-files scope this
+  // write is constrained to. The installed hook receives only host stdin (no allowed_files),
+  // so the persisted per-delegation scopes (`.twinharness/delegation-scopes/<id>.json`, armed
+  // by `th delegate pack --allowed-files`) are the actual enforcement source (audit P1). The
+  // read GCs any TTL-expired scope (crash recovery). Steps c1c (Bash) and e1 (file_path)
+  // below consume `effectiveAllowedFiles`; an EMPTY result is a NO-OP (historical gating
+  // untouched).
+  //
+  // F7 no-id XOR PARTITION (the DECISION — Item 2):
+  //   ARM 1: {0 active scopes ⇒ NO-OP, write never gated} — preserves the historical
+  //          "An empty union is a no-op (the historical gating is untouched)" verbatim.
+  //   ARM 2: {>=1 active scope + no per-delegation id on the payload ⇒ UNION enforcement
+  //          (fail-tighter)} — the write is constrained to the union of ALL active scopes,
+  //          NOT a no-op (the REJECTED alternative "no-id ⇒ no-op even with active scopes"
+  //          would ship F7 as an installed no-op, re-opening the fail-open).
+  // When a `delegation_id` DOES match an active scope, the gate enforces THAT scope alone
+  // (precise per-id enforcement), which is TIGHTER than the union and is the Tier-2 path a
+  // host id unlocks.
   const stdinScope = Array.isArray(input?.allowed_files)
     ? input!.allowed_files.filter((x): x is string => typeof x === "string")
     : [];
-  const persistedScope = readDelegationScope(paths).allowedFiles;
-  const effectiveAllowedFiles = [...new Set([...stdinScope, ...persistedScope])];
+  const { active: activeScopes } = readActiveDelegationScopes(paths);
+  // The per-WRITER delegation key. ONLY an explicit `delegation_id` (the minted `DEL-*`
+  // key the orchestrator threads) counts — NOT the host `session_id` / `tool_use_id`,
+  // which every real PreToolUse payload carries and which bear NO relation to a minted
+  // scope id. Treating a host id as the writer id was a fail-OPEN: it made `writerId`
+  // truthy on every real call, so `ownScope` was always undefined (no scope is keyed by a
+  // host id) and the Tier-2 branch returned an EMPTY (unfettered) scope — silently
+  // SUPPRESSING the active-scope union for the very delegated writes F7 must constrain.
+  // Keying strictly on `delegation_id` restores the no-id XOR: a real payload (no
+  // delegation_id) correctly falls to the Tier-1 union (fail-tighter).
+  const writerId = input?.delegation_id;
+  const ownScope: ActiveDelegationScope | undefined = writerId
+    ? activeScopes.find((s) => s.delegationId === writerId)
+    : undefined;
+  // The base scope this write is constrained to:
+  //   • writerId PRESENT (Tier 2 / per-id — an explicit delegation_id): enforce ONLY that
+  //     id's scope. A matching id → its allowed-files; an id with NO armed scope → [] (no
+  //     constraint). We do NOT fall back to the union here — supplying a delegation_id is
+  //     the host asserting "this is the delegation I am", so a non-delegated writer that
+  //     names its own (scope-less) id is correctly unfettered (the Tier-2 path that
+  //     eliminates the orchestrator-write false-block).
+  //   • writerId ABSENT (Tier 1 / no-id XOR — the installed hook, which gets only host ids):
+  //     ARM 2 — >=1 active scope ⇒ UNION of ALL active scopes (fail-tighter); ARM 1 — 0
+  //     active scopes ⇒ [] (the historical no-op, verbatim).
+  // stdin allowed_files (a host directly declaring THIS call's scope) always unions in.
+  const baseScope = writerId
+    ? (ownScope?.allowedFiles ?? []) // Tier 2: this id's own scope only (empty ⇒ unfettered).
+    : activeScopes.flatMap((s) => s.allowedFiles); // Tier 1: [] (ARM 1) or union (ARM 2).
+  const effectiveAllowedFiles = [...new Set([...stdinScope, ...baseScope])];
 
   // Step b (state check): write_gate=off → allow.
   if (state.write_gate === "off") return allow();

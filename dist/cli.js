@@ -785,18 +785,17 @@ function dispatch(parsed) {
                         // SG3 P1-B (C-11) — explicit allowed-files write scope (comma-separated).
                         allowedFiles: (parsed.flags.allowedFiles ?? "").split(",").map((s) => s.trim()).filter(Boolean),
                     });
-                    // SG3 P1-B (C-11) — ARM the DURABLE delegate scope so the out-of-process
-                    // PreToolUse write-gate can enforce it (the installed hook receives no
-                    // allowed_files on stdin — without this the scope never reached the gate and
-                    // enforcement was inactive). The pack's normalized `data.allowedFiles` IS the
-                    // scope; persist it (a non-empty set arms; an empty set disarms a prior scope).
-                    // CLI-only: the MCP `th_delegate_pack` exposes no --allowed-files, so it never
-                    // arms a scope and stays genuinely read-only.
+                    // SG3 P1-B (C-11) + R-36 (F7) — ARM the DURABLE delegate scope under the pack's
+                    // MINTED per-delegation id so the out-of-process PreToolUse write-gate can enforce
+                    // it (the installed hook receives no allowed_files on stdin — without this the
+                    // scope never reached the gate and enforcement was inactive). The pack's normalized
+                    // `data.allowedFiles` IS the scope; persist it under `data.delegationId` (a non-empty
+                    // set arms one independent `<id>.json`; an empty set arms nothing). Per-id scopes let
+                    // overlapping delegations coexist without clobber and self-expire via TTL on a crash.
+                    // CLI-only: the MCP `th_delegate_pack` exposes no --allowed-files, so it never arms a
+                    // scope and stays genuinely read-only.
                     if (packRes.ok) {
-                        (0, delegation_scope_1.writeDelegationScope)(paths, packRes.data?.allowedFiles ?? [], {
-                            agent: parsed.flags.agent,
-                            slice: parsed.flags.slice,
-                        });
+                        (0, delegation_scope_1.writeDelegationScope)(paths, packRes.data?.delegationId ?? "", packRes.data?.allowedFiles ?? [], { agent: parsed.flags.agent, slice: parsed.flags.slice });
                     }
                     return packRes;
                 }
@@ -1322,23 +1321,26 @@ function readHookStdin() {
     }
 }
 /**
- * Resolve the project paths for a hook dispatch, reading the hook's stdin payload
- * once and applying the SAME stdin-`cwd` precedence to every hook (PreToolUse /
- * Stop / SubagentStop). Claude Code does NOT pass `--cwd` to the shipped hooks
- * (`hooks/hooks.json`), so the session's project dir arrives ONLY on the stdin
- * payload's `cwd`. If all three hooks resolved from process cwd while one read
- * stdin, they could govern different roots for one session — the write-gate and
- * the completion-gate must agree.
+ * Read the hook's stdin payload once and compute the effective project `cwd` for a hook
+ * dispatch, applying the SAME stdin-`cwd` precedence to every hook (PreToolUse / Stop /
+ * SubagentStop). Claude Code does NOT pass `--cwd` to the shipped hooks (`hooks/hooks.json`),
+ * so the session's project dir arrives ONLY on the stdin payload's `cwd`. If all three hooks
+ * resolved from process cwd while one read stdin, they could govern different roots for one
+ * session — the write-gate and the completion-gate must agree.
  *
- * Precedence (identical for all hooks): prefer the payload's `cwd` UNLESS the
- * caller explicitly passed `--cwd` (then the explicit flag wins). Returns the
- * resolved paths alongside the parsed payload so callers don't re-read stdin.
+ * Precedence (identical for all hooks): prefer the payload's `cwd` UNLESS the caller
+ * explicitly passed `--cwd` (then the explicit flag wins). Returns the effective cwd + parsed
+ * payload WITHOUT resolving the project paths — the resolve (which can THROW the F5
+ * {@link StateLocationConflictError} on an ambiguous state location) happens INSIDE the
+ * `runHook*FromRoot` wrappers, which CATCH that throw and translate it into a fail-safe
+ * DECISION (block / deny) rather than letting it escape as an uncaught crash (the cross-lane
+ * F1<->F5 fail-open closure).
  */
-function resolveHookPaths(flagCwd) {
+function readHookPayload(flagCwd) {
     const payload = readHookStdin();
     const cwdFromStdin = payload?.cwd;
     const effectiveCwd = cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : flagCwd;
-    return { paths: (0, paths_1.resolveProjectPaths)(effectiveCwd), payload };
+    return { effectiveCwd, payload };
 }
 function main() {
     // P0-4 (#20) — fail fast with a friendly, actionable message on an unsupported
@@ -1370,17 +1372,22 @@ function main() {
     // (a fail-open). Compute the decision, then exit; never fall through.
     if (parsed.positionals[0] === "hook") {
         let hookOut;
+        // Cross-lane (F1<->F5): the `*FromRoot` wrappers resolve the project paths INTERNALLY
+        // and CATCH the F5 StateLocationConflictError (ambiguous/unsafe state LOCATION),
+        // translating it into a fail-safe DECISION (Stop/SubagentStop → block; PreToolUse →
+        // deny) instead of letting the resolve throw escape as an uncaught crash here (which a
+        // strict hook consumer would read as a fail-OPEN — no decision emitted).
         if (parsed.positionals[1] === "stop-gate") {
-            const { paths, payload } = resolveHookPaths(parsed.flags.cwd);
-            hookOut = (0, hook_1.runHookStopGate)(paths, payload);
+            const { effectiveCwd, payload } = readHookPayload(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookStopGateFromRoot)(effectiveCwd, payload);
         }
         else if (parsed.positionals[1] === "pretool-gate") {
-            const { paths, payload } = resolveHookPaths(parsed.flags.cwd);
-            hookOut = (0, hook_1.runHookPretoolGate)(paths, payload);
+            const { effectiveCwd, payload } = readHookPayload(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookPretoolGateFromRoot)(effectiveCwd, payload);
         }
         else if (parsed.positionals[1] === "subagent-stop") {
-            const { paths, payload } = resolveHookPaths(parsed.flags.cwd);
-            hookOut = (0, hook_1.runHookSubagentStop)(paths, payload);
+            const { effectiveCwd, payload } = readHookPayload(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookSubagentStopFromRoot)(effectiveCwd, payload);
         }
         if (hookOut) {
             writeAndExit(hookOut.stdout + "\n", hookOut.exitCode);

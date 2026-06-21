@@ -43,6 +43,7 @@ const output_1 = require("../core/output");
 const log_1 = require("../core/log");
 const context_1 = require("./context");
 const delegation_1 = require("../core/delegation");
+const delegation_scope_1 = require("../core/delegation-scope");
 /**
  * `th delegate` — the Context Preservation / Delegation Layer (advisory).
  *
@@ -140,9 +141,16 @@ function runDelegatePack(paths, opts) {
     // trimmed non-empty entries, deduped, deterministic order. This is the list the
     // write-gate enforces off its stdin payload.
     const allowedFiles = normalizeAllowedFiles(opts.allowedFiles, opts.file);
+    // R-36 (F7) — mint a per-delegation id (unless the caller supplied one) so overlapping
+    // delegations arm INDEPENDENT scope files. The id is returned in `data.delegationId` (the
+    // CLI arms the scope under it) and surfaced in the envelope so the orchestrator can pass
+    // it as the subagent's `delegation_id` (per-id enforcement + clear-own-id-only). It is
+    // minted even when there is no scope, so the envelope always names the delegation.
+    const delegationId = opts.delegationId ?? (0, delegation_scope_1.mintDelegationId)();
     const envelope = [
         "DELEGATED AGENT HANDOFF",
         `Agent: ${opts.agent ?? "(unspecified — set --agent)"}`,
+        `Delegation id: ${delegationId}`,
         `Task: ${opts.task ?? "(describe the task)"}`,
         `Intent: ${parsed.intent ?? "(read|write|debug|review|artifact|repo-analysis)"}`,
         `Slice: ${opts.slice ?? "(none)"}`,
@@ -177,6 +185,7 @@ function runDelegatePack(paths, opts) {
         intent: parsed.intent ?? null,
         hasContextPack: contextPack !== null,
         allowedFiles: allowedFiles.length,
+        delegationId,
     });
     return (0, output_1.success)({
         data: {
@@ -188,6 +197,8 @@ function runDelegatePack(paths, opts) {
             hasContextPack: contextPack !== null,
             // SG3 P1-B (C-11) — the explicit write-scope the gate enforces (always present).
             allowedFiles,
+            // R-36 (F7) — the minted per-delegation id the CLI arms the scope under.
+            delegationId,
         },
         human: envelope.join("\n"),
     });
