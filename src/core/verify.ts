@@ -44,6 +44,7 @@ import { assertGovernedWriteSurface } from "./paths";
 import { atomicWriteFile, readFileWithRetry } from "./atomic-io";
 import { hashContent, GENESIS_PREV_HASH, HEX64 } from "./hash";
 import { readJsonlValues, scanTailValid } from "./jsonl";
+import { gitHead, dirtyTreeDigest } from "./git-revision";
 
 /** Per-command provenance (#19, P6-2): who added the command and when. */
 export interface VerifyCommandProvenance {
@@ -391,6 +392,183 @@ export function readVerifyReport(paths: ProjectPaths): VerifyReport | null {
 export function writeVerifyReport(paths: ProjectPaths, report: VerifyReport): void {
   fs.mkdirSync(paths.stateDir, { recursive: true });
   atomicWriteFile(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n", { root: paths.root });
+}
+
+// ---------------------------------------------------------------------------
+// F2 (R-30) — bound verify-report envelope + validated reader
+// ---------------------------------------------------------------------------
+
+/**
+ * The CURRENT verify-report envelope schema version (F2, R-30). A report written
+ * by `runVerifyRun` now carries this so the completion gate can tell a binding-
+ * carrying report apart from a legacy bare `VerifyReport` (which had no
+ * `schemaVersion`). Bumped only when the binding shape changes.
+ */
+export const VERIFY_REPORT_SCHEMA_VERSION = 2;
+
+/**
+ * A verify report BOUND to the snapshot it certified (F2, R-30). The completion
+ * gate must not accept a report that does not correspond to the CURRENT state of
+ * the project — a legacy `{"ok":true}`, a stale report from before a `verify
+ * add`/`clear`, or a report copied from another project/revision. The envelope
+ * carries the four coordinates that pin a report to its production reality:
+ *
+ *   - `commandSetHash`   — `commandSetHash(commands)` of the suite that ran. A
+ *                          `verify add`/`clear` changes this, so an old report no
+ *                          longer matches the configured set → STALE.
+ *   - `configLockDigest` — the approval-ledger tail (the `recordHash` of the latest
+ *                          approval, or GENESIS when none). A re-approval (a new
+ *                          human confirmation) advances it, so a report sealed
+ *                          against an earlier approval is detectably stale.
+ *   - `gitHead`          — the committed-tree identity the run executed against
+ *                          (null on a non-git checkout — non-discriminating).
+ *   - `dirtyTreeDigest`  — the uncommitted working-tree delta digest (null on a
+ *                          non-git checkout). A report produced at HEAD with one set
+ *                          of local edits is distinct from one at the same HEAD with
+ *                          a different (or clean) tree.
+ *
+ * The report PAYLOAD (`ok`/`ranAt`/`results`) is carried inline (it IS a
+ * `VerifyReport`) so the legacy readers (`readVerifyReport`) still parse it — the
+ * envelope is a superset, not a wrapper. This keeps the bare-report consumers
+ * working while the validated reader inspects the binding.
+ */
+export interface VerifyReportEnvelope extends VerifyReport {
+  /** Envelope schema version ({@link VERIFY_REPORT_SCHEMA_VERSION}); absent ⇒ legacy. */
+  schemaVersion: number;
+  /** `commandSetHash(commands)` of the suite that produced this report. */
+  commandSetHash: string;
+  /** The approval-ledger tail digest at run time (latest recordHash, or GENESIS). */
+  configLockDigest: string;
+  /** The committed HEAD the run executed against, or null on a non-git checkout. */
+  gitHead: string | null;
+  /** The uncommitted working-tree delta digest, or null on a non-git checkout. */
+  dirtyTreeDigest: string | null;
+}
+
+/**
+ * The classification of a verify report against the CURRENT binding coordinates
+ * (F2, R-30). The completion gate accepts ONLY `valid`; every other status blocks:
+ *
+ *   - `absent`  — no report on disk.
+ *   - `corrupt` — present but unparseable / wrong shape.
+ *   - `legacy`  — a bare `VerifyReport` with no (or an old) `schemaVersion` — it
+ *                 carries no binding, so its greenness cannot be trusted for the
+ *                 current snapshot; the operator must re-run to seal an envelope.
+ *   - `stale`   — a bound report whose binding no longer matches: the command set
+ *                 changed (`commandSetHash`), the approval was re-sealed
+ *                 (`configLockDigest`), or the repo snapshot moved (`gitHead` /
+ *                 `dirtyTreeDigest`). A copied-from-another-project/revision report
+ *                 lands here (its gitHead/dirtyTree differ from this checkout's).
+ *   - `valid`   — a bound report whose every PRESENT coordinate matches the current
+ *                 project state (an absent git coordinate is non-discriminating).
+ */
+export type VerifyReportValidationStatus = "absent" | "corrupt" | "legacy" | "stale" | "valid";
+
+export interface ValidatedVerifyReport {
+  status: VerifyReportValidationStatus;
+  /** The parsed report payload when present+parseable (absent/corrupt ⇒ undefined). */
+  report?: VerifyReport;
+  /** The parsed envelope when the report carried a binding (legacy/absent ⇒ undefined). */
+  envelope?: VerifyReportEnvelope;
+  /** For `stale`: which binding coordinate(s) diverged (audit/diagnostics). */
+  staleReasons?: string[];
+}
+
+/** The expected binding coordinates a report must match to be `valid`. */
+export interface VerifyBinding {
+  commandSetHash: string;
+  configLockDigest: string;
+  gitHead: string | null;
+  dirtyTreeDigest: string | null;
+}
+
+/** Is `v` a binding-carrying envelope (has the F2 fields)? Narrowing guard. */
+function hasEnvelopeBinding(v: Record<string, unknown>): boolean {
+  return (
+    typeof v.schemaVersion === "number" &&
+    typeof v.commandSetHash === "string" &&
+    typeof v.configLockDigest === "string"
+  );
+}
+
+/**
+ * The CURRENT binding for `paths`: the configured command set's hash, the approval-
+ * ledger tail digest, and the repo snapshot coordinates. Used both to STAMP a fresh
+ * envelope (the writer, Commit 2) and to VALIDATE a stored one (the reader below) —
+ * a single source so a report is judged stale by the SAME coordinates it was sealed
+ * with. `gitHead`/`dirtyTreeDigest` fail soft to null (non-git checkout).
+ */
+export function currentVerifyBinding(paths: ProjectPaths, commands: string[]): VerifyBinding {
+  return {
+    commandSetHash: commandSetHash(commands),
+    configLockDigest: lastApprovalRecordHash(paths),
+    gitHead: gitHead(paths.root),
+    dirtyTreeDigest: dirtyTreeDigest(paths.root),
+  };
+}
+
+/**
+ * Read the verify report and CLASSIFY it against the current binding (F2, R-30).
+ * This is the validated reader the completion gate consumes instead of the bare
+ * {@link readVerifyReport}: a legacy/stale/copied report is no longer silently
+ * trusted as green.
+ *
+ * A git coordinate (gitHead/dirtyTreeDigest) that is null on EITHER side (the stored
+ * report's or the current binding's) is NON-DISCRIMINATING — a binding we cannot
+ * compute cannot prove staleness, so it does not flip a report to stale (the honest
+ * "unbound" posture). The command-set and config-lock digests are always present
+ * (they are content hashes), so they always discriminate.
+ */
+export function readVerifyReportValidated(paths: ProjectPaths): ValidatedVerifyReport {
+  const file = verifyReportPath(paths);
+  if (!fs.existsSync(file)) return { status: "absent" };
+  let raw: string;
+  try {
+    raw = readFileWithRetry(file);
+  } catch {
+    return { status: "absent" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { status: "corrupt" };
+  }
+  if (parsed === null || typeof parsed !== "object") return { status: "corrupt" };
+  const obj = parsed as Record<string, unknown>;
+  if (typeof obj.ok !== "boolean") return { status: "corrupt" };
+  const report = obj as unknown as VerifyReport;
+
+  // No binding ⇒ legacy: a bare report (or a pre-F2 schemaVersion) carries no proof
+  // it corresponds to the current snapshot, so its greenness cannot be trusted.
+  if (!hasEnvelopeBinding(obj) || (obj.schemaVersion as number) < VERIFY_REPORT_SCHEMA_VERSION) {
+    return { status: "legacy", report };
+  }
+  const envelope = obj as unknown as VerifyReportEnvelope;
+
+  // Compute the current binding and compare each PRESENT coordinate.
+  const config = loadVerifyConfig(paths).config;
+  const expected = currentVerifyBinding(paths, config.commands);
+  const staleReasons: string[] = [];
+  if (envelope.commandSetHash !== expected.commandSetHash) staleReasons.push("commandSetHash");
+  if (envelope.configLockDigest !== expected.configLockDigest) staleReasons.push("configLockDigest");
+  // git coordinates: only discriminate when BOTH sides are non-null.
+  if (
+    envelope.gitHead !== null &&
+    expected.gitHead !== null &&
+    envelope.gitHead !== expected.gitHead
+  ) {
+    staleReasons.push("gitHead");
+  }
+  if (
+    envelope.dirtyTreeDigest !== null &&
+    expected.dirtyTreeDigest !== null &&
+    envelope.dirtyTreeDigest !== expected.dirtyTreeDigest
+  ) {
+    staleReasons.push("dirtyTreeDigest");
+  }
+  if (staleReasons.length > 0) return { status: "stale", report, envelope, staleReasons };
+  return { status: "valid", report, envelope };
 }
 
 // ---------------------------------------------------------------------------

@@ -7,6 +7,8 @@ import { gatingObligations, reduceDecisions, readDecisionEvents } from "../core/
 import { isFinalVerification } from "../core/stages";
 import { matchApprovedArtifact } from "../core/artifact-guard";
 import { readDelegationScope, clearDelegationScope } from "../core/delegation-scope";
+import { canCompleteRun } from "../core/gate-preconditions";
+import { renderStopReason } from "./next";
 
 /**
  * Stop-gate decision (plan pre-mortem #2 mitigation): the mechanical gate that
@@ -154,6 +156,72 @@ export function evaluateStopGate(paths: ProjectPaths): StopGateDecision {
     }
   }
   return { block: false, reasons: [] };
+}
+
+/**
+ * The three-state Stop-gate verdict (R-29, Item b). The old `StopGateDecision`
+ * carried a binary `block` plus reason strings; the verdict distinguishes the
+ * loop-escape from a clean pass so the caller never conflates "STILL blocked but
+ * yielding to a human to avoid a loop" with "actually complete":
+ *
+ *   - `block`       — a completion-relevant rung is unmet and there is no loop-escape;
+ *                     the Stop hook refuses the turn-end.
+ *   - `complete`    — every completion-relevant rung passes; the run may stop.
+ *   - `human-yield` — a rung is STILL unmet but `stop_hook_active` is true, so the
+ *                     gate yields the turn to a human instead of re-blocking forever
+ *                     (a human decision is required). This is NOT the empty `complete`
+ *                     payload — the unresolved reason is surfaced.
+ *
+ * `reason` is the human-facing token-derived sentence (renderStopReason parity);
+ * `token` is the stable canonical token of the first unmet rung (absent on complete).
+ */
+export type StopGateVerdictKind = "block" | "complete" | "human-yield";
+
+export interface StopGateVerdict {
+  kind: StopGateVerdictKind;
+  /** Stable canonical token of the first unmet completion rung (absent on complete). */
+  token?: string;
+  /** The human sentence for the unmet rung (parity with `th next`); absent on complete. */
+  reason?: string;
+}
+
+/**
+ * Decide the three-state Stop-gate verdict from the COMPLETION predicate
+ * (`canCompleteRun`) — the re-selection that blocks completion at any stage on the
+ * human-reconciliation obligations and, at final-verification, on the strict
+ * completion ladder (R-29, Item b).
+ *
+ * Wired ADVISORY in Commit 1: `runHookStopGate` still consumes the historical
+ * `evaluateStopGate` so the Stop snapshots stay green; the ENFORCE commit switches
+ * `runHookStopGate` to this verdict. The mapping is the load-bearing contract the F1
+ * property test pins:
+ *   - `canCompleteRun.ok === true`                         → `complete`.
+ *   - unmet rung AND `stop_hook_active === true`           → `human-yield`.
+ *   - unmet rung AND not looping                           → `block`.
+ *
+ * `renderStopReason` projects the rung's canonical token to the SAME human sentence
+ * `th next` emits (Stop and `th next` print identically), so a blocked Stop and a
+ * blocked `th next` never disagree on wording.
+ */
+export function decideStopGate(paths: ProjectPaths, input?: StopHookInput): StopGateVerdict {
+  const r = readState(paths);
+  // No state.json → no run here → completion is unconstrained (allow).
+  if (!r.exists) return { kind: "complete" };
+  // Present-but-invalid state is a completion blocker (repair first) — surfaced with a
+  // stable token so the verdict is uniform with the rung tokens below.
+  if (!r.state) {
+    const reason =
+      "state.json is present but does NOT validate against the schema; repair it before claiming any stage complete. " +
+      (r.issues ?? []).map((i) => `${i.path}: ${i.message}`).join(" ");
+    if (input?.stop_hook_active === true) return { kind: "human-yield", token: "invalid_state", reason };
+    return { kind: "block", token: "invalid_state", reason };
+  }
+  const verdict = canCompleteRun(paths, r.state);
+  if (verdict.ok) return { kind: "complete" };
+  const token = verdict.error ?? "blocked";
+  const reason = renderStopReason(token, verdict.detail);
+  if (input?.stop_hook_active === true) return { kind: "human-yield", token, reason };
+  return { kind: "block", token, reason };
 }
 
 /**

@@ -21519,7 +21519,11 @@ function readTesterRecord(paths) {
     driver: r.driver,
     provider: typeof r.provider === "string" ? r.provider : void 0,
     evidenceRef: typeof r.evidenceRef === "string" ? r.evidenceRef : void 0,
-    ranAt: typeof r.ranAt === "string" ? r.ranAt : void 0
+    ranAt: typeof r.ranAt === "string" ? r.ranAt : void 0,
+    passed: typeof r.passed === "boolean" ? r.passed : void 0,
+    receiptDigest: typeof r.receiptDigest === "string" ? r.receiptDigest : void 0,
+    gitHead: typeof r.gitHead === "string" ? r.gitHead : r.gitHead === null ? null : void 0,
+    dirtyTreeDigest: typeof r.dirtyTreeDigest === "string" ? r.dirtyTreeDigest : r.dirtyTreeDigest === null ? null : void 0
   };
 }
 function testerRecordPresent(paths) {
@@ -21739,27 +21743,44 @@ function checkInterview(paths, state) {
   }
   return PASS;
 }
+var GLOBAL_RUNGS = [
+  { id: "checkBlockingDrift", bucket: "always-run", scope: "global", run: (_p, s) => checkBlockingDrift(s) },
+  { id: "checkReviseEscalation", bucket: "always-run", scope: "global", run: (_p, s) => checkReviseEscalation(s) },
+  { id: "checkVerifySuite", bucket: "forward-only", scope: "global", run: (p) => checkVerifySuite(p) },
+  { id: "checkArtifactDrift", bucket: "forward-only", scope: "global", run: (p, s) => checkArtifactDrift(p, s) },
+  { id: "checkTierSet", bucket: "forward-only", scope: "global", run: (_p, s) => checkTierSet(s) },
+  { id: "checkInterview", bucket: "forward-only", scope: "global", run: (p, s) => checkInterview(p, s) },
+  { id: "checkRepoMap", bucket: "forward-only", scope: "global", run: (p, s) => checkRepoMap(p, s) },
+  { id: "checkDecisionObligations", bucket: "always-run", scope: "global", run: (p, s) => checkDecisionObligations(p, s) },
+  { id: "checkDebate", bucket: "always-run", scope: "global", run: (_p, s) => checkDebate(s) }
+];
+var STAGE_RUNGS = [
+  { id: "checkGoverningArtifact", bucket: "forward-only", scope: "stage:non-final-artifact", run: (p, s) => checkGoverningArtifact(p, s) },
+  { id: "checkCoverage", bucket: "forward-only", scope: "stage:implementation-planning", run: (p) => checkCoverage(p) },
+  { id: "checkImplementationSettled", bucket: "forward-only", scope: "stage:implementation", run: (_p, s) => checkImplementationSettled(s) },
+  { id: "checkFinalVerification", bucket: "final", scope: "stage:final", run: (p, s) => checkFinalVerification(p, s) }
+];
+var CAN_ADVANCE_RUNGS = [...GLOBAL_RUNGS, ...STAGE_RUNGS];
+function rungAppliesAtStage(rung, stage) {
+  switch (rung.scope) {
+    case "global":
+      return true;
+    case "stage:non-final-artifact":
+      return !isFinalVerification(stage);
+    case "stage:implementation-planning":
+      return stage === "implementation-planning";
+    case "stage:implementation":
+      return stage === "implementation";
+    case "stage:final":
+      return isFinalVerification(stage);
+  }
+}
 function canAdvanceStage(paths, state) {
-  let r;
-  if (!(r = checkBlockingDrift(state)).ok) return r;
-  if (!(r = checkReviseEscalation(state)).ok) return r;
-  if (!(r = checkVerifySuite(paths)).ok) return r;
-  if (!(r = checkArtifactDrift(paths, state)).ok) return r;
-  if (!(r = checkTierSet(state)).ok) return r;
-  if (!(r = checkInterview(paths, state)).ok) return r;
-  if (!(r = checkRepoMap(paths, state)).ok) return r;
-  if (!(r = checkDecisionObligations(paths, state)).ok) return r;
-  if (!(r = checkDebate(state)).ok) return r;
   const current = canonicalizeStage(state.current_stage);
-  if (isFinalVerification(current)) {
-    return checkFinalVerification(paths, state);
-  }
-  if (!(r = checkGoverningArtifact(paths, state)).ok) return r;
-  if (current === "implementation-planning") {
-    if (!(r = checkCoverage(paths)).ok) return r;
-  }
-  if (current === "implementation") {
-    if (!(r = checkImplementationSettled(state)).ok) return r;
+  for (const rung of CAN_ADVANCE_RUNGS) {
+    if (!rungAppliesAtStage(rung, current)) continue;
+    const r = rung.run(paths, state);
+    if (!r.ok) return r;
   }
   return PASS;
 }

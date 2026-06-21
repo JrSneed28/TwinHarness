@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.evaluateStopGate = evaluateStopGate;
+exports.decideStopGate = decideStopGate;
 exports.runHookStopGate = runHookStopGate;
 exports.runHookSubagentStop = runHookSubagentStop;
 exports.extractBashWriteTargets = extractBashWriteTargets;
@@ -49,6 +50,8 @@ const decisions_1 = require("../core/decisions");
 const stages_1 = require("../core/stages");
 const artifact_guard_1 = require("../core/artifact-guard");
 const delegation_scope_1 = require("../core/delegation-scope");
+const gate_preconditions_1 = require("../core/gate-preconditions");
+const next_1 = require("./next");
 /**
  * Decide whether the orchestrator may declare completion.
  *
@@ -182,6 +185,47 @@ function evaluateStopGate(paths) {
         }
     }
     return { block: false, reasons: [] };
+}
+/**
+ * Decide the three-state Stop-gate verdict from the COMPLETION predicate
+ * (`canCompleteRun`) — the re-selection that blocks completion at any stage on the
+ * human-reconciliation obligations and, at final-verification, on the strict
+ * completion ladder (R-29, Item b).
+ *
+ * Wired ADVISORY in Commit 1: `runHookStopGate` still consumes the historical
+ * `evaluateStopGate` so the Stop snapshots stay green; the ENFORCE commit switches
+ * `runHookStopGate` to this verdict. The mapping is the load-bearing contract the F1
+ * property test pins:
+ *   - `canCompleteRun.ok === true`                         → `complete`.
+ *   - unmet rung AND `stop_hook_active === true`           → `human-yield`.
+ *   - unmet rung AND not looping                           → `block`.
+ *
+ * `renderStopReason` projects the rung's canonical token to the SAME human sentence
+ * `th next` emits (Stop and `th next` print identically), so a blocked Stop and a
+ * blocked `th next` never disagree on wording.
+ */
+function decideStopGate(paths, input) {
+    const r = (0, state_store_1.readState)(paths);
+    // No state.json → no run here → completion is unconstrained (allow).
+    if (!r.exists)
+        return { kind: "complete" };
+    // Present-but-invalid state is a completion blocker (repair first) — surfaced with a
+    // stable token so the verdict is uniform with the rung tokens below.
+    if (!r.state) {
+        const reason = "state.json is present but does NOT validate against the schema; repair it before claiming any stage complete. " +
+            (r.issues ?? []).map((i) => `${i.path}: ${i.message}`).join(" ");
+        if (input?.stop_hook_active === true)
+            return { kind: "human-yield", token: "invalid_state", reason };
+        return { kind: "block", token: "invalid_state", reason };
+    }
+    const verdict = (0, gate_preconditions_1.canCompleteRun)(paths, r.state);
+    if (verdict.ok)
+        return { kind: "complete" };
+    const token = verdict.error ?? "blocked";
+    const reason = (0, next_1.renderStopReason)(token, verdict.detail);
+    if (input?.stop_hook_active === true)
+        return { kind: "human-yield", token, reason };
+    return { kind: "block", token, reason };
 }
 /**
  * `th hook stop-gate` — emit a Claude Code Stop-hook decision on stdout.

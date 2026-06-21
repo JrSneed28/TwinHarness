@@ -49,9 +49,11 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.testerRecordPath = testerRecordPath;
 exports.readTesterRecord = readTesterRecord;
+exports.readTesterRecordValidated = readTesterRecordValidated;
 exports.testerRecordPresent = testerRecordPresent;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+const git_revision_1 = require("./git-revision");
 /** `<stateDir>/tester-record.json` — the live-QA Tester evidence marker. */
 function testerRecordPath(paths) {
     return path.join(paths.stateDir, "tester-record.json");
@@ -59,7 +61,9 @@ function testerRecordPath(paths) {
 /**
  * Read the Tester record, returning `null` when absent or unreadable/malformed
  * (fail-closed for the gate: no readable record ⇒ the rung blocks). A present record
- * must carry a non-empty `driver` to count — an empty marker is not evidence.
+ * must carry a non-empty `driver` to PARSE — an empty marker is not evidence. The
+ * F8 BINDING fields are carried through when present (the strict gate predicate
+ * inspects them); a legacy bare record still parses (advisory back-compat).
  */
 function readTesterRecord(paths) {
     const file = testerRecordPath(paths);
@@ -89,9 +93,55 @@ function readTesterRecord(paths) {
         provider: typeof r.provider === "string" ? r.provider : undefined,
         evidenceRef: typeof r.evidenceRef === "string" ? r.evidenceRef : undefined,
         ranAt: typeof r.ranAt === "string" ? r.ranAt : undefined,
+        passed: typeof r.passed === "boolean" ? r.passed : undefined,
+        receiptDigest: typeof r.receiptDigest === "string" ? r.receiptDigest : undefined,
+        gitHead: typeof r.gitHead === "string" ? r.gitHead : r.gitHead === null ? null : undefined,
+        dirtyTreeDigest: typeof r.dirtyTreeDigest === "string" ? r.dirtyTreeDigest : r.dirtyTreeDigest === null ? null : undefined,
     };
 }
-/** True iff a valid live-QA Tester record is attached — the gate's 3rd condition. */
+/**
+ * Read + CLASSIFY the Tester record against the F8 binding (R-31). The git
+ * coordinates discriminate only when BOTH sides are non-null (the honest "unbound"
+ * posture — a coordinate we cannot compute cannot prove staleness). `commands`-style
+ * content hashing is not needed here: the record's identity is its receipt + the
+ * repo snapshot it ran against.
+ */
+function readTesterRecordValidated(paths) {
+    const record = readTesterRecord(paths);
+    if (record === null)
+        return { status: "absent" };
+    // A bare/legacy marker: a driver but no pass+receipt binding.
+    if (record.passed === undefined && record.receiptDigest === undefined) {
+        return { status: "driver_only", record };
+    }
+    if (record.passed !== true)
+        return { status: "not_passed", record };
+    if (typeof record.receiptDigest !== "string" || record.receiptDigest.trim() === "") {
+        return { status: "unbound", record };
+    }
+    // Repo-snapshot binding: stale when a present coordinate diverged from the current tree.
+    const curHead = (0, git_revision_1.gitHead)(paths.root);
+    const curDirty = (0, git_revision_1.dirtyTreeDigest)(paths.root);
+    const staleReasons = [];
+    if (record.gitHead != null && curHead != null && record.gitHead !== curHead) {
+        staleReasons.push("gitHead");
+    }
+    if (record.dirtyTreeDigest != null && curDirty != null && record.dirtyTreeDigest !== curDirty) {
+        staleReasons.push("dirtyTreeDigest");
+    }
+    if (staleReasons.length > 0)
+        return { status: "stale", record, staleReasons };
+    return { status: "valid", record };
+}
+/**
+ * True iff a live-QA Tester record satisfying the F8 binding is attached — the
+ * production-reality gate's 3rd condition (R-31).
+ *
+ * Commit 1 (advisory) keeps the HISTORICAL lenient predicate (presence + a non-empty
+ * driver) so the enforce flip and its re-baseline land together in Commit 2. The
+ * strict classification lives in {@link readTesterRecordValidated}; the gate is
+ * switched to it (`status === "valid"`) in the enforce commit.
+ */
 function testerRecordPresent(paths) {
     return readTesterRecord(paths) !== null;
 }

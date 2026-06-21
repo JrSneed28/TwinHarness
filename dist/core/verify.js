@@ -69,7 +69,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.EXIT_KILLED = exports.EXIT_OUTPUT_OVERFLOW = exports.EXIT_TIMEOUT = exports.DEFAULT_COMMAND_TIMEOUT_MS = void 0;
+exports.EXIT_KILLED = exports.EXIT_OUTPUT_OVERFLOW = exports.EXIT_TIMEOUT = exports.VERIFY_REPORT_SCHEMA_VERSION = exports.DEFAULT_COMMAND_TIMEOUT_MS = void 0;
 exports.verifyConfigPath = verifyConfigPath;
 exports.verifyReportPath = verifyReportPath;
 exports.commandSetHash = commandSetHash;
@@ -86,6 +86,8 @@ exports.isCommandSetApproved = isCommandSetApproved;
 exports.latestApprovalFor = latestApprovalFor;
 exports.readVerifyReport = readVerifyReport;
 exports.writeVerifyReport = writeVerifyReport;
+exports.currentVerifyBinding = currentVerifyBinding;
+exports.readVerifyReportValidated = readVerifyReportValidated;
 exports.redactSecrets = redactSecrets;
 exports.curatedEnv = curatedEnv;
 exports.looksRepoMutating = looksRepoMutating;
@@ -103,6 +105,7 @@ const paths_1 = require("./paths");
 const atomic_io_1 = require("./atomic-io");
 const hash_1 = require("./hash");
 const jsonl_1 = require("./jsonl");
+const git_revision_1 = require("./git-revision");
 const OUTPUT_TAIL_CHARS = 2000;
 /**
  * Per-command wall-clock budget (ms). A configured command that hangs (a watch
@@ -358,6 +361,102 @@ function readVerifyReport(paths) {
 function writeVerifyReport(paths, report) {
     fs.mkdirSync(paths.stateDir, { recursive: true });
     (0, atomic_io_1.atomicWriteFile)(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n", { root: paths.root });
+}
+// ---------------------------------------------------------------------------
+// F2 (R-30) — bound verify-report envelope + validated reader
+// ---------------------------------------------------------------------------
+/**
+ * The CURRENT verify-report envelope schema version (F2, R-30). A report written
+ * by `runVerifyRun` now carries this so the completion gate can tell a binding-
+ * carrying report apart from a legacy bare `VerifyReport` (which had no
+ * `schemaVersion`). Bumped only when the binding shape changes.
+ */
+exports.VERIFY_REPORT_SCHEMA_VERSION = 2;
+/** Is `v` a binding-carrying envelope (has the F2 fields)? Narrowing guard. */
+function hasEnvelopeBinding(v) {
+    return (typeof v.schemaVersion === "number" &&
+        typeof v.commandSetHash === "string" &&
+        typeof v.configLockDigest === "string");
+}
+/**
+ * The CURRENT binding for `paths`: the configured command set's hash, the approval-
+ * ledger tail digest, and the repo snapshot coordinates. Used both to STAMP a fresh
+ * envelope (the writer, Commit 2) and to VALIDATE a stored one (the reader below) —
+ * a single source so a report is judged stale by the SAME coordinates it was sealed
+ * with. `gitHead`/`dirtyTreeDigest` fail soft to null (non-git checkout).
+ */
+function currentVerifyBinding(paths, commands) {
+    return {
+        commandSetHash: commandSetHash(commands),
+        configLockDigest: lastApprovalRecordHash(paths),
+        gitHead: (0, git_revision_1.gitHead)(paths.root),
+        dirtyTreeDigest: (0, git_revision_1.dirtyTreeDigest)(paths.root),
+    };
+}
+/**
+ * Read the verify report and CLASSIFY it against the current binding (F2, R-30).
+ * This is the validated reader the completion gate consumes instead of the bare
+ * {@link readVerifyReport}: a legacy/stale/copied report is no longer silently
+ * trusted as green.
+ *
+ * A git coordinate (gitHead/dirtyTreeDigest) that is null on EITHER side (the stored
+ * report's or the current binding's) is NON-DISCRIMINATING — a binding we cannot
+ * compute cannot prove staleness, so it does not flip a report to stale (the honest
+ * "unbound" posture). The command-set and config-lock digests are always present
+ * (they are content hashes), so they always discriminate.
+ */
+function readVerifyReportValidated(paths) {
+    const file = verifyReportPath(paths);
+    if (!fs.existsSync(file))
+        return { status: "absent" };
+    let raw;
+    try {
+        raw = (0, atomic_io_1.readFileWithRetry)(file);
+    }
+    catch {
+        return { status: "absent" };
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch {
+        return { status: "corrupt" };
+    }
+    if (parsed === null || typeof parsed !== "object")
+        return { status: "corrupt" };
+    const obj = parsed;
+    if (typeof obj.ok !== "boolean")
+        return { status: "corrupt" };
+    const report = obj;
+    // No binding ⇒ legacy: a bare report (or a pre-F2 schemaVersion) carries no proof
+    // it corresponds to the current snapshot, so its greenness cannot be trusted.
+    if (!hasEnvelopeBinding(obj) || obj.schemaVersion < exports.VERIFY_REPORT_SCHEMA_VERSION) {
+        return { status: "legacy", report };
+    }
+    const envelope = obj;
+    // Compute the current binding and compare each PRESENT coordinate.
+    const config = loadVerifyConfig(paths).config;
+    const expected = currentVerifyBinding(paths, config.commands);
+    const staleReasons = [];
+    if (envelope.commandSetHash !== expected.commandSetHash)
+        staleReasons.push("commandSetHash");
+    if (envelope.configLockDigest !== expected.configLockDigest)
+        staleReasons.push("configLockDigest");
+    // git coordinates: only discriminate when BOTH sides are non-null.
+    if (envelope.gitHead !== null &&
+        expected.gitHead !== null &&
+        envelope.gitHead !== expected.gitHead) {
+        staleReasons.push("gitHead");
+    }
+    if (envelope.dirtyTreeDigest !== null &&
+        expected.dirtyTreeDigest !== null &&
+        envelope.dirtyTreeDigest !== expected.dirtyTreeDigest) {
+        staleReasons.push("dirtyTreeDigest");
+    }
+    if (staleReasons.length > 0)
+        return { status: "stale", report, envelope, staleReasons };
+    return { status: "valid", report, envelope };
 }
 // ---------------------------------------------------------------------------
 // Secret redaction (#19, P6-3) — scrub known secret shapes before persist/print
