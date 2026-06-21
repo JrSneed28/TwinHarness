@@ -2235,6 +2235,10 @@ export async function callTool(name: string, args: ToolArgs = {}): Promise<CallT
         failure({
           human: err.message,
           data: { error: err.code, kind: err.kind, candidates: err.candidates },
+          // Preserve the CLI/MCP exit-code taxonomy: `mapDispatchError` maps this
+          // client-correctable conflict to exit 2, so `structuredContent.exitCode`
+          // must read 2 here too — not the `failure()` default of 1.
+          exitCode: 2,
         }),
       );
     }

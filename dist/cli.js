@@ -600,6 +600,17 @@ function dispatch(parsed) {
     // first and the recovery could never run). It operates on the conflict-tolerant
     // candidate set (`resolveStateCandidates`, which never throws).
     if (parsed.positionals[0] === "state" && parsed.positionals[1] === "adopt") {
+        // Passing BOTH targets is a contradictory mutating request: `th state adopt`
+        // KEEPS one location and RETIRES the other, so `--twinharness --legacy` cannot
+        // be honored. Reject it as a usage error BEFORE runStateAdopt rather than
+        // silently letting the ternary below pick `twinharness` and retire the legacy
+        // state the operator also named.
+        if (parsed.flags.twinharness && parsed.flags.legacy) {
+            return (0, output_1.failure)({
+                human: "Pass only one of --twinharness / --legacy.\n" +
+                    "`th state adopt` keeps ONE location and retires the other; naming both is contradictory.",
+            });
+        }
         const target = parsed.flags.twinharness
             ? "twinharness"
             : parsed.flags.legacy

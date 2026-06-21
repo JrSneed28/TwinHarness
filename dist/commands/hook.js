@@ -278,13 +278,17 @@ function runHookPretoolGateFromRoot(root, payload, env = process.env) {
  */
 function runHookSubagentStop(paths, input) {
     // SG3 P1-B (C-11) + R-36 (F7) — a delegated subagent finishing means ITS OWN
-    // allowed-files scope no longer applies. Clear ONLY the stopping delegation's id so an
-    // unrelated SubagentStop never lifts a still-running PEER's scope (the singleton's
-    // fail-open). When the payload carries no usable id we DO NOT clear anything (clearing
-    // a peer on an unidentified stop is exactly the bug); a crashed delegate that never
-    // sends SubagentStop is recovered by TTL expiry on the read path instead. Best-effort +
-    // ahead of the state read so it lifts even when state.json is absent/invalid.
-    const stoppingId = input?.delegation_id ?? input?.tool_use_id ?? input?.session_id;
+    // allowed-files scope no longer applies. Clear ONLY the stopping delegation's scope, and
+    // ONLY by its actual key: the minted `DEL-*` `delegation_id` the orchestrator threads.
+    // The host `session_id` / `tool_use_id` are NOT scope keys — scopes are filed under the
+    // minted id — so using them would `rm` a nonexistent `<session-id>.json` (a clear that
+    // clears nothing) while the REAL completed scope lingered, AND could lift an unrelated
+    // scope if a host id ever coincided with one. When no `delegation_id` is present (today's
+    // installed hook) we DO NOT clear anything (clearing a peer on an unidentified stop is
+    // exactly the bug); a crashed/unthreaded delegate's scope self-expires via TTL on the
+    // read path instead. Best-effort + ahead of the state read so it lifts even when
+    // state.json is absent/invalid.
+    const stoppingId = input?.delegation_id;
     if (stoppingId)
         (0, delegation_scope_1.clearDelegationScope)(paths, stoppingId);
     const r = (0, state_store_1.readState)(paths);
@@ -838,21 +842,29 @@ function runHookPretoolGate(paths, input, env = process.env) {
         ? input.allowed_files.filter((x) => typeof x === "string")
         : [];
     const { active: activeScopes } = (0, delegation_scope_1.readActiveDelegationScopes)(paths);
-    // A per-WRITER id (delegation_id, else the weaker host ids). Its PRESENCE — not whether
-    // it matches an armed scope — is what gates the union fallback (the XOR is keyed on "no
-    // id on the payload", per Item 2).
-    const writerId = input?.delegation_id ?? input?.tool_use_id ?? input?.session_id;
+    // The per-WRITER delegation key. ONLY an explicit `delegation_id` (the minted `DEL-*`
+    // key the orchestrator threads) counts — NOT the host `session_id` / `tool_use_id`,
+    // which every real PreToolUse payload carries and which bear NO relation to a minted
+    // scope id. Treating a host id as the writer id was a fail-OPEN: it made `writerId`
+    // truthy on every real call, so `ownScope` was always undefined (no scope is keyed by a
+    // host id) and the Tier-2 branch returned an EMPTY (unfettered) scope — silently
+    // SUPPRESSING the active-scope union for the very delegated writes F7 must constrain.
+    // Keying strictly on `delegation_id` restores the no-id XOR: a real payload (no
+    // delegation_id) correctly falls to the Tier-1 union (fail-tighter).
+    const writerId = input?.delegation_id;
     const ownScope = writerId
         ? activeScopes.find((s) => s.delegationId === writerId)
         : undefined;
     // The base scope this write is constrained to:
-    //   • writerId PRESENT (Tier 2 / per-id): enforce ONLY that id's scope. A matching id →
-    //     its allowed-files; an id with NO armed scope → [] (no constraint). We do NOT fall
-    //     back to the union here — supplying an id is the host asserting "this is who I am",
-    //     so a non-delegated writer that names its own (scope-less) id is correctly unfettered
-    //     (the Tier-2 path that eliminates the orchestrator-write false-block).
-    //   • writerId ABSENT (Tier 1 / no-id XOR): ARM 2 — >=1 active scope ⇒ UNION of ALL active
-    //     scopes (fail-tighter); ARM 1 — 0 active scopes ⇒ [] (the historical no-op, verbatim).
+    //   • writerId PRESENT (Tier 2 / per-id — an explicit delegation_id): enforce ONLY that
+    //     id's scope. A matching id → its allowed-files; an id with NO armed scope → [] (no
+    //     constraint). We do NOT fall back to the union here — supplying a delegation_id is
+    //     the host asserting "this is the delegation I am", so a non-delegated writer that
+    //     names its own (scope-less) id is correctly unfettered (the Tier-2 path that
+    //     eliminates the orchestrator-write false-block).
+    //   • writerId ABSENT (Tier 1 / no-id XOR — the installed hook, which gets only host ids):
+    //     ARM 2 — >=1 active scope ⇒ UNION of ALL active scopes (fail-tighter); ARM 1 — 0
+    //     active scopes ⇒ [] (the historical no-op, verbatim).
     // stdin allowed_files (a host directly declaring THIS call's scope) always unions in.
     const baseScope = writerId
         ? (ownScope?.allowedFiles ?? []) // Tier 2: this id's own scope only (empty ⇒ unfettered).
