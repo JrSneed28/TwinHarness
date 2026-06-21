@@ -36,6 +36,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.evaluateStopGate = evaluateStopGate;
 exports.decideStopGate = decideStopGate;
 exports.runHookStopGate = runHookStopGate;
+exports.runHookStopGateFromRoot = runHookStopGateFromRoot;
+exports.runHookSubagentStopFromRoot = runHookSubagentStopFromRoot;
+exports.runHookPretoolGateFromRoot = runHookPretoolGateFromRoot;
 exports.runHookSubagentStop = runHookSubagentStop;
 exports.extractBashWriteTargets = extractBashWriteTargets;
 exports.bashWriteTargetWasDropped = bashWriteTargetWasDropped;
@@ -162,6 +165,93 @@ function runHookStopGate(paths, input) {
         stdout: JSON.stringify({ decision: "block", reason }),
         exitCode: 0,
     };
+}
+// ---------------------------------------------------------------------------
+// CROSS-LANE (F1<->F5) — resolve-from-root hook entry points that CATCH the
+// StateLocationConflictError that `resolveProjectPaths` (R-34/F5) throws on a
+// both-valid / both-present-but-invalid (no-safe-location) root.
+// ---------------------------------------------------------------------------
+/**
+ * The F1<->F5 fail-open closure. With Phase-1's `canCompleteRun` and Phase-3-F5's
+ * valid-state-FILE selection both in-tree, a root with NO valid state must yield a
+ * NON-completing verdict — and a root where the state LOCATION is ambiguous (both
+ * `.twinharness` and legacy hold valid state, OR both are present-but-invalid) makes
+ * `resolveProjectPaths` THROW before any decision function runs. The Stop / SubagentStop
+ * hooks resolve paths at their entry, so that throw would otherwise escape as an UNCAUGHT
+ * crash (non-zero exit, NO JSON decision) — which a strict hook consumer treats as a
+ * fail-OPEN (no block emitted). These wrappers resolve from the root and translate the
+ * conflict into the correct fail-safe DECISION instead of crashing:
+ *   - Stop / SubagentStop → a `block` (non-completing) — the run may not claim completion
+ *     while its state location is unresolvable.
+ *   - PreToolUse          → a `deny` (fail-closed) — a write must not slip through while
+ *     the governed state location is ambiguous.
+ * A non-conflict resolve still succeeds normally; only the typed F5 conflict is mapped.
+ */
+function resolveOrConflict(root) {
+    try {
+        return { paths: (0, paths_1.resolveProjectPaths)(root) };
+    }
+    catch (e) {
+        if (e instanceof paths_1.StateLocationConflictError)
+            return { conflict: e };
+        throw e; // any other resolve error is a genuine fault — let it surface.
+    }
+}
+/**
+ * `th hook stop-gate`, resolving from `root` and CATCHING the F5 location conflict as a
+ * BLOCK (cross-lane AC). On a clean resolve it defers to {@link runHookStopGate}.
+ */
+function runHookStopGateFromRoot(root, payload) {
+    const r = resolveOrConflict(root);
+    if ("conflict" in r) {
+        return {
+            stdout: JSON.stringify({
+                decision: "block",
+                reason: "TwinHarness stop-gate blocked completion: the state LOCATION is ambiguous/unsafe — " +
+                    r.conflict.message,
+            }),
+            exitCode: 0,
+        };
+    }
+    return runHookStopGate(r.paths, payload);
+}
+/**
+ * `th hook subagent-stop`, resolving from `root` and CATCHING the F5 location conflict as
+ * a BLOCK (cross-lane AC). On a clean resolve it defers to {@link runHookSubagentStop}.
+ */
+function runHookSubagentStopFromRoot(root, payload) {
+    const r = resolveOrConflict(root);
+    if ("conflict" in r) {
+        return {
+            stdout: JSON.stringify({
+                decision: "block",
+                reason: "TwinHarness subagent-stop gate blocked: the state LOCATION is ambiguous/unsafe — " +
+                    r.conflict.message,
+            }),
+            exitCode: 0,
+        };
+    }
+    return runHookSubagentStop(r.paths, payload);
+}
+/**
+ * `th hook pretool-gate`, resolving from `root` and CATCHING the F5 location conflict as a
+ * DENY (fail-closed — a write must not slip through an unresolvable state location). On a
+ * clean resolve it defers to {@link runHookPretoolGate}.
+ */
+function runHookPretoolGateFromRoot(root, payload, env = process.env) {
+    const r = resolveOrConflict(root);
+    if ("conflict" in r) {
+        // Honor the same global disable hatch the gate itself honors, so the conflict
+        // fail-closed never traps an operator who has deliberately disabled the gate.
+        if (env["TH_DISABLE_WRITE_GATE"] === "1") {
+            return { stdout: JSON.stringify({}), exitCode: 0 };
+        }
+        return fireGateResult("deny", "TwinHarness write-gate (F5 — fail-closed) DENIED this write: the state LOCATION is " +
+            "ambiguous/unsafe, so the gate cannot determine which project governs it. " +
+            r.conflict.message +
+            " Escape hatch (emergency manual override): set env TH_DISABLE_WRITE_GATE=1.");
+    }
+    return runHookPretoolGate(r.paths, payload, env);
 }
 /**
  * `th hook subagent-stop` — emit a Claude Code SubagentStop-hook decision on

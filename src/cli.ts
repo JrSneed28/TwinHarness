@@ -45,9 +45,9 @@ import { runDriftAdd, runDriftList, runDriftResolve } from "./commands/drift";
 import { runTraceRender } from "./commands/trace";
 import { runStale } from "./commands/stale";
 import {
-  runHookStopGate,
-  runHookPretoolGate,
-  runHookSubagentStop,
+  runHookStopGateFromRoot,
+  runHookPretoolGateFromRoot,
+  runHookSubagentStopFromRoot,
   type StopHookInput,
   type PreToolHookInput,
   type SubagentStopHookInput,
@@ -1461,26 +1461,29 @@ function readHookStdin<T extends object>(): T | undefined {
 }
 
 /**
- * Resolve the project paths for a hook dispatch, reading the hook's stdin payload
- * once and applying the SAME stdin-`cwd` precedence to every hook (PreToolUse /
- * Stop / SubagentStop). Claude Code does NOT pass `--cwd` to the shipped hooks
- * (`hooks/hooks.json`), so the session's project dir arrives ONLY on the stdin
- * payload's `cwd`. If all three hooks resolved from process cwd while one read
- * stdin, they could govern different roots for one session — the write-gate and
- * the completion-gate must agree.
+ * Read the hook's stdin payload once and compute the effective project `cwd` for a hook
+ * dispatch, applying the SAME stdin-`cwd` precedence to every hook (PreToolUse / Stop /
+ * SubagentStop). Claude Code does NOT pass `--cwd` to the shipped hooks (`hooks/hooks.json`),
+ * so the session's project dir arrives ONLY on the stdin payload's `cwd`. If all three hooks
+ * resolved from process cwd while one read stdin, they could govern different roots for one
+ * session — the write-gate and the completion-gate must agree.
  *
- * Precedence (identical for all hooks): prefer the payload's `cwd` UNLESS the
- * caller explicitly passed `--cwd` (then the explicit flag wins). Returns the
- * resolved paths alongside the parsed payload so callers don't re-read stdin.
+ * Precedence (identical for all hooks): prefer the payload's `cwd` UNLESS the caller
+ * explicitly passed `--cwd` (then the explicit flag wins). Returns the effective cwd + parsed
+ * payload WITHOUT resolving the project paths — the resolve (which can THROW the F5
+ * {@link StateLocationConflictError} on an ambiguous state location) happens INSIDE the
+ * `runHook*FromRoot` wrappers, which CATCH that throw and translate it into a fail-safe
+ * DECISION (block / deny) rather than letting it escape as an uncaught crash (the cross-lane
+ * F1<->F5 fail-open closure).
  */
-function resolveHookPaths<T extends { cwd?: string }>(
+function readHookPayload<T extends { cwd?: string }>(
   flagCwd: string,
-): { paths: ProjectPaths; payload: T | undefined } {
+): { effectiveCwd: string; payload: T | undefined } {
   const payload = readHookStdin<T>();
   const cwdFromStdin = payload?.cwd;
   const effectiveCwd =
     cwdFromStdin && !process.argv.includes("--cwd") ? cwdFromStdin : flagCwd;
-  return { paths: resolveProjectPaths(effectiveCwd), payload };
+  return { effectiveCwd, payload };
 }
 
 function main(): void {
@@ -1517,15 +1520,20 @@ function main(): void {
   // (a fail-open). Compute the decision, then exit; never fall through.
   if (parsed.positionals[0] === "hook") {
     let hookOut: { stdout: string; exitCode: number } | undefined;
+    // Cross-lane (F1<->F5): the `*FromRoot` wrappers resolve the project paths INTERNALLY
+    // and CATCH the F5 StateLocationConflictError (ambiguous/unsafe state LOCATION),
+    // translating it into a fail-safe DECISION (Stop/SubagentStop → block; PreToolUse →
+    // deny) instead of letting the resolve throw escape as an uncaught crash here (which a
+    // strict hook consumer would read as a fail-OPEN — no decision emitted).
     if (parsed.positionals[1] === "stop-gate") {
-      const { paths, payload } = resolveHookPaths<StopHookInput>(parsed.flags.cwd);
-      hookOut = runHookStopGate(paths, payload);
+      const { effectiveCwd, payload } = readHookPayload<StopHookInput>(parsed.flags.cwd);
+      hookOut = runHookStopGateFromRoot(effectiveCwd, payload);
     } else if (parsed.positionals[1] === "pretool-gate") {
-      const { paths, payload } = resolveHookPaths<PreToolHookInput>(parsed.flags.cwd);
-      hookOut = runHookPretoolGate(paths, payload);
+      const { effectiveCwd, payload } = readHookPayload<PreToolHookInput>(parsed.flags.cwd);
+      hookOut = runHookPretoolGateFromRoot(effectiveCwd, payload);
     } else if (parsed.positionals[1] === "subagent-stop") {
-      const { paths, payload } = resolveHookPaths<SubagentStopHookInput>(parsed.flags.cwd);
-      hookOut = runHookSubagentStop(paths, payload);
+      const { effectiveCwd, payload } = readHookPayload<SubagentStopHookInput>(parsed.flags.cwd);
+      hookOut = runHookSubagentStopFromRoot(effectiveCwd, payload);
     }
     if (hookOut) {
       writeAndExit(hookOut.stdout + "\n", hookOut.exitCode);

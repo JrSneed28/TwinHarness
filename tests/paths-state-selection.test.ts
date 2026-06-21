@@ -8,9 +8,9 @@
  * while the real run lived in the legacy `.agentic-sdlc` location.
  *
  * Selection parity: CLI (`resolveProjectPaths`), the hook path (also
- * `resolveProjectPaths` via `resolveHookPaths`), and MCP (`resolvePathsForCall` →
- * `resolveProjectPaths`) all route through the ONE shared resolver, so the same
- * input yields the same selection on every surface.
+ * `resolveProjectPaths`, via the `runHook*FromRoot` wrappers), and MCP
+ * (`resolvePathsForCall` → `resolveProjectPaths`) all route through the ONE shared
+ * resolver, so the same input yields the same selection on every surface.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
