@@ -1230,6 +1230,17 @@ function mapDispatchError(e) {
     if (code === "state_lock_timeout" || code === "state_write_contended") {
         return (0, output_1.failure)({ human: e.message, data: { error: code } });
     }
+    // R-33 / F4 — the mutation-boundary refused a too-new / corrupt on-disk state
+    // (writeState's assertWriteAllowed seam). A client-correctable refusal, not a
+    // bug: surface the stable `schema_too_new` token + the on-disk/current versions
+    // so a `--json` caller can react (upgrade th, or repair the file).
+    if (code === "schema_too_new") {
+        const err = e;
+        return (0, output_1.failure)({
+            human: err.message,
+            data: { error: code, onDisk: err.onDisk, current: err.current },
+        });
+    }
     throw e;
 }
 /**

@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { initialState, validateState, serializeState, STATE_FIELD_ORDER } from "../src/core/state-schema";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import {
+  initialState,
+  validateState,
+  serializeState,
+  STATE_FIELD_ORDER,
+  CURRENT_SCHEMA_VERSION,
+} from "../src/core/state-schema";
+import { writeState, SchemaTooNewError } from "../src/core/state-store";
 
 describe("REQ-STATE-SCHEMA: state.json validation (§18)", () => {
   it("accepts the initial state", () => {
@@ -80,14 +90,49 @@ describe("ARCH-007: unknown top-level keys are a NON-fatal warning (not a hard r
     expect(paths).toEqual(["alpha", "zeta"]); // sorted
   });
 
-  it("the warned state still round-trips via serializeState BYTE-IDENTICALLY (unknown key dropped, no corruption)", () => {
-    // serializeState only emits canonical fields, so an unknown key is simply not
-    // serialized — the output is identical to the same state without the extra key,
-    // proving the warning never perturbs serialization / content-hash stability.
-    const base = { ...initialState(), tier: "T1" as const };
-    const withExtra = { ...base, mystery_key: "x" } as unknown as typeof base;
-    expect(serializeState(withExtra)).toBe(serializeState(base));
-    expect(JSON.parse(serializeState(withExtra))).not.toHaveProperty("mystery_key");
+  // R-33 / F4 RE-BASELINE — this slot previously asserted that an unknown
+  // top-level key is "harmlessly DROPPED" on the next serialize (the warned state
+  // round-trips byte-identically WITHOUT the extra key). That premise is now FALSE
+  // by design: a state file carrying a future/unknown field written by a NEWER
+  // binary must NOT be silently rewritten-and-stripped by an older one. The new
+  // guarantee is the OPPOSITE — the mutation is REFUSED at the writeState seam and
+  // the on-disk bytes (the future fields) are left BYTE-IDENTICAL.
+  it("R-33: mutating a too-new state file is REFUSED and the on-disk bytes (future fields) are byte-IDENTICAL", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "th-f4-rebaseline-"));
+    try {
+      const stateDir = path.join(tmp, ".twinharness");
+      fs.mkdirSync(stateDir, { recursive: true });
+      const stateFile = path.join(stateDir, "state.json");
+      // A VALID state file written by a newer binary: schema_version > CURRENT AND a
+      // top-level field this binary does not know (validateState treats it as a
+      // non-fatal unknown-key warning, so the file still VALIDATES → arm 4).
+      const future = {
+        ...initialState(),
+        schema_version: CURRENT_SCHEMA_VERSION + 1,
+        future_field: { nested: "from a newer th" },
+      };
+      const onDiskBefore = JSON.stringify(future, null, 2) + "\n";
+      fs.writeFileSync(stateFile, onDiskBefore, "utf8");
+
+      const paths = {
+        root: tmp,
+        stateDir,
+        stateFile,
+        docsDir: path.join(tmp, "docs"),
+        driftLog: path.join(tmp, "drift-log.md"),
+        interviewFile: path.join(stateDir, "interview.json"),
+      };
+
+      // A mutation (writeState) is REFUSED with the stable token…
+      expect(() => writeState(paths, initialState())).toThrow(SchemaTooNewError);
+      // …and the on-disk file is left BYTE-IDENTICAL — the unknown/future field is
+      // PRESERVED, not stripped (the inverse of the old "harmlessly dropped" premise).
+      const onDiskAfter = fs.readFileSync(stateFile, "utf8");
+      expect(onDiskAfter).toBe(onDiskBefore);
+      expect(JSON.parse(onDiskAfter)).toHaveProperty("future_field");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 

@@ -15982,6 +15982,17 @@ var LockStampError = class extends Error {
     this.name = "LockStampError";
   }
 };
+var SchemaTooNewError = class extends Error {
+  constructor(onDisk, current, message) {
+    super(message);
+    this.onDisk = onDisk;
+    this.current = current;
+    this.name = "SchemaTooNewError";
+  }
+  onDisk;
+  current;
+  code = "schema_too_new";
+};
 function readState(paths) {
   if (!fs3.existsSync(paths.stateFile)) {
     return { exists: false };
@@ -16006,7 +16017,46 @@ function readState(paths) {
   }
   return { exists: true, raw, state, warnings: result.warnings };
 }
+function assertWriteAllowed(paths) {
+  if (!fs3.existsSync(paths.stateFile)) return;
+  let raw;
+  try {
+    raw = readFileWithRetry(paths.stateFile);
+  } catch {
+    throw new SchemaTooNewError(
+      void 0,
+      CURRENT_SCHEMA_VERSION,
+      `Refusing to mutate state.json: the file is present but could not be read to verify its schema version. Resolve the read error before mutating.`
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new SchemaTooNewError(
+      void 0,
+      CURRENT_SCHEMA_VERSION,
+      `Refusing to mutate state.json: the on-disk file is present but not valid JSON (corrupt or partially written). Repair it (e.g. \`th doctor\`, then \`th migrate\`) before mutating; the file is left untouched.`
+    );
+  }
+  const result = validateState(parsed);
+  if (!result.ok) {
+    throw new SchemaTooNewError(
+      void 0,
+      CURRENT_SCHEMA_VERSION,
+      `Refusing to mutate state.json: the on-disk file is present but does not validate (corrupt or partially written). Repair it before mutating; the file is left untouched.`
+    );
+  }
+  const onDisk = result.state.schema_version;
+  if (onDisk === void 0 || onDisk <= CURRENT_SCHEMA_VERSION) return;
+  throw new SchemaTooNewError(
+    onDisk,
+    CURRENT_SCHEMA_VERSION,
+    `Refusing to mutate state.json: it is schema v${onDisk}, newer than this th (v${CURRENT_SCHEMA_VERSION}). Upgrade th; refusing to downgrade. The file is left untouched.`
+  );
+}
 function writeState(paths, state) {
+  assertWriteAllowed(paths);
   atomicWriteFile(paths.stateFile, serializeState(state), { root: paths.root });
 }
 function isLockHeldError(code) {
@@ -27492,6 +27542,14 @@ async function callTool(name, args = {}) {
     const cmd = def.runAsync ? await def.runAsync(paths, args) : def.run(paths, args);
     return toToolResult(cmd);
   } catch (err) {
+    if (err instanceof SchemaTooNewError) {
+      return toToolResult(
+        failure({
+          human: err.message,
+          data: { error: err.code, onDisk: err.onDisk, current: err.current }
+        })
+      );
+    }
     const message = err instanceof Error ? err.message : String(err);
     return { content: [{ type: "text", text: `Tool ${def.name} failed: ${message}` }], isError: true };
   }
