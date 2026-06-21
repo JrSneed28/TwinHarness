@@ -3,7 +3,11 @@ import * as path from "node:path";
 import { realpathExistingPrefix, type ProjectPaths } from "../core/paths";
 import { readState } from "../core/state-store";
 import { matchApprovedArtifact } from "../core/artifact-guard";
-import { readDelegationScope, clearDelegationScope } from "../core/delegation-scope";
+import {
+  readActiveDelegationScopes,
+  clearDelegationScope,
+  type ActiveDelegationScope,
+} from "../core/delegation-scope";
 import { canCompleteRun } from "../core/gate-preconditions";
 import { renderStopReason } from "./next";
 
@@ -191,6 +195,17 @@ export interface SubagentStopHookInput {
    * agree on one project root. Absent in older payloads.
    */
   cwd?: string;
+  /**
+   * R-36 (F7) — id fields the host MAY supply so the SubagentStop clears ONLY the
+   * stopping delegation's OWN scope (not a peer's). `delegation_id` is the precise key
+   * (`th delegate pack`'s minted id, threaded by the orchestrator); `session_id` /
+   * `tool_use_id` are the weaker host ids used as fallbacks. When NONE is present the
+   * clear is a NO-OP (we will NOT clear a peer's scope on an unidentified stop — the
+   * crashed-delegate case is covered by TTL recovery instead).
+   */
+  delegation_id?: string;
+  session_id?: string;
+  tool_use_id?: string;
 }
 
 /**
@@ -220,11 +235,15 @@ export function runHookSubagentStop(
   paths: ProjectPaths,
   input?: SubagentStopHookInput,
 ): { stdout: string; exitCode: number } {
-  // SG3 P1-B (C-11) — a delegated subagent finishing means its allowed-files scope no
-  // longer applies. DISARM the durable scope here so it cannot leak onto the
-  // orchestrator's (or the next delegate's) writes. Best-effort + unconditional: it must
-  // lift even when state.json is absent/invalid, and a missing scope file is a no-op.
-  clearDelegationScope(paths);
+  // SG3 P1-B (C-11) + R-36 (F7) — a delegated subagent finishing means ITS OWN
+  // allowed-files scope no longer applies. Clear ONLY the stopping delegation's id so an
+  // unrelated SubagentStop never lifts a still-running PEER's scope (the singleton's
+  // fail-open). When the payload carries no usable id we DO NOT clear anything (clearing
+  // a peer on an unidentified stop is exactly the bug); a crashed delegate that never
+  // sends SubagentStop is recovered by TTL expiry on the read path instead. Best-effort +
+  // ahead of the state read so it lifts even when state.json is absent/invalid.
+  const stoppingId = input?.delegation_id ?? input?.tool_use_id ?? input?.session_id;
+  if (stoppingId) clearDelegationScope(paths, stoppingId);
 
   const r = readState(paths);
 
@@ -286,6 +305,18 @@ export interface PreToolHookInput {
    * (as `th delegate pack` emitted them); the gate resolves + compares them.
    */
   allowed_files?: string[];
+  /**
+   * R-36 (F7) — id fields the host MAY supply so the gate enforces the WRITER's OWN
+   * delegation scope precisely. `delegation_id` is the precise per-delegation key (the
+   * orchestrator threads `th delegate pack`'s minted id onto the subagent's tool calls);
+   * `session_id` / `tool_use_id` are weaker host ids. When a `delegation_id` matches an
+   * active per-delegation scope, the gate enforces THAT scope alone. When NO id is present
+   * (today's installed hook — Tier 1) the gate falls back to the no-id XOR partition:
+   * {0 active scopes ⇒ no-op} XOR {>=1 active scope ⇒ UNION enforcement (fail-tighter)}.
+   */
+  delegation_id?: string;
+  session_id?: string;
+  tool_use_id?: string;
 }
 
 /**
@@ -851,19 +882,48 @@ export function runHookPretoolGate(
 
   const state = r.state;
 
-  // SG3 P1-B (C-11) — the EFFECTIVE delegate allowed-files scope is the UNION of any
-  // stdin-provided `allowed_files` (forward-compat: a future host that injects them) and
-  // the DURABLE scope armed by `th delegate pack --allowed-files`
-  // (.twinharness/delegation-scope.json). The installed hook receives only host stdin,
-  // which carries NO allowed_files, so WITHOUT the persisted scope the delegate-scope
-  // enforcement below could never activate (audit P1). An empty union is a no-op (the
-  // historical gating is untouched). Read once here, used by steps c1c (Bash) and e1
-  // (file_path) below.
+  // SG3 P1-B (C-11) + R-36 (F7) — resolve the EFFECTIVE delegate allowed-files scope this
+  // write is constrained to. The installed hook receives only host stdin (no allowed_files),
+  // so the persisted per-delegation scopes (`.twinharness/delegation-scopes/<id>.json`, armed
+  // by `th delegate pack --allowed-files`) are the actual enforcement source (audit P1). The
+  // read GCs any TTL-expired scope (crash recovery). Steps c1c (Bash) and e1 (file_path)
+  // below consume `effectiveAllowedFiles`; an EMPTY result is a NO-OP (historical gating
+  // untouched).
+  //
+  // F7 no-id XOR PARTITION (the DECISION — Item 2):
+  //   ARM 1: {0 active scopes ⇒ NO-OP, write never gated} — preserves the historical
+  //          "An empty union is a no-op (the historical gating is untouched)" verbatim.
+  //   ARM 2: {>=1 active scope + no per-delegation id on the payload ⇒ UNION enforcement
+  //          (fail-tighter)} — the write is constrained to the union of ALL active scopes,
+  //          NOT a no-op (the REJECTED alternative "no-id ⇒ no-op even with active scopes"
+  //          would ship F7 as an installed no-op, re-opening the fail-open).
+  // When a `delegation_id` DOES match an active scope, the gate enforces THAT scope alone
+  // (precise per-id enforcement), which is TIGHTER than the union and is the Tier-2 path a
+  // host id unlocks.
   const stdinScope = Array.isArray(input?.allowed_files)
     ? input!.allowed_files.filter((x): x is string => typeof x === "string")
     : [];
-  const persistedScope = readDelegationScope(paths).allowedFiles;
-  const effectiveAllowedFiles = [...new Set([...stdinScope, ...persistedScope])];
+  const { active: activeScopes } = readActiveDelegationScopes(paths);
+  // A per-WRITER id (delegation_id, else the weaker host ids). Its PRESENCE — not whether
+  // it matches an armed scope — is what gates the union fallback (the XOR is keyed on "no
+  // id on the payload", per Item 2).
+  const writerId = input?.delegation_id ?? input?.tool_use_id ?? input?.session_id;
+  const ownScope: ActiveDelegationScope | undefined = writerId
+    ? activeScopes.find((s) => s.delegationId === writerId)
+    : undefined;
+  // The base scope this write is constrained to:
+  //   • writerId PRESENT (Tier 2 / per-id): enforce ONLY that id's scope. A matching id →
+  //     its allowed-files; an id with NO armed scope → [] (no constraint). We do NOT fall
+  //     back to the union here — supplying an id is the host asserting "this is who I am",
+  //     so a non-delegated writer that names its own (scope-less) id is correctly unfettered
+  //     (the Tier-2 path that eliminates the orchestrator-write false-block).
+  //   • writerId ABSENT (Tier 1 / no-id XOR): ARM 2 — >=1 active scope ⇒ UNION of ALL active
+  //     scopes (fail-tighter); ARM 1 — 0 active scopes ⇒ [] (the historical no-op, verbatim).
+  // stdin allowed_files (a host directly declaring THIS call's scope) always unions in.
+  const baseScope = writerId
+    ? (ownScope?.allowedFiles ?? []) // Tier 2: this id's own scope only (empty ⇒ unfettered).
+    : activeScopes.flatMap((s) => s.allowedFiles); // Tier 1: [] (ARM 1) or union (ARM 2).
+  const effectiveAllowedFiles = [...new Set([...stdinScope, ...baseScope])];
 
   // Step b (state check): write_gate=off → allow.
   if (state.write_gate === "off") return allow();

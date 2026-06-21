@@ -23677,6 +23677,12 @@ function capsuleTemplate() {
   return [CAPSULE_TITLE, ...CAPSULE_SECTIONS.map((s) => `${s}:`)].join("\n");
 }
 
+// src/core/delegation-scope.ts
+var DEFAULT_DELEGATION_TTL_MS = 60 * 60 * 1e3;
+function mintDelegationId() {
+  return `DEL-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 // src/commands/delegate.ts
 function parseIntent(raw) {
   if (raw === void 0) return {};
@@ -23747,9 +23753,11 @@ function runDelegatePack(paths, opts) {
     contextPack = pack.human ?? null;
   }
   const allowedFiles = normalizeAllowedFiles(opts.allowedFiles, opts.file);
+  const delegationId = opts.delegationId ?? mintDelegationId();
   const envelope = [
     "DELEGATED AGENT HANDOFF",
     `Agent: ${opts.agent ?? "(unspecified \u2014 set --agent)"}`,
+    `Delegation id: ${delegationId}`,
     `Task: ${opts.task ?? "(describe the task)"}`,
     `Intent: ${parsed.intent ?? "(read|write|debug|review|artifact|repo-analysis)"}`,
     `Slice: ${opts.slice ?? "(none)"}`,
@@ -23775,7 +23783,8 @@ function runDelegatePack(paths, opts) {
     slice: opts.slice ?? null,
     intent: parsed.intent ?? null,
     hasContextPack: contextPack !== null,
-    allowedFiles: allowedFiles.length
+    allowedFiles: allowedFiles.length,
+    delegationId
   });
   return success({
     data: {
@@ -23786,7 +23795,9 @@ function runDelegatePack(paths, opts) {
       capsuleSections: [...CAPSULE_SECTIONS],
       hasContextPack: contextPack !== null,
       // SG3 P1-B (C-11) — the explicit write-scope the gate enforces (always present).
-      allowedFiles
+      allowedFiles,
+      // R-36 (F7) — the minted per-delegation id the CLI arms the scope under.
+      delegationId
     },
     human: envelope.join("\n")
   });

@@ -13,6 +13,7 @@ import {
   type DelegationIntent,
   type DelegationSignals,
 } from "../core/delegation";
+import { mintDelegationId } from "../core/delegation-scope";
 
 /**
  * `th delegate` — the Context Preservation / Delegation Layer (advisory).
@@ -132,6 +133,13 @@ export interface DelegatePackOptions {
    * `--slice` scope stays component-named (the gate's component-boundary path enforces it).
    */
   allowedFiles?: string[];
+  /**
+   * R-36 (F7) — an explicit per-delegation id to arm the scope under. Normally OMITTED:
+   * `runDelegatePack` MINTS a fresh id so overlapping delegations get independent scope
+   * files (no clobber). Supplied only by callers that already own an id (e.g. a re-pack
+   * that must update the SAME delegation's scope rather than mint a new one).
+   */
+  delegationId?: string;
 }
 
 export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions): CommandResult {
@@ -158,9 +166,17 @@ export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions):
   // write-gate enforces off its stdin payload.
   const allowedFiles = normalizeAllowedFiles(opts.allowedFiles, opts.file);
 
+  // R-36 (F7) — mint a per-delegation id (unless the caller supplied one) so overlapping
+  // delegations arm INDEPENDENT scope files. The id is returned in `data.delegationId` (the
+  // CLI arms the scope under it) and surfaced in the envelope so the orchestrator can pass
+  // it as the subagent's `delegation_id` (per-id enforcement + clear-own-id-only). It is
+  // minted even when there is no scope, so the envelope always names the delegation.
+  const delegationId = opts.delegationId ?? mintDelegationId();
+
   const envelope: string[] = [
     "DELEGATED AGENT HANDOFF",
     `Agent: ${opts.agent ?? "(unspecified — set --agent)"}`,
+    `Delegation id: ${delegationId}`,
     `Task: ${opts.task ?? "(describe the task)"}`,
     `Intent: ${parsed.intent ?? "(read|write|debug|review|artifact|repo-analysis)"}`,
     `Slice: ${opts.slice ?? "(none)"}`,
@@ -198,6 +214,7 @@ export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions):
     intent: parsed.intent ?? null,
     hasContextPack: contextPack !== null,
     allowedFiles: allowedFiles.length,
+    delegationId,
   });
 
   return success({
@@ -210,6 +227,8 @@ export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions):
       hasContextPack: contextPack !== null,
       // SG3 P1-B (C-11) — the explicit write-scope the gate enforces (always present).
       allowedFiles,
+      // R-36 (F7) — the minted per-delegation id the CLI arms the scope under.
+      delegationId,
     },
     human: envelope.join("\n"),
   });

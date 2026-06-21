@@ -774,18 +774,17 @@ function dispatch(parsed) {
                         // SG3 P1-B (C-11) — explicit allowed-files write scope (comma-separated).
                         allowedFiles: (parsed.flags.allowedFiles ?? "").split(",").map((s) => s.trim()).filter(Boolean),
                     });
-                    // SG3 P1-B (C-11) — ARM the DURABLE delegate scope so the out-of-process
-                    // PreToolUse write-gate can enforce it (the installed hook receives no
-                    // allowed_files on stdin — without this the scope never reached the gate and
-                    // enforcement was inactive). The pack's normalized `data.allowedFiles` IS the
-                    // scope; persist it (a non-empty set arms; an empty set disarms a prior scope).
-                    // CLI-only: the MCP `th_delegate_pack` exposes no --allowed-files, so it never
-                    // arms a scope and stays genuinely read-only.
+                    // SG3 P1-B (C-11) + R-36 (F7) — ARM the DURABLE delegate scope under the pack's
+                    // MINTED per-delegation id so the out-of-process PreToolUse write-gate can enforce
+                    // it (the installed hook receives no allowed_files on stdin — without this the
+                    // scope never reached the gate and enforcement was inactive). The pack's normalized
+                    // `data.allowedFiles` IS the scope; persist it under `data.delegationId` (a non-empty
+                    // set arms one independent `<id>.json`; an empty set arms nothing). Per-id scopes let
+                    // overlapping delegations coexist without clobber and self-expire via TTL on a crash.
+                    // CLI-only: the MCP `th_delegate_pack` exposes no --allowed-files, so it never arms a
+                    // scope and stays genuinely read-only.
                     if (packRes.ok) {
-                        (0, delegation_scope_1.writeDelegationScope)(paths, packRes.data?.allowedFiles ?? [], {
-                            agent: parsed.flags.agent,
-                            slice: parsed.flags.slice,
-                        });
+                        (0, delegation_scope_1.writeDelegationScope)(paths, packRes.data?.delegationId ?? "", packRes.data?.allowedFiles ?? [], { agent: parsed.flags.agent, slice: parsed.flags.slice });
                     }
                     return packRes;
                 }
