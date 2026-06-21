@@ -17,6 +17,7 @@ import { computeWave, validateDeps, hasDepIssues } from "../core/wave";
 import { computeRoute } from "../core/routing";
 import { structuredLog } from "../core/log";
 import { NOT_INIT, requireState } from "../core/guards";
+import { assertFeatureUnlocked } from "./tier";
 
 /**
  * `th build plan` — the mechanical parallel-build serializer (spec §16; build
@@ -348,6 +349,8 @@ export function runBuildRelease(paths: ProjectPaths, sliceId?: string): CommandR
  *     `sub_lease_conflict` (exit 1).
  */
 export function runBuildSubClaim(paths: ProjectPaths, parentSlice?: string, components?: string[]): CommandResult {
+  const locked = assertFeatureUnlocked(paths, "sub-lease");
+  if (locked) return locked;
   if (!parentSlice) return failure({ human: "usage: th build sub-claim <PARENT-SLICE> --components <c1,c2,...>" });
   if (!components || components.length === 0) {
     return failure({ human: "usage: th build sub-claim <PARENT-SLICE> --components <c1,c2,...>", data: { error: "no_components" } });
@@ -422,6 +425,8 @@ export function runBuildSubClaim(paths: ProjectPaths, parentSlice?: string, comp
  * "sub-Builder finished cleanly" path.
  */
 export function runBuildSubRelease(paths: ProjectPaths, subId?: string): CommandResult {
+  const locked = assertFeatureUnlocked(paths, "sub-lease");
+  if (locked) return locked;
   if (!subId) return failure({ human: "usage: th build sub-release <SUB-ID>" });
   return withStateLock(paths, () => {
     const sr = requireState(paths);

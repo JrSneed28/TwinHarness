@@ -11,7 +11,7 @@ Next mechanical obligation (the run's highest-priority owed action, captured bef
 !`node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" next || true`
 
 Gather the blocking signals — **prefer the typed `mcp__plugin_twinharness_th__*` MCP tools** and fall
-back to the CLI only for verbs not exposed as MCP tools (see `reference/mcp-tools.md`):
+back to the CLI only for verbs not exposed as MCP tools (see `skills/twinharness/reference/mcp-tools.md`):
 
 - **`mcp__plugin_twinharness_th__th_next`** — the next mechanical obligation (same as the `!` snapshot above).
 - **`mcp__plugin_twinharness_th__th_state_get`** — tier/stage/gates, `drift_open_blocking`, revise-loop counts, and open questions.

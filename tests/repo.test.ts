@@ -11,7 +11,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, expectedToolDefsCount, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runContextPack } from "../src/commands/context";
 import { TOOL_DEFS } from "../src/mcp-server";
@@ -155,10 +155,22 @@ describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 60 tools registered (on to
     "th_init",
     "th_budget_check",
     "th_handoff_write",
+    "th_template_get",
+    "th_template_list",
+    "th_repo_search",
+    "th_context_read",
+    "th_artifact_section",
+    "th_research_write",
+    "th_sim_add",
+    "th_sim_list",
+    "th_sim_retire",
+    "th_sim_scan",
+    "th_gate_production_reality",
+    "th_inspector_write",
   ] as const;
 
   it("REQ-NFR-002 — TOOL_DEFS.length === 60 (the MCP-tool-expansion adds 5 typed gate-transition tools + 16 wired handlers on top of the prior 39 → 60)", () => {
-    expect(TOOL_DEFS.length).toBe(62);
+    expect(TOOL_DEFS.length).toBe(expectedToolDefsCount());
   });
 
   it("REQ-NFR-002 — TOOL_DEFS contains exactly the 60 expected tool names", () => {
@@ -2568,7 +2580,9 @@ describe("SLICE-5 / TASK-013 — docs truthfulness: documented surface ⊆ dispa
     // `check` (runRepoCheck, cli.ts case "repo"→"check") was added after this list
     // was first written; USAGE.md now documents it (exit codes 4/5), so it must be
     // listed here for the subset guard to reflect the real dispatch table.
-    const implementedSubcommands = ["map", "relevant", "impact", "check"];
+    // `search` (runRepoSearch, cli.ts case "repo"→"search") is the SG3 P1-B governed
+    // search; USAGE.md documents it, so it joins the dispatch-table set.
+    const implementedSubcommands = ["map", "relevant", "impact", "check", "search"];
 
     for (const mentioned of repoCommandMentions) {
       expect(implementedSubcommands).toContain(mentioned);

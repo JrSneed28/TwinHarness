@@ -14,7 +14,7 @@ model: opus
 > `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve
 > `${CLAUDE_PROJECT_DIR}`, so calls work unchanged from inside a worktree). The tool set GROWS — use
 > whatever is currently available, don't rely on a fixed list; full guidance + current list in
-> `reference/mcp-tools.md`. **A tool that *returns* an error result (`not_initialized`, `map_missing`,
+> `skills/twinharness/reference/mcp-tools.md`. **A tool that *returns* an error result (`not_initialized`, `map_missing`,
 > `slice_not_found`) is working** — a domain fact to act on, not a broken tool. Fall back to
 > `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for a verb with no MCP tool, or an
 > unreachable server.
@@ -199,10 +199,13 @@ default, expensive where wrong answers are expensive.
 
 Not pipeline stages — invoke them in fresh context, like the Critic, when the situation calls for it.
 
-- **Researcher (`agents/researcher.md`) — conditional.** Spawn only when a real knowledge gap blocks a
-  design decision (unfamiliar external API/library, a genuine-tradeoff approach, a regulatory/domain
-  area, or an explicit ask). Most projects don't need it. Emits source-cited
-  `docs/00-research/<topic>.md` (register with `th artifact register docs/00-research/ --version N`),
+- **Researcher (`agents/researcher.md`) — universal, on-demand.** Spawn when a project needs external
+  knowledge: a knowledge gap blocking a design decision (unfamiliar external API/library, a
+  genuine-tradeoff approach, a regulatory/domain area, or an explicit ask), but **also** early
+  discovery before requirements, bug/error-message research, UI/visual inspiration, security/legal, or
+  OSS/perf comparison. REQ-anchoring is conditional, not mandatory. It routes across web/Exa/Context7/
+  GitHub + local tools and persists each topic via the governed writer `th research write` (MCP twin
+  `th_research_write`), which hard-pins, writes, and auto-registers `docs/00-research/<topic>.md`.
   Critic-reviewed in `research` mode.
 - **Debugger (`agents/debugger.md`) — on a defect.** Spawn when a slice's tests fail, `th verify run`
   is red, a Critic `code-review` finds a defect it can't ground, or behavior contradicts a contract.
@@ -214,10 +217,13 @@ Not pipeline stages — invoke them in fresh context, like the Critic, when the 
   test framework, and existing blast-radius surfaces (auth, authz, money, data-integrity, migrations).
   Emits `docs/00-existing-codebase-analysis.md` (register it); its output feeds `th tier classify` /
   `th tier veto-check`. Greenfield runs skip it.
-- **Tester (`agents/tester.md`) — broad-QA, on-demand.** Launches/drives the *real* built project
-  (CLI/TUI/service/web) to find defects at any stage: driver per type (process/stdio; `claude-in-chrome`
-  for web; tmux optional), model by tier/blast (sonnet→opus), findings → `th drift add`/blackboard, no
-  sub-agents. Invoke directly or via `/twinharness:th-test`.
+- **Tester (`agents/tester.md`) — broad-QA on-demand AND REQUIRED at final verification.** Launches/drives
+  the *real* built project (CLI/TUI/service/web) to find defects at any stage: driver per type
+  (process/stdio; `claude-in-chrome` for web; tmux optional), model by tier/blast (sonnet→opus), findings →
+  `th drift add`/blackboard, no sub-agents. Invoke directly or via `/twinharness:th-test`. **MANDATORY at
+  `final-verification`:** a recorded live run on the real/sandbox boundary (report's **Tester Evidence**) —
+  without it `th gate production-reality` blocks (`tester_record_missing`), as does any unretired
+  user-visible simulation. A green test suite on mocks is not production reality.
 
 ## Brownfield mode (adopting an existing codebase)
 

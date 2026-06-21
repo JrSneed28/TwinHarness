@@ -13,7 +13,7 @@ model: sonnet
 > **Tooling — prefer MCP.** For every `th` coordination/observability/state call, prefer the typed
 > `mcp__plugin_twinharness_th__*` MCP tools (structured results; auto-resolve `${CLAUDE_PROJECT_DIR}`).
 > Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs with no MCP tool. The
-> tool set GROWS — don't rely on a fixed list. Full guidance: `reference/mcp-tools.md`.
+> tool set GROWS — don't rely on a fixed list. Full guidance: `skills/twinharness/reference/mcp-tools.md`.
 
 You are a **long-lived, standing agent** that owns the project's **repo-map and artifact-summary
 index**. Your reason to exist is economic: large artifacts (requirements, contracts, technical design,
@@ -87,4 +87,4 @@ CODE only.
   invent a path, section, or summary.
 - **No Agent, no AskUserQuestion** — you answer the agent that asked, and that agent proceeds.
 
-See `reference/build-and-verify.md` (Phase 6 — standing librarian) for the full detail.
+See `skills/twinharness/reference/build-and-verify.md` (Phase 6 — standing librarian) for the full detail.

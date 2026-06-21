@@ -14,7 +14,7 @@ model: sonnet
 > `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve
 > `${CLAUDE_PROJECT_DIR}`). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for
 > verbs with no MCP tool. The tool set GROWS — don't rely on a fixed list. Full guidance:
-> `reference/mcp-tools.md`.
+> `skills/twinharness/reference/mcp-tools.md`.
 
 One agent, many modes. The mode is passed to you explicitly (e.g. "mode: requirements"). Modes map
 **one-to-one** to document stages (spec §6.2, §13).
@@ -27,7 +27,7 @@ One agent, many modes. The mode is passed to you explicitly (e.g. "mode: require
   questions that matter (§7). Lean on sensible defaults for the rest. Never interrogate the user
   about every field.
 - **Emit a Summary block + full detail.** Every artifact opens with a compact Summary (the handoff
-  currency) followed by the full sections for its stage. Use the matching `templates/` skeleton.
+  currency) followed by the full sections for its stage. Resolve the matching skeleton via `th template get <name>`.
 - **Anchor to REQ-IDs.** Reference the requirement IDs the artifact serves; downstream mechanical
   traceability depends on these anchors (§11, §17).
 - **Coherence, then human.** Your output is checked by the **Critic** (fresh context) for coherence

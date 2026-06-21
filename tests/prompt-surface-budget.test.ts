@@ -9,7 +9,7 @@ import * as path from "node:path";
  * behavior-preserving trim pass so future edits cannot silently re-bloat the
  * orchestration prompt surface.
  *
- * It recomputes the SAME 45-file surface `th context estimate` measures —
+ * It recomputes the SAME 46-file surface `th context estimate` measures —
  * agents/*.md + skills/twinharness/**.md + commands/*.md — using the identical
  * char/4 heuristic (TOKENS_PER_CHAR = 1/4), and asserts the total stays at or
  * below the 20%-reduction target.
@@ -26,9 +26,20 @@ const ROOT = path.resolve(__dirname, "..");
 /** Same heuristic as `src/commands/context.ts` (`th context estimate`). */
 const TOKENS_PER_CHAR = 1 / 4;
 
-/** Pre-optimization baseline and the ≥20% reduction ceiling (see header). */
+/**
+ * Pre-optimization baseline and the prompt-surface ceiling.
+ *
+ * The original ≥20%-reduction lock was floor(97_823 * 0.80) = 78_258. SG3
+ * (Evidence & Reality) adds genuine capability content to several agent prompts
+ * (universal researcher, broadened UX/UI direction, production-reality guidance,
+ * inspector/research write paths). Per the user-approved re-baseline (2026-06-20),
+ * "trim cheap redundancy, raise for the residual": obvious verbosity is trimmed
+ * first, then this ceiling tracks the post-SG3 surface. It is ratcheted tight at
+ * each prompt-touching SG3 commit and finalized at SG3 closure (P3-B). Do NOT
+ * raise it for ordinary edits — trim redundancy instead.
+ */
 const BASELINE_TOKENS = 97_823;
-const BUDGET_TOKENS = 78_258; // floor(97_823 * 0.80)
+const BUDGET_TOKENS = 81_700; // SG3 interim re-baseline (P2-C: trimmed cheap redundancy, raised for the production-reality guidance residual in builder/orchestrator/vertical-slice; +100 at the sg3/p1d merge for the canonical-citation path residual — `skills/twinharness/reference/<name>.md` expansions; +200 for the audit-P1 `th tester record` writer guidance in tester.md — the live-QA production-reality record path; finalized at P3-B)
 
 /** Recursively collect every *.md file under a directory (sorted, deterministic). */
 function listMd(dir: string): string[] {
@@ -55,7 +66,7 @@ function estimateTokens(content: string): number {
 }
 
 describe("prompt-surface budget: ≥20% reduction is locked in (Track C-2)", () => {
-  it("the 45-file prompt surface total stays within the 78,258-token budget", () => {
+  it("the 46-file prompt surface total stays within the SG3 re-baseline budget", () => {
     const files = surfaceFiles();
     const total = files.reduce(
       (sum, abs) => sum + estimateTokens(fs.readFileSync(abs, "utf8")),
@@ -65,12 +76,14 @@ describe("prompt-surface budget: ≥20% reduction is locked in (Track C-2)", () 
     expect(
       total,
       `prompt surface is ~${total} tokens across ${files.length} files (baseline ${BASELINE_TOKENS}, ` +
-        `${reductionPct.toFixed(1)}% reduction); budget is ${BUDGET_TOKENS} (≥20% off baseline). ` +
-        `Trim redundancy/verbosity in agents/skills/commands rather than raising this ceiling.`,
+        `${reductionPct.toFixed(1)}% reduction); budget is ${BUDGET_TOKENS} (SG3 re-baseline). ` +
+        `Trim redundancy/verbosity in agents/skills/commands first; raise the ceiling only for ` +
+        `genuine new capability content (SG3 trim-cheap/raise-residual policy).`,
     ).toBeLessThanOrEqual(BUDGET_TOKENS);
   });
 
-  it("the measured surface is the expected 45 prompt files", () => {
-    expect(surfaceFiles().length).toBe(45);
+  it("the measured surface is the expected 46 prompt files", () => {
+    // SG3 P2-A adds skills/twinharness/reference/research-routing.md → 46.
+    expect(surfaceFiles().length).toBe(46);
   });
 });

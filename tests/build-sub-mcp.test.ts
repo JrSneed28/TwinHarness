@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, afterEach } from "vitest";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, expectedToolDefsCount, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runStateSet } from "../src/commands/state";
 import { runBuildClaim, runBuildSubClaim, runBuildSubRelease } from "../src/commands/build";
@@ -144,7 +144,7 @@ describe("SLICE-1 — MCP sub-claim / sub-release wrappers", () => {
       // inserted into the build group + th_artifact_*/collab_*/debate_* appended), the
       // th_interview_*/th_init tools append to reach 39, and the MCP-tool-expansion
       // adds 21 more (5 typed gate-transition tools + 16 wired handlers) → 60.
-      expect(TOOL_DEFS.length).toBe(62);
+      expect(TOOL_DEFS.length).toBe(expectedToolDefsCount());
 
       // Both sub-lease tools must be present.
       const names = TOOL_DEFS.map((t) => t.name);
@@ -156,8 +156,10 @@ describe("SLICE-1 — MCP sub-claim / sub-release wrappers", () => {
 
       // th_build_dispatch + th_build_plan were inserted after th_build_release (16/17→18/19),
       // and the MCP-tool-expansion then inserted 5 typed gate tools (positions 3-7),
-      // th_drift_list/resolve (9-10) and th_coverage_report (18) ahead of the build group,
-      // shifting the sub-lease tools to canonical positions 27/28 → indices 26/27.
+      // th_drift_list/resolve (9-10) and th_coverage_report (18) ahead of the build group.
+      // SG3 P2-C's 5 new tools (th_sim_add/list/retire/scan + th_gate_production_reality)
+      // are APPENDED at the END of TOOL_DEFS, AFTER the build group, so the sub-lease
+      // tools do NOT shift — they stay at indices 26/27.
       expect(names[26]).toBe("th_build_sub_claim");
       expect(names[27]).toBe("th_build_sub_release");
     },

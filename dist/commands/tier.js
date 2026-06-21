@@ -38,6 +38,7 @@ exports.featureSpec = featureSpec;
 exports.parallelAuthorshipDetected = parallelAuthorshipDetected;
 exports.featureActive = featureActive;
 exports.featureActiveForState = featureActiveForState;
+exports.assertFeatureUnlocked = assertFeatureUnlocked;
 exports.runTierFeatures = runTierFeatures;
 exports.runTierClassify = runTierClassify;
 exports.runTierVetoCheck = runTierVetoCheck;
@@ -134,6 +135,50 @@ function featureActive(_feature, tier, state) {
  */
 function featureActiveForState(feature, state) {
     return featureActive(feature, state.tier, state);
+}
+/**
+ * A minimal valid state used ONLY as the conservative default for
+ * {@link assertFeatureUnlocked} when state.json is absent/invalid: an unclassified
+ * tier with no slices, which {@link featureActiveForState} evaluates to LOCKED for
+ * every advanced feature. Kept tiny (only the fields the activation predicate
+ * reads) and frozen so it is never mutated.
+ */
+const EMPTY_STATE_FOR_GATE = Object.freeze({ tier: null, slices: [] });
+/**
+ * The SINGLE feature-availability gate (P5-2 / SG3 P1-C). Both the CLI shared
+ * handlers and the MCP runtime (`assertTierAllows`) call this so a `tier_locked`
+ * refusal is byte-for-byte identical no matter which surface the call entered
+ * through — the surfaces cannot drift.
+ *
+ * Returns `undefined` when the feature is active for the run's current state (the
+ * caller proceeds), or a structured `tier_locked` {@link CommandResult} when it is
+ * locked (the caller returns it instead of running). A missing/invalid state.json
+ * reads as the conservative default (unclassified tier, no slices) — i.e. LOCKED —
+ * so an uninitialized project never silently exposes advanced coordination.
+ *
+ * The refusal carries a stable `error:"tier_locked"` token, the `feature`, and a
+ * human line pointing at `th tier features` / `th tier record` so a caller knows
+ * exactly which capability is off and how to enable it. Never throws — a locked
+ * feature is a clean refusal, not a crash (the parity-compatible contract). Pure
+ * read: a plain state read (NOT a re-classification — the tier is already on disk).
+ */
+function assertFeatureUnlocked(paths, feature) {
+    const r = (0, state_store_1.readState)(paths);
+    const state = r.state ?? { ...EMPTY_STATE_FOR_GATE };
+    if (featureActiveForState(feature, state))
+        return undefined;
+    const spec = featureSpec(feature);
+    const tierLabel = state.tier ?? "unclassified";
+    return (0, output_1.failure)({
+        data: {
+            error: "tier_locked",
+            feature,
+            tier: tierLabel,
+        },
+        human: `Advanced feature "${feature}" is locked at tier ${tierLabel} — it activates at tier ≥T2 or when >1 slice is in flight. ` +
+            `Enable via \`th tier record <T2|T3>\` (or run \`th tier features\` to see what is active).` +
+            (spec ? ` Use when: ${spec.useWhen}` : ""),
+    });
 }
 /**
  * `th tier features` — render the feature-activation layer for the current run:

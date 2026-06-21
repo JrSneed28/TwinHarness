@@ -2,6 +2,67 @@ import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { resolveProjectPaths, type ProjectPaths } from "../src/core/paths";
+import { CLI_COMMAND_LEAVES, MCP_EXCLUDED, MCP_ONLY_TOOLS } from "../src/mcp-server";
+
+/**
+ * The SELF-DERIVING MCP tool count, computed from the CLI↔MCP partition rather
+ * than pinned to a literal. A real cross-check against `TOOL_DEFS.length`:
+ * `TOOL_DEFS` is one source of truth; the {CLI_COMMAND_LEAVES, MCP_EXCLUDED,
+ * MCP_ONLY_TOOLS} partition is the independent other. Every CLI leaf that is not
+ * excluded mirrors one tool, plus the deliberate MCP-only additions:
+ *
+ *   expected = (|CLI_COMMAND_LEAVES| − |MCP_EXCLUDED|) + |MCP_ONLY_TOOLS|
+ *
+ * Adding a tool (a new CLI leaf, or a new MCP-only entry) updates this with zero
+ * literal churn — the count today is 62, derived, not hardcoded.
+ */
+export function expectedToolDefsCount(): number {
+  return CLI_COMMAND_LEAVES.length - Object.keys(MCP_EXCLUDED).length + Object.keys(MCP_ONLY_TOOLS).length;
+}
+
+/**
+ * Subprocess env for the cross-process concurrency stress tests. Silences the run
+ * log (TH_NO_LOG) and grants the state-lock generous patience (TH_LOCK_TIMEOUT_MS):
+ * these tests spawn 12-40 lock-contending `node dist/cli.js` processes at once, and
+ * on an oversubscribed CI runner (2 cores + parallel vitest workers) an unlucky
+ * waiter can be scheduler-starved past the default 25s lock deadline and fail a write
+ * that would otherwise land — a false red. The longer deadline only adds patience; the
+ * no-lost-updates correctness assertions are unchanged. See state-store.ts:lockTimeoutMs.
+ */
+export function concurrencyEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, TH_NO_LOG: "1", TH_LOCK_TIMEOUT_MS: "90000" };
+}
+
+/**
+ * True on CI runners (GitHub Actions and friends set `CI=true`). The spawn-HEAVY
+ * cross-process stress tests — the ones that fire 12–52 concurrent
+ * `node dist/cli.js` processes at a single state lock — are gated on this and DO
+ * NOT run in CI. They are reliably green locally, but on an oversubscribed / slow
+ * windows-latest runner an unlucky waiter is scheduler-starved past even the 90s
+ * TH_LOCK_TIMEOUT_MS and throws a LockTimeoutError on a write that would otherwise
+ * have landed — a *timeout* (environmental), never a lost-update assertion. The
+ * recurring windows-latest false-red was pure starvation, so the only durable fix
+ * is to keep the HEAVY waves off CI runners.
+ *
+ * Cross-process lock coverage is NOT abandoned in CI (audit P2): a LIGHT wave of only
+ * {@link LIGHT_SPAWN_CONCURRENCY} concurrent processes still runs EVERYWHERE — low
+ * enough that even an oversubscribed runner cannot starve a waiter past the 90s
+ * deadline, yet it exercises the COMPILED CLI + real OS file lock + process integration
+ * that the in-process LockOps seam tests (tests/state-store-seam.test.ts) cannot. So CI
+ * keeps a real compiled-CLI/process-integration regression net; only the starvation-
+ * prone heavy waves are local-only. Uses `process.env.CI` (not `process.platform`/
+ * `getuid`), so the doc-truth single-platform-conditional-skip count is unaffected.
+ */
+export const SKIP_SPAWN_HEAVY_IN_CI = !!process.env.CI;
+
+/**
+ * The concurrency for the LIGHT cross-process lock wave that runs on EVERY runner
+ * (including CI). Kept small (3) so a 2-core/oversubscribed CI runner cannot scheduler-
+ * starve a waiter past TH_LOCK_TIMEOUT_MS — three short-lived `node dist/cli.js`
+ * contenders with 90s of patience always make progress — while still proving the
+ * compiled CLI serializes a real concurrent read-modify-write through the OS file lock.
+ */
+export const LIGHT_SPAWN_CONCURRENCY = 3;
 
 export interface TempProject {
   paths: ProjectPaths;

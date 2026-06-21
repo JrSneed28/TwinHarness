@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { TOOL_DEFS } from "../src/mcp-server";
+import { expectedToolDefsCount } from "./helpers";
 
 /**
  * DOC-TRUTH (on-thesis): TwinHarness's whole premise is "mechanical truths are
@@ -77,7 +78,7 @@ describe("DOC-TRUTH: docs match mechanical reality", () => {
   // README.md must equal TOOL_DEFS.length (the mechanical source of truth).
   // -------------------------------------------------------------------------
   it("TOOL_DEFS.length equals 62", () => {
-    expect(TOOL_DEFS.length).toBe(62);
+    expect(TOOL_DEFS.length).toBe(expectedToolDefsCount());
   });
 
   it("README: every 'N tools' / 'N-tool' numeric claim equals TOOL_DEFS.length", () => {

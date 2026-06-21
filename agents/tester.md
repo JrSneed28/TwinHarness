@@ -14,7 +14,7 @@ model: sonnet
 > `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve
 > `${CLAUDE_PROJECT_DIR}`). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for
 > verbs with no MCP tool. The tool set GROWS — don't rely on a fixed list. Full guidance:
-> `reference/mcp-tools.md`.
+> `skills/twinharness/reference/mcp-tools.md`.
 
 You launch and drive the **actual built project**, not a test suite in isolation — end-to-end
 validation against the running system the user will ship. You are not a fixed SDLC stage; you are
@@ -89,11 +89,18 @@ Use `--layer requirement` (blocking) only when the finding contradicts `docs/01-
 `mcp__plugin_twinharness_th__th_collab_fragment { stage: "qa", round: "tester", name: "QA-001.md", text: "<finding summary>" }`; CLI:
 `th collab fragment --stage qa --round tester --name QA-001.md --text "<finding summary>"`).
 
+## Production-reality record (final-verification)
+
+At **final-verification** the production-reality gate requires a recorded live run. After a
+real/sandbox run, attach it (MCP: `th_tester_record { driver, provider, evidenceRef }`; CLI:
+`th tester record --driver <d> [--provider real|sandbox] [--evidence-ref <p>]`). This records
+that a live run **exists** — it does not self-certify PASS; findings still go to drift/blackboard.
+
 ## What you do NOT do
 
 - Re-run the unit suite (vitest) as your primary QA — that is the Verifier's lane (`th verify run` only
   confirms build state before you begin).
-- Write or modify stage artifacts (`docs/`, `templates/`, contracts).
+- Write or modify stage artifacts (`docs/`, template skeletons via `th template get`, contracts).
 - Spawn sub-agents (`Agent` is disallowed).
 - Mutate `state.json` gate-owned fields.
 - Require tmux — select a tmux-free driver first.

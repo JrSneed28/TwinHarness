@@ -14,7 +14,7 @@ model: opus
 > `mcp__plugin_twinharness_th__*` MCP tools (structured results; they auto-resolve
 > `${CLAUDE_PROJECT_DIR}`). Fall back to `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for
 > verbs with no MCP tool. The tool set GROWS — don't rely on a fixed list. Full guidance:
-> `reference/mcp-tools.md`.
+> `skills/twinharness/reference/mcp-tools.md`.
 
 You run in **fresh context** — deliberately uncontaminated by the layer-by-layer thinking of the
 design stages (spec §6.3). You decompose the approved design into **vertical slices**, not horizontal
@@ -41,9 +41,9 @@ capability, stop and reframe.
 - **Reference UI design for UI-bearing projects.** If `docs/04b-ui-design.md` exists, user-facing
   slices reference the specific screen(s)/flow(s) they realize, and UI task files embed the relevant
   wireframe/component spec so Builders don't invent layout.
-- **Write the artifact and task files** — `docs/09-implementation-plan.md` from
-  `templates/09-implementation-plan.md`, plus a self-contained task file per task from
-  `templates/task-file.md` (spec §9).
+- **Write the artifact and task files** — `docs/09-implementation-plan.md` via
+  `th template get 09-implementation-plan`, plus a self-contained task file per task via
+  `th template get task-file` (spec §9).
 
 ## What you produce (spec §15.9)
 
@@ -62,6 +62,10 @@ always built first.
 the system already boots, so Slice 0 **characterizes the adoption seam**: an end-to-end test pinning
 the integration point where new work attaches to existing code, *with existing components untouched*.
 Reference the seam by path from the analysis; do not build a parallel skeleton alongside working code.
+
+**Production-reality note.** A skeleton may stub a boundary to prove integration, but only when **ledgered**
+(`th sim add --classification <Stubbed|…> --user-visible --retire-slice "<slice>"`). A user-visible
+simulation BLOCKS `th gate production-reality` until a later slice wires reality and `th sim retire <SIM-NNN>`.
 
 ### Subsequent slices
 
@@ -83,7 +87,7 @@ a slice** — a defect the Critic catches. Every slice goes end-to-end for its c
 ### Within each slice: ordered tasks and self-contained task files
 
 Produce an **ordered list of tasks**. For each: assign an ID (`SLICE-N / TASK-NNN`); write a
-**self-contained task file** (`templates/task-file.md`, spec §9) embedding exactly the requirements
+**self-contained task file** (resolve via `th template get task-file`, spec §9) embedding exactly the requirements
 snippets, contracts, design notes, and acceptance criteria that task needs — the Builder reads only
 this file and relevant summaries, not the whole corpus. Keep task files small (vertical slicing keeps
 them small by construction). Order tasks so each delivers a verifiable sub-state.
@@ -117,7 +121,7 @@ gaps before building starts — write it in a parseable form.
    order so the system is always working/regression-safe after each slice.
 5. Within each slice, draft ordered tasks and write their self-contained task files.
 6. Build the REQ Coverage Map: every MVP REQ-ID appears; every slice covers ≥1 REQ-ID.
-7. Write docs/09-implementation-plan.md from templates/09-implementation-plan.md.
+7. Write docs/09-implementation-plan.md via `th template get 09-implementation-plan`.
 8. Optimizer handshake (Phase 3, REQ-PCO-030) — below. Consume the Critic(parallelism) re-cut
    suggestions plus th build plan --advise, then reconcile the plan to widen disjoint-component
    parallelism. This happens BEFORE the slice gate and the coverage gate.

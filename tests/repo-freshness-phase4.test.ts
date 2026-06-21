@@ -12,7 +12,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, expectedToolDefsCount, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runRepoMap, runRepoCheck, runRepoCheckCached, repoFreshnessSummary } from "../src/commands/repo";
 import { runDoctor } from "../src/commands/doctor";
@@ -120,7 +120,7 @@ describe("REQ-P4-3: MCP repo tools carry a freshness/stale field", () => {
   });
 
   it("the MCP tool COUNT and names are unchanged (contract preserved)", () => {
-    expect(TOOL_DEFS.length).toBe(62);
+    expect(TOOL_DEFS.length).toBe(expectedToolDefsCount());
   });
 });
 

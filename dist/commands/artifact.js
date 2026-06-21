@@ -34,7 +34,9 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runArtifactRegister = runArtifactRegister;
+exports.guardApprovedArtifactReauthor = guardApprovedArtifactReauthor;
 exports.runArtifactList = runArtifactList;
+exports.runArtifactSection = runArtifactSection;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const paths_1 = require("../core/paths");
@@ -144,6 +146,65 @@ function runArtifactRegisterLocked(paths, file, version) {
             : `registered ${relKey} v${version} (${hash})`,
     });
 }
+/**
+ * SG3 (audit P1) — the approved-artifact CLOBBER + version-monotonicity guard for the
+ * GOVERNED WRITERS (`th research write`, `th inspector write`). Those verbs write the
+ * file directly through the atomic chokepoint and THEN auto-register, so they BYPASS the
+ * PreToolUse R-14 approved-artifact clobber guard (which only fires for Write/Edit/Bash
+ * tool calls routed through the hook). Without this check a stage re-run silently
+ * overwrote an approved doc AND reset its registered version to 1 (the audit reproduced
+ * an approved v7 research document replaced and downgraded to v1). So before such a
+ * writer overwrites a path it must consult THIS guard:
+ *
+ *   - target NOT yet registered          → first registration; version = requested ?? 1.
+ *   - registered, no explicit version    → REFUSE `approved_artifact_exists` (re-authoring
+ *     would silently clobber reviewed content; caller must pass an explicit higher version).
+ *   - registered, requested ≤ registered → REFUSE `version_not_monotonic` (never downgrade
+ *     an approved artifact).
+ *   - registered, requested > registered → allow at the requested version (deliberate bump).
+ *
+ * Returns the effective version to register at, or a ready-to-return refusal result. The
+ * caller checks this BEFORE writing, so a refused re-author never touches the file on disk.
+ */
+function guardApprovedArtifactReauthor(approved, relKey, requestedVersion, cmd) {
+    const existing = approved.find((a) => a.file === relKey);
+    if (!existing) {
+        return { ok: true, version: requestedVersion ?? 1 };
+    }
+    if (requestedVersion === undefined) {
+        return {
+            ok: false,
+            result: (0, output_1.failure)({
+                human: `Refusing ${cmd}: ${relKey} is already a REGISTERED approved artifact (v${existing.version}). ` +
+                    `Re-authoring it would overwrite reviewed/human-edited content. To deliberately replace it, pass ` +
+                    `--version ${existing.version + 1} (a version bump).`,
+                data: {
+                    error: "approved_artifact_exists",
+                    file: relKey,
+                    registeredVersion: existing.version,
+                    nextVersion: existing.version + 1,
+                },
+            }),
+        };
+    }
+    if (requestedVersion <= existing.version) {
+        return {
+            ok: false,
+            result: (0, output_1.failure)({
+                human: `Refusing ${cmd}: ${relKey} is registered at v${existing.version}; --version must be GREATER than ` +
+                    `${existing.version} (a governed writer must not downgrade an approved artifact). ` +
+                    `Pass --version ${existing.version + 1} or higher.`,
+                data: {
+                    error: "version_not_monotonic",
+                    file: relKey,
+                    registeredVersion: existing.version,
+                    requested: requestedVersion,
+                },
+            }),
+        };
+    }
+    return { ok: true, version: requestedVersion };
+}
 /** `th artifact list` — list every recorded approved artifact. */
 function runArtifactList(paths) {
     const r = (0, state_store_1.readState)(paths);
@@ -160,4 +221,124 @@ function runArtifactList(paths) {
         ? artifacts.map((a) => `${a.file}  v${a.version}  ${a.hash}`).join("\n")
         : "(none)";
     return (0, output_1.success)({ data: { artifacts }, human });
+}
+// ---------------------------------------------------------------------------
+// `th artifact section` (SG3 P1-B / C-12) — bounded named-heading extraction
+// ---------------------------------------------------------------------------
+/**
+ * Token estimator: ~4 chars per token (mirrors `context.ts` TOKENS_PER_CHAR and the
+ * §9 pack budget heuristic). The single estimation point so the budget math here and
+ * in `th context pack` / `th context read` agree.
+ */
+function estimateTokens(text) {
+    return Math.round(text.length / 4);
+}
+/**
+ * `th artifact section --file <p> --section <h> [--max-tokens N]` (C-12) — extract the
+ * BODY of a named heading from a markdown artifact under an optional token budget, with
+ * a content-hash RECEIPT of the FULL extracted section. This closes the "no bounded
+ * section read" gap: an agent can pull JUST `## External Dependencies` (or any heading)
+ * without reading — or paying the token cost of — the whole document.
+ *
+ * Determinism: the section is the first heading whose text equals `--section`
+ * (case-insensitive); its body runs to the next same-or-higher-level heading
+ * (`extractSection`). When `--max-tokens` is set and the body exceeds it, the body is
+ * truncated to the budget by KEEPING A LINE PREFIX (deterministic — never a random
+ * slice), and `truncated:true` is reported. The receipt always hashes the FULL section
+ * body (the evidence of what was extracted), regardless of truncation. Read-only.
+ *
+ * Follows Critical Pattern 1: named `runArtifactSection`, `paths` first, typed opts
+ * second; returns `success()`/`failure()` (never throws / exits); one structuredLog.
+ */
+function runArtifactSection(paths, opts = {}) {
+    if (!opts.file) {
+        (0, log_1.structuredLog)({ cmd: "artifact section", error: "no_file" });
+        return (0, output_1.failure)({ human: "usage: th artifact section --file <path> --section <heading> [--max-tokens N]", data: { error: "no_file" } });
+    }
+    if (!opts.section) {
+        (0, log_1.structuredLog)({ cmd: "artifact section", error: "no_section" });
+        return (0, output_1.failure)({ human: "usage: th artifact section --file <path> --section <heading> [--max-tokens N]", data: { error: "no_section" } });
+    }
+    const abs = (0, paths_1.resolveWithinRoot)(paths.root, opts.file);
+    if (abs === null) {
+        (0, log_1.structuredLog)({ cmd: "artifact section", error: "path_outside_root", file: opts.file });
+        return (0, output_1.failure)({ human: `Path outside project root: ${opts.file}`, data: { error: "path_outside_root", file: opts.file } });
+    }
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+        (0, log_1.structuredLog)({ cmd: "artifact section", error: "file_not_found", file: opts.file });
+        return (0, output_1.failure)({ human: `File not found: ${opts.file}`, data: { error: "file_not_found", file: opts.file } });
+    }
+    const relKey = toRelKey(paths.root, opts.file);
+    let content;
+    try {
+        content = fs.readFileSync(abs, "utf8");
+    }
+    catch {
+        (0, log_1.structuredLog)({ cmd: "artifact section", error: "read_failed", file: relKey });
+        return (0, output_1.failure)({ human: `Could not read ${relKey}`, data: { error: "read_failed", file: relKey } });
+    }
+    const extracted = (0, summary_1.extractSection)(content, opts.section);
+    if (!extracted.found) {
+        (0, log_1.structuredLog)({ cmd: "artifact section", error: "section_not_found", file: relKey, section: opts.section });
+        return (0, output_1.failure)({
+            human: `No \`${opts.section}\` heading in ${relKey}.`,
+            data: { error: "section_not_found", file: relKey, section: opts.section },
+        });
+    }
+    const fullBody = extracted.body;
+    const fullTokens = estimateTokens(fullBody);
+    // Token budget: when set (>0), truncate the body to fit by keeping a deterministic
+    // LINE PREFIX. The receipt always hashes the FULL body (the evidence of what the
+    // section is), so a downstream consumer can detect a later edit even if it only saw
+    // the truncated head.
+    const budget = typeof opts.maxTokens === "number" && opts.maxTokens > 0 ? opts.maxTokens : null;
+    let bodyOut = fullBody;
+    let truncated = false;
+    if (budget !== null && fullTokens > budget) {
+        const lines = fullBody.split("\n");
+        const kept = [];
+        let running = 0;
+        for (const line of lines) {
+            const cost = estimateTokens(line + "\n");
+            if (running + cost > budget)
+                break;
+            kept.push(line);
+            running += cost;
+        }
+        bodyOut = kept.join("\n");
+        truncated = true;
+    }
+    const receipt = { file: relKey, hash: (0, hash_1.hashContent)(fullBody), tokensConsumed: estimateTokens(bodyOut) };
+    (0, log_1.structuredLog)({
+        cmd: "artifact section",
+        file: relKey,
+        section: opts.section,
+        fullTokens,
+        returnedTokens: receipt.tokensConsumed,
+        truncated,
+    });
+    const human = [
+        extracted.heading ?? `## ${opts.section}`,
+        "",
+        bodyOut || "(empty section)",
+        "",
+        truncated
+            ? `(truncated to --max-tokens=${budget}; full section ~${fullTokens} tokens, hash ${receipt.hash.slice(0, 12)})`
+            : `(~${fullTokens} tokens, hash ${receipt.hash.slice(0, 12)})`,
+    ].join("\n");
+    return (0, output_1.success)({
+        receipts: [receipt],
+        data: {
+            file: relKey,
+            section: opts.section,
+            heading: extracted.heading,
+            body: bodyOut,
+            fullTokens,
+            returnedTokens: receipt.tokensConsumed,
+            truncated,
+            maxTokens: budget,
+            receipts: [receipt],
+        },
+        human,
+    });
 }

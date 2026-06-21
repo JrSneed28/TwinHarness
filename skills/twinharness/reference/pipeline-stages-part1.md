@@ -53,7 +53,7 @@ single owner of the **repo-map + artifact-summary index**.
   and refreshed via `th repo map`, `th repo relevant`, `th repo impact`, and `th context pack`
   (**prefer the typed `mcp__plugin_twinharness_th__*` MCP tools** for these calls — they return
   structured results and resolve `${CLAUDE_PLUGIN_DIR}` from any worktree; see
-  `reference/mcp-tools.md`). It does not edit artifacts; it indexes and summarizes them.
+  `skills/twinharness/reference/mcp-tools.md`). It does not edit artifacts; it indexes and summarizes them.
 - **What it answers.** Any agent (Orchestrator, Spec, Builder, Critic, Debugger, Researcher) can ask
   the Librarian **locate** queries ("where does component X live / which files touch REQ-NNN") and
   **summary** queries ("give me the design context for SLICE-3"). It replies with **compact

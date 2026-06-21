@@ -66,7 +66,7 @@ You don't need to memorize these — but every section below assumes them. Skim 
 | **Coverage gate** | `th coverage check` mechanically blocks the build from starting until every in-scope REQ-ID maps to ≥ 1 slice **and** ≥ 1 test. |
 | **Stop-gate** | A Claude Code *Stop hook* that refuses to let the session claim "done" while state is invalid, a blocking drift is open, or final slices/tests aren't finished. It's code, not a reminder. |
 | **Write-gate** | A Claude Code *PreToolUse hook* that blocks file writes before the pre-build gates clear, and polices slice boundaries during the build. Fail-open: it never touches non-TwinHarness projects. |
-| **MCP tools** | The same `th` read/compute surface exposed as **62** typed `th_*` tools so agents can call it natively over MCP instead of shelling out. |
+| **MCP tools** | The same `th` read/compute surface exposed as **73** typed `th_*` tools so agents can call it natively over MCP instead of shelling out. |
 
 ---
 
@@ -1292,9 +1292,9 @@ Pre-edit blast-radius analysis over the persisted `repo-map.json`. Reads no stat
 | `map_invalid-json` / `map_schema` / `map_version` | Map file malformed or unknown version | Run `th repo map` to regenerate |
 | `unknown_slice` | `--slice` names no known slice | Check `th state status` for valid slice IDs |
 
-#### MCP tools (registered count 62)
+#### MCP tools (registered count 75)
 
-62 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin. The interview/init surface exposes `th_interview_start`, `th_interview_record`, `th_interview_status`, and `th_init`. Five precondition-gated gate-transition tools safely mutate gate-owned fields: `th_tier_record`, `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`, `th_blast_radius_record`. Additional wired handlers: `th_drift_list`, `th_drift_resolve`, `th_coverage_report`, `th_artifact_register`, `th_artifact_list`, `th_verify_add`, `th_verify_list`, `th_verify_clear`, `th_verify_run`, `th_stage_current`, `th_stage_describe`, `th_stage_list`, `th_doctor`, `th_scorecard`, `th_slices_sync`, `th_slice_set_status`. Notable tools highlighted below:
+75 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin. The interview/init surface exposes `th_interview_start`, `th_interview_record`, `th_interview_status`, and `th_init`. Five precondition-gated gate-transition tools safely mutate gate-owned fields: `th_tier_record`, `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`, `th_blast_radius_record`. Additional wired handlers: `th_drift_list`, `th_drift_resolve`, `th_coverage_report`, `th_artifact_register`, `th_artifact_list`, `th_verify_add`, `th_verify_list`, `th_verify_clear`, `th_verify_run`, `th_stage_current`, `th_stage_describe`, `th_stage_list`, `th_doctor`, `th_scorecard`, `th_slices_sync`, `th_slice_set_status`. Notable tools highlighted below:
 
 | Tool name | CLI equivalent | Notes |
 |---|---|---|
@@ -1311,7 +1311,7 @@ All MCP tool schemas are strict and closed (`additionalProperties: false`). Outp
 
 #### Generated command reference
 
-This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **90 CLI command leaves** and **62 MCP tools**.
+This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **104 CLI command leaves** and **75 MCP tools**.
 
 | CLI command | MCP tool | Status |
 |---|---|---|
@@ -1335,9 +1335,11 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th implementation unlock` | `th_implementation_unlock` | mirrored |
 | `th artifact register` | `th_artifact_register` | mirrored |
 | `th artifact list` | `th_artifact_list` | mirrored |
+| `th artifact section` | `th_artifact_section` | mirrored |
 | `th artifact claim` | `th_artifact_claim` | mirrored |
 | `th artifact release` | `th_artifact_release` | mirrored |
 | `th artifact leases` | `th_artifact_leases` | mirrored |
+| `th research write` | `th_research_write` | mirrored |
 | `th coverage check` | `th_coverage_check` | mirrored |
 | `th coverage report` | `th_coverage_report` | mirrored |
 | `th verify add` | `th_verify_add` | mirrored |
@@ -1364,6 +1366,12 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th drift add` | `th_drift_add` | mirrored |
 | `th drift list` | `th_drift_list` | mirrored |
 | `th drift resolve` | `th_drift_resolve` | mirrored |
+| `th sim add` | `th_sim_add` | mirrored |
+| `th sim list` | `th_sim_list` | mirrored |
+| `th sim retire` | `th_sim_retire` | mirrored |
+| `th sim scan` | `th_sim_scan` | mirrored |
+| `th tester record` | `th_tester_record` | mirrored |
+| `th gate production-reality` | `th_gate_production_reality` | mirrored |
 | `th collab init` | `th_collab_init` | mirrored |
 | `th collab fragment` | `th_collab_fragment` | mirrored |
 | `th collab list` | `th_collab_list` | mirrored |
@@ -1385,10 +1393,12 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th telemetry status` | — (CLI-only) | Local-only operator opt-in; not an agent capability. |
 | `th context estimate` | — (CLI-only) | Prompt-surface estimator (operator sizing); th_context_pack/th_budget_check are the MCP context surfaces. |
 | `th context pack` | `th_context_pack` | mirrored |
+| `th context read` | `th_context_read` | mirrored |
 | `th budget check` | `th_budget_check` | mirrored |
 | `th handoff write` | `th_handoff_write` | mirrored |
 | `th handoff verify` | — (CLI-only) | Resume-integrity CLI check; th_handoff_write is the MCP handoff surface. |
 | `th resume` | — (CLI-only) | Resume detector (prints th next); agents call th_next directly. |
+| `th inspector write` | `th_inspector_write` | mirrored |
 | `th delegate plan` | `th_delegate_plan` | mirrored |
 | `th delegate pack` | `th_delegate_pack` | mirrored |
 | `th delegate capsule` | — (CLI-only) | Prints a blank capsule skeleton; a static template, not a coordination tool. |
@@ -1397,12 +1407,16 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th repo check` | `th_repo_check` | mirrored |
 | `th repo relevant` | `th_repo_relevant` | mirrored |
 | `th repo impact` | `th_repo_impact` | mirrored |
+| `th repo search` | `th_repo_search` | mirrored |
 | `th decision detect` | `th_decision_detect` | mirrored |
 | `th decision add` | `th_decision_add` | mirrored |
 | `th decision approve` | — (CLI-only) | HUMAN-ONLY TTY-gated transition (RULE-011); permanently absent from MCP. |
 | `th decision check` | `th_decision_check` | mirrored |
 | `th decision list` | `th_decision_list` | mirrored |
 | `th manifest export` | — (CLI-only) | Deterministic run-snapshot CLI surface; agents read th_scorecard / th_state_get. |
+| `th manifest tools` | — (CLI-only) | MCP advertises tools natively via ListTools; this is the CLI mirror. |
+| `th template get` | `th_template_get` | mirrored |
+| `th template list` | `th_template_list` | mirrored |
 | `th version` | — (CLI-only) | CLI meta; the MCP server advertises version via the protocol. |
 | `th help` | — (CLI-only) | CLI meta; MCP clients read tool descriptions, not `th help`. |
 | `th_blast_radius_record` | — (MCP-only) | Typed gate setter; the CLI reaches blast_radius only via `th state set ... --emergency`. |
@@ -1411,7 +1425,7 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th_interview_record` | — (MCP-only) | MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment). |
 | `th_interview_status` | — (MCP-only) | MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment). |
 
-#### MCP tool roster (exhaustive — all 62)
+#### MCP tool roster (exhaustive — all 75)
 
 Every registered MCP tool name, in registry order. The CLI↔MCP parity test pins this list against `TOOL_DEFS.map(t => t.name)`, so a tool added/removed/renamed without updating this roster fails CI.
 
@@ -1477,6 +1491,19 @@ Every registered MCP tool name, in registry order. The CLI↔MCP parity test pin
 - `th_init`
 - `th_budget_check`
 - `th_handoff_write`
+- `th_template_get`
+- `th_template_list`
+- `th_repo_search`
+- `th_context_read`
+- `th_artifact_section`
+- `th_research_write`
+- `th_sim_add`
+- `th_sim_list`
+- `th_sim_retire`
+- `th_sim_scan`
+- `th_gate_production_reality`
+- `th_inspector_write`
+- `th_tester_record`
 
 <!-- END AUTO-GENERATED: command-reference -->
 

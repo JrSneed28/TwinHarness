@@ -1,9 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
-import { type CommandResult, success, failure } from "../core/output";
+import { resolveWithinRoot } from "../core/paths";
+import { type CommandResult, type ReadReceipt, success, failure } from "../core/output";
 import { readState } from "../core/state-store";
 import { extractSummary } from "../core/summary";
+import { hashContent } from "../core/hash";
 import { structuredLog } from "../core/log";
 import { runRepoRelevant, repoFreshnessSummary } from "./repo";
 
@@ -351,6 +353,152 @@ export function runContextPack(paths: ProjectPaths, opts: ContextPackOptions = {
       repoRelevantFiles,
       repoRelevantNote: repoRelevantNote ?? null,
     },
+    human,
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * `th context read` (SG3 P1-B / C-11) — batch read under one budget.  *
+ * ------------------------------------------------------------------ */
+
+/** Estimator shared with `th context pack` / `th artifact section` (~4 chars/token). */
+function estimateTokens(text: string): number {
+  return Math.round(text.length * TOKENS_PER_CHAR);
+}
+
+export interface ContextReadOptions {
+  /** Files to read (root-relative or absolute within root). */
+  files?: string[];
+  /** Single token budget shared across ALL files (>0; ≤0/absent ⇒ no budget). */
+  maxTokens?: number;
+}
+
+interface ReadFileResult {
+  file: string;
+  exists: boolean;
+  /** The text actually included (may be a deterministic line-prefix when truncated). */
+  text: string;
+  tokens: number;
+  truncated: boolean;
+  /** Omitted entirely because the budget was exhausted before this file. */
+  omitted: boolean;
+}
+
+/**
+ * `th context read --files <list> --max-tokens N` (C-11) — batch-read a set of files
+ * under ONE shared token budget, with deterministic truncation and a per-file
+ * `{file, hash, tokensConsumed}` RECEIPT. This is the governed batch-read primitive: an
+ * agent hands a file list and a budget and gets back exactly what fits, in order, with
+ * a verifiable hash of each file it actually read — instead of N unbounded raw reads.
+ *
+ * Determinism: files are processed in the GIVEN order. Each file's full content is read
+ * and a receipt minted (hash of the FULL content + the tokens actually charged). While
+ * budget remains, the file is included whole; the file that would OVERFLOW the budget is
+ * truncated to a deterministic line-prefix; every file after the budget is exhausted is
+ * marked `omitted` (still receipted with `tokensConsumed:0` so the audit trail shows it
+ * was requested). A missing/escaping file is reported (`exists:false`) and skipped, not
+ * fatal. Read-only.
+ *
+ * Follows Critical Pattern 1: named `runContextRead`, `paths` first, typed opts second;
+ * returns `success()`/`failure()` (never throws / exits); one structuredLog before return.
+ */
+export function runContextRead(paths: ProjectPaths, opts: ContextReadOptions = {}): CommandResult {
+  const files = (opts.files ?? []).map((f) => f.trim()).filter(Boolean);
+  if (files.length === 0) {
+    structuredLog({ cmd: "context read", error: "no_files" });
+    return failure({ human: "Provide at least one file: --files <comma-separated list>.", data: { error: "no_files" } });
+  }
+
+  const budget = typeof opts.maxTokens === "number" && opts.maxTokens > 0 ? opts.maxTokens : null;
+  const results: ReadFileResult[] = [];
+  const receipts: ReadReceipt[] = [];
+  let running = 0;
+  let budgetExhausted = false;
+
+  for (const f of files) {
+    const relKey = path.relative(paths.root, path.resolve(paths.root, f)).split(path.sep).join("/");
+    const abs = resolveWithinRoot(paths.root, f);
+    if (abs === null || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+      results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
+      continue;
+    }
+    let content: string;
+    try {
+      content = fs.readFileSync(abs, "utf8");
+    } catch {
+      results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
+      continue;
+    }
+
+    const fullHash = hashContent(content);
+
+    // Budget already exhausted by an earlier file → omit (but still receipt the request).
+    if (budgetExhausted) {
+      results.push({ file: relKey, exists: true, text: "", tokens: 0, truncated: false, omitted: true });
+      receipts.push({ file: relKey, hash: fullHash, tokensConsumed: 0 });
+      continue;
+    }
+
+    const fullTokens = estimateTokens(content);
+    let text = content;
+    let tokens = fullTokens;
+    let truncated = false;
+
+    if (budget !== null && running + fullTokens > budget) {
+      // Truncate THIS file to the remaining budget by keeping a deterministic line prefix.
+      const remaining = budget - running;
+      const lines = content.split("\n");
+      const kept: string[] = [];
+      let used = 0;
+      for (const line of lines) {
+        const cost = estimateTokens(line + "\n");
+        if (used + cost > remaining) break;
+        kept.push(line);
+        used += cost;
+      }
+      text = kept.join("\n");
+      tokens = estimateTokens(text);
+      truncated = true;
+      budgetExhausted = true; // anything after this is omitted.
+    }
+
+    running += tokens;
+    results.push({ file: relKey, exists: true, text, tokens, truncated, omitted: false });
+    receipts.push({ file: relKey, hash: fullHash, tokensConsumed: tokens });
+    if (budget !== null && running >= budget) budgetExhausted = true;
+  }
+
+  const totalTokens = results.reduce((sum, r) => sum + r.tokens, 0);
+  const missing = results.filter((r) => !r.exists).map((r) => r.file);
+  const omittedFiles = results.filter((r) => r.omitted).map((r) => r.file);
+  const anyTruncated = results.some((r) => r.truncated);
+
+  structuredLog({
+    cmd: "context read",
+    files: files.length,
+    read: results.filter((r) => r.exists && !r.omitted).length,
+    missing: missing.length,
+    omitted: omittedFiles.length,
+    tokens: totalTokens,
+    truncated: anyTruncated,
+  });
+
+  const human = [
+    `Read ${results.filter((r) => r.exists && !r.omitted).length}/${files.length} file(s), ~${totalTokens} tokens${budget !== null ? ` (budget ${budget})` : ""}.`,
+    ...(missing.length ? [`Missing/outside-root (skipped): ${missing.join(", ")}`] : []),
+    ...(omittedFiles.length ? [`Omitted for budget: ${omittedFiles.join(", ")}`] : []),
+    ...results
+      .filter((r) => r.exists && !r.omitted)
+      .flatMap((r) => [
+        "",
+        `### ${r.file} (~${r.tokens} tok${r.truncated ? ", TRUNCATED" : ""})`,
+        r.text || "(empty)",
+      ]),
+  ].join("\n");
+
+  return success({
+    receipts,
+    data: { files: results, totalTokens, maxTokens: budget, truncated: anyTruncated, missing, omitted: omittedFiles, receipts },
     human,
   });
 }

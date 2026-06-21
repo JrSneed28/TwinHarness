@@ -16,6 +16,7 @@ const wave_1 = require("../core/wave");
 const routing_1 = require("../core/routing");
 const log_1 = require("../core/log");
 const guards_1 = require("../core/guards");
+const tier_1 = require("./tier");
 /**
  * `th build plan [--include-done]` — schedule the slices into conflict-free
  * build waves. By default only unfinished slices (pending/in-progress/blocked)
@@ -300,6 +301,9 @@ function runBuildRelease(paths, sliceId) {
  *     `sub_lease_conflict` (exit 1).
  */
 function runBuildSubClaim(paths, parentSlice, components) {
+    const locked = (0, tier_1.assertFeatureUnlocked)(paths, "sub-lease");
+    if (locked)
+        return locked;
     if (!parentSlice)
         return (0, output_1.failure)({ human: "usage: th build sub-claim <PARENT-SLICE> --components <c1,c2,...>" });
     if (!components || components.length === 0) {
@@ -373,6 +377,9 @@ function runBuildSubClaim(paths, parentSlice, components) {
  * "sub-Builder finished cleanly" path.
  */
 function runBuildSubRelease(paths, subId) {
+    const locked = (0, tier_1.assertFeatureUnlocked)(paths, "sub-lease");
+    if (locked)
+        return locked;
     if (!subId)
         return (0, output_1.failure)({ human: "usage: th build sub-release <SUB-ID>" });
     return (0, state_store_1.withStateLock)(paths, () => {

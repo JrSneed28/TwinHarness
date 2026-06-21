@@ -28,6 +28,7 @@ const state_store_1 = require("../core/state-store");
 const guards_1 = require("../core/guards");
 const leases_1 = require("../core/leases");
 const log_1 = require("../core/log");
+const tier_1 = require("./tier");
 const CLAIM_USAGE = "usage: th artifact claim <file>#<section> --holder <id>";
 const RELEASE_USAGE = "usage: th artifact release <file>#<section> --holder <id>";
 /** Validate the `{section, holder}` pair common to claim/release. */
@@ -75,6 +76,9 @@ function validate(opts, usage) {
  * two concurrent claims can't both win the same section.
  */
 function runArtifactClaim(paths, opts = {}) {
+    const locked = (0, tier_1.assertFeatureUnlocked)(paths, "section-lease");
+    if (locked)
+        return locked;
     const v = validate(opts, CLAIM_USAGE);
     if (!v.ok)
         return v.result;
@@ -104,6 +108,9 @@ function runArtifactClaim(paths, opts = {}) {
  * `runBuildRelease`); after it, the section is free for another holder.
  */
 function runArtifactRelease(paths, opts = {}) {
+    const locked = (0, tier_1.assertFeatureUnlocked)(paths, "section-lease");
+    if (locked)
+        return locked;
     const v = validate(opts, RELEASE_USAGE);
     if (!v.ok)
         return v.result;
@@ -121,6 +128,9 @@ function runArtifactRelease(paths, opts = {}) {
  * `th artifact leases` — list the active section leases and their holders.
  */
 function runArtifactLeases(paths) {
+    const locked = (0, tier_1.assertFeatureUnlocked)(paths, "section-lease");
+    if (locked)
+        return locked;
     const sr = (0, guards_1.requireState)(paths);
     if (sr.result)
         return sr.result;

@@ -16,7 +16,7 @@ isolation: worktree
 > `${CLAUDE_PROJECT_DIR}` so calls work unchanged from inside a worktree). Fall back to
 > `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <args>` only for verbs not yet exposed as MCP tools. The
 > tool set GROWS — use whatever is currently available; do not rely on a fixed list. Full guidance +
-> current list: `reference/mcp-tools.md`.
+> current list: `skills/twinharness/reference/mcp-tools.md`.
 
 You write code, run tests, and run checks. The other agents cannot — that is the only reason you are
 a separate agent. Keep the boundary sharp: you build; you do not plan, re-architect, or make scope
@@ -25,7 +25,7 @@ decisions.
 ## Core contract (§6.4, §16)
 
 - Implement **one slice at a time, one task at a time**, from `docs/09-implementation-plan.md` plus
-  each task's self-contained task file (`templates/task-file.md` instances).
+  each task's self-contained task file (via `th template get task-file`).
 - Read only the **relevant Summary blocks + the task file** before each task — not the full corpus
   (§9). Fetch a full artifact only when a detail can't be resolved from the summary.
 - Write **tests with the implementation** — not after. Tests carry the REQ-ID anchor (see below).
@@ -115,6 +115,30 @@ against the existing implementation, log a derived entry (`--discovery "existing
 code that *contradicts* a requirement-level REQ is **BLOCKING** drift, handled like any requirement
 contradiction below.
 
+### Missing real-boundary detail → STOP, escalate, BLOCKING (do NOT fake it)
+
+**When** an external boundary the task touches — provider, auth, persistence, network, credentials —
+is under-specified: the task file's `## External Dependencies` lacks the provider, auth model,
+persistence target, or real-vs-sandbox classification you need to implement the REAL path. This is
+**NOT** derived drift you may auto-resolve: "proceed with only what is specified" here produces a
+**fake/no-op/stubbed adapter that passes tests but does nothing real** — the failure the
+production-reality gate exists to stop. So it **BLOCKS** like a requirement contradiction:
+
+1. **Stop building the current task** — do **not** invent a provider/auth/persistence detail and do
+   **not** ship a stub or hardcoded value to make the anchored test pass.
+2. **Log a blocking entry** (increments `drift_open_blocking`; the stop-gate blocks completion):
+   ```
+   th drift add --layer requirement --ref "SLICE-<N> / TASK-<MMM>" \
+     --discovery "<the missing real-boundary detail: which provider/auth/persistence is unspecified>" \
+     --action "build paused — real boundary undefined"
+   ```
+3. **Escalate to the Orchestrator** for the real boundary spec. **Only a human/spec owner supplies it.**
+4. If the run DELIBERATELY ships a temporary simulation for this boundary (an approved Slice-0 /
+   labeled prototype only), it must be **ledgered, not hidden**: `th sim add --classification
+   <Stubbed|Mocked|Emulated|Hardcoded> --user-visible --replaces "<real dependency>" --retire-slice
+   "<SLICE/owner>"`. A user-visible simulation BLOCKS `th gate production-reality` until retired
+   (`th sim retire <SIM-NNN>`) — it is never silently passed off as production.
+
 ### Requirement / scope drift → STOP, escalate, BLOCKING
 
 **When** you find a contradiction with `docs/01-requirements.md` or `docs/02-scope.md` (e.g. REQ-004
@@ -188,7 +212,7 @@ under it stale, so a forgotten release can't wedge the schedule — but release 
 > sub-release / drift command MUST target the main project root (`--cwd <main-root>`, or the typed
 > `mcp__plugin_twinharness_th__*` MCP tools, which resolve `${CLAUDE_PROJECT_DIR}`). Worktrees isolate
 > CODE only; the lease ledger is the one shared coordination plane. See the orchestrator's
-> parallel-build section and `reference/build-and-verify.md`.
+> parallel-build section and `skills/twinharness/reference/build-and-verify.md`.
 
 ## What you do NOT do
 

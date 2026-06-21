@@ -123,6 +123,9 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   // drift ledger (append to stateDir)
   th_drift_add: { layer: "derived", discovery: "probe", action: "probe" },
   th_drift_resolve: { id: "DRIFT-001" },
+  // simulation ledger (SG3 P2-C; append/transition under stateDir — not path-taking)
+  th_sim_add: { classification: "Mocked" },
+  th_sim_retire: { id: "SIM-001" },
   // build leases (append to stateDir)
   th_build_claim: { sliceId: "SLICE-1" },
   th_build_release: { sliceId: "SLICE-1" },
@@ -141,6 +144,11 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   th_artifact_register: { path: CANARY_REL, version: 1 },
   th_artifact_claim: { section: `${SLICE_OWNED_REL}#s`, holder: "h" },
   th_artifact_release: { section: `${SLICE_OWNED_REL}#s`, holder: "h" },
+  // research writer (SG3 P2-A) — PATH-TAKING via `topic`. The handler sanitizes the
+  // topic to a flat slug and HARD-PINS the target under docs/00-research/, so a
+  // boundary-shaped topic is refused (writes nothing); a clean topic lands inside the
+  // governed `docs/` surface. Either way the snapshot proves it never escapes.
+  th_research_write: { topic: CANARY_REL, markdown: "probe" },
   // collab (tier-gated; writes under stateDir/collab)
   th_collab_init: { stage: "spec" },
   th_collab_fragment: { stage: "spec", round: 1, name: "n", text: "t", confirm: true },
@@ -165,6 +173,13 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   // lifecycle + handoff (write under stateDir / HANDOFF.md under stateDir)
   th_init: {},
   th_handoff_write: {},
+  // codebase-inspector governed write — PATH-TAKING via `file`: a boundary path in
+  // the `file` slot is refused by the handler pin (inspector_path_pinned) before the
+  // chokepoint, so nothing escapes the governed surface. `content` is required.
+  th_inspector_write: { content: "probe", file: CANARY_REL },
+  // live-QA Tester record (SG3 P2-C) — writes only .twinharness/tester-record.json
+  // (governed state dir); not path-taking. `driver` is required.
+  th_tester_record: { driver: "cli-e2e", provider: "sandbox" },
 };
 
 describe("MCP write-surface audit — no mutating tool escapes the governed surface (AC#1)", () => {
@@ -244,6 +259,8 @@ describe("MCP write-surface audit — no mutating tool escapes the governed surf
       const pathTaking: Record<string, (v: string) => Record<string, unknown>> = {
         th_artifact_register: (v) => ({ path: v, version: 1 }),
         th_slices_sync: (v) => ({ planFile: v }),
+        th_research_write: (v) => ({ topic: v, markdown: "probe" }),
+        th_inspector_write: (v) => ({ content: "probe", file: v }),
       };
       const mk = pathTaking[tool.name];
       if (mk) {

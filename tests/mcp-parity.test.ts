@@ -9,7 +9,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, expectedToolDefsCount, type TempProject } from "./helpers";
 import { TOOL_DEFS } from "../src/mcp-server";
 import { runDecisionAdd } from "../src/commands/decision";
 
@@ -69,7 +69,7 @@ describe("SLICE-6 — MCP parity: th_repo_check + four th_decision_* tools (coun
       // th_build_dispatch/th_build_plan brought it to 35, th_interview_*/th_init → 39, and
       // the MCP-tool-expansion added 5 typed gate-transition tools + 16 wired
       // handlers → 60.
-      expect(TOOL_DEFS.length).toBe(62);
+      expect(TOOL_DEFS.length).toBe(expectedToolDefsCount());
     },
   );
 

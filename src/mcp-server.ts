@@ -44,26 +44,33 @@ import { type CommandResult, failure } from "./core/output";
 
 import { runStateGet, runStateSet, applyGateMutation } from "./commands/state";
 import { runDriftAdd, runDriftList, runDriftResolve } from "./commands/drift";
+import { runSimAdd, runSimList, runSimRetire, runSimScan } from "./commands/sim";
+import { runGateProductionReality } from "./commands/gate";
+import { SIMULATION_CLASSIFICATIONS } from "./core/simulation";
 import { runBuildNextWave, runBuildClaim, runBuildRelease, runBuildSubClaim, runBuildSubRelease, runBuildDispatch, runBuildPlan } from "./commands/build";
 import { runCoverageCheck, runCoverageReport } from "./commands/coverage";
 import { runRoute } from "./commands/route";
 import { runNext } from "./commands/next";
 import { runDelegatePlan, runDelegatePack, runDelegateCheck } from "./commands/delegate";
-import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck, repoFreshnessSummary } from "./commands/repo";
-import { runContextPack } from "./commands/context";
+import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck, runRepoSearch, repoFreshnessSummary } from "./commands/repo";
+import { runContextPack, runContextRead } from "./commands/context";
 import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite } from "./commands/handoff";
+import { runInspectorWrite } from "./commands/inspector";
+import { runTesterRecord } from "./commands/tester";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
+import { runTemplateGet, runTemplateList } from "./commands/template";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
 import { runCollabInit, runCollabFragment, runCollabList, runCollabMerge } from "./commands/collab";
 import { runDebateAdd, runDebateList, runDebateResolve } from "./commands/debate";
-import { type AdvancedFeature, featureActiveForState, featureSpec } from "./commands/tier";
+import { type AdvancedFeature, assertFeatureUnlocked } from "./commands/tier";
 import { GATE_OWNED } from "./core/state-fields";
 import { runInterviewStart, runInterviewRecord, runInterviewStatus } from "./commands/interview";
 import { runInitMcp } from "./commands/init";
 
 // --- Component A wiring tool handlers (16 existing handlers exposed as ToolDefs) ---
-import { runArtifactRegister, runArtifactList } from "./commands/artifact";
+import { runArtifactRegister, runArtifactList, runArtifactSection } from "./commands/artifact";
+import { runResearchWrite } from "./commands/research";
 import { runVerifyAdd, runVerifyList, runVerifyClear, runVerifyRun } from "./commands/verify";
 import { runStageCurrent, runStageDescribe, runStageList } from "./commands/stage";
 import { runDoctor } from "./commands/doctor";
@@ -147,27 +154,15 @@ function gateRefusal(check: GateResult): CommandResult {
  * human line pointing at `th tier features` / `th tier record` so a caller knows
  * exactly which capability is off and how to enable it. Never throws — a locked
  * tool is a clean refusal, not a crash (the parity-compatible contract).
+ *
+ * Thin delegate over {@link assertFeatureUnlocked} (tier.ts), the SINGLE gate the
+ * CLI shared handlers also call — so the MCP and CLI refusals are byte-for-byte
+ * identical and the two surfaces cannot drift (SG3 P1-C).
  */
 function assertTierAllows(paths: ProjectPaths, feature: AdvancedFeature): CommandResult | undefined {
-  // Plain state read (NOT a re-classification): the tier is already on disk.
-  const r = readState(paths);
-  // Conservative default for absent/invalid state: an unclassified single-writer
-  // run with no slices, which {@link featureActiveForState} evaluates as locked.
-  const state: TwinHarnessState = r.state ?? { ...EMPTY_STATE_FOR_GATE };
-  if (featureActiveForState(feature, state)) return undefined;
-  const spec = featureSpec(feature);
-  const tierLabel = state.tier ?? "unclassified";
-  return failure({
-    data: {
-      error: "tier_locked",
-      feature,
-      tier: tierLabel,
-    },
-    human:
-      `Advanced feature "${feature}" is locked at tier ${tierLabel} — it activates at tier ≥T2 or when >1 slice is in flight. ` +
-      `Enable via \`th tier record <T2|T3>\` (or run \`th tier features\` to see what is active).` +
-      (spec ? ` Use when: ${spec.useWhen}` : ""),
-  });
+  // Delegate to the single shared gate (tier.ts) so the MCP refusal is byte-for-byte
+  // identical to the CLI shared-handler refusal — the two surfaces cannot drift.
+  return assertFeatureUnlocked(paths, feature);
 }
 
 /* ------------------------------------------------------------------ *
@@ -266,15 +261,6 @@ export function compactHeavyResult(result: CommandResult, verbose: boolean): Com
     human: `${headline}\n(compact: ${omitted} more line(s) omitted — pass verbose:true for the full report; full data in structuredContent)`,
   };
 }
-
-/**
- * A minimal valid state used ONLY as the conservative default for
- * {@link assertTierAllows} when state.json is absent/invalid: an unclassified tier
- * with no slices, which evaluates to LOCKED for every advanced feature. Kept tiny
- * (only the fields the activation predicate reads) and frozen so it is never
- * mutated.
- */
-const EMPTY_STATE_FOR_GATE = Object.freeze({ tier: null, slices: [] }) as unknown as TwinHarnessState;
 
 /* ------------------------------------------------------------------ *
  * Project-paths resolution                                            *
@@ -1493,6 +1479,229 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runHandoffWrite(paths),
   },
+  // ---- C-10: deterministic template resolver (project-override → plugin-bundled → structured miss) ----
+  {
+    name: "th_template_get",
+    description:
+      "Resolve a TwinHarness template by bare name (e.g. `task-file` or `task-file.md`) and return its absolute path, content, and source layer. Precedence (no probing): a project override at `.twinharness/templates/<name>` (source `project-override`) wins over the plugin-bundled `templates/<name>` (source `plugin-bundled`); a miss returns the structured `template_not_found` with the paths searched. A traversal/absolute name is refused. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: stringProp("Bare template filename to resolve (e.g. `task-file` or `task-file.md`). A single component — no path separators, no `..`."),
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runTemplateGet(paths, optString(args, "name")),
+  },
+  {
+    name: "th_template_list",
+    description:
+      "List every resolvable template across both layers (project `.twinharness/templates/` overrides + plugin-bundled `templates/`), deduped with the resolver's precedence and marking any project override that shadows a same-named bundled template. Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runTemplateList(paths),
+  },
+  // SG3 P1-B (C-11) — governed, receipt-bearing repo search over the persisted map's scope.
+  {
+    name: "th_repo_search",
+    description:
+      "Search the GOVERNED repo (the file set the persisted repo-map covers) for a pattern, returning path:line citations under a cap — each backed by a SHA-256 read receipt (in data.receipts). Kinds: literal (substring) | regex | symbol (parsed export names) | req (REQ-ID anchors) | artifact (registered approved-artifact paths) | template (resolvable template names). Read-only; never executes content. Run th_repo_map first to build the search scope.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pattern: stringProp("The pattern to search for (required)."),
+        kind: { type: "string", description: "Search kind (default literal).", enum: ["literal", "regex", "symbol", "req", "artifact", "template"] },
+        maxResults: numberProp("Cap on emitted citations (default 50; clamped to [1, 500])."),
+      },
+      required: ["pattern"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runRepoSearch(paths, { pattern: optString(args, "pattern"), kind: optString(args, "kind"), maxResults: optNumber(args, "maxResults") }),
+  },
+  // SG3 P1-B (C-11) — batch read a file list under ONE token budget with per-file receipts.
+  {
+    name: "th_context_read",
+    description:
+      "Batch-read a set of files under ONE shared token budget, with deterministic truncation and a per-file {file, hash, tokensConsumed} read receipt (in data.receipts). Files are read in order; while budget remains a file is included whole, the file that would overflow is truncated to a deterministic line-prefix, and any file after the budget is exhausted is reported omitted. A missing/escaping file is skipped (not fatal). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        files: stringProp("Comma-separated file list (root-relative); split/trim/drop-empties."),
+        maxTokens: numberProp("Single token budget shared across all files (>0; ≤0/absent ⇒ no budget)."),
+      },
+      required: ["files"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runContextRead(paths, {
+        files: (optString(args, "files") ?? "").split(",").map((f) => f.trim()).filter(Boolean),
+        maxTokens: optNumber(args, "maxTokens"),
+      }),
+  },
+  // SG3 P1-B (C-12) — bounded named-heading extraction with a content-hash receipt.
+  {
+    name: "th_artifact_section",
+    description:
+      "Extract the BODY of a named heading from a markdown artifact under an optional token budget, with a content-hash read receipt (in data.receipts). The section is the first heading whose text equals `section` (case-insensitive); its body runs to the next same-or-higher-level heading. With maxTokens set, the body is truncated to fit by keeping a deterministic line-prefix (truncated:true). The receipt always hashes the FULL section body. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: stringProp("Artifact file to read (root-relative or absolute within root)."),
+        section: stringProp("Heading name whose body to extract (the H1-H6 text, e.g. \"External Dependencies\")."),
+        maxTokens: numberProp("Token budget for the returned body (>0 truncates; absent ⇒ full section)."),
+      },
+      required: ["file", "section"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runArtifactSection(paths, { file: optString(args, "file"), section: optString(args, "section"), maxTokens: optNumber(args, "maxTokens") }),
+  },
+  // SG3 P2-A — governed research-output writer (resolves C-01). Appended LAST per the
+  // TOOL_DEFS append convention (the sub-lease tools must keep their fixed indices).
+  // The Researcher agent is read/web-only and cannot author its own artifact; this twin
+  // persists the markdown at the HANDLER-PINNED path docs/00-research/<topic>.md
+  // (sanitized in runResearchWrite — never a caller-chosen path) and auto-registers it.
+  {
+    name: "th_research_write",
+    description:
+      "Persist a research artifact's markdown at the HANDLER-PINNED path docs/00-research/<topic>.md (the topic is sanitized to a flat slug; slashes, `..`, and absolute/drive paths are refused) and auto-register it (first write ⇒ v1). If the topic is ALREADY a registered approved artifact, the write is REFUSED unless an explicit `version` GREATER than the registered one is supplied — a governed writer never silently clobbers or downgrades an approved doc. Returns a {file, hash} receipt. Serialized under the state lock via the register step.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topic: stringProp("Research topic slug — becomes the file stem under docs/00-research/. Flat name only (no path separators, no `..`)."),
+        markdown: stringProp("The full markdown body to persist."),
+        version: numberProp("Artifact version to register at. Omit for a first write (v1); to re-author an already-registered topic, pass a version greater than the registered one."),
+      },
+      required: ["topic", "markdown"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      const topic = optString(args, "topic");
+      const markdown = optString(args, "markdown");
+      if (topic === undefined) return failure({ human: "th_research_write requires `topic`.", data: { error: "missing_topic" } });
+      if (markdown === undefined) return failure({ human: "th_research_write requires `markdown`.", data: { error: "missing_markdown" } });
+      // Defense-in-depth: reject an obviously path-shaped topic BEFORE the handler
+      // (runResearchWrite re-sanitizes and re-pins regardless). Mirrors the
+      // th_artifact_register pre-check using the shared cross-platform predicate.
+      if (isAbsoluteOrEscaping(topic)) {
+        return failure({ human: `Refusing a topic that is absolute or escapes the research dir: ${topic}`, data: { error: "invalid_topic", topic } });
+      }
+      return runResearchWrite(paths, { topic, markdown, version: optNumber(args, "version") });
+    },
+  },
+  // --- SG3 P2-C: simulation ledger + production-reality gate reader (appended) ---
+  {
+    name: "th_sim_add",
+    description:
+      "Append a simulation-ledger entry (.twinharness/simulation-ledger.json). `classification` is required (Real|Sandbox|Emulated|Mocked|Stubbed|Hardcoded). A user-visible SIMULATED entry (Mocked/Stubbed/Hardcoded/Emulated) BLOCKS the production-reality gate until retired. Optional replaces/introSlice/retireSlice/owner/userVisible mirror the CLI flags. Append-only; mints SIM-NNN.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        classification: { type: "string", description: "Production-reality classification (required).", enum: [...SIMULATION_CLASSIFICATIONS] },
+        replaces: stringProp("What real dependency this stands in for."),
+        introSlice: stringProp("Slice/task that introduced the simulation."),
+        retireSlice: stringProp("Slice/owner that will replace it with reality."),
+        owner: stringProp("Who owns retiring the simulation."),
+        userVisible: boolProp("true when a user-visible production path depends on this (the gate blocks on it)."),
+      },
+      required: ["classification"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runSimAdd(paths, {
+        classification: optString(args, "classification"),
+        replaces: optString(args, "replaces"),
+        introSlice: optString(args, "introSlice"),
+        retireSlice: optString(args, "retireSlice"),
+        owner: optString(args, "owner"),
+        userVisible: optBool(args, "userVisible"),
+      }),
+  },
+  {
+    name: "th_sim_list",
+    description:
+      "List simulation-ledger entries plus the ids that BLOCK the production-reality gate (non-retired, user-visible, simulated). Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runSimList(paths, {}),
+  },
+  {
+    name: "th_sim_retire",
+    description:
+      "Mark a simulation entry retired by id (status transition active→retired; entries are never deleted). Optional retireSlice records who/what replaced it with reality. Errors on an unknown id or a double-retire. Serialized under the state lock.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: stringProp("The SIM-NNN id to retire."),
+        retireSlice: stringProp("Slice/owner that replaced the simulation with reality."),
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => runSimRetire(paths, optString(args, "id"), { retireSlice: optString(args, "retireSlice") }),
+  },
+  {
+    name: "th_sim_scan",
+    description:
+      "Grep dist/ and tests/ for simulation patterns (mock|fake|stub|fixture|placeholder|demo|TODO|canned|hardcoded) and flag any hit in dist/ that has no active ledger entry. Advisory/read-only (exit 0); the production-reality GATE — not scan — refuses advance.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runSimScan(paths, {}),
+  },
+  {
+    name: "th_gate_production_reality",
+    description:
+      "Reader: report the production-reality gate (checkProductionReality). FOUR conditions, each a stable error token: simulation_unretired (a non-retired user-visible simulation), production_verify_not_green, tester_record_missing, unledgered_simulation_in_dist. The SAME predicate canAdvanceStage/canUnlockImplementation/checkFinalVerification compose, so a blocked th_stage_advance/th_implementation_unlock returns the IDENTICAL token. Read-only.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (paths) => runGateProductionReality(paths),
+  },
+  // Codebase-Inspector governed write (SG3 P3-A): the read-only inspector agent's
+  // single write path. Hard-pins the target to docs/00-existing-codebase-analysis.md
+  // in the handler (refuses any other `file` before the governed-write chokepoint),
+  // then writes + auto-registers the artifact and returns a content-hash receipt.
+  {
+    name: "th_inspector_write",
+    description:
+      "Codebase-Inspector governed write (brownfield): write `content` to docs/00-existing-codebase-analysis.md and auto-register it as an approved artifact. The target path is FIXED in the handler — an optional `file` must equal that path exactly or the write is refused (inspector_path_pinned). `version` defaults to 1. Returns a `receipts: [{file, hash}]` payload.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        content: stringProp("The full markdown analysis body to write (the agent assembles it; the CLI records + hashes it)."),
+        file: stringProp("Optional explicit target; must equal docs/00-existing-codebase-analysis.md or the write is refused."),
+        version: numberProp("Artifact version recorded on auto-register (default 1)."),
+      },
+      required: ["content"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runInspectorWrite(paths, {
+        content: optString(args, "content"),
+        file: optString(args, "file"),
+        version: optNumber(args, "version"),
+      }),
+  },
+  // SG3 P2-C — live-QA Tester record writer (resolves audit P1: the production-reality
+  // gate's 3rd condition had no writer). Attaches .twinharness/tester-record.json so the
+  // gate's `tester_record_missing` rung can be cleared through the documented workflow.
+  {
+    name: "th_tester_record",
+    description:
+      "Attach the live-QA Tester run record (.twinharness/tester-record.json) that satisfies the production-reality gate's 3rd condition (tester_record_missing). `driver` is required (e.g. playwright|curl|cli-e2e); optional provider (real|sandbox) and evidenceRef (path/URL to raw output) are recorded for the verification report's Tester Evidence. Stamps ranAt. Returns a {file, hash} receipt. Mechanical: it records that a live run EXISTS; it does not judge pass/fail.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        driver: stringProp("Driver/runner the live QA used (playwright | curl | cli-e2e | …). Required, non-empty."),
+        provider: stringProp("Provider tier the live run exercised (real | sandbox)."),
+        evidenceRef: stringProp("Path/URL to the raw live-run output or screenshots."),
+      },
+      required: ["driver"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runTesterRecord(paths, {
+        driver: optString(args, "driver"),
+        provider: optString(args, "provider"),
+        evidenceRef: optString(args, "evidenceRef"),
+      }),
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -1522,6 +1731,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
 export type ToolCategory =
   | "state"
   | "gate"
+  | "simulation"
   | "drift"
   | "build"
   | "routing"
@@ -1539,7 +1749,9 @@ export type ToolCategory =
   | "health"
   | "slices"
   | "interview"
-  | "lifecycle";
+  | "lifecycle"
+  | "template"
+  | "tester";
 
 /** The behavior hints + category attached to a tool. */
 export interface ToolAnnotation {
@@ -1582,6 +1794,12 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_drift_add: wr("drift", { idempotent: false }),
   th_drift_list: ro("drift"),
   th_drift_resolve: wr("drift", { idempotent: false }),
+  // SG3 P2-C — simulation ledger (append/transition) + read/scan + production-reality reader
+  th_sim_add: wr("simulation", { idempotent: false }),
+  th_sim_list: ro("simulation"),
+  th_sim_retire: wr("simulation", { idempotent: false }),
+  th_sim_scan: ro("simulation"),
+  th_gate_production_reality: ro("gate"),
   // build oracles (read-only) + leases (mutating)
   th_build_next_wave: ro("oracle"),
   th_build_claim: wr("build", { idempotent: false }),
@@ -1607,8 +1825,12 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_repo_relevant: ro("repo"),
   th_repo_impact: ro("repo"),
   th_repo_check: ro("repo"),
+  // SG3 P1-B — governed search is a pure read over the persisted map's scope.
+  th_repo_search: ro("repo"),
   // context
   th_context_pack: ro("context"),
+  // SG3 P1-B — batch read under one budget; pure read with receipts.
+  th_context_read: ro("context"),
   // decision ledger (append) + read
   th_decision_detect: ro("decision"),
   th_decision_add: wr("decision", { idempotent: false }),
@@ -1617,9 +1839,14 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // artifacts: register (content-hash record, idempotent) + leases + read
   th_artifact_register: wr("artifact", { idempotent: true }),
   th_artifact_list: ro("artifact"),
+  // SG3 P1-B — bounded named-heading extraction with a content-hash receipt; pure read.
+  th_artifact_section: ro("artifact"),
   th_artifact_claim: wr("artifact", { idempotent: false }),
   th_artifact_release: wr("artifact", { idempotent: false }),
   th_artifact_leases: ro("artifact"),
+  // SG3 P2-A — governed research writer: persists + registers docs/00-research/<topic>.md
+  // (a re-write of the same topic replaces the file + its register entry → idempotent).
+  th_research_write: wr("artifact", { idempotent: true }),
   // collab blackboard
   th_collab_init: wr("collab", { idempotent: true }),
   th_collab_fragment: wr("collab", { idempotent: false, destructive: true }),
@@ -1655,6 +1882,15 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // context budget + handoff
   th_budget_check: ro("context"),
   th_handoff_write: wr("context", { idempotent: true }),
+  // template resolver (read-only; resolves bundled/overridden templates, never writes)
+  th_template_get: ro("template"),
+  th_template_list: ro("template"),
+  // codebase-inspector governed write (writes + registers a fixed artifact;
+  // re-writing the same analysis is an idempotent overwrite + upsert)
+  th_inspector_write: wr("artifact", { idempotent: true }),
+  // SG3 P2-C — live-QA Tester record writer (overwriting the marker with a fresh run is
+  // an idempotent overwrite of the single tester-record.json under the state dir).
+  th_tester_record: wr("tester", { idempotent: true }),
 };
 
 /** The MCP-standard annotation object for a tool (or undefined if unknown). */
@@ -1734,6 +1970,7 @@ export const MCP_EXCLUDED: Readonly<Record<string, string>> = {
   resume: "Resume detector (prints th next); agents call th_next directly.",
   "delegate capsule": "Prints a blank capsule skeleton; a static template, not a coordination tool.",
   "manifest export": "Deterministic run-snapshot CLI surface; agents read th_scorecard / th_state_get.",
+  "manifest tools": "MCP advertises tools natively via ListTools; this is the CLI mirror.",
   preview: "Pre-run pipeline preview (operator orientation); the MCP th_stage_* tools expose stage contracts.",
 };
 
@@ -1771,7 +2008,8 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "tier classify", "tier veto-check", "tier record", "tier features",
   "stage advance", "stage current", "stage describe", "stage list",
   "implementation unlock",
-  "artifact register", "artifact list", "artifact claim", "artifact release", "artifact leases",
+  "artifact register", "artifact list", "artifact section", "artifact claim", "artifact release", "artifact leases",
+  "research write",
   "coverage check", "coverage report",
   "verify add", "verify list", "verify approve", "verify clear", "verify run",
   "build plan", "build next-wave", "build dispatch", "build claim", "build release",
@@ -1782,18 +2020,23 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "stale",
   "slices sync", "slice set-status",
   "drift add", "drift list", "drift resolve",
+  "sim add", "sim list", "sim retire", "sim scan",
+  "tester record",
+  "gate production-reality",
   "collab init", "collab fragment", "collab list", "collab merge",
   "debate add", "debate list", "debate resolve",
   "hook stop-gate", "hook pretool-gate", "hook subagent-stop",
   "migrate", "doctor", "next", "preview", "scorecard", "route",
   "telemetry on", "telemetry off", "telemetry status",
-  "context estimate", "context pack",
+  "context estimate", "context pack", "context read",
   "budget check",
   "handoff write", "handoff verify", "resume",
+  "inspector write",
   "delegate plan", "delegate pack", "delegate capsule", "delegate check",
-  "repo map", "repo check", "repo relevant", "repo impact",
+  "repo map", "repo check", "repo relevant", "repo impact", "repo search",
   "decision detect", "decision add", "decision approve", "decision check", "decision list",
-  "manifest export",
+  "manifest export", "manifest tools",
+  "template get", "template list",
   "version", "help",
 ];
 

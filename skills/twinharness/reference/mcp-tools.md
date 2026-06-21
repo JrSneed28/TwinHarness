@@ -56,7 +56,7 @@ resume the MCP tools.)
   `${CLAUDE_PROJECT_DIR}` to the stable project root, so a call works
   **unchanged from inside a git worktree** — no `--cwd <main-root>` juggling.
   This is exactly what the parallel-build coordination plane needs (see
-  `reference/build-and-verify.md` §21): one shared `.twinharness/`, reached the
+  `skills/twinharness/reference/build-and-verify.md` §21): one shared `.twinharness/`, reached the
   same way from every worktree.
 - **One warm process, not a cold spawn per call.** The server is a single
   long-lived process; each MCP call reuses it instead of paying a fresh
@@ -70,6 +70,19 @@ resume the MCP tools.)
 > added over time and appear automatically in the advertised tool set. If a
 > coordination/observability/state verb you need is not in the table, check the
 > live advertised tools before falling back to the CLI.
+
+**Discovering the live set.** Over MCP, read the advertised tools directly
+(`ListTools` — the host surfaces them as the `mcp__plugin_twinharness_th__*`
+namespace). From a CLI-only context, `th manifest tools` (`--json` for the
+machine-readable list) prints the exact same roster — name + one-line summary —
+as the CLI MIRROR of `ListTools`. Use either to discover, never a hard-coded list.
+
+**The CLI is not a governance bypass.** Shelling `th <verb>` reaches the SAME
+`run*` handler the MCP tool wraps — identical locks, gates, and refusals. The MCP
+adapter is a thin typed front end, not an extra gate: a verb you can run on the
+CLI is a verb the MCP tool runs the same way, and a refusal (`tier_locked`,
+`not_initialized`, a gate rung) is returned by both surfaces alike. Prefer MCP for
+the typed/worktree-safe ergonomics above — not because the CLI skips enforcement.
 
 ## Naming rule
 

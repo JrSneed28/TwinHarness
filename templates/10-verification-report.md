@@ -72,6 +72,25 @@ A gap here is a correctness blocker.>
 th coverage check: <paste result>
 ```
 
+### Tester Evidence
+
+<The live-QA Tester is REQUIRED at final verification (not optional). A green anchored-test suite can pass
+on mocks; this section records that the USER-VISIBLE PRODUCTION PATH was exercised against the real (or
+official sandbox) boundary. Without it, the production-reality gate (`th gate production-reality`) blocks.>
+
+- **Driver / runner used:** <e.g. playwright, curl, cli-e2e — the live runner that exercised the real path>
+- **Provider tier confirmed:** <real | sandbox — the actual boundary the live run hit>
+- **Raw output / screenshots:** <path or link to captured request/response, logs, or screenshots>
+- **Tester record attached:** <`th gate production-reality` reports tester_record present — yes/no>
+
+**Production-reality gate:** <paste `th gate production-reality` result — must be clear: no unretired
+user-visible simulation (`th sim list`), verify green, Tester record attached, no unledgered simulation
+patterns in `dist/`.>
+
+```
+th gate production-reality: <paste result>
+```
+
 ### Human Sign-off
 
 <The human confirms that the passing tests verify the right behavior — i.e., the implementation does what was

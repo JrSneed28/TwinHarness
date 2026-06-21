@@ -31,6 +31,7 @@ import {
   sectionLeaseHolder,
 } from "../core/leases";
 import { structuredLog } from "../core/log";
+import { assertFeatureUnlocked } from "./tier";
 
 export interface ArtifactLeaseOptions {
   /** The section id of the form `<file>#<section>`. */
@@ -90,6 +91,8 @@ function validate(opts: ArtifactLeaseOptions, usage: string):
  * two concurrent claims can't both win the same section.
  */
 export function runArtifactClaim(paths: ProjectPaths, opts: ArtifactLeaseOptions = {}): CommandResult {
+  const locked = assertFeatureUnlocked(paths, "section-lease");
+  if (locked) return locked;
   const v = validate(opts, CLAIM_USAGE);
   if (!v.ok) return v.result;
   const { section, holder } = v;
@@ -121,6 +124,8 @@ export function runArtifactClaim(paths: ProjectPaths, opts: ArtifactLeaseOptions
  * `runBuildRelease`); after it, the section is free for another holder.
  */
 export function runArtifactRelease(paths: ProjectPaths, opts: ArtifactLeaseOptions = {}): CommandResult {
+  const locked = assertFeatureUnlocked(paths, "section-lease");
+  if (locked) return locked;
   const v = validate(opts, RELEASE_USAGE);
   if (!v.ok) return v.result;
   const { section, holder } = v;
@@ -139,6 +144,8 @@ export function runArtifactRelease(paths: ProjectPaths, opts: ArtifactLeaseOptio
  * `th artifact leases` — list the active section leases and their holders.
  */
 export function runArtifactLeases(paths: ProjectPaths): CommandResult {
+  const locked = assertFeatureUnlocked(paths, "section-lease");
+  if (locked) return locked;
   const sr = requireState(paths);
   if (sr.result) return sr.result;
 

@@ -68,6 +68,7 @@ exports.checkCoverage = checkCoverage;
 exports.implementationRequiresSlices = implementationRequiresSlices;
 exports.checkImplementationSettled = checkImplementationSettled;
 exports.checkFinalVerification = checkFinalVerification;
+exports.checkProductionReality = checkProductionReality;
 exports.interviewRequired = interviewRequired;
 exports.checkInterview = checkInterview;
 exports.canAdvanceStage = canAdvanceStage;
@@ -83,6 +84,9 @@ const verify_1 = require("./verify");
 const decisions_1 = require("./decisions");
 const repo_1 = require("../commands/repo");
 const interview_1 = require("../commands/interview");
+const sim_1 = require("../commands/sim");
+const simulation_1 = require("./simulation");
+const tester_1 = require("./tester");
 const PASS = { ok: true };
 // ---------------------------------------------------------------------------
 // Global rungs (stage-independent) — checked before any stage-specific work, in
@@ -320,6 +324,107 @@ function checkFinalVerification(paths, state) {
                 : { ok: false, error: "report_not_produced", detail: { produces: produced } };
         }
     }
+    // SG3 P2-C (enforce) — the production-reality rung: at final-verification, a run may
+    // not be certified complete while a user-visible production path depends on unresolved
+    // simulation / verify is red / no Tester record / dist carries unledgered simulation.
+    const pr = checkProductionReality(paths, state);
+    if (!pr.ok)
+        return pr;
+    return PASS;
+}
+/**
+ * Rung m (NEW — SG3 P2-C, audit C-05..C-08) — the PRODUCTION-REALITY rung. A run may
+ * not be certified complete while its user-visible production path still depends on
+ * unresolved simulated behavior. FOUR sub-checks, each a DISTINCT stable error token
+ * (the order is the short-circuit order; the first failing one is returned):
+ *
+ *   1. `simulation_unretired`         — a non-retired simulation ledger entry maps to
+ *                                       a user-visible path (`blocksProductionReality`).
+ *   2. `production_verify_not_green`  — the last `th verify run` is not green (or a
+ *                                       configured suite was never run / the config is
+ *                                       corrupt) — production-targeted commands must pass.
+ *   3. `tester_record_missing`        — no live-QA Tester run record is attached
+ *                                       (`tester.ts` — the audit's mandatory live QA).
+ *   4. `unledgered_simulation_in_dist`— `dist/` carries simulation patterns
+ *                                       (mock/fake/stub/…) with no active ledger entry.
+ *
+ * This is the mechanical form of the audit's required invariant — a COMPLETION gate.
+ * It is now COMPOSED into `checkFinalVerification` (and, via it, `canAdvanceStage`'s
+ * final-stage branch) plus `canUnlockImplementation`. Because production reality is a
+ * CERTIFY-COMPLETION condition, the rung ONLY enforces at the completion boundary
+ * (`final-verification`): at any earlier stage there is no built `dist/` and no Tester
+ * record yet, so it returns PASS — exactly the stage-aware shape `checkInterview` uses
+ * to gate only the front of the pipeline. This keeps the composed if-lines a no-op for
+ * every non-final run (no spurious obligation-ladder churn) while making the
+ * final-verification gate refuse a fake-backed "complete".
+ *
+ * `th gate production-reality` is a PURE READER of this predicate; the MCP gate tools
+ * (`th_stage_advance`/`th_implementation_unlock`) inherit it FREE through the composed
+ * ladder, so a blocked `th next` and a blocked MCP gate tool return the IDENTICAL token.
+ *
+ * A corrupt simulation ledger fails CLOSED with `simulation_ledger_corrupt` (the same
+ * fail-closed posture `checkFinalVerification` takes on a corrupt verify config).
+ */
+function checkProductionReality(paths, state) {
+    // Stage-aware: production reality is a CERTIFY-COMPLETION condition, so it only
+    // enforces at the completion boundary (final-verification). Earlier stages have no
+    // built dist/ / Tester record yet — gating them would be nonsensical and would red
+    // every in-flight run's obligation ladder. Mirrors checkInterview's front-gate shape.
+    if (!(0, stages_1.isFinalVerification)(state.current_stage))
+        return PASS;
+    // 1. A non-retired simulation entry on a user-visible production path blocks.
+    let entries;
+    try {
+        entries = (0, sim_1.readSimulationLedger)(paths);
+    }
+    catch (e) {
+        if (e instanceof sim_1.SimulationLedgerCorruptError) {
+            return { ok: false, error: "simulation_ledger_corrupt", detail: {} };
+        }
+        throw e;
+    }
+    const blocking = entries.filter(simulation_1.blocksProductionReality);
+    if (blocking.length > 0) {
+        return {
+            ok: false,
+            error: "simulation_unretired",
+            detail: { ids: blocking.map((e) => e.id), classifications: blocking.map((e) => e.classification) },
+        };
+    }
+    // 2. The verify suite must be green against production-targeted commands. Mirror
+    // checkFinalVerification's fail-closed reading: a corrupt config, a configured-but-
+    // never-run suite, or a red report each blocks (one stable token).
+    const verifyLoaded = (0, verify_1.loadVerifyConfig)(paths);
+    if (verifyLoaded.status === "corrupt") {
+        return { ok: false, error: "production_verify_not_green", detail: { reason: "config_corrupt" } };
+    }
+    const verifyCfg = verifyLoaded.config;
+    const report = (0, verify_1.readVerifyReport)(paths);
+    if (verifyCfg.commands.length > 0 && !report) {
+        return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
+    }
+    if (report && !report.ok) {
+        const failed = report.results.filter((x) => !x.ok).length;
+        return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
+    }
+    // 3. A live-QA Tester run record must be attached (audit C-08).
+    if (!(0, tester_1.testerRecordPresent)(paths)) {
+        return { ok: false, error: "tester_record_missing", detail: {} };
+    }
+    // 4. dist/ must not carry unledgered simulation patterns. A dist hit is "ledgered"
+    // only when an ACTIVE simulation entry DECLARES that specific hit — matched
+    // PER-DEPENDENCY (audit P1), so a single unrelated, non-user-visible entry no longer
+    // blanket-suppresses every dist hit. The SAME `computeUnledgeredDistHits` join backs
+    // `th sim scan`, so scan and gate agree. Capped walk (never throws).
+    const scan = (0, sim_1.scanForSimulationHits)(paths);
+    const unledgered = (0, sim_1.computeUnledgeredDistHits)(entries, scan.distHits);
+    if (unledgered.length > 0) {
+        return {
+            ok: false,
+            error: "unledgered_simulation_in_dist",
+            detail: { hits: unledgered.slice(0, 20), total: unledgered.length },
+        };
+    }
     return PASS;
 }
 // ---------------------------------------------------------------------------
@@ -395,6 +500,11 @@ function canAdvanceStage(paths, state) {
         return r;
     const current = (0, stages_1.canonicalizeStage)(state.current_stage);
     if ((0, stages_1.isFinalVerification)(current)) {
+        // SG3 P2-C (enforce) — checkFinalVerification composes the production-reality rung
+        // as its LAST sub-rung (after slices/verify/coverage/report), so canAdvanceStage's
+        // final branch inherits it in the SAME order `th next` renders it. Inserting an
+        // explicit check HERE would put production-reality AHEAD of coverage and diverge
+        // from the oracle's order — so the rung lives inside checkFinalVerification only.
         return checkFinalVerification(paths, state);
     }
     if (!(r = checkGoverningArtifact(paths, state)).ok)
@@ -424,6 +534,12 @@ function canUnlockImplementation(paths, state) {
     const cov = checkCoverage(paths);
     if (!cov.ok)
         return cov;
+    // SG3 P2-C (enforce) — production-reality is part of the unlock composition too
+    // (stage-aware: a no-op until final-verification, so it never blocks the normal
+    // implementation-planning unlock; it holds if unlock is attempted at the final stage).
+    const pr = checkProductionReality(paths, state);
+    if (!pr.ok)
+        return pr;
     const ordinal = stageOrdinal(state.current_stage);
     if (ordinal < 0 || ordinal < IMPLEMENTATION_PLANNING_ORDINAL) {
         return {

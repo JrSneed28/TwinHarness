@@ -54,7 +54,7 @@ never hand-edit `state.json`, never eyeball traceability, never "remember" a has
 
 The state, drift, build-lease, route, decision, repo, context, and delegate verbs below have typed
 `mcp__plugin_twinharness_th__*` equivalents — invoke them via those MCP tools per
-`reference/mcp-tools.md`; use the CLI form only for verbs without an MCP tool.
+`skills/twinharness/reference/mcp-tools.md`; use the CLI form only for verbs without an MCP tool.
 
 > Also available (all implemented): `th artifact register|list` (accepts a directory, e.g. `docs/05-adrs/`),
 > `th anchors scan`, `th trace render`, `th coverage check|report`, `th verify add|list|clear|run`,
@@ -105,7 +105,7 @@ Brownfield shifts three things: Slice 0 becomes a characterization test around t
 a fresh walking skeleton), the architecture is an overlay on existing components (new vs. reused), and
 the Builder reuses existing code that already satisfies a REQ rather than reimplementing it. Existing
 auth/money/migrations in touched code are §5 blast-radius. See the *Brownfield adaptations* notes in
-`reference/pipeline-stages.md` and `reference/build-and-verify.md`.
+`skills/twinharness/reference/pipeline-stages.md` and `skills/twinharness/reference/build-and-verify.md`.
 
 ### 1.5. Interview gate (`--interview`)
 

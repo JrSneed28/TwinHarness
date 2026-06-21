@@ -81,6 +81,27 @@ describe("agent-prompt lint: required sections", () => {
   }
 });
 
+describe("agent-prompt lint: no bare templates/ references (C-10)", () => {
+  // Templates ship ONLY at `${pluginRoot}/templates/`; `th init` does not copy them
+  // into a project, and a Builder worktree has none — so a bare `templates/X` citation
+  // in a prompt silently misresolves against the agent cwd. Every template reference
+  // must instead route through the deterministic resolver `th template get <name>`
+  // (which knows the project-override → plugin-bundled precedence). This guard bans the
+  // bare `templates/` directory token across `agents/*.md` so the misresolution cannot
+  // creep back in. (The resolver invocation `th template get <name>` is fine — it
+  // contains "template", never the bare `templates/` path token.)
+  for (const file of agentFiles()) {
+    it(`${file} has no bare \`templates/\` path reference (resolve via \`th template get\`)`, () => {
+      const content = fs.readFileSync(path.join(AGENTS_DIR, file), "utf8");
+      const hits = content.split(/\r?\n/).filter((line) => line.includes("templates/"));
+      expect(
+        hits,
+        `${file} cites a bare templates/ path — replace it with "resolve via \`th template get <name>\`":\n${hits.join("\n")}`,
+      ).toEqual([]);
+    });
+  }
+});
+
 describe("agent-prompt lint: measured token counts (reporting)", () => {
   it("every agent file reports a finite, positive token estimate", () => {
     const measured = agentFiles().map((file) => {
@@ -94,4 +115,96 @@ describe("agent-prompt lint: measured token counts (reporting)", () => {
       expect(m.tokens).toBeLessThanOrEqual(AGENT_TOKEN_BUDGET);
     }
   });
+});
+
+// SG3 P2-B1 (C-03): ux-ui-designer frontmatter must NOT disallow WebSearch/WebFetch
+// (Researcher remains the default visual-research owner; Designer holds these for
+// targeted in-context lookups during Stage 4b only). Token budget still enforced.
+describe("agent-prompt lint: ux-ui-designer web-research grant (SG3 C-03)", () => {
+  const UX_UI_FILE = "ux-ui-designer.md";
+
+  it("ux-ui-designer.md frontmatter does not disallow WebSearch", () => {
+    const content = fs.readFileSync(path.join(AGENTS_DIR, UX_UI_FILE), "utf8");
+    const fm = frontmatter(content);
+    expect(fm, "must have frontmatter").not.toBeNull();
+    // disallowedTools must not contain WebSearch (whole-word match)
+    expect(fm!).not.toMatch(/\bWebSearch\b/);
+  });
+
+  it("ux-ui-designer.md frontmatter does not disallow WebFetch", () => {
+    const content = fs.readFileSync(path.join(AGENTS_DIR, UX_UI_FILE), "utf8");
+    const fm = frontmatter(content);
+    expect(fm, "must have frontmatter").not.toBeNull();
+    // disallowedTools must not contain WebFetch (whole-word match)
+    expect(fm!).not.toMatch(/\bWebFetch\b/);
+  });
+
+  it("ux-ui-designer.md still passes the 6000-token budget after the grant", () => {
+    const content = fs.readFileSync(path.join(AGENTS_DIR, UX_UI_FILE), "utf8");
+    const tokens = estimateTokens(content);
+    expect(tokens).toBeGreaterThan(0);
+    expect(tokens).toBeLessThanOrEqual(AGENT_TOKEN_BUDGET);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * P1-D (C-09/C-16) — canonical reference-citation guard.              *
+ *                                                                     *
+ * On-demand playbook detail lives under `skills/twinharness/reference/ *
+ * <name>.md`. A prompt that cites it with a BARE ` reference/<name>`   *
+ * (no `skills/twinharness/` prefix) is not a resolvable path from a    *
+ * worktree or the plugin root — it silently misresolves. This guard    *
+ * bans the bare token across the whole prompt surface (agents /        *
+ * commands / skills), the same files the citations were normalized in. *
+ * The canonical form is `skills/twinharness/reference/<name>.md`.       *
+ * ------------------------------------------------------------------ */
+
+/** The prompt-surface dirs (relative to repo root) the citation guards scan. */
+const PROMPT_DIRS = ["agents", "commands", path.join("skills", "twinharness")] as const;
+
+/** Recursively collect every `*.md` file under `dir` (absolute paths). */
+function markdownFilesUnder(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...markdownFilesUnder(full));
+    else if (entry.isFile() && entry.name.endsWith(".md")) out.push(full);
+  }
+  return out;
+}
+
+/** Every prompt-surface markdown file, sorted, repo-root-relative-labelled. */
+function promptSurfaceFiles(): Array<{ abs: string; rel: string }> {
+  const root = path.resolve(__dirname, "..");
+  const files: Array<{ abs: string; rel: string }> = [];
+  for (const d of PROMPT_DIRS) {
+    for (const abs of markdownFilesUnder(path.join(root, d))) {
+      files.push({ abs, rel: path.relative(root, abs).split(path.sep).join("/") });
+    }
+  }
+  return files.sort((a, b) => a.rel.localeCompare(b.rel));
+}
+
+describe("agent-prompt lint: canonical reference/ citations (no bare token)", () => {
+  // A bare ` reference/<name>` citation — a space (or backtick/paren) immediately
+  // before `reference/`, NOT preceded by the canonical `skills/twinharness/` path.
+  // The negative lookbehind admits the canonical `skills/twinharness/reference/`
+  // and the `${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference/` forms.
+  const BARE_REFERENCE_RE = /(?<!twinharness\/)\breference\//;
+
+  for (const { abs, rel } of promptSurfaceFiles()) {
+    it(`${rel} cites reference docs canonically (skills/twinharness/reference/<name>.md)`, () => {
+      const content = fs.readFileSync(abs, "utf8");
+      const offenders = content
+        .split(/\r?\n/)
+        .map((line, i) => ({ line, n: i + 1 }))
+        .filter(({ line }) => BARE_REFERENCE_RE.test(line))
+        .map(({ line, n }) => `${rel}:${n}: ${line.trim()}`);
+      expect(
+        offenders,
+        `bare \`reference/\` citation(s) — use the canonical \`skills/twinharness/reference/<name>.md\`:\n${offenders.join("\n")}`,
+      ).toEqual([]);
+    });
+  }
 });

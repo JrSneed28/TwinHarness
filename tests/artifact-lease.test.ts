@@ -10,6 +10,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
+import { runStateSet } from "../src/commands/state";
 import {
   runArtifactClaim,
   runArtifactRelease,
@@ -20,10 +21,22 @@ import { activeSectionLeases, isSectionLeased } from "../src/core/leases";
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
 
+/**
+ * Init a fresh project AND unlock the advanced-coordination tier. Section leases
+ * are an advanced feature (SG3 P1-C / C-14): the shared CLI handlers gate them at
+ * tier <T2 with no parallel authorship, identically to the MCP runtime. These are
+ * DOMAIN tests for the lease logic, so they record T2 in setup to reach it — the
+ * tier gate itself is pinned separately by cli-tier-gate-parity.test.ts.
+ */
+function initUnlocked(t: TempProject): void {
+  runInit(t.paths, {});
+  runStateSet(t.paths, "tier", "T2", { emergency: true });
+}
+
 describe("REQ-PCO-041: section-level artifact leases — different sections co-held, same section serialized", () => {
   it("two DIFFERENT sections of the same file can be co-held by different holders", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
 
     const a = runArtifactClaim(tp.paths, { section: "docs/spec.md#intro", holder: "agent-A" });
     const b = runArtifactClaim(tp.paths, { section: "docs/spec.md#api", holder: "agent-B" });
@@ -39,7 +52,7 @@ describe("REQ-PCO-041: section-level artifact leases — different sections co-h
 
   it("the SAME section cannot be double-claimed by a different holder (collision guard)", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
 
     expect(runArtifactClaim(tp.paths, { section: "docs/spec.md#intro", holder: "agent-A" }).ok).toBe(true);
     const conflict = runArtifactClaim(tp.paths, { section: "docs/spec.md#intro", holder: "agent-B" });
@@ -55,7 +68,7 @@ describe("REQ-PCO-041: section-level artifact leases — different sections co-h
 
   it("re-claim by the SAME holder is allowed (not a collision with itself)", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
 
     expect(runArtifactClaim(tp.paths, { section: "docs/spec.md#intro", holder: "agent-A" }).ok).toBe(true);
     expect(runArtifactClaim(tp.paths, { section: "docs/spec.md#intro", holder: "agent-A" }).ok).toBe(true);
@@ -64,7 +77,7 @@ describe("REQ-PCO-041: section-level artifact leases — different sections co-h
 
   it("release frees the section so another holder can claim it", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
 
     expect(runArtifactClaim(tp.paths, { section: "docs/spec.md#intro", holder: "agent-A" }).ok).toBe(true);
     expect(runArtifactRelease(tp.paths, { section: "docs/spec.md#intro", holder: "agent-A" }).ok).toBe(true);
@@ -78,7 +91,7 @@ describe("REQ-PCO-041: section-level artifact leases — different sections co-h
 
   it("th artifact leases lists active section holders; empty when none", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
 
     expect((runArtifactLeases(tp.paths).data?.leases as unknown[]).length).toBe(0);
 
@@ -96,7 +109,7 @@ describe("REQ-PCO-041: section-level artifact leases — different sections co-h
 describe("REQ-PCO-041: section id validation", () => {
   it("claim rejects a malformed section id (missing <file>#<section> shape)", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
 
     const noHash = runArtifactClaim(tp.paths, { section: "docs/spec.md", holder: "agent-A" });
     expect(noHash.ok).toBe(false);
@@ -113,7 +126,7 @@ describe("REQ-PCO-041: section id validation", () => {
 
   it("claim and release require both section and holder", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
 
     expect(runArtifactClaim(tp.paths, { section: "docs/spec.md#intro" }).ok).toBe(false);
     expect(runArtifactClaim(tp.paths, { holder: "agent-A" }).ok).toBe(false);
@@ -124,7 +137,7 @@ describe("REQ-PCO-041: section id validation", () => {
 describe("R-11: the shared lease validator rejects an absolute / parent-escaping file part (parity with th_artifact_register)", () => {
   it("claim REJECTS an absolute file part with a path_escape error", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
 
     const abs = runArtifactClaim(tp.paths, { section: "/etc/passwd#x", holder: "agent-A" });
     expect(abs.ok).toBe(false);
@@ -136,7 +149,7 @@ describe("R-11: the shared lease validator rejects an absolute / parent-escaping
 
   it("claim REJECTS a `..` segment in the file part (POSIX or Windows separator)", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
 
     const posix = runArtifactClaim(tp.paths, { section: "../../secret#s", holder: "agent-A" });
     expect(posix.ok).toBe(false);
@@ -151,7 +164,7 @@ describe("R-11: the shared lease validator rejects an absolute / parent-escaping
 
   it("release ALSO rejects an absolute / `..` file part (the validator is shared)", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
 
     expect(runArtifactRelease(tp.paths, { section: "/etc/passwd#x", holder: "agent-A" }).data?.error).toBe("path_escape");
     expect(runArtifactRelease(tp.paths, { section: "..\\x#s", holder: "agent-A" }).data?.error).toBe("path_escape");
@@ -159,7 +172,7 @@ describe("R-11: the shared lease validator rejects an absolute / parent-escaping
 
   it("a legitimate in-repo section id (docs/x.md#s) still claims successfully", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
 
     const ok = runArtifactClaim(tp.paths, { section: "docs/x.md#s", holder: "agent-A" });
     expect(ok.ok).toBe(true);
@@ -170,7 +183,7 @@ describe("R-11: the shared lease validator rejects an absolute / parent-escaping
 describe("R-22: the lease validator rejects CROSS-PLATFORM absolute file parts (host-native path.isAbsolute missed these on POSIX)", () => {
   it("claim REJECTS a Windows drive-absolute file part on ANY host (the R-11 gap)", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
 
     // On a POSIX host the OLD `path.isAbsolute("C:\\Windows\\x")` was false and the
     // `..`-split missed it too → it slipped through. The shared cross-platform
@@ -188,7 +201,7 @@ describe("R-22: the lease validator rejects CROSS-PLATFORM absolute file parts (
 
   it("claim REJECTS a UNC file part on ANY host", () => {
     tp = makeTempProject();
-    runInit(tp.paths, {});
+    initUnlocked(tp);
 
     const unc = runArtifactClaim(tp.paths, { section: "\\\\server\\share#sec", holder: "agent-A" });
     expect(unc.ok).toBe(false);
@@ -197,25 +210,32 @@ describe("R-22: the lease validator rejects CROSS-PLATFORM absolute file parts (
   });
 });
 
-describe("REQ-PCO-041: commands return NOT_INIT on an uninitialized project", () => {
-  it("claim returns not_initialized when state.json is absent", () => {
+describe("REQ-PCO-041 / SG3 P1-C: an uninitialized project is tier_locked (the gate precedes the not-init check)", () => {
+  // Section leases are an advanced feature OFF by default (C-14). On an absent
+  // state.json the shared gate (`assertFeatureUnlocked`) reads the conservative
+  // default — unclassified tier, no slices — and refuses with `tier_locked` BEFORE
+  // the handler reaches its own not-init guard. This is the intended C-14 contract:
+  // both surfaces refuse identically (cli-tier-gate-parity.test.ts pins that an
+  // uninitialized project reads as locked via the CLI handler too, matching the MCP
+  // runtime), so an uninitialized project never silently exposes the lease plane.
+  it("claim refuses tier_locked when state.json is absent (advanced feature off, gate first)", () => {
     tp = makeTempProject();
     const res = runArtifactClaim(tp.paths, { section: "docs/spec.md#intro", holder: "agent-A" });
     expect(res.ok).toBe(false);
-    expect(res.data?.error).toBe("not_initialized");
+    expect(res.data?.error).toBe("tier_locked");
   });
 
-  it("release returns not_initialized when state.json is absent", () => {
+  it("release refuses tier_locked when state.json is absent (advanced feature off, gate first)", () => {
     tp = makeTempProject();
     const res = runArtifactRelease(tp.paths, { section: "docs/spec.md#intro", holder: "agent-A" });
     expect(res.ok).toBe(false);
-    expect(res.data?.error).toBe("not_initialized");
+    expect(res.data?.error).toBe("tier_locked");
   });
 
-  it("leases returns not_initialized when state.json is absent", () => {
+  it("leases refuses tier_locked when state.json is absent (advanced feature off, gate first)", () => {
     tp = makeTempProject();
     const res = runArtifactLeases(tp.paths);
     expect(res.ok).toBe(false);
-    expect(res.data?.error).toBe("not_initialized");
+    expect(res.data?.error).toBe("tier_locked");
   });
 });

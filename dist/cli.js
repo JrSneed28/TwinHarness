@@ -47,6 +47,7 @@ const revise_1 = require("./commands/revise");
 const tier_1 = require("./commands/tier");
 const artifact_1 = require("./commands/artifact");
 const artifact_lease_1 = require("./commands/artifact-lease");
+const research_1 = require("./commands/research");
 const collab_1 = require("./commands/collab");
 const debate_1 = require("./commands/debate");
 const coverage_1 = require("./commands/coverage");
@@ -66,14 +67,20 @@ const context_1 = require("./commands/context");
 const stage_1 = require("./commands/stage");
 const budget_1 = require("./commands/budget");
 const handoff_1 = require("./commands/handoff");
+const inspector_1 = require("./commands/inspector");
+const tester_1 = require("./commands/tester");
 const manifest_1 = require("./commands/manifest");
 const preview_1 = require("./commands/preview");
 const scorecard_1 = require("./commands/scorecard");
 const telemetry_1 = require("./commands/telemetry");
 const route_1 = require("./commands/route");
 const delegate_1 = require("./commands/delegate");
+const delegation_scope_1 = require("./core/delegation-scope");
 const repo_1 = require("./commands/repo");
 const decision_1 = require("./commands/decision");
+const template_1 = require("./commands/template");
+const sim_1 = require("./commands/sim");
+const gate_1 = require("./commands/gate");
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
@@ -95,6 +102,7 @@ Usage:
   th implementation unlock [--lock] Typed gate command: unlock implementation when the gate ladder clears (--lock re-locks)
   th artifact register <file> --version <n>  Content-hash a file and record it in approved_artifacts
   th artifact list                  List recorded approved artifacts (file, version, hash)
+  th research write --topic <t> --markdown <md> [--version <n>]  Persist + register research at docs/00-research/<topic>.md (governed; --version bumps a re-author of an already-registered topic)
   th coverage check [--reqs F] [--plan F] [--tests D] [--scope F]
                                     Verify every (MVP) REQ-ID maps to ≥1 slice and ≥1 test (hard gate)
   th coverage report [--reqs F] [--plan F] [--tests D] [--scope F] [--code D]
@@ -128,6 +136,8 @@ Usage:
   th artifact claim <file#section> --holder <id>  Take a section-level artifact lease (REQ-PCO-041; collision guard for intra-artifact fan-out)
   th artifact release <file#section> --holder <id>  Release a section-level artifact lease
   th artifact leases                List active section-level artifact leases
+  th artifact section --file <path> --section <heading> [--max-tokens <N>]
+                                    Extract a named heading's body under a token budget, with a content-hash read receipt (C-12)
   th collab init --stage <s>        Initialize a blackboard stage dir (REQ-PCO-040)
   th collab fragment --stage <s> --round <r> --name <n> --text <t> [--force]  Drop a fragment file on the blackboard (refuses to overwrite without --force)
   th collab list --stage <s> [--round <r>]  List blackboard fragments
@@ -150,15 +160,21 @@ Usage:
   th context estimate               Approximate the prompt-surface token cost (flags oversized files)
   th context pack [--slice <ID>|--req <REQ-ID>|--file <path>] [--max-tokens <N>]
                                     Assemble the §9 handoff bundle (artifact Summary blocks + slice/REQ/file framing; --max-tokens bounds the pack)
+  th context read --files-list <a,b,c> [--max-tokens <N>]
+                                    Batch-read files under ONE token budget with deterministic truncation + per-file read receipts (C-11)
   th budget check [--max <k>] [--files-read N] [--slices-built N] [--tool-calls N] [--artifacts N]
                                     Deterministic context-budget estimate from agent-supplied proxy counts → { estTokens, pct, verdict } (--max in thousands; tier-aware default when omitted)
   th handoff write                  Assemble .twinharness/HANDOFF.md (run state + next action + artifact Summary blocks + open questions + "don't re-read docs/" directive)
   th handoff verify                 Confirm a resumed run matches HANDOFF (current_stage/slice + approved-artifact hashes still valid); pass/fail
   th resume                         Detect .twinharness/HANDOFF.md and print the next mechanical action (from th next)
+  th inspector write --content <md> [--version <n>]
+                                    Codebase-Inspector governed write: emit + auto-register the source-anchored brownfield analysis at docs/00-existing-codebase-analysis.md (path is fixed; refuses any other target)
+  th tester record --driver <d> [--provider real|sandbox] [--evidence-ref <p>]
+                                    Attach the live-QA Tester record (.twinharness/tester-record.json) that satisfies the production-reality gate's Tester condition
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
-  th delegate pack [--agent A] [--slice ID] [--task T] [--intent I]
-                                    Assemble a bounded child-agent handoff (reuses context pack for a slice)
+  th delegate pack [--agent A] [--slice ID] [--task T] [--intent I] [--allowed-files <a,b,c>]
+                                    Assemble a bounded child-agent handoff (reuses context pack for a slice; --allowed-files emits the write-gate-enforced scope, C-11)
   th delegate capsule               Print the blank Delegation Capsule skeleton (the strict return format)
   th delegate check --capsule <path>  Validate a returned capsule has every required section (presence only)
   th repo map [--write|--no-write] [--force] [--format <summary|json|md>] [--max-files <N>] [--max-bytes <N>]
@@ -170,6 +186,8 @@ Usage:
                                     Precision context: read-first/related/tests/risks for a selector (reads persisted map)
   th repo impact (--file <path> | --component <name|path>) [--format <file|json>]
                                     Pre-edit blast-radius: impacted components, tests, features, risk flags (reads persisted map; no state read)
+  th repo search --pattern <p> --kind <literal|regex|symbol|req|artifact|template> [--maxResults <N>]
+                                    Governed repo search over the map's scope: path:line citations under a cap, each with a SHA-256 read receipt (C-11)
   th decision detect                Surface advisory decision candidates from ADRs/drift-log/scope/blast-radius flags (read-only; exit 0)
   th decision add --title <t> --rationale <r> [--links a,b] [--proposer <n>]
                                     Record a proposed decision (mints DECISION-NNN; never auto-approves)
@@ -177,8 +195,17 @@ Usage:
                                     HUMAN-ONLY: interactive-TTY-gated transition (proposed→approved/rejected; approved→superseded). Never an MCP tool.
   th decision check                 Fail (exit 6) when an unapproved decision gates the current stage; else exit 0
   th decision list                  List the decision set (ids/titles/statuses/links/audit), sorted (exit 0; non-zero if the hash chain is broken)
+  th sim add --classification <Real|Sandbox|Emulated|Mocked|Stubbed|Hardcoded> [--replaces ...] [--intro-slice ...] [--retire-slice ...] [--owner ...] [--user-visible]
+                                    Append a simulation-ledger entry (.twinharness/simulation-ledger.json); a user-visible simulated entry BLOCKS the production-reality gate until retired
+  th sim list                       List simulation-ledger entries + the ids that block production-reality
+  th sim retire <SIM-NNN> [--retire-slice ...]  Mark a simulation entry retired (status transition; entries are never deleted)
+  th sim scan                       Grep dist/+tests for unledgered simulation patterns (mock|fake|stub|fixture|placeholder|demo|TODO|canned|hardcoded); advisory (exit 0)
+  th gate production-reality        Reader: report the production-reality gate (no unretired user-visible simulation, verify green, Tester record, no unledgered dist/ patterns)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
+  th manifest tools                 List the advertised MCP tool set (name + summary); CLI mirror of ListTools; --json for full
+  th template get <name>            Resolve a template by bare name (e.g. task-file or task-file.md): project override (.twinharness/templates/) → plugin-bundled (templates/) → structured template_not_found; --json returns path+content+source
+  th template list                  List resolvable templates across both layers (deduped; marks project overrides that shadow a bundled template)
   th version                        Print the CLI version
   th help                           Show this help
 
@@ -187,6 +214,8 @@ Global flags:
   --cwd <dir>       Operate against <dir> instead of the current directory
   --cap <n>         (revise) Override the revise-loop cap (default 3)
   --version <n>     (artifact register) Artifact version (positive integer)
+  --topic <t>       (research write, debate add) Research topic slug (file stem under docs/00-research/) / debate topic
+  --markdown <md>   (research write) Markdown body to persist under docs/00-research/<topic>.md
   --reqs <file>     (coverage) Requirements file (default docs/01-requirements.md)
   --plan <file>     (coverage, slices sync) Implementation-plan file (default docs/09-implementation-plan.md)
   --tests <dir>     (coverage) Tests directory (default tests)
@@ -239,6 +268,11 @@ Global flags:
   --query <kw>      (repo relevant) Keyword/phrase selector (exact one of --slice/--req/--file/--query required)
   --maxResults <n>  (repo relevant) Cap on combined emitted items (default 20; ≤0 = default)
   --component <n>   (repo impact) Component name or path selector (exact one of --file/--component required)
+  --pattern <p>     (repo search) The pattern to search for (required)
+  --kind <k>        (repo search) literal (default) | regex | symbol | req | artifact | template
+  --section <h>     (artifact section) The heading name whose body to extract (also: artifact claim/release section id)
+  --files-list <l>  (context read) Comma-separated file list to batch-read under one budget
+  --allowed-files <l>  (delegate pack) Comma-separated write scope emitted as allowedFiles[] and enforced by the write-gate (C-11)
   --title <t>       (decision add) Decision title (required)
   --rationale <r>   (decision add) Decision rationale (required)
   --links <a,b>     (decision add) Comma-separated REQ-IDs / ADR-ids / stage ids the decision concerns
@@ -251,7 +285,16 @@ Global flags:
   --delivery-mode <m>  (init) Set delivery_mode once at creation: code (default) | no-code | documentation-only
   --has-ui / --no-ui   (init) Set has_ui at creation (default absent ⇒ true; --no-ui drops the UX/UI stages)
   --interview-required / --no-interview-required  (init) Force the clarity-interview gate on/off (default absent ⇒ computed from tier)
-  --interview-cutoff <0..1>  (init) Set the interview-readiness confidence cutoff at creation`;
+  --interview-cutoff <0..1>  (init) Set the interview-readiness confidence cutoff at creation
+  --classification <C>  (sim add) Real | Sandbox | Emulated | Mocked | Stubbed | Hardcoded (required)
+  --replaces <s>    (sim add) What real dependency this simulation stands in for
+  --intro-slice <s> (sim add) Slice/task that introduced the simulation
+  --retire-slice <s> (sim add / sim retire) Slice/owner that will (or did) replace it with reality
+  --owner <s>       (sim add) Who owns retiring the simulation
+  --user-visible    (sim add) A user-visible production path depends on this (BLOCKS production-reality until retired)
+  --driver <d>      (tester record) Driver/runner the live QA used (playwright | curl | cli-e2e | …) (required)
+  --provider <p>    (tester record) Provider tier the live run exercised (real | sandbox)
+  --evidence-ref <p>  (tester record) Path/URL to the raw live-run output or screenshots`;
 /** Boolean flags (presence = true). */
 const BOOLEAN_FLAGS = {
     "--json": "json",
@@ -283,6 +326,8 @@ const BOOLEAN_FLAGS = {
     "--lock": "lock",
     "--emergency": "emergency",
     "--read-only": "readOnly",
+    // SG3 P2-C — a user-visible simulation entry is what the production-reality gate blocks on.
+    "--user-visible": "userVisible",
 };
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
 const STRING_FLAGS = {
@@ -330,15 +375,32 @@ const STRING_FLAGS = {
     "--round": "round",
     "--name": "name",
     "--text": "text",
+    "--content": "content",
     "--section": "section",
     "--holder": "holder",
     "--topic": "topic",
+    "--markdown": "markdown",
     "--positions": "positions",
     "--id": "id",
     "--resolution": "resolution",
     "--corpus-root": "corpusRoot",
     "--output-root": "outputRoot",
     "--scenario-root": "scenarioRoot",
+    // SG3 P1-B (C-11/C-12) — governed search + bounded reads + delegate scope.
+    "--pattern": "pattern",
+    "--kind": "kind",
+    "--files-list": "filesList",
+    "--allowed-files": "allowedFiles",
+    // SG3 P2-C — simulation-ledger entry fields.
+    "--classification": "classification",
+    "--replaces": "replaces",
+    "--intro-slice": "introSlice",
+    "--retire-slice": "retireSlice",
+    "--owner": "owner",
+    // SG3 P2-C — live-QA Tester record fields (`th tester record`).
+    "--driver": "driver",
+    "--provider": "provider",
+    "--evidence-ref": "evidenceRef",
 };
 /** Flags that consume a numeric value. */
 const NUMBER_FLAGS = {
@@ -415,6 +477,7 @@ function parseArgs(argv) {
         lock: false,
         emergency: false,
         readOnly: false,
+        userVisible: false,
     };
     const positionals = [];
     const unknownFlags = [];
@@ -573,6 +636,29 @@ function dispatch(parsed) {
                 default:
                     return (0, output_1.failure)({ human: `unknown 'handoff' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
+        case "inspector":
+            switch (sub) {
+                case "write":
+                    return (0, inspector_1.runInspectorWrite)(paths, {
+                        content: parsed.flags.content,
+                        file: parsed.flags.file,
+                        version: parsed.flags.version,
+                    });
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'inspector' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        // SG3 P2-C — attach the live-QA Tester record the production-reality gate requires.
+        case "tester":
+            switch (sub) {
+                case "record":
+                    return (0, tester_1.runTesterRecord)(paths, {
+                        driver: parsed.flags.driver,
+                        provider: parsed.flags.provider,
+                        evidenceRef: parsed.flags.evidenceRef,
+                    });
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'tester' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
         case "resume":
             return (0, handoff_1.runResume)(paths);
         case "migrate":
@@ -618,6 +704,12 @@ function dispatch(parsed) {
                         file: parsed.flags.file,
                         maxTokens: parsed.flags.maxTokens,
                     });
+                case "read":
+                    // SG3 P1-B (C-11) — batch read a comma-separated file list under one budget.
+                    return (0, context_1.runContextRead)(paths, {
+                        files: (parsed.flags.filesList ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+                        maxTokens: parsed.flags.maxTokens,
+                    });
                 default:
                     return (0, output_1.failure)({ human: `unknown 'context' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
@@ -632,15 +724,32 @@ function dispatch(parsed) {
                         task: parsed.flags.task,
                         slice: parsed.flags.slice,
                     });
-                case "pack":
-                    return (0, delegate_1.runDelegatePack)(paths, {
+                case "pack": {
+                    const packRes = (0, delegate_1.runDelegatePack)(paths, {
                         agent: parsed.flags.agent,
                         task: parsed.flags.task,
                         intent: parsed.flags.intent,
                         slice: parsed.flags.slice,
                         req: parsed.flags.req,
                         file: parsed.flags.file,
+                        // SG3 P1-B (C-11) — explicit allowed-files write scope (comma-separated).
+                        allowedFiles: (parsed.flags.allowedFiles ?? "").split(",").map((s) => s.trim()).filter(Boolean),
                     });
+                    // SG3 P1-B (C-11) — ARM the DURABLE delegate scope so the out-of-process
+                    // PreToolUse write-gate can enforce it (the installed hook receives no
+                    // allowed_files on stdin — without this the scope never reached the gate and
+                    // enforcement was inactive). The pack's normalized `data.allowedFiles` IS the
+                    // scope; persist it (a non-empty set arms; an empty set disarms a prior scope).
+                    // CLI-only: the MCP `th_delegate_pack` exposes no --allowed-files, so it never
+                    // arms a scope and stays genuinely read-only.
+                    if (packRes.ok) {
+                        (0, delegation_scope_1.writeDelegationScope)(paths, packRes.data?.allowedFiles ?? [], {
+                            agent: parsed.flags.agent,
+                            slice: parsed.flags.slice,
+                        });
+                    }
+                    return packRes;
+                }
                 case "capsule":
                     return (0, delegate_1.runDelegateCapsule)();
                 case "check":
@@ -699,6 +808,13 @@ function dispatch(parsed) {
                     // against the matching scan scope (mismatched caps would phantom-flag files
                     // outside the build's scope as added/removed).
                     return (0, repo_1.runRepoCheck)(paths, { scanOptions: buildScanOptions(parsed.flags) });
+                case "search":
+                    // SG3 P1-B (C-11) — governed, receipt-bearing repo search over the map's scope.
+                    return (0, repo_1.runRepoSearch)(paths, {
+                        pattern: parsed.flags.pattern,
+                        kind: parsed.flags.kind,
+                        maxResults: parsed.flags.maxResults,
+                    });
                 default:
                     return (0, output_1.failure)({ human: `unknown 'repo' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
@@ -749,12 +865,55 @@ function dispatch(parsed) {
                 default:
                     return (0, output_1.failure)({ human: `unknown 'stage' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
+        case "sim":
+            switch (sub) {
+                case "add":
+                    // SG3 P2-C — append an active simulation-ledger entry (classification required).
+                    return (0, sim_1.runSimAdd)(paths, {
+                        classification: parsed.flags.classification,
+                        replaces: parsed.flags.replaces,
+                        introSlice: parsed.flags.introSlice,
+                        retireSlice: parsed.flags.retireSlice,
+                        owner: parsed.flags.owner,
+                        userVisible: parsed.flags.userVisible,
+                    });
+                case "list":
+                    return (0, sim_1.runSimList)(paths, {});
+                case "retire":
+                    return (0, sim_1.runSimRetire)(paths, rest[0], { retireSlice: parsed.flags.retireSlice });
+                case "scan":
+                    // Advisory: grep dist/+tests for unledgered simulation patterns (exit 0).
+                    return (0, sim_1.runSimScan)(paths, {});
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'sim' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "gate":
+            switch (sub) {
+                case "production-reality":
+                    // SG3 P2-C — PURE READER of checkProductionReality (no verb-calls-verb).
+                    return (0, gate_1.runGateProductionReality)(paths);
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'gate' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
         case "manifest":
             switch (sub) {
                 case "export":
                     return (0, manifest_1.runManifestExport)(paths);
+                case "tools":
+                    // C-09/C-16: runtime tool discovery — the CLI mirror of MCP ListTools.
+                    return (0, manifest_1.runManifestTools)();
                 default:
                     return (0, output_1.failure)({ human: `unknown 'manifest' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        case "template":
+            switch (sub) {
+                case "get":
+                    // C-10 — deterministic template resolver (project-override → plugin-bundled → structured miss).
+                    return (0, template_1.runTemplateGet)(paths, rest[0]);
+                case "list":
+                    return (0, template_1.runTemplateList)(paths);
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'template' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
         case "state":
             switch (sub) {
@@ -806,8 +965,24 @@ function dispatch(parsed) {
                     return (0, artifact_lease_1.runArtifactRelease)(paths, { section: rest[0] ?? parsed.flags.section, holder: parsed.flags.holder });
                 case "leases":
                     return (0, artifact_lease_1.runArtifactLeases)(paths);
+                case "section":
+                    // SG3 P1-B (C-12) — bounded named-heading extraction with a content-hash receipt.
+                    return (0, artifact_1.runArtifactSection)(paths, {
+                        file: parsed.flags.file,
+                        section: parsed.flags.section,
+                        maxTokens: parsed.flags.maxTokens,
+                    });
                 default:
                     return (0, output_1.failure)({ human: `unknown 'artifact' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        // SG3 P2-A — governed research-output path (resolves C-01). The write target is
+        // hard-pinned to docs/00-research/<topic>.md inside runResearchWrite.
+        case "research":
+            switch (sub) {
+                case "write":
+                    return (0, research_1.runResearchWrite)(paths, { topic: parsed.flags.topic, markdown: parsed.flags.markdown, version: parsed.flags.version });
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'research' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
         case "coverage":
             switch (sub) {

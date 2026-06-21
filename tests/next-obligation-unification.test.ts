@@ -11,6 +11,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
+import { runStateSet } from "../src/commands/state";
 import { runDriftAdd } from "../src/commands/drift";
 import { runDebateAdd } from "../src/commands/debate";
 import { runNext, openHumanObligations, type OpenHumanObligations } from "../src/commands/next";
@@ -45,6 +46,9 @@ describe("REQ-PCO-063: openHumanObligations unifies drift/debate/decision", () =
   it("REQ-PCO-063: drift AND debate both count toward the unified total", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
+    // The debate ledger is an advanced feature gated at tier <T2 (SG3 P1-C / C-14);
+    // record T2 so `runDebateAdd` reaches the ledger instead of refusing tier_locked.
+    runStateSet(tp.paths, "tier", "T2", { emergency: true });
     runDriftAdd(tp.paths, { layer: "requirement", ref: "SLICE-1 / TASK-1" });
     runDebateAdd(tp.paths, { topic: "queue vs stream", links: "REQ-001" });
     const o = obligationsOf(tp);
@@ -82,6 +86,9 @@ describe("REQ-PCO-063: th next surfaces the unified obligations payload", () => 
   it("REQ-PCO-063: MULTIPLE obligation classes print one unified suffix from the firing rung", () => {
     tp = makeTempProject();
     runInit(tp.paths, {});
+    // The debate ledger is an advanced feature gated at tier <T2 (SG3 P1-C / C-14);
+    // record T2 so `runDebateAdd` reaches the ledger instead of refusing tier_locked.
+    runStateSet(tp.paths, "tier", "T2", { emergency: true });
     runDriftAdd(tp.paths, { layer: "requirement", ref: "SLICE-1 / TASK-1" });
     runDebateAdd(tp.paths, { topic: "queue vs stream", links: "REQ-001" });
 

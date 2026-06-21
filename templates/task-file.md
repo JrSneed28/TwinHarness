@@ -69,6 +69,27 @@ the task scope is too large. Omit anything the task does not touch.>
 
 ---
 
+## External Dependencies
+
+<Every external boundary this task touches — provider, auth, persistence, network, or any
+real-world service. For EACH, state the production-reality classification and (when simulated)
+who/what retires it. A missing real-boundary detail here is an **escalation trigger**, NOT silent
+derived drift: the Builder must escalate rather than invent a fake/no-op adapter (see `builder.md`).
+A user-visible production path that depends on an unresolved simulation BLOCKS completion — record
+the simulation in the ledger (`th sim add --classification <…> --user-visible`) and retire it
+(`th sim retire <SIM-NNN>`) before final verification. Classifications: **Real** (live provider) ·
+**Sandbox** (real provider, official test env) · **Emulated** (approved local substitute + named
+real-provider plan) · **Mocked** (test-only) · **Stubbed** / **Hardcoded** (labeled prototype /
+Slice-0 only). "None — no external boundary" is a valid, explicit answer.>
+
+| Dependency | Provider / boundary | Auth | Persistence | Classification | Retire by (slice/owner) |
+|------------|---------------------|------|-------------|----------------|-------------------------|
+| <name> | <service / API> | <real / sandbox / none> | <real DB / fixture / none> | Real / Sandbox / Emulated / Mocked / Stubbed / Hardcoded | <SLICE-N / owner, or "n/a (Real)"> |
+
+- **None — no external boundary** *(use this line and delete the table when the task has no external dependency).*
+
+---
+
 ## Acceptance Test(s)
 
 <The anchored test names this task must make pass. These names come from `08-test-strategy.md`
@@ -87,6 +108,7 @@ Builder asserts completion.>
 - [ ] No undocumented behavior introduced (§6.4): any discovery is logged to `drift-log.md`.
 - [ ] If a contract was defined here, it has been promoted to `07-contracts.md`.
 - [ ] `th coverage check` does not regress (REQ-<###> still maps to a passing test).
+- [ ] Every simulation on a user-visible production path is ledgered (`th sim list`) and retired before completion; `th gate production-reality` is clear (no unretired user-visible simulation).
 
 ---
 

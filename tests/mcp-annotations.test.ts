@@ -12,7 +12,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, expectedToolDefsCount, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import {
   TOOL_DEFS,
@@ -55,7 +55,7 @@ describe("REQ-PCO-071: every tool is annotated (no gaps, no orphans)", () => {
 
   it("REQ-PCO-071: the annotation count equals the tool count (62)", () => {
     expect(Object.keys(TOOL_ANNOTATIONS).length).toBe(TOOL_DEFS.length);
-    expect(TOOL_DEFS.length).toBe(62);
+    expect(TOOL_DEFS.length).toBe(expectedToolDefsCount());
   });
 });
 

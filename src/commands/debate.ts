@@ -14,6 +14,7 @@ import {
 import { structuredLog } from "../core/log";
 import { appendLedger } from "../core/ledger";
 import { NOT_INIT, formatIssues } from "../core/guards";
+import { assertFeatureUnlocked } from "./tier";
 
 /**
  * `th debate` — append-only access to the debate ledger (REQ-PCO-042). The
@@ -101,6 +102,8 @@ function appendDebateLog(paths: ProjectPaths, block: string): void {
  * it increments `state.debate_open_blocking`.
  */
 export function runDebateAdd(paths: ProjectPaths, opts: DebateAddOptions): CommandResult {
+  const locked = assertFeatureUnlocked(paths, "debate");
+  if (locked) return locked;
   return withStateLock(paths, () => runDebateAddLocked(paths, opts));
 }
 
@@ -160,6 +163,8 @@ function runDebateAddLocked(paths: ProjectPaths, opts: DebateAddOptions): Comman
  * with a later `## DEBATE-NNN — resolved` note reads as resolved.
  */
 export function runDebateList(paths: ProjectPaths): CommandResult {
+  const locked = assertFeatureUnlocked(paths, "debate");
+  if (locked) return locked;
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
   if (!r.state) {
@@ -210,6 +215,8 @@ function idNum(id: string): number {
  * - Double-resolving (a `## <id> — resolved` note already present) is rejected.
  */
 export function runDebateResolve(paths: ProjectPaths, opts: DebateResolveOptions): CommandResult {
+  const locked = assertFeatureUnlocked(paths, "debate");
+  if (locked) return locked;
   return withStateLock(paths, () => runDebateResolveLocked(paths, opts));
 }
 

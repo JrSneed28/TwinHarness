@@ -24,7 +24,7 @@ node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" doctor --json
 
 `th doctor` is now exposed as the typed MCP tool `th_doctor` (optional `strict` boolean) — prefer it,
 with the CLI as a fallback. Also prefer `mcp__plugin_twinharness_th__th_state_get` to read individual
-state fields before or after running the doctor (see `reference/mcp-tools.md`).
+state fields before or after running the doctor (see `skills/twinharness/reference/mcp-tools.md`).
 
 ## What is checked
 

@@ -147,6 +147,16 @@ describe("th_stage_advance — gated stage advance", () => {
     // final-verification, no slices (slice-floor inert), no verify commands, coverage clean.
     writeState(paths, { ...initialState(), tier: "T1", current_stage: "final-verification" });
     expect(runArtifactRegister(paths, "docs/10-verification-report.md", 1).ok).toBe(true);
+    // SG3 P2-C: the production-reality rung now composes into the final-verification
+    // ladder, so the terminal state must also be production-reality-clean (a live-QA
+    // Tester record attached; no user-visible simulation) to reach the no_next_stage
+    // tail. Attach the Tester record so this stays a TERMINAL-stage test, not a
+    // production-reality test (that rung is covered in production-reality.test.ts).
+    fs.writeFileSync(
+      path.join(paths.stateDir, "tester-record.json"),
+      JSON.stringify({ driver: "cli-e2e", provider: "sandbox" }),
+      "utf8",
+    );
     const r = toolRun("th_stage_advance", paths);
     expect(r.ok).toBe(false);
     expect(r.data?.error).toBe("no_next_stage");
