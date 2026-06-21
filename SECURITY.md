@@ -124,12 +124,16 @@ Several boundaries keep this narrow:
   killed together with its process tree (`taskkill /T /F` on Windows; a `ps`-walked
   descendant SIGKILL on POSIX) so a grandchild (a spawned test runner or dev server)
   cannot survive as an orphan.
-- **Optional read-only mode.** `th verify run --read-only` refuses any configured
-  command that looks repo-mutating (write/redirection, package install, git
-  mutation, or a destructive fs verb) so a verification on an untrusted project
-  cannot mutate the working tree. The detector is the same conservative-regex,
-  honest-caveat posture as the write-gate heuristic — it catches common mutating
-  shapes, not every possible mutation.
+- **Optional best-effort write blocker.** `th verify run --no-obvious-writes`
+  (deprecated alias: `--read-only`) blocks configured commands that match
+  recognised repo-writing patterns (output redirections, package installs, git
+  mutations, destructive fs verbs). This is a **best-effort heuristic, NOT a security boundary
+  and NOT real OS-level containment**: commands that use unrecognised write shapes,
+  interpreter indirection (e.g. `bash -c`, `pwsh -Command`), or any technique the
+  regex does not cover will still execute and can mutate the working tree. Use it as
+  a convenience guard against accidental obvious writes, not as a trust boundary.
+  The detector is the same conservative-regex, honest-caveat posture as the
+  write-gate heuristic — it catches common mutating shapes, not every possible mutation.
 
 ### `th decision approve` is a human-only guardrail, not a sandbox
 

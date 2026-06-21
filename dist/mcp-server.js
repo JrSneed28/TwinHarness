@@ -17887,7 +17887,7 @@ function runCommands(root, commands, nowOrOpts = () => /* @__PURE__ */ new Date(
         // conventional "command found but not executable/permitted"
         ok: false,
         durationMs: 0,
-        outputTail: "[th verify] refused in --read-only mode: this command looks like it mutates the repo/working tree (write/redirection, package install, git mutation, or destructive fs verb). Remove --read-only to run it, or configure a non-mutating verification command."
+        outputTail: "[th verify] refused in --no-obvious-writes mode: this command looks like it mutates the repo/working tree (write/redirection, package install, git mutation, or destructive fs verb). This is a best-effort heuristic, not a security boundary. Remove --no-obvious-writes to run it, or configure a non-mutating verification command."
       });
       continue;
     }

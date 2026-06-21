@@ -23,7 +23,7 @@
  *   - a curated (not fully-inherited) child env;
  *   - secret redaction of the persisted/printed output tail;
  *   - a Windows/POSIX process-TREE kill on timeout so grandchildren die;
- *   - an optional read-only mode that refuses repo-mutating verification.
+ *   - an optional best-effort write blocker (--no-obvious-writes / deprecated --read-only) that refuses obvious repo-mutating verification commands.
  *
  * P1 hardening (R-01/R-02/R-03 — bring verify.json to the decision-record
  * standard): the command SET must be human-confirmed (a TTY barrier on
@@ -820,16 +820,17 @@ function runCommands(root, commands, nowOrOpts = () => new Date(), timeoutMsArg 
     const killTree = opts.killTree ?? killProcessTree;
     const results = [];
     for (const command of commands) {
-        // Read-only refusal (#19, P6-5): never execute an apparently-mutating command.
+        // Best-effort write blocker (#19, P6-5, R-32): refuse obvious repo-mutating commands when --no-obvious-writes is set.
         if (opts.readOnly && looksRepoMutating(command)) {
             results.push({
                 command,
                 exitCode: 126, // conventional "command found but not executable/permitted"
                 ok: false,
                 durationMs: 0,
-                outputTail: "[th verify] refused in --read-only mode: this command looks like it mutates the repo/working tree " +
+                outputTail: "[th verify] refused in --no-obvious-writes mode: this command looks like it mutates the repo/working tree " +
                     "(write/redirection, package install, git mutation, or destructive fs verb). " +
-                    "Remove --read-only to run it, or configure a non-mutating verification command.",
+                    "This is a best-effort heuristic, not a security boundary. " +
+                    "Remove --no-obvious-writes to run it, or configure a non-mutating verification command.",
             });
             continue;
         }
