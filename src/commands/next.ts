@@ -484,8 +484,8 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
         return emit(
           {
             kind: "run-tester",
-            action: "Final verification is blocked — no live-QA Tester record is attached. Run the Tester against the real (or sandbox) boundary and record the evidence (driver/provider/output) in the verification report's Tester Evidence section.",
-            why: "At final-verification the live Tester is mandatory: a green anchored-test suite can pass on mocks, so production reality needs a recorded live run exercising the user-visible production path.",
+            action: "Final verification is blocked — no live-QA Tester record is attached. Run the Tester against the real (or sandbox) boundary, then attach the record with `th tester record --driver <d> [--provider real|sandbox] [--evidence-ref <p>]` (and note the same evidence in the verification report's Tester Evidence section).",
+            why: "At final-verification the live Tester is mandatory: a green anchored-test suite can pass on mocks, so production reality needs a recorded live run exercising the user-visible production path. `th tester record` writes the marker the gate reads.",
           },
           explain,
         );

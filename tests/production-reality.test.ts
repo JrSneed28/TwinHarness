@@ -32,7 +32,8 @@ import {
 import { runNext } from "../src/commands/next";
 import { runSimAdd, runSimList, runSimRetire, runSimScan, simulationLedgerPath } from "../src/commands/sim";
 import { runGateProductionReality } from "../src/commands/gate";
-import { testerRecordPath } from "../src/core/tester";
+import { runTesterRecord } from "../src/commands/tester";
+import { testerRecordPath, readTesterRecord } from "../src/core/tester";
 import type { ProjectPaths } from "../src/core/paths";
 
 let tp: TempProject | undefined;
@@ -246,6 +247,99 @@ describe("th sim scan — flags an unledgered simulation pattern in dist/", () =
     runSimRetire(paths, "SIM-001");
     const res = runSimScan(paths, {});
     expect((res.data!.unledgeredDistHits as unknown[]).length).toBeGreaterThan(0);
+  });
+});
+
+describe("th tester record — the missing writer for the gate's 3rd condition (audit P1)", () => {
+  it("requires a non-empty driver", () => {
+    const paths = greenAtFinalVerification();
+    fs.rmSync(testerRecordPath(paths), { force: true });
+    expect(runTesterRecord(paths, { driver: "" }).data!.error).toBe("missing_driver");
+    expect(runTesterRecord(paths, {}).data!.error).toBe("missing_driver");
+  });
+
+  it("writes a well-shaped record (driver/provider/evidence/ranAt) the gate's read predicate accepts", () => {
+    const paths = greenAtFinalVerification();
+    fs.rmSync(testerRecordPath(paths), { force: true });
+    const res = runTesterRecord(paths, { driver: "playwright", provider: "sandbox", evidenceRef: "out/run.log" });
+    expect(res.ok).toBe(true);
+    const rec = readTesterRecord(paths);
+    expect(rec).not.toBeNull();
+    expect(rec!.driver).toBe("playwright");
+    expect(rec!.provider).toBe("sandbox");
+    expect(rec!.evidenceRef).toBe("out/run.log");
+    expect(typeof rec!.ranAt).toBe("string");
+  });
+
+  it("CLEARS the production-reality gate's tester_record_missing block end-to-end", () => {
+    const paths = greenAtFinalVerification();
+    fs.rmSync(testerRecordPath(paths), { force: true });
+    expect(checkProductionReality(paths, state(paths)).error).toBe("tester_record_missing");
+    expect(runTesterRecord(paths, { driver: "cli-e2e" }).ok).toBe(true);
+    expect(checkProductionReality(paths, state(paths))).toEqual({ ok: true });
+  });
+});
+
+describe("dist/ detection is PER-DEPENDENCY, not global existence (audit P1)", () => {
+  it("an UNRELATED active simulation entry does NOT suppress an undeclared dist stub", () => {
+    const paths = greenAtFinalVerification();
+    writeFile(paths, "dist/payments.js", "const v = stubProvider(); // placeholder\n");
+    // An active simulation about an UNRELATED dependency must not blanket-cover the
+    // payments stub — the regression the audit flagged (global existence check).
+    runSimAdd(paths, { classification: "Mocked", userVisible: false, replaces: "telemetry-sink" });
+    const res = checkProductionReality(paths, state(paths));
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("unledgered_simulation_in_dist");
+  });
+
+  it("an entry whose `replaces` names the dependency DOES cover the matching dist hit", () => {
+    const paths = greenAtFinalVerification();
+    writeFile(paths, "dist/x.js", "const v = stubProvider(); // placeholder\n");
+    // "provider" appears in the matched line `stubProvider()` → per-dependency match.
+    runSimAdd(paths, { classification: "Stubbed", userVisible: false, replaces: "provider" });
+    expect(checkProductionReality(paths, state(paths))).toEqual({ ok: true });
+  });
+
+  it("th sim scan agrees: an unrelated entry leaves the dist hit unledgered", () => {
+    tp = makeTempProject();
+    const paths = tp.paths;
+    writeState(paths, { ...initialState(), tier: "T1" });
+    writeFile(paths, "dist/payments.js", "const x = stubProvider();\n");
+    runSimAdd(paths, { classification: "Stubbed", userVisible: false, replaces: "telemetry-sink" });
+    const res = runSimScan(paths, {});
+    expect((res.data!.unledgeredDistHits as unknown[]).length).toBeGreaterThan(0);
+  });
+});
+
+describe("simulation ledger fails CLOSED on a malformed row (audit P2)", () => {
+  it("a damaged blocker row → simulation_ledger_corrupt (it does not silently disappear)", () => {
+    const paths = greenAtFinalVerification();
+    // A user-visible Mocked blocker whose `userVisible` flag was edited away (string,
+    // not boolean) must NOT downgrade to non-blocking — the whole ledger reads corrupt.
+    fs.writeFileSync(
+      simulationLedgerPath(paths),
+      JSON.stringify([{ id: "SIM-001", classification: "Mocked", status: "active", userVisible: "true", replaces: "auth" }]),
+      "utf8",
+    );
+    const res = checkProductionReality(paths, state(paths));
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("simulation_ledger_corrupt");
+  });
+
+  it("an entry with an invalid classification → simulation_ledger_corrupt", () => {
+    const paths = greenAtFinalVerification();
+    fs.writeFileSync(
+      simulationLedgerPath(paths),
+      JSON.stringify([{ id: "SIM-001", classification: "Bogus", status: "active", userVisible: true }]),
+      "utf8",
+    );
+    expect(checkProductionReality(paths, state(paths)).error).toBe("simulation_ledger_corrupt");
+  });
+
+  it("a non-object row → simulation_ledger_corrupt (no skip-malformed fail-open)", () => {
+    const paths = greenAtFinalVerification();
+    fs.writeFileSync(simulationLedgerPath(paths), JSON.stringify(["not-an-object"]), "utf8");
+    expect(checkProductionReality(paths, state(paths)).error).toBe("simulation_ledger_corrupt");
   });
 });
 

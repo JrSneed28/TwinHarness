@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runArtifactRegister = runArtifactRegister;
+exports.guardApprovedArtifactReauthor = guardApprovedArtifactReauthor;
 exports.runArtifactList = runArtifactList;
 exports.runArtifactSection = runArtifactSection;
 const fs = __importStar(require("node:fs"));
@@ -144,6 +145,65 @@ function runArtifactRegisterLocked(paths, file, version) {
             ? `registered ${relKey} v${version} (${hash})\n  ⚠ ${summaryWarning}`
             : `registered ${relKey} v${version} (${hash})`,
     });
+}
+/**
+ * SG3 (audit P1) — the approved-artifact CLOBBER + version-monotonicity guard for the
+ * GOVERNED WRITERS (`th research write`, `th inspector write`). Those verbs write the
+ * file directly through the atomic chokepoint and THEN auto-register, so they BYPASS the
+ * PreToolUse R-14 approved-artifact clobber guard (which only fires for Write/Edit/Bash
+ * tool calls routed through the hook). Without this check a stage re-run silently
+ * overwrote an approved doc AND reset its registered version to 1 (the audit reproduced
+ * an approved v7 research document replaced and downgraded to v1). So before such a
+ * writer overwrites a path it must consult THIS guard:
+ *
+ *   - target NOT yet registered          → first registration; version = requested ?? 1.
+ *   - registered, no explicit version    → REFUSE `approved_artifact_exists` (re-authoring
+ *     would silently clobber reviewed content; caller must pass an explicit higher version).
+ *   - registered, requested ≤ registered → REFUSE `version_not_monotonic` (never downgrade
+ *     an approved artifact).
+ *   - registered, requested > registered → allow at the requested version (deliberate bump).
+ *
+ * Returns the effective version to register at, or a ready-to-return refusal result. The
+ * caller checks this BEFORE writing, so a refused re-author never touches the file on disk.
+ */
+function guardApprovedArtifactReauthor(approved, relKey, requestedVersion, cmd) {
+    const existing = approved.find((a) => a.file === relKey);
+    if (!existing) {
+        return { ok: true, version: requestedVersion ?? 1 };
+    }
+    if (requestedVersion === undefined) {
+        return {
+            ok: false,
+            result: (0, output_1.failure)({
+                human: `Refusing ${cmd}: ${relKey} is already a REGISTERED approved artifact (v${existing.version}). ` +
+                    `Re-authoring it would overwrite reviewed/human-edited content. To deliberately replace it, pass ` +
+                    `--version ${existing.version + 1} (a version bump).`,
+                data: {
+                    error: "approved_artifact_exists",
+                    file: relKey,
+                    registeredVersion: existing.version,
+                    nextVersion: existing.version + 1,
+                },
+            }),
+        };
+    }
+    if (requestedVersion <= existing.version) {
+        return {
+            ok: false,
+            result: (0, output_1.failure)({
+                human: `Refusing ${cmd}: ${relKey} is registered at v${existing.version}; --version must be GREATER than ` +
+                    `${existing.version} (a governed writer must not downgrade an approved artifact). ` +
+                    `Pass --version ${existing.version + 1} or higher.`,
+                data: {
+                    error: "version_not_monotonic",
+                    file: relKey,
+                    registeredVersion: existing.version,
+                    requested: requestedVersion,
+                },
+            }),
+        };
+    }
+    return { ok: true, version: requestedVersion };
 }
 /** `th artifact list` — list every recorded approved artifact. */
 function runArtifactList(paths) {

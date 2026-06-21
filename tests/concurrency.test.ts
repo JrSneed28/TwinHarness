@@ -16,7 +16,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { concurrencyEnv, makeTempProject, SKIP_SPAWN_HEAVY_IN_CI, type TempProject } from "./helpers";
+import { concurrencyEnv, makeTempProject, SKIP_SPAWN_HEAVY_IN_CI, LIGHT_SPAWN_CONCURRENCY, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { readVerifyConfig } from "../src/core/verify";
 import {
@@ -120,6 +120,45 @@ describe("REQ-STATE-LOCK-001: concurrent mutations do not lose updates (F10)", (
     const commands = readVerifyConfig(tp.paths).commands;
     expect(commands).toHaveLength(N);
     expect(new Set(commands).size).toBe(N); // each distinct add present, none lost
+  }, 120_000);
+});
+
+describe("REQ-STATE-LOCK-002: a LIGHT cross-process lock wave runs in CI too (compiled-CLI integration)", () => {
+  // Unlike the heavy N=12–52 waves above (local-only via SKIP_SPAWN_HEAVY_IN_CI), this
+  // fires only LIGHT_SPAWN_CONCURRENCY (3) concurrent `node dist/cli.js` processes — low
+  // enough that even an oversubscribed CI runner cannot scheduler-starve a waiter past the
+  // 90s TH_LOCK_TIMEOUT_MS, yet it still exercises the COMPILED CLI + real OS file lock +
+  // process integration that the in-process LockOps seam tests cannot reach. This keeps
+  // cross-process lock coverage alive on EVERY CI runner (audit P2) instead of disabling
+  // it wholesale. (skipIf dist absent → degrade gracefully, TEST-008/009.)
+  it.skipIf(!fs.existsSync(CLI))("a few parallel `drift add` processes each land with a unique id (CI-safe)", async () => {
+    tp = makeTempProject();
+    runInit(tp.paths, {});
+
+    const N = LIGHT_SPAWN_CONCURRENCY;
+    await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        execFileP(
+          "node",
+          [
+            CLI, "drift", "add",
+            "--layer", "requirement",
+            "--ref", `SLICE-${i}`,
+            "--discovery", `light concurrent discovery ${i}`,
+            "--action", "build paused",
+            "--cwd", tp!.root,
+          ],
+          { env: concurrencyEnv() },
+        ),
+      ),
+    );
+
+    // No lost increment and no id collision through the real OS lock + compiled CLI.
+    const state = readState(tp.paths).state;
+    expect(state?.drift_open_blocking).toBe(N);
+    const log = fs.readFileSync(tp.paths.driftLog, "utf8");
+    const ids = new Set([...log.matchAll(/DRIFT-(\d+)/g)].map((m) => m[1]));
+    expect(ids.size).toBe(N);
   }, 120_000);
 });
 

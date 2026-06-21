@@ -123,10 +123,13 @@ export interface DelegatePackOptions {
   /**
    * SG3 P1-B (C-11) — the explicit read/write SCOPE the delegate is allowed to touch
    * (root-relative paths). When provided, the pack emits `allowedFiles[]` in its data and
-   * the envelope; the PreToolUse write-gate (`runHookPretoolGate`) reads the SAME list off
-   * its stdin payload and DENIES a child write outside it (read-scoping, not write-policy).
-   * When absent the pack derives a sensible default from `--file` (that file) — a `--slice`
-   * scope stays component-named (the gate's component-boundary path already enforces it).
+   * the envelope. The CLI then ARMS this as a DURABLE scope
+   * (`.twinharness/delegation-scope.json`, via `core/delegation-scope.ts`), because the
+   * out-of-process PreToolUse write-gate (`runHookPretoolGate`) gets NO `allowed_files` on
+   * its stdin — it READS the durable scope from disk and DENIES a child write outside it
+   * (read-scoping, not write-policy). The scope is disarmed when the delegated subagent
+   * stops. When absent the pack derives a sensible default from `--file` (that file) — a
+   * `--slice` scope stays component-named (the gate's component-boundary path enforces it).
    */
   allowedFiles?: string[];
 }

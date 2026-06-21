@@ -5,7 +5,7 @@ import { atomicWriteFile } from "../core/atomic-io";
 import { shortHashPath } from "../core/hash";
 import { structuredLog } from "../core/log";
 import { requireState } from "../core/guards";
-import { runArtifactRegister } from "./artifact";
+import { runArtifactRegister, guardApprovedArtifactReauthor } from "./artifact";
 
 /**
  * `th research write` (SG3 P2-A, resolves C-01) — the governed output path for the
@@ -64,7 +64,7 @@ const RESEARCH_DIR = "docs/00-research";
 
 export function runResearchWrite(
   paths: ProjectPaths,
-  opts: { topic?: string; markdown?: string },
+  opts: { topic?: string; markdown?: string; version?: number },
 ): CommandResult {
   const topic = opts.topic;
   const markdown = opts.markdown;
@@ -98,6 +98,15 @@ export function runResearchWrite(
   const st = requireState(paths);
   if (st.result) return st.result;
 
+  // Audit P1: this governed writer writes the file directly and THEN auto-registers, so
+  // it bypasses the PreToolUse R-14 approved-artifact clobber guard. Consult the shared
+  // guard BEFORE writing — refuse to silently overwrite (or downgrade the registered
+  // version of) an already-approved research doc. A deliberate re-author passes an
+  // explicit `--version` greater than the registered one.
+  const guard = guardApprovedArtifactReauthor(st.state.approved_artifacts, relTarget, opts.version, `research write ${relTarget}`);
+  if (!guard.ok) return guard.result;
+  const version = guard.version;
+
   // Write through the UNMODIFIED governed-write chokepoint. `atomicWriteFile` calls
   // `assertGovernedWriteSurface(root, absTarget)` when a root is threaded; `docs` is an
   // admitted first segment, so the pinned target passes.
@@ -107,10 +116,9 @@ export function runResearchWrite(
   // `th artifact register` records, so the receipt and the registered hash agree).
   const hash = shortHashPath(absTarget);
 
-  // Auto-register the artifact IN-PROCESS via the core function (no verb-calls-verb).
-  // Version 1 mirrors the prompt's documented `--version 1` register step; re-running a
-  // topic replaces the entry (register is an upsert).
-  const reg = runArtifactRegister(paths, relTarget, 1);
+  // Auto-register the artifact IN-PROCESS via the core function (no verb-calls-verb) at
+  // the guard-approved version (first write ⇒ v1, or an explicit higher re-author bump).
+  const reg = runArtifactRegister(paths, relTarget, version);
   if (!reg.ok) {
     // The file is written but registration failed — surface it rather than reporting
     // success. Carry the register failure payload so the caller sees the real cause.
@@ -120,10 +128,10 @@ export function runResearchWrite(
     });
   }
 
-  structuredLog({ cmd: "research write", file: relTarget, hash });
+  structuredLog({ cmd: "research write", file: relTarget, hash, version });
   return success({
-    data: { file: relTarget, hash, registered: true, version: 1 },
-    human: `wrote ${relTarget} (${hash}) and registered it v1`,
+    data: { file: relTarget, hash, registered: true, version },
+    human: `wrote ${relTarget} (${hash}) and registered it v${version}`,
     receipts: [{ file: relTarget, hash }],
   });
 }

@@ -57,6 +57,7 @@ import { runContextPack, runContextRead } from "./commands/context";
 import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite } from "./commands/handoff";
 import { runInspectorWrite } from "./commands/inspector";
+import { runTesterRecord } from "./commands/tester";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
 import { runTemplateGet, runTemplateList } from "./commands/template";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
@@ -1563,12 +1564,13 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_research_write",
     description:
-      "Persist a research artifact's markdown at the HANDLER-PINNED path docs/00-research/<topic>.md (the topic is sanitized to a flat slug; slashes, `..`, and absolute/drive paths are refused) and auto-register it at version 1. Returns a {file, hash} receipt. Serialized under the state lock via the register step.",
+      "Persist a research artifact's markdown at the HANDLER-PINNED path docs/00-research/<topic>.md (the topic is sanitized to a flat slug; slashes, `..`, and absolute/drive paths are refused) and auto-register it (first write ⇒ v1). If the topic is ALREADY a registered approved artifact, the write is REFUSED unless an explicit `version` GREATER than the registered one is supplied — a governed writer never silently clobbers or downgrades an approved doc. Returns a {file, hash} receipt. Serialized under the state lock via the register step.",
     inputSchema: {
       type: "object",
       properties: {
         topic: stringProp("Research topic slug — becomes the file stem under docs/00-research/. Flat name only (no path separators, no `..`)."),
         markdown: stringProp("The full markdown body to persist."),
+        version: numberProp("Artifact version to register at. Omit for a first write (v1); to re-author an already-registered topic, pass a version greater than the registered one."),
       },
       required: ["topic", "markdown"],
       additionalProperties: false,
@@ -1584,7 +1586,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
       if (isAbsoluteOrEscaping(topic)) {
         return failure({ human: `Refusing a topic that is absolute or escapes the research dir: ${topic}`, data: { error: "invalid_topic", topic } });
       }
-      return runResearchWrite(paths, { topic, markdown });
+      return runResearchWrite(paths, { topic, markdown, version: optNumber(args, "version") });
     },
   },
   // --- SG3 P2-C: simulation ledger + production-reality gate reader (appended) ---
@@ -1676,6 +1678,30 @@ export const TOOL_DEFS: readonly ToolDef[] = [
         version: optNumber(args, "version"),
       }),
   },
+  // SG3 P2-C — live-QA Tester record writer (resolves audit P1: the production-reality
+  // gate's 3rd condition had no writer). Attaches .twinharness/tester-record.json so the
+  // gate's `tester_record_missing` rung can be cleared through the documented workflow.
+  {
+    name: "th_tester_record",
+    description:
+      "Attach the live-QA Tester run record (.twinharness/tester-record.json) that satisfies the production-reality gate's 3rd condition (tester_record_missing). `driver` is required (e.g. playwright|curl|cli-e2e); optional provider (real|sandbox) and evidenceRef (path/URL to raw output) are recorded for the verification report's Tester Evidence. Stamps ranAt. Returns a {file, hash} receipt. Mechanical: it records that a live run EXISTS; it does not judge pass/fail.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        driver: stringProp("Driver/runner the live QA used (playwright | curl | cli-e2e | …). Required, non-empty."),
+        provider: stringProp("Provider tier the live run exercised (real | sandbox)."),
+        evidenceRef: stringProp("Path/URL to the raw live-run output or screenshots."),
+      },
+      required: ["driver"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runTesterRecord(paths, {
+        driver: optString(args, "driver"),
+        provider: optString(args, "provider"),
+        evidenceRef: optString(args, "evidenceRef"),
+      }),
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -1724,7 +1750,8 @@ export type ToolCategory =
   | "slices"
   | "interview"
   | "lifecycle"
-  | "template";
+  | "template"
+  | "tester";
 
 /** The behavior hints + category attached to a tool. */
 export interface ToolAnnotation {
@@ -1861,6 +1888,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // codebase-inspector governed write (writes + registers a fixed artifact;
   // re-writing the same analysis is an idempotent overwrite + upsert)
   th_inspector_write: wr("artifact", { idempotent: true }),
+  // SG3 P2-C — live-QA Tester record writer (overwriting the marker with a fresh run is
+  // an idempotent overwrite of the single tester-record.json under the state dir).
+  th_tester_record: wr("tester", { idempotent: true }),
 };
 
 /** The MCP-standard annotation object for a tool (or undefined if unknown). */
@@ -1991,6 +2021,7 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "slices sync", "slice set-status",
   "drift add", "drift list", "drift resolve",
   "sim add", "sim list", "sim retire", "sim scan",
+  "tester record",
   "gate production-reality",
   "collab init", "collab fragment", "collab list", "collab merge",
   "debate add", "debate list", "debate resolve",

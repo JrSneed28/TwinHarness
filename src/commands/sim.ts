@@ -36,9 +36,11 @@ import { readState } from "../core/state-store";
 import {
   type SimulationEntry,
   type SimulationClassification,
+  type SimulationStatus,
   SIMULATION_CLASSIFICATIONS,
   SIMULATION_SCAN_TOKENS,
   asClassification,
+  asStatus,
   blocksProductionReality,
   isSimulatedClassification,
   nextSimulationId,
@@ -78,14 +80,41 @@ export function readSimulationLedger(paths: ProjectPaths): SimulationEntry[] {
   if (!Array.isArray(parsed)) {
     throw new SimulationLedgerCorruptError(`simulation-ledger.json is not a JSON array`);
   }
-  // Tolerant projection: keep only well-shaped entries (mirrors the drift/decision
-  // parsers' skip-malformed posture) so one bad row never blanks the whole ledger.
+  // FAIL-CLOSED projection (audit P2): a malformed row is NOT silently skipped — this
+  // is a SECURITY ledger, and the prior skip-malformed posture let a damaged/edited
+  // BLOCKER disappear (dropped row) or downgrade to non-blocking (`userVisible`
+  // defaulting to false) while the gate still reported success. So every gate-relevant
+  // field (id / classification / status / userVisible) must be well-shaped, or the
+  // whole ledger is treated as corrupt — exactly the posture the module doc promises
+  // and that `checkProductionReality` maps to `simulation_ledger_corrupt`. The free-text
+  // metadata fields (replaces/introSlice/retireSlice/owner) stay tolerant (default "")
+  // because they never affect the blocking decision.
   const entries: SimulationEntry[] = [];
   for (const row of parsed as unknown[]) {
-    if (typeof row !== "object" || row === null) continue;
+    if (typeof row !== "object" || row === null) {
+      throw new SimulationLedgerCorruptError("simulation-ledger.json contains a non-object entry");
+    }
     const r = row as Record<string, unknown>;
+    if (typeof r.id !== "string" || r.id.trim() === "") {
+      throw new SimulationLedgerCorruptError("a simulation entry has a missing/invalid id");
+    }
     const classification = asClassification(typeof r.classification === "string" ? r.classification : undefined);
-    if (typeof r.id !== "string" || !classification) continue;
+    if (!classification) {
+      throw new SimulationLedgerCorruptError(`simulation entry ${r.id} has a missing/invalid classification`);
+    }
+    if (typeof r.userVisible !== "boolean") {
+      throw new SimulationLedgerCorruptError(`simulation entry ${r.id} has a missing/invalid userVisible flag`);
+    }
+    // status: absent ⇒ "active" (fail-CLOSED — an entry with no status still blocks);
+    // present-but-invalid ⇒ corrupt (a tampered status must not be silently coerced).
+    let status: SimulationStatus;
+    if (r.status === undefined) {
+      status = "active";
+    } else {
+      const s = asStatus(typeof r.status === "string" ? r.status : undefined);
+      if (!s) throw new SimulationLedgerCorruptError(`simulation entry ${r.id} has an invalid status`);
+      status = s;
+    }
     entries.push({
       id: r.id,
       replaces: typeof r.replaces === "string" ? r.replaces : "",
@@ -93,8 +122,8 @@ export function readSimulationLedger(paths: ProjectPaths): SimulationEntry[] {
       retireSlice: typeof r.retireSlice === "string" ? r.retireSlice : "",
       owner: typeof r.owner === "string" ? r.owner : "",
       classification,
-      status: r.status === "retired" ? "retired" : "active",
-      userVisible: r.userVisible === true,
+      status,
+      userVisible: r.userVisible,
     });
   }
   return entries;
@@ -269,12 +298,18 @@ export interface SimScanOptions {
   // No flags beyond --json / --cwd (universal).
 }
 
-/** One unledgered-simulation hit: file:line plus the token that matched. */
-interface ScanHit {
+/** One unledgered-simulation hit: file:line, the token that matched, and the matched
+ *  source line (trimmed/capped) so per-dependency ledger matching can be done per hit. */
+export interface ScanHit {
   file: string;
   line: number;
   token: string;
+  /** The matched source line (trimmed, capped) — used to join a hit to a ledger entry's `replaces` dependency. */
+  text: string;
 }
+
+/** Cap on the per-hit `text` we retain (keeps scan output bounded; enough to match a dependency name). */
+const SCAN_HIT_TEXT_MAX = 200;
 
 // Bounded walk caps (mirror the repo scanner's defensive posture without reusing
 // scanRepo, which EXCLUDES dist/ — exactly the tree we must scan here).
@@ -310,12 +345,10 @@ export function runSimScan(paths: ProjectPaths, _opts: SimScanOptions = {}): Com
   }
 
   const result = scanForSimulationHits(paths);
-  // A dist hit is "ledgered" only when an ACTIVE simulation entry exists at all: the
-  // ledger is the declaration that the simulation is known/tracked. With zero active
-  // simulation entries, every dist hit is unledgered (undeclared). This mirrors the
-  // gate's 4th condition.
-  const hasActiveSimEntry = entries.some((e) => e.status !== "retired" && isSimulatedClassification(e.classification));
-  const unledgeredDistHits = hasActiveSimEntry ? [] : result.distHits;
+  // A dist hit is "ledgered" only when an ACTIVE simulation entry DECLARES that specific
+  // hit — matched per-dependency, NOT by global existence (audit P1). The gate's 4th
+  // condition reuses the SAME `computeUnledgeredDistHits` join, so scan and gate agree.
+  const unledgeredDistHits = computeUnledgeredDistHits(entries, result.distHits);
 
   structuredLog({
     cmd: "sim scan",
@@ -409,7 +442,7 @@ export function scanForSimulationHits(paths: ProjectPaths): {
           const lc = lines[i]!.toLowerCase();
           for (let t = 0; t < SCAN_TOKENS_LC.length; t++) {
             if (lc.includes(SCAN_TOKENS_LC[t]!)) {
-              sink.push({ file: rel, line: i + 1, token: SIMULATION_SCAN_TOKENS[t]! });
+              sink.push({ file: rel, line: i + 1, token: SIMULATION_SCAN_TOKENS[t]!, text: lines[i]!.trim().slice(0, SCAN_HIT_TEXT_MAX) });
               break; // one hit per line is enough to flag it.
             }
           }
@@ -418,6 +451,44 @@ export function scanForSimulationHits(paths: ProjectPaths): {
     }
   }
   return { distHits, testHits, capHit };
+}
+
+/**
+ * The ACTIVE simulated entries — the only ones that can DECLARE a dist hit. `Real`/
+ * `Sandbox` are reality (never simulate) and a `retired` entry has been replaced, so
+ * neither can cover a live dist simulation.
+ */
+function activeSimulatedEntries(entries: SimulationEntry[]): SimulationEntry[] {
+  return entries.filter((e) => e.status !== "retired" && isSimulatedClassification(e.classification));
+}
+
+/**
+ * Does some active simulated entry DECLARE this specific dist hit? PER-DEPENDENCY join
+ * (audit P1 — NOT global existence): a single unrelated ledger entry must not blanket-
+ * cover every dist hit. An entry covers a hit only when it NAMES a non-empty dependency
+ * (`replaces`) that appears, case-insensitively, in the hit's file path OR matched
+ * source line. An entry that declares no dependency (`replaces` empty) cannot scope-
+ * cover anything, so it never suppresses an undeclared stub.
+ */
+export function distHitLedgered(hit: ScanHit, active: SimulationEntry[]): boolean {
+  const hay = `${hit.file}\n${hit.text}`.toLowerCase();
+  for (const e of active) {
+    const dep = e.replaces.trim().toLowerCase();
+    if (dep.length > 0 && hay.includes(dep)) return true;
+  }
+  return false;
+}
+
+/**
+ * The dist hits that are UNLEDGERED — i.e. not declared by any active simulated entry
+ * (per-dependency, via {@link distHitLedgered}). SINGLE source of truth shared by
+ * `th sim scan` and the production-reality gate's 4th condition so they can never
+ * disagree about which hits count as undeclared.
+ */
+export function computeUnledgeredDistHits(entries: SimulationEntry[], distHits: ScanHit[]): ScanHit[] {
+  const active = activeSimulatedEntries(entries);
+  if (active.length === 0) return distHits.slice();
+  return distHits.filter((h) => !distHitLedgered(h, active));
 }
 
 /** Shared corrupt-ledger failure (fail CLOSED, stable token). */

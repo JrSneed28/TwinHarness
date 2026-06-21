@@ -177,6 +177,9 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   // the `file` slot is refused by the handler pin (inspector_path_pinned) before the
   // chokepoint, so nothing escapes the governed surface. `content` is required.
   th_inspector_write: { content: "probe", file: CANARY_REL },
+  // live-QA Tester record (SG3 P2-C) — writes only .twinharness/tester-record.json
+  // (governed state dir); not path-taking. `driver` is required.
+  th_tester_record: { driver: "cli-e2e", provider: "sandbox" },
 };
 
 describe("MCP write-surface audit — no mutating tool escapes the governed surface (AC#1)", () => {

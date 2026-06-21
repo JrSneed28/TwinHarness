@@ -37,8 +37,8 @@ import { loadVerifyConfig, readVerifyReport } from "./verify";
 import { gatingObligations, reduceDecisions, readDecisionEvents } from "./decisions";
 import { runRepoCheckCached, repoMapPartialMarker, REPO_NO_MAP_EXIT } from "../commands/repo";
 import { interviewReady } from "../commands/interview";
-import { readSimulationLedger, scanForSimulationHits, SimulationLedgerCorruptError } from "../commands/sim";
-import { blocksProductionReality, isSimulatedClassification } from "./simulation";
+import { readSimulationLedger, scanForSimulationHits, computeUnledgeredDistHits, SimulationLedgerCorruptError } from "../commands/sim";
+import { blocksProductionReality } from "./simulation";
 import { testerRecordPresent } from "./tester";
 
 /**
@@ -395,18 +395,18 @@ export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessSt
   }
 
   // 4. dist/ must not carry unledgered simulation patterns. A dist hit is "ledgered"
-  // only when an ACTIVE simulation entry exists; with none, every dist hit is an
-  // undeclared simulation (mirrors `th sim scan`). Capped walk (never throws).
-  const hasActiveSimEntry = entries.some((e) => e.status !== "retired" && isSimulatedClassification(e.classification));
-  if (!hasActiveSimEntry) {
-    const scan = scanForSimulationHits(paths);
-    if (scan.distHits.length > 0) {
-      return {
-        ok: false,
-        error: "unledgered_simulation_in_dist",
-        detail: { hits: scan.distHits.slice(0, 20), total: scan.distHits.length },
-      };
-    }
+  // only when an ACTIVE simulation entry DECLARES that specific hit — matched
+  // PER-DEPENDENCY (audit P1), so a single unrelated, non-user-visible entry no longer
+  // blanket-suppresses every dist hit. The SAME `computeUnledgeredDistHits` join backs
+  // `th sim scan`, so scan and gate agree. Capped walk (never throws).
+  const scan = scanForSimulationHits(paths);
+  const unledgered = computeUnledgeredDistHits(entries, scan.distHits);
+  if (unledgered.length > 0) {
+    return {
+      ok: false,
+      error: "unledgered_simulation_in_dist",
+      detail: { hits: unledgered.slice(0, 20), total: unledgered.length },
+    };
   }
 
   return PASS;

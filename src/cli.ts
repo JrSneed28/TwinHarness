@@ -52,6 +52,7 @@ import {
 import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite, runHandoffVerify, runResume } from "./commands/handoff";
 import { runInspectorWrite } from "./commands/inspector";
+import { runTesterRecord } from "./commands/tester";
 import { runManifestExport, runManifestTools } from "./commands/manifest";
 import { runPreview } from "./commands/preview";
 import { runScorecard } from "./commands/scorecard";
@@ -63,6 +64,7 @@ import {
   runDelegateCapsule,
   runDelegateCheck,
 } from "./commands/delegate";
+import { writeDelegationScope } from "./core/delegation-scope";
 import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck, runRepoSearch } from "./commands/repo";
 import {
   runDecisionAdd,
@@ -96,7 +98,7 @@ Usage:
   th implementation unlock [--lock] Typed gate command: unlock implementation when the gate ladder clears (--lock re-locks)
   th artifact register <file> --version <n>  Content-hash a file and record it in approved_artifacts
   th artifact list                  List recorded approved artifacts (file, version, hash)
-  th research write --topic <t> --markdown <md>  Persist + register research at docs/00-research/<topic>.md (governed; resolves C-01)
+  th research write --topic <t> --markdown <md> [--version <n>]  Persist + register research at docs/00-research/<topic>.md (governed; --version bumps a re-author of an already-registered topic)
   th coverage check [--reqs F] [--plan F] [--tests D] [--scope F]
                                     Verify every (MVP) REQ-ID maps to ≥1 slice and ≥1 test (hard gate)
   th coverage report [--reqs F] [--plan F] [--tests D] [--scope F] [--code D]
@@ -163,6 +165,8 @@ Usage:
   th resume                         Detect .twinharness/HANDOFF.md and print the next mechanical action (from th next)
   th inspector write --content <md> [--version <n>]
                                     Codebase-Inspector governed write: emit + auto-register the source-anchored brownfield analysis at docs/00-existing-codebase-analysis.md (path is fixed; refuses any other target)
+  th tester record --driver <d> [--provider real|sandbox] [--evidence-ref <p>]
+                                    Attach the live-QA Tester record (.twinharness/tester-record.json) that satisfies the production-reality gate's Tester condition
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
   th delegate pack [--agent A] [--slice ID] [--task T] [--intent I] [--allowed-files <a,b,c>]
@@ -283,7 +287,10 @@ Global flags:
   --intro-slice <s> (sim add) Slice/task that introduced the simulation
   --retire-slice <s> (sim add / sim retire) Slice/owner that will (or did) replace it with reality
   --owner <s>       (sim add) Who owns retiring the simulation
-  --user-visible    (sim add) A user-visible production path depends on this (BLOCKS production-reality until retired)`;
+  --user-visible    (sim add) A user-visible production path depends on this (BLOCKS production-reality until retired)
+  --driver <d>      (tester record) Driver/runner the live QA used (playwright | curl | cli-e2e | …) (required)
+  --provider <p>    (tester record) Provider tier the live run exercised (real | sandbox)
+  --evidence-ref <p>  (tester record) Path/URL to the raw live-run output or screenshots`;
 
 export interface ParsedArgs {
   positionals: string[];
@@ -405,6 +412,10 @@ export interface ParsedArgs {
     retireSlice?: string;
     owner?: string;
     userVisible: boolean;
+    // SG3 P2-C — live-QA Tester record flags (`th tester record`).
+    driver?: string;
+    provider?: string;
+    evidenceRef?: string;
   };
 }
 
@@ -513,6 +524,10 @@ const STRING_FLAGS: Record<string, FlagField> = {
   "--intro-slice": "introSlice",
   "--retire-slice": "retireSlice",
   "--owner": "owner",
+  // SG3 P2-C — live-QA Tester record fields (`th tester record`).
+  "--driver": "driver",
+  "--provider": "provider",
+  "--evidence-ref": "evidenceRef",
 };
 
 /** Flags that consume a numeric value. */
@@ -756,6 +771,18 @@ function dispatch(parsed: ParsedArgs): CommandResult {
         default:
           return failure({ human: `unknown 'inspector' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
+    // SG3 P2-C — attach the live-QA Tester record the production-reality gate requires.
+    case "tester":
+      switch (sub) {
+        case "record":
+          return runTesterRecord(paths, {
+            driver: parsed.flags.driver,
+            provider: parsed.flags.provider,
+            evidenceRef: parsed.flags.evidenceRef,
+          });
+        default:
+          return failure({ human: `unknown 'tester' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
     case "resume":
       return runResume(paths);
     case "migrate":
@@ -821,8 +848,8 @@ function dispatch(parsed: ParsedArgs): CommandResult {
             task: parsed.flags.task,
             slice: parsed.flags.slice,
           });
-        case "pack":
-          return runDelegatePack(paths, {
+        case "pack": {
+          const packRes = runDelegatePack(paths, {
             agent: parsed.flags.agent,
             task: parsed.flags.task,
             intent: parsed.flags.intent,
@@ -832,6 +859,21 @@ function dispatch(parsed: ParsedArgs): CommandResult {
             // SG3 P1-B (C-11) — explicit allowed-files write scope (comma-separated).
             allowedFiles: (parsed.flags.allowedFiles ?? "").split(",").map((s) => s.trim()).filter(Boolean),
           });
+          // SG3 P1-B (C-11) — ARM the DURABLE delegate scope so the out-of-process
+          // PreToolUse write-gate can enforce it (the installed hook receives no
+          // allowed_files on stdin — without this the scope never reached the gate and
+          // enforcement was inactive). The pack's normalized `data.allowedFiles` IS the
+          // scope; persist it (a non-empty set arms; an empty set disarms a prior scope).
+          // CLI-only: the MCP `th_delegate_pack` exposes no --allowed-files, so it never
+          // arms a scope and stays genuinely read-only.
+          if (packRes.ok) {
+            writeDelegationScope(paths, (packRes.data?.allowedFiles as string[] | undefined) ?? [], {
+              agent: parsed.flags.agent,
+              slice: parsed.flags.slice,
+            });
+          }
+          return packRes;
+        }
         case "capsule":
           return runDelegateCapsule();
         case "check":
@@ -1061,7 +1103,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
     case "research":
       switch (sub) {
         case "write":
-          return runResearchWrite(paths, { topic: parsed.flags.topic, markdown: parsed.flags.markdown });
+          return runResearchWrite(paths, { topic: parsed.flags.topic, markdown: parsed.flags.markdown, version: parsed.flags.version });
         default:
           return failure({ human: `unknown 'research' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }

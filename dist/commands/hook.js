@@ -48,6 +48,7 @@ const verify_1 = require("../core/verify");
 const decisions_1 = require("../core/decisions");
 const stages_1 = require("../core/stages");
 const artifact_guard_1 = require("../core/artifact-guard");
+const delegation_scope_1 = require("../core/delegation-scope");
 /**
  * Decide whether the orchestrator may declare completion.
  *
@@ -237,6 +238,11 @@ function runHookStopGate(paths, input) {
  * so the present-but-invalid detection is identical to the Stop-gate's.
  */
 function runHookSubagentStop(paths, input) {
+    // SG3 P1-B (C-11) — a delegated subagent finishing means its allowed-files scope no
+    // longer applies. DISARM the durable scope here so it cannot leak onto the
+    // orchestrator's (or the next delegate's) writes. Best-effort + unconditional: it must
+    // lift even when state.json is absent/invalid, and a missing scope file is a no-op.
+    (0, delegation_scope_1.clearDelegationScope)(paths);
     const r = (0, state_store_1.readState)(paths);
     // No state.json → not a TwinHarness run (or a Tier-0 bypass) → allow.
     if (!r.exists) {
@@ -752,6 +758,19 @@ function runHookPretoolGate(paths, input, env = process.env) {
             "Repair state.json and re-run to restore gating.");
     }
     const state = r.state;
+    // SG3 P1-B (C-11) — the EFFECTIVE delegate allowed-files scope is the UNION of any
+    // stdin-provided `allowed_files` (forward-compat: a future host that injects them) and
+    // the DURABLE scope armed by `th delegate pack --allowed-files`
+    // (.twinharness/delegation-scope.json). The installed hook receives only host stdin,
+    // which carries NO allowed_files, so WITHOUT the persisted scope the delegate-scope
+    // enforcement below could never activate (audit P1). An empty union is a no-op (the
+    // historical gating is untouched). Read once here, used by steps c1c (Bash) and e1
+    // (file_path) below.
+    const stdinScope = Array.isArray(input?.allowed_files)
+        ? input.allowed_files.filter((x) => typeof x === "string")
+        : [];
+    const persistedScope = (0, delegation_scope_1.readDelegationScope)(paths).allowedFiles;
+    const effectiveAllowedFiles = [...new Set([...stdinScope, ...persistedScope])];
     // Step b (state check): write_gate=off → allow.
     if (state.write_gate === "off")
         return allow();
@@ -835,8 +854,8 @@ function runHookPretoolGate(paths, input, env = process.env) {
     // redirection cannot escape the delegate's scope. Same HARD deny + caveat as the
     // R-19/R-24 Bash guards (metachar/heredoc-obscured targets are out of scope). Only
     // fires when a non-empty allowed_files set was declared (additive; no-op otherwise).
-    const allowedFilesC1c = input?.allowed_files;
-    if (bashCommand && Array.isArray(allowedFilesC1c) && allowedFilesC1c.length > 0) {
+    const allowedFilesC1c = effectiveAllowedFiles;
+    if (bashCommand && allowedFilesC1c.length > 0) {
         const baseC1c = input?.cwd ?? paths.root;
         for (const token of extractBashWriteTargets(bashCommand)) {
             const absC1c = path.isAbsolute(token) ? token : path.resolve(baseC1c, token);
@@ -881,8 +900,8 @@ function runHookPretoolGate(paths, input, env = process.env) {
     // An ABSENT/empty list is a no-op, so the historical gating is untouched (additive
     // injection point). HARD deny: there is nothing to "ask" about — the delegate was
     // explicitly scoped, so an out-of-scope write is a boundary violation to escalate.
-    const allowedFiles = input?.allowed_files;
-    if (Array.isArray(allowedFiles) && allowedFiles.length > 0 && !isWithinAllowedFiles(relFwd, allowedFiles, paths.root)) {
+    const allowedFiles = effectiveAllowedFiles;
+    if (allowedFiles.length > 0 && !isWithinAllowedFiles(relFwd, allowedFiles, paths.root)) {
         const reason = `TwinHarness write-gate (C-11 — delegate scope) DENIED this write: ${relFwd} is OUTSIDE the delegated agent's allowed-files scope. ` +
             `This delegate was packed with an explicit allowed-files set (${allowedFiles.join(", ")}); writes outside it are refused. ` +
             `AGENT INSTRUCTION: do NOT retry — write only within your allowed scope, or escalate to the human to widen the delegation (\`th delegate pack ... --allowed-files <list>\`). ` +

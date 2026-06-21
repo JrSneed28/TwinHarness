@@ -6,7 +6,7 @@ import { type CommandResult, success, failure } from "../core/output";
 import { structuredLog } from "../core/log";
 import { NOT_INIT, formatIssues } from "../core/guards";
 import { readState } from "../core/state-store";
-import { runArtifactRegister } from "./artifact";
+import { runArtifactRegister, guardApprovedArtifactReauthor } from "./artifact";
 
 /**
  * `th inspector write` — the Codebase-Inspector agent's single governed write path
@@ -78,8 +78,10 @@ export function runInspectorWrite(
     });
   }
 
-  const version = opts.version ?? 1;
-  if (!Number.isInteger(version) || version < 1) {
+  // Validate an EXPLICIT version up front (an absent version is resolved by the guard
+  // below — first write ⇒ v1, re-author ⇒ caller must bump). A present-but-invalid
+  // value is rejected before any state read or write.
+  if (opts.version !== undefined && (!Number.isInteger(opts.version) || opts.version < 1)) {
     return failure({
       human: "usage: th inspector write --content <markdown> [--version <n>] (version must be a positive integer)",
       data: { error: "invalid_version" },
@@ -96,6 +98,14 @@ export function runInspectorWrite(
       data: { error: "invalid_state", issues: r.issues },
     });
   }
+
+  // Audit P1: this governed writer writes directly and THEN auto-registers, bypassing the
+  // PreToolUse R-14 approved-artifact clobber guard. Consult the shared guard BEFORE
+  // writing — refuse to silently overwrite (or downgrade the registered version of) an
+  // already-approved analysis. A deliberate re-author passes an explicit higher --version.
+  const guard = guardApprovedArtifactReauthor(r.state.approved_artifacts, INSPECTOR_ANALYSIS_FILE, opts.version, `inspector write ${INSPECTOR_ANALYSIS_FILE}`);
+  if (!guard.ok) return guard.result;
+  const version = guard.version;
 
   // Write the pinned file through the UNMODIFIED governed-write chokepoint: threading
   // `root` makes `atomicWriteFile` assert the write-surface allowlist (first segment

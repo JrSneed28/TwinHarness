@@ -130,6 +130,15 @@ function runResearchWrite(paths, opts) {
     const st = (0, guards_1.requireState)(paths);
     if (st.result)
         return st.result;
+    // Audit P1: this governed writer writes the file directly and THEN auto-registers, so
+    // it bypasses the PreToolUse R-14 approved-artifact clobber guard. Consult the shared
+    // guard BEFORE writing — refuse to silently overwrite (or downgrade the registered
+    // version of) an already-approved research doc. A deliberate re-author passes an
+    // explicit `--version` greater than the registered one.
+    const guard = (0, artifact_1.guardApprovedArtifactReauthor)(st.state.approved_artifacts, relTarget, opts.version, `research write ${relTarget}`);
+    if (!guard.ok)
+        return guard.result;
+    const version = guard.version;
     // Write through the UNMODIFIED governed-write chokepoint. `atomicWriteFile` calls
     // `assertGovernedWriteSurface(root, absTarget)` when a root is threaded; `docs` is an
     // admitted first segment, so the pinned target passes.
@@ -137,10 +146,9 @@ function runResearchWrite(paths, opts) {
     // Provenance receipt: content hash of what we just persisted (same short-hash form
     // `th artifact register` records, so the receipt and the registered hash agree).
     const hash = (0, hash_1.shortHashPath)(absTarget);
-    // Auto-register the artifact IN-PROCESS via the core function (no verb-calls-verb).
-    // Version 1 mirrors the prompt's documented `--version 1` register step; re-running a
-    // topic replaces the entry (register is an upsert).
-    const reg = (0, artifact_1.runArtifactRegister)(paths, relTarget, 1);
+    // Auto-register the artifact IN-PROCESS via the core function (no verb-calls-verb) at
+    // the guard-approved version (first write ⇒ v1, or an explicit higher re-author bump).
+    const reg = (0, artifact_1.runArtifactRegister)(paths, relTarget, version);
     if (!reg.ok) {
         // The file is written but registration failed — surface it rather than reporting
         // success. Carry the register failure payload so the caller sees the real cause.
@@ -149,10 +157,10 @@ function runResearchWrite(paths, opts) {
             data: { error: "register_failed", file: relTarget, hash, register: reg.data },
         });
     }
-    (0, log_1.structuredLog)({ cmd: "research write", file: relTarget, hash });
+    (0, log_1.structuredLog)({ cmd: "research write", file: relTarget, hash, version });
     return (0, output_1.success)({
-        data: { file: relTarget, hash, registered: true, version: 1 },
-        human: `wrote ${relTarget} (${hash}) and registered it v1`,
+        data: { file: relTarget, hash, registered: true, version },
+        human: `wrote ${relTarget} (${hash}) and registered it v${version}`,
         receipts: [{ file: relTarget, hash }],
     });
 }

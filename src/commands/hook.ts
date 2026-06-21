@@ -6,6 +6,7 @@ import { loadVerifyConfig, readVerifyReport } from "../core/verify";
 import { gatingObligations, reduceDecisions, readDecisionEvents } from "../core/decisions";
 import { isFinalVerification } from "../core/stages";
 import { matchApprovedArtifact } from "../core/artifact-guard";
+import { readDelegationScope, clearDelegationScope } from "../core/delegation-scope";
 
 /**
  * Stop-gate decision (plan pre-mortem #2 mitigation): the mechanical gate that
@@ -250,6 +251,12 @@ export function runHookSubagentStop(
   paths: ProjectPaths,
   input?: SubagentStopHookInput,
 ): { stdout: string; exitCode: number } {
+  // SG3 P1-B (C-11) — a delegated subagent finishing means its allowed-files scope no
+  // longer applies. DISARM the durable scope here so it cannot leak onto the
+  // orchestrator's (or the next delegate's) writes. Best-effort + unconditional: it must
+  // lift even when state.json is absent/invalid, and a missing scope file is a no-op.
+  clearDelegationScope(paths);
+
   const r = readState(paths);
 
   // No state.json → not a TwinHarness run (or a Tier-0 bypass) → allow.
@@ -859,6 +866,20 @@ export function runHookPretoolGate(
 
   const state = r.state;
 
+  // SG3 P1-B (C-11) — the EFFECTIVE delegate allowed-files scope is the UNION of any
+  // stdin-provided `allowed_files` (forward-compat: a future host that injects them) and
+  // the DURABLE scope armed by `th delegate pack --allowed-files`
+  // (.twinharness/delegation-scope.json). The installed hook receives only host stdin,
+  // which carries NO allowed_files, so WITHOUT the persisted scope the delegate-scope
+  // enforcement below could never activate (audit P1). An empty union is a no-op (the
+  // historical gating is untouched). Read once here, used by steps c1c (Bash) and e1
+  // (file_path) below.
+  const stdinScope = Array.isArray(input?.allowed_files)
+    ? input!.allowed_files.filter((x): x is string => typeof x === "string")
+    : [];
+  const persistedScope = readDelegationScope(paths).allowedFiles;
+  const effectiveAllowedFiles = [...new Set([...stdinScope, ...persistedScope])];
+
   // Step b (state check): write_gate=off → allow.
   if (state.write_gate === "off") return allow();
 
@@ -948,8 +969,8 @@ export function runHookPretoolGate(
   // redirection cannot escape the delegate's scope. Same HARD deny + caveat as the
   // R-19/R-24 Bash guards (metachar/heredoc-obscured targets are out of scope). Only
   // fires when a non-empty allowed_files set was declared (additive; no-op otherwise).
-  const allowedFilesC1c = input?.allowed_files;
-  if (bashCommand && Array.isArray(allowedFilesC1c) && allowedFilesC1c.length > 0) {
+  const allowedFilesC1c = effectiveAllowedFiles;
+  if (bashCommand && allowedFilesC1c.length > 0) {
     const baseC1c = input?.cwd ?? paths.root;
     for (const token of extractBashWriteTargets(bashCommand)) {
       const absC1c = path.isAbsolute(token) ? token : path.resolve(baseC1c, token);
@@ -995,8 +1016,8 @@ export function runHookPretoolGate(
   // An ABSENT/empty list is a no-op, so the historical gating is untouched (additive
   // injection point). HARD deny: there is nothing to "ask" about — the delegate was
   // explicitly scoped, so an out-of-scope write is a boundary violation to escalate.
-  const allowedFiles = input?.allowed_files;
-  if (Array.isArray(allowedFiles) && allowedFiles.length > 0 && !isWithinAllowedFiles(relFwd, allowedFiles, paths.root)) {
+  const allowedFiles = effectiveAllowedFiles;
+  if (allowedFiles.length > 0 && !isWithinAllowedFiles(relFwd, allowedFiles, paths.root)) {
     const reason =
       `TwinHarness write-gate (C-11 — delegate scope) DENIED this write: ${relFwd} is OUTSIDE the delegated agent's allowed-files scope. ` +
       `This delegate was packed with an explicit allowed-files set (${allowedFiles.join(", ")}); writes outside it are refused. ` +

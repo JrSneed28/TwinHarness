@@ -34,7 +34,7 @@ export function concurrencyEnv(): NodeJS.ProcessEnv {
 }
 
 /**
- * True on CI runners (GitHub Actions and friends set `CI=true`). The spawn-heavy
+ * True on CI runners (GitHub Actions and friends set `CI=true`). The spawn-HEAVY
  * cross-process stress tests — the ones that fire 12–52 concurrent
  * `node dist/cli.js` processes at a single state lock — are gated on this and DO
  * NOT run in CI. They are reliably green locally, but on an oversubscribed / slow
@@ -42,16 +42,27 @@ export function concurrencyEnv(): NodeJS.ProcessEnv {
  * TH_LOCK_TIMEOUT_MS and throws a LockTimeoutError on a write that would otherwise
  * have landed — a *timeout* (environmental), never a lost-update assertion. The
  * recurring windows-latest false-red was pure starvation, so the only durable fix
- * is to keep these waves off CI runners.
+ * is to keep the HEAVY waves off CI runners.
  *
- * No lock CORRECTNESS coverage is lost in CI: the contention / steal / timeout /
- * backoff loop is exercised deterministically by the in-process LockOps seam tests
- * (tests/state-store-seam.test.ts) and the in-process steal/classify tests that live
- * alongside these waves, and the full multi-process waves still run on every local
- * `npm test`. Uses `process.env.CI` (not `process.platform`/`getuid`), so the
- * doc-truth single-platform-conditional-skip count is unaffected.
+ * Cross-process lock coverage is NOT abandoned in CI (audit P2): a LIGHT wave of only
+ * {@link LIGHT_SPAWN_CONCURRENCY} concurrent processes still runs EVERYWHERE — low
+ * enough that even an oversubscribed runner cannot starve a waiter past the 90s
+ * deadline, yet it exercises the COMPILED CLI + real OS file lock + process integration
+ * that the in-process LockOps seam tests (tests/state-store-seam.test.ts) cannot. So CI
+ * keeps a real compiled-CLI/process-integration regression net; only the starvation-
+ * prone heavy waves are local-only. Uses `process.env.CI` (not `process.platform`/
+ * `getuid`), so the doc-truth single-platform-conditional-skip count is unaffected.
  */
 export const SKIP_SPAWN_HEAVY_IN_CI = !!process.env.CI;
+
+/**
+ * The concurrency for the LIGHT cross-process lock wave that runs on EVERY runner
+ * (including CI). Kept small (3) so a 2-core/oversubscribed CI runner cannot scheduler-
+ * starve a waiter past TH_LOCK_TIMEOUT_MS — three short-lived `node dist/cli.js`
+ * contenders with 90s of patience always make progress — while still proving the
+ * compiled CLI serializes a real concurrent read-modify-write through the OS file lock.
+ */
+export const LIGHT_SPAWN_CONCURRENCY = 3;
 
 export interface TempProject {
   paths: ProjectPaths;
