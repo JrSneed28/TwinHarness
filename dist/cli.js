@@ -111,7 +111,8 @@ Usage:
   th verify list                    Show configured verify commands (with provenance + approval status)
   th verify approve [--as <actor>]  Human-confirm the current command SET for execution — requires an interactive TTY (an agent/non-interactive caller cannot self-approve); sealed in a tamper-evident ledger; re-required after any add/change
   th verify clear                   Remove all configured verify commands
-  th verify run [--read-only]       Run every configured verify command; refuses an UNAPPROVED set; --read-only refuses repo-mutating commands; writes a report; exit 1 on failure
+  th verify run [--no-obvious-writes]  Run every configured verify command; refuses an UNAPPROVED set; --no-obvious-writes blocks commands that look like obvious repo-writes (best-effort heuristic, NOT a security boundary or real containment — unrecognized write shapes still execute); writes a report; exit 1 on failure
+                                       Deprecated alias: --read-only (still accepted; emits a deprecation warning to stderr)
   th build plan [--include-done] [--advise]  Schedule slices into dependency-aware, conflict-free build waves (§16; a slice's wave is strictly after its hard depends_on); --advise emits the parallelism-optimizer advisory (max wave width + serializing conflict pairs); exit 7 when the depends_on graph is unsatisfiable (cycle/dangling)
   th build next-wave                Live oracle: slices dispatchable in parallel now (deps done, components free)
   th build dispatch                 Live oracle: full parallel wave + per-slice spawn descriptors in one payload (for single-message batch spawn)
@@ -325,6 +326,8 @@ const BOOLEAN_FLAGS = {
     "--self-test": "selfTest",
     "--lock": "lock",
     "--emergency": "emergency",
+    "--no-obvious-writes": "readOnly",
+    // Deprecated alias for --no-obvious-writes; kept for back-compat (emits a deprecation warning at parse time).
     "--read-only": "readOnly",
     // SG3 P2-C — a user-visible simulation entry is what the production-reality gate blocks on.
     "--user-visible": "userVisible",
@@ -500,6 +503,10 @@ function parseArgs(argv) {
         const name = eq >= 0 ? a.slice(0, eq) : a;
         const inlineVal = eq >= 0 ? a.slice(eq + 1) : undefined;
         if (name in BOOLEAN_FLAGS) {
+            // R-32: --read-only is a deprecated alias for --no-obvious-writes; warn once.
+            if (name === "--read-only") {
+                process.stderr.write("warning: --read-only is deprecated; use --no-obvious-writes\n");
+            }
             assign(BOOLEAN_FLAGS[name], true);
         }
         else if (name in STRING_FLAGS) {
@@ -1007,7 +1014,7 @@ function dispatch(parsed) {
         case "verify":
             switch (sub) {
                 case "run":
-                    // P6-5 (#19): --read-only refuses repo-mutating verify commands.
+                    // P6-5 (#19): --no-obvious-writes (alias --read-only) blocks obvious repo-mutating verify commands (heuristic, not a security boundary).
                     return (0, verify_1.runVerifyRun)(paths, { readOnly: parsed.flags.readOnly });
                 case "add":
                     // P6-2 (#19): --as records the actor in per-command provenance.

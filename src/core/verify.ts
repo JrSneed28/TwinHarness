@@ -22,7 +22,7 @@
  *   - a curated (not fully-inherited) child env;
  *   - secret redaction of the persisted/printed output tail;
  *   - a Windows/POSIX process-TREE kill on timeout so grandchildren die;
- *   - an optional read-only mode that refuses repo-mutating verification.
+ *   - an optional best-effort write blocker (--no-obvious-writes / deprecated --read-only) that refuses obvious repo-mutating verification commands.
  *
  * P1 hardening (R-01/R-02/R-03 — bring verify.json to the decision-record
  * standard): the command SET must be human-confirmed (a TTY barrier on
@@ -823,7 +823,7 @@ export interface RunCommandsOptions {
   timeoutMs?: number;
   /** Curated env to pass to each child (default {@link curatedEnv}()). */
   env?: NodeJS.ProcessEnv;
-  /** When true, refuse to execute a command that looks repo-mutating (#19, P6-5). */
+  /** When true, refuse to execute a command that looks repo-mutating (#19, P6-5). Set by --no-obvious-writes (deprecated alias --read-only). */
   readOnly?: boolean;
   /**
    * Max bytes of combined stdout+stderr buffered per child before `spawnSync` kills
@@ -881,7 +881,7 @@ export function runCommands(
 
   const results: VerifyResult[] = [];
   for (const command of commands) {
-    // Read-only refusal (#19, P6-5): never execute an apparently-mutating command.
+    // Best-effort write blocker (#19, P6-5, R-32): refuse obvious repo-mutating commands when --no-obvious-writes is set.
     if (opts.readOnly && looksRepoMutating(command)) {
       results.push({
         command,
@@ -889,9 +889,10 @@ export function runCommands(
         ok: false,
         durationMs: 0,
         outputTail:
-          "[th verify] refused in --read-only mode: this command looks like it mutates the repo/working tree " +
+          "[th verify] refused in --no-obvious-writes mode: this command looks like it mutates the repo/working tree " +
           "(write/redirection, package install, git mutation, or destructive fs verb). " +
-          "Remove --read-only to run it, or configure a non-mutating verification command.",
+          "This is a best-effort heuristic, not a security boundary. " +
+          "Remove --no-obvious-writes to run it, or configure a non-mutating verification command.",
       });
       continue;
     }

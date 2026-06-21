@@ -261,7 +261,9 @@ describe("REQ-VERIFY-SEC-005 (P6-5): read-only mode refuses repo-mutating comman
     const report = runCommands(tp.root, ["echo hi > out.txt"], { readOnly: true });
     expect(report.results[0]!.ok).toBe(false);
     expect(report.results[0]!.exitCode).toBe(126);
-    expect(report.results[0]!.outputTail).toContain("read-only");
+    // R-32: message now references --no-obvious-writes (renamed from --read-only).
+    expect(report.results[0]!.outputTail).toContain("--no-obvious-writes");
+    expect(report.results[0]!.outputTail).toContain("best-effort heuristic");
     // The redirection never ran → out.txt does not exist.
     expect(fs.existsSync(require("node:path").join(tp.root, "out.txt"))).toBe(false);
     void mutating;

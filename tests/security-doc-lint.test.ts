@@ -95,12 +95,37 @@ describe("SEC-017 (P6-1): the human-only TTY gate is documented as a guardrail, 
 });
 
 describe("SEC-019 (P6-2/3/4/5): verify hardening boundaries are documented", () => {
-  it("CONTAINS the approve-before-first-run, curated-env, redaction, tree-kill, and read-only claims", () => {
+  it("CONTAINS the approve-before-first-run, curated-env, redaction, tree-kill, and write-blocker claims", () => {
     expect(security).toContain("Approve-before-first-run");
     expect(security).toContain("unapproved_command_set");
     expect(security).toContain("Curated child environment");
     expect(security).toContain("Output redaction");
     expect(security).toContain("Process-tree kill on timeout");
-    expect(security).toContain("Optional read-only mode");
+    // R-32: renamed from "Optional read-only mode" to honest "Optional best-effort write blocker"
+    expect(security).toContain("Optional best-effort write blocker");
+    expect(security).not.toContain("Optional read-only mode");
+  });
+});
+
+describe("R-32: --no-obvious-writes flag honesty (read-only mode truthfulness)", () => {
+  it("CONTAINS the heuristic caveat (best-effort, not a security boundary, not real containment)", () => {
+    // The old --read-only section over-claimed the flag was a security boundary.
+    // These strings must be PRESENT after the fix — they describe the honest posture.
+    expect(security).toContain("best-effort heuristic, NOT a security boundary");
+    expect(security).toContain("NOT real OS-level containment");
+  });
+
+  it("does NOT contain the over-claim 'cannot mutate the working tree'", () => {
+    // This phrase implied OS-level containment — it must be removed.
+    expect(security).not.toContain("cannot mutate the working tree");
+  });
+
+  it("CONTAINS --no-obvious-writes as the primary flag name", () => {
+    expect(security).toContain("--no-obvious-writes");
+  });
+
+  it("CONTAINS the deprecated --read-only alias disclosure", () => {
+    // The alias must be documented so users know --read-only still works.
+    expect(security).toContain("deprecated alias: `--read-only`");
   });
 });
