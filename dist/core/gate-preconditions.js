@@ -55,6 +55,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.CAN_ADVANCE_RUNGS = void 0;
 exports.checkBlockingDrift = checkBlockingDrift;
 exports.checkReviseEscalation = checkReviseEscalation;
 exports.checkVerifySuite = checkVerifySuite;
@@ -72,6 +73,7 @@ exports.checkProductionReality = checkProductionReality;
 exports.interviewRequired = interviewRequired;
 exports.checkInterview = checkInterview;
 exports.canAdvanceStage = canAdvanceStage;
+exports.canCompleteRun = canCompleteRun;
 exports.canUnlockImplementation = canUnlockImplementation;
 exports.validateTierTransition = validateTierTransition;
 const fs = __importStar(require("node:fs"));
@@ -391,21 +393,30 @@ function checkProductionReality(paths, state) {
             detail: { ids: blocking.map((e) => e.id), classifications: blocking.map((e) => e.classification) },
         };
     }
-    // 2. The verify suite must be green against production-targeted commands. Mirror
-    // checkFinalVerification's fail-closed reading: a corrupt config, a configured-but-
-    // never-run suite, or a red report each blocks (one stable token).
+    // 2. The verify suite must be green against production-targeted commands, AND the
+    // report must be a CURRENT-binding report (F2/R-30 — not a legacy bare report, not a
+    // stale/copied one). The validated reader classifies the report; only a `valid` GREEN
+    // report passes. A corrupt config still blocks (fail-closed). One stable token
+    // (`production_verify_not_green`) with a `reason` detail naming the divergence.
     const verifyLoaded = (0, verify_1.loadVerifyConfig)(paths);
     if (verifyLoaded.status === "corrupt") {
         return { ok: false, error: "production_verify_not_green", detail: { reason: "config_corrupt" } };
     }
     const verifyCfg = verifyLoaded.config;
-    const report = (0, verify_1.readVerifyReport)(paths);
-    if (verifyCfg.commands.length > 0 && !report) {
-        return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
-    }
-    if (report && !report.ok) {
-        const failed = report.results.filter((x) => !x.ok).length;
-        return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
+    if (verifyCfg.commands.length > 0) {
+        const validated = (0, verify_1.readVerifyReportValidated)(paths);
+        if (validated.status === "absent") {
+            return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
+        }
+        if (validated.status !== "valid") {
+            // legacy / stale / corrupt report → the green claim cannot be trusted for the
+            // current snapshot. Re-run `th verify run` to seal a fresh bound envelope.
+            return { ok: false, error: "production_verify_not_green", detail: { reason: validated.status, ...(validated.staleReasons ? { staleReasons: validated.staleReasons } : {}) } };
+        }
+        if (!validated.report.ok) {
+            const failed = validated.report.results.filter((x) => !x.ok).length;
+            return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
+        }
     }
     // 3. A live-QA Tester run record must be attached (audit C-08).
     if (!(0, tester_1.testerRecordPresent)(paths)) {
@@ -471,52 +482,138 @@ function checkInterview(paths, state) {
     return PASS;
 }
 /**
+ * The 9 GLOBAL rungs in `canAdvanceStage`'s exact short-circuit order. The loop in
+ * `canAdvanceStage` iterates THIS array, so the order here IS the runtime order
+ * (next.ts's ladder is pinned to it by next-characterization). Each is classified:
+ * the four HUMAN-reconciliation obligations are `always-run`; the rest are
+ * `forward-only`.
+ */
+const GLOBAL_RUNGS = [
+    { id: "checkBlockingDrift", bucket: "always-run", scope: "global", run: (_p, s) => checkBlockingDrift(s) },
+    { id: "checkReviseEscalation", bucket: "always-run", scope: "global", run: (_p, s) => checkReviseEscalation(s) },
+    { id: "checkVerifySuite", bucket: "forward-only", scope: "global", run: (p) => checkVerifySuite(p) },
+    { id: "checkArtifactDrift", bucket: "forward-only", scope: "global", run: (p, s) => checkArtifactDrift(p, s) },
+    { id: "checkTierSet", bucket: "forward-only", scope: "global", run: (_p, s) => checkTierSet(s) },
+    { id: "checkInterview", bucket: "forward-only", scope: "global", run: (p, s) => checkInterview(p, s) },
+    { id: "checkRepoMap", bucket: "forward-only", scope: "global", run: (p, s) => checkRepoMap(p, s) },
+    { id: "checkDecisionObligations", bucket: "always-run", scope: "global", run: (p, s) => checkDecisionObligations(p, s) },
+    { id: "checkDebate", bucket: "always-run", scope: "global", run: (_p, s) => checkDebate(s) },
+];
+/**
+ * The STAGE-specific rungs (the branch after the globals). Each is gated by the
+ * current stage at runtime; here they are enumerated + classified so the
+ * exhaustiveness test sees the COMPLETE rung set. `checkFinalVerification` is the
+ * sole `final` rung (the verify AUTHORITY at completion — Item 5); the rest are
+ * `forward-only` (they gate advancing OUT of a non-final stage, not completion).
+ */
+const STAGE_RUNGS = [
+    { id: "checkGoverningArtifact", bucket: "forward-only", scope: "stage:non-final-artifact", run: (p, s) => checkGoverningArtifact(p, s) },
+    { id: "checkCoverage", bucket: "forward-only", scope: "stage:implementation-planning", run: (p) => checkCoverage(p) },
+    { id: "checkImplementationSettled", bucket: "forward-only", scope: "stage:implementation", run: (_p, s) => checkImplementationSettled(s) },
+    { id: "checkFinalVerification", bucket: "final", scope: "stage:final", run: (p, s) => checkFinalVerification(p, s) },
+];
+/**
+ * The COMPLETE, machine-enumerable rung registry — every rung `canAdvanceStage`
+ * runs, in (global-then-stage) order. This is the LITERAL execution list: BOTH
+ * `canAdvanceStage` and `canCompleteRun` iterate it and invoke each entry's `run`
+ * closure (a rung cannot be run from anywhere else), and `th next`'s ladder is pinned
+ * to this order by next-characterization. The partition-exhaustiveness test
+ * introspects it (every entry has a valid bucket) and, by wrapping the `run` closures,
+ * proves every rung `canAdvanceStage` invokes is a registry entry — so a future rung
+ * added without a bucket fails LOUDLY.
+ */
+exports.CAN_ADVANCE_RUNGS = [...GLOBAL_RUNGS, ...STAGE_RUNGS];
+/**
+ * Does a registry rung APPLY at `stage`? Globals always apply; the stage rungs apply
+ * only at their stage. This is the single stage-gating predicate `canAdvanceStage`
+ * uses to drive the registry, so the stage-branch logic lives in ONE place the
+ * exhaustiveness test can see.
+ */
+function rungAppliesAtStage(rung, stage) {
+    switch (rung.scope) {
+        case "global":
+            return true;
+        case "stage:non-final-artifact":
+            return !(0, stages_1.isFinalVerification)(stage);
+        case "stage:implementation-planning":
+            return stage === "implementation-planning";
+        case "stage:implementation":
+            return stage === "implementation";
+        case "stage:final":
+            return (0, stages_1.isFinalVerification)(stage);
+    }
+}
+/**
  * The FULL mechanical ladder that must clear before the run advances OUT of the
  * current stage — the EXHAUSTIVE list (AC-B13 reuses it verbatim): global rungs
  * a–h, then the stage-specific rung for the current stage (governing artifact,
  * coverage at implementation-planning, slices settled at implementation, or the
  * final-verification ladder). Evaluated lazily so the short-circuit order — and the
  * cost (the brownfield repo scan only runs when reached) — matches `runNext()`.
+ *
+ * R-29: this ITERATES `CAN_ADVANCE_RUNGS` and runs each entry whose scope applies to
+ * the current stage, in registry order — the registry is the execution list, not a
+ * hand-mirror. A rung can never be in the registry but skipped here, nor run here but
+ * missing from the registry. (The final-verification branch is a single `final` rung
+ * — `checkFinalVerification` — which composes the production-reality rung LAST,
+ * matching `th next`'s render order.)
  */
 function canAdvanceStage(paths, state) {
-    let r;
-    if (!(r = checkBlockingDrift(state)).ok)
-        return r;
-    if (!(r = checkReviseEscalation(state)).ok)
-        return r;
-    if (!(r = checkVerifySuite(paths)).ok)
-        return r;
-    if (!(r = checkArtifactDrift(paths, state)).ok)
-        return r;
-    if (!(r = checkTierSet(state)).ok)
-        return r;
-    if (!(r = checkInterview(paths, state)).ok)
-        return r;
-    if (!(r = checkRepoMap(paths, state)).ok)
-        return r;
-    if (!(r = checkDecisionObligations(paths, state)).ok)
-        return r;
-    if (!(r = checkDebate(state)).ok)
-        return r;
     const current = (0, stages_1.canonicalizeStage)(state.current_stage);
-    if ((0, stages_1.isFinalVerification)(current)) {
-        // SG3 P2-C (enforce) — checkFinalVerification composes the production-reality rung
-        // as its LAST sub-rung (after slices/verify/coverage/report), so canAdvanceStage's
-        // final branch inherits it in the SAME order `th next` renders it. Inserting an
-        // explicit check HERE would put production-reality AHEAD of coverage and diverge
-        // from the oracle's order — so the rung lives inside checkFinalVerification only.
+    for (const rung of exports.CAN_ADVANCE_RUNGS) {
+        if (!rungAppliesAtStage(rung, current))
+            continue;
+        const r = rung.run(paths, state);
+        if (!r.ok)
+            return r;
+    }
+    return PASS;
+}
+/**
+ * May the run be certified COMPLETE (turn-end / "claim done") RIGHT NOW? (R-29.)
+ *
+ * This is a RE-SELECTION of `canAdvanceStage`'s rungs, NOT a verbatim alias.
+ * `canAdvanceStage` answers "may the run advance to the NEXT stage?" — a
+ * forward-progress question. Completion is a DIFFERENT question: a mid-build turn-end
+ * is NOT a claim that the run is done, so the forward-PROGRESS rungs (verify-suite,
+ * artifact-drift, tier, interview, repo-map, governing-artifact, stage-coverage,
+ * impl-settled) must NOT block a non-final Stop — blocking on them would wedge every
+ * legitimate mid-build pause. What MUST still block at any stage are the HUMAN
+ * reconciliation obligations (`always-run`): an open blocking drift / debate / revise
+ * escalation / gating decision is owed to a human regardless of stage.
+ *
+ * Composition (the registry's buckets drive it):
+ *   1. Run every `always-run` rung (drift, revise, decisions, debate) — block on any.
+ *   2. At final-verification: return `checkFinalVerification` — the STRICT completion
+ *      ladder (slices → verify_config_corrupt → verify_suite_never_run → coverage →
+ *      report → production-reality).
+ *   3. At a non-final stage: PASS (the forward-only rungs do not gate completion).
+ *
+ * VERIFY-AUTHORITY PIN (Item 5): at final-verification the verify authority is
+ * `checkFinalVerification` (which blocks on verify_config_corrupt + verify_suite_
+ * never_run + red), NOT `checkVerifySuite` (which PASSes never-run + corrupt-config
+ * and blocks only on an existing-red report). Routing the final verify check through
+ * the weaker `checkVerifySuite` would silently DROP the never-run + corrupt-config
+ * blocks — an F1-class weakening. So the final branch composes `checkFinalVerification`
+ * directly; `checkVerifySuite` is classified `forward-only` and is INERT at completion.
+ * (`checkProductionReality` is self-gated to final-verification and composed inside
+ * `checkFinalVerification`, so it is never reached at a non-final stage.)
+ */
+function canCompleteRun(paths, state) {
+    // 1. Always-run human-reconciliation obligations, in registry order.
+    for (const rung of GLOBAL_RUNGS) {
+        if (rung.bucket !== "always-run")
+            continue;
+        const r = rung.run(paths, state);
+        if (!r.ok)
+            return r;
+    }
+    // 2. At the completion boundary, the strict final-verification ladder is authority.
+    if ((0, stages_1.isFinalVerification)(state.current_stage)) {
         return checkFinalVerification(paths, state);
     }
-    if (!(r = checkGoverningArtifact(paths, state)).ok)
-        return r;
-    if (current === "implementation-planning") {
-        if (!(r = checkCoverage(paths)).ok)
-            return r;
-    }
-    if (current === "implementation") {
-        if (!(r = checkImplementationSettled(state)).ok)
-            return r;
-    }
+    // 3. Non-final: the forward-only rungs do not gate completion (a mid-build turn-end
+    //    is not a "claim done"), so completion PASSes.
     return PASS;
 }
 /**

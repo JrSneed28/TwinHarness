@@ -737,7 +737,8 @@ describe("REQ-WGATE-010: verify approval anchors are gated, not allowlisted", ()
       const out = runHookPretoolGate(tp.paths, inputFor(anchor, tp.root));
       expect(isAllow(out)).toBe(false);
       expect(permissionDecision(out)).toBe("ask");
-      expect(permissionReason(out)).toContain("verify approval anchor");
+      // R-29: anchor set widened to all completion-evidence files; reason renamed.
+      expect(permissionReason(out)).toContain("completion-evidence anchor");
     });
 
     it(`deny mode: a Write to ${anchor} is DENIED`, () => {

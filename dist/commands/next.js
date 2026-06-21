@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.openHumanObligations = openHumanObligations;
 exports.runNext = runNext;
+exports.renderStopReason = renderStopReason;
 const output_1 = require("../core/output");
 const state_store_1 = require("../core/state-store");
 const stages_1 = require("../core/stages");
@@ -449,4 +450,89 @@ function emit(next, explain = false) {
         data.why = next.why;
     const human = explain && next.why ? `next: ${next.action}\nwhy: ${next.why}` : `next: ${next.action}`;
     return (0, output_1.success)({ data, human });
+}
+/**
+ * Project a canonical gate token (the stable `error` a gate-precondition rung
+ * returns) to the SAME human sentence `th next` emits for that rung (R-29,
+ * observability). The Stop gate renders its block reason through THIS function so a
+ * blocked Stop and a `th next` pointed at the identical rung print the same wording
+ * — the Stop↔next token-parity contract (the enum-iterated parity matrix test pins
+ * it). `detail` is the rung's structured payload (ids, counts) the sentence
+ * interpolates; an absent/partial detail degrades to the bare sentence.
+ *
+ * The mapping is exhaustive over the COMPLETION-relevant tokens (the always-run
+ * human-reconciliation obligations + every `checkFinalVerification` sub-rung token,
+ * including the production-reality tokens). An UNKNOWN token (a rung added without a
+ * sentence) returns a generic but honest fallback naming the token, so the gate is
+ * never silent — the parity test asserts no completion token hits that fallback.
+ */
+function renderStopReason(token, detail) {
+    const d = detail ?? {};
+    const num = (k) => (typeof d[k] === "number" ? d[k] : 0);
+    const ids = (k) => (Array.isArray(d[k]) ? d[k] : []);
+    switch (token) {
+        // --- always-run human-reconciliation obligations (block at ANY stage) ----------
+        case "blocking_drift_open": {
+            const n = num("drift_open_blocking");
+            return `${n} blocking drift entr${n === 1 ? "y is" : "ies are"} open — resolve or escalate before completion (\`th drift list\` / \`th drift resolve <DRIFT-NNN>\`).`;
+        }
+        case "revise_escalation_open":
+            return "A revise loop is at its cap — escalate to the human (\`th drift\`/Critic loop §18) before completing.";
+        case "decision_obligation_open": {
+            const id = typeof d.decisionId === "string" ? d.decisionId : "";
+            const stage = typeof d.blockedStage === "string" ? d.blockedStage : "";
+            return `An unapproved decision${id ? ` (${id})` : ""} gates the current stage${stage ? ` '${stage}'` : ""}; approve or reject via \`th decision approve\` (see \`th decision check\`) before completing.`;
+        }
+        case "debate_open_blocking": {
+            const n = num("debate_open_blocking");
+            return `${n} open BLOCKING debate${n === 1 ? "" : "s"} must be reconciled (\`th debate resolve\`) before completing.`;
+        }
+        // --- present-but-invalid state -------------------------------------------------
+        case "invalid_state":
+            return "state.json is present but does NOT validate against the schema; repair it before claiming any stage complete.";
+        // --- final-verification ladder (the strict completion gate) --------------------
+        case "slices_unsettled": {
+            const open = ids("open");
+            return `Final verification is blocked while slices are unfinished — finish or block${open.length ? `: ${open.join(", ")}` : ""} (\`th slice set-status <SLICE-ID> done|blocked\`).`;
+        }
+        case "verify_config_corrupt":
+            return "Final verification is blocked — verify.json is present but unreadable/corrupt. Inspect it, or run \`th verify clear\` and re-add the commands, then \`th verify approve\` and \`th verify run\` before sign-off.";
+        case "verify_suite_never_run": {
+            const n = num("commands");
+            return `Final verification needs a green suite — ${n} verify command(s) are configured but \`th verify run\` has never been recorded. Run \`th verify run\` and confirm it is green before sign-off.`;
+        }
+        case "reqs_file_missing":
+            return "Coverage cannot be checked — author the requirements file first.";
+        case "coverage_failing": {
+            const gaps = Array.isArray(d.gaps) ? d.gaps : [];
+            return `Coverage gate failing — ${gaps.length} REQ-ID(s) lack a slice and/or a test${gaps.length ? `: ${gaps.map((g) => g.req).join(", ")}` : ""}. Run \`th coverage check\`.`;
+        }
+        case "report_not_registered": {
+            const file = typeof d.file === "string" ? d.file : "the verification report";
+            return `${file} exists but is not registered — after the human signs off, run \`th artifact register ${file} --version <n>\`.`;
+        }
+        case "report_not_produced": {
+            const produced = typeof d.produces === "string" ? d.produces : "the verification report";
+            return `Produce ${produced} separating coherence (Critic) from correctness (tests + human), then register it.`;
+        }
+        // --- production-reality rung tokens (audit C-05..C-08) -------------------------
+        case "simulation_unretired": {
+            const list = ids("ids");
+            return `Final verification is blocked — user-visible simulation still active${list.length ? `: ${list.join(", ")}` : ""}. Replace it with the real (or sandbox) dependency and \`th sim retire <SIM-NNN>\` before sign-off (\`th sim list\`).`;
+        }
+        case "production_verify_not_green":
+            return "Final verification is blocked — the verify suite is not green against production-targeted commands. Run \`th verify run\` and confirm green before sign-off.";
+        case "tester_record_missing":
+            return "Final verification is blocked — no live-QA Tester record is attached. Run the Tester against the real (or sandbox) boundary, then attach the record with \`th tester record --driver <d> [--provider real|sandbox] [--evidence-ref <p>]\` (and note the same evidence in the verification report's Tester Evidence section).";
+        case "unledgered_simulation_in_dist": {
+            const n = num("total");
+            return `Final verification is blocked — dist/ carries ${n} unledgered simulation pattern(s) (\`th sim scan\`). Declare each with \`th sim add\` (and retire it) or remove it before sign-off.`;
+        }
+        case "simulation_ledger_corrupt":
+            return "Final verification is blocked — .twinharness/simulation-ledger.json is corrupt/unreadable. Inspect and repair it before sign-off (it must be a JSON array of simulation entries).";
+        default:
+            // Honest fallback: never silent. The Stop↔next parity test asserts no
+            // completion-relevant token reaches here (every such token has a sentence above).
+            return `Completion is blocked by an unmet gate (${token}). Run \`th next\` for the specific obligation.`;
+    }
 }

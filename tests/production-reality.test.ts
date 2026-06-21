@@ -52,10 +52,14 @@ function state(paths: ProjectPaths): TwinHarnessState {
   return readState(paths).state!;
 }
 
-/** Attach a valid live-QA Tester record (satisfies condition 3). */
+/**
+ * Attach a VALID, F8-BOUND live-QA Tester record (satisfies condition 3 under the
+ * enforced gate, R-31). The bare `{driver,provider}` marker is no longer evidence —
+ * the strict predicate requires passed:true + the execution receipt + a matching repo
+ * snapshot. `runTesterRecord(--passed)` writes exactly that binding.
+ */
 function attachTesterRecord(paths: ProjectPaths): void {
-  fs.mkdirSync(paths.stateDir, { recursive: true });
-  fs.writeFileSync(testerRecordPath(paths), JSON.stringify({ driver: "cli-e2e", provider: "sandbox" }), "utf8");
+  expect(runTesterRecord(paths, { driver: "cli-e2e", provider: "sandbox", passed: true }).ok).toBe(true);
 }
 
 /**
@@ -261,6 +265,9 @@ describe("th tester record — the missing writer for the gate's 3rd condition (
   it("writes a well-shaped record (driver/provider/evidence/ranAt) the gate's read predicate accepts", () => {
     const paths = greenAtFinalVerification();
     fs.rmSync(testerRecordPath(paths), { force: true });
+    // PR #28 review: a LOCAL evidence ref must name a readable file — provide it.
+    fs.mkdirSync(path.join(paths.root, "out"), { recursive: true });
+    fs.writeFileSync(path.join(paths.root, "out", "run.log"), "live run output\n", "utf8");
     const res = runTesterRecord(paths, { driver: "playwright", provider: "sandbox", evidenceRef: "out/run.log" });
     expect(res.ok).toBe(true);
     const rec = readTesterRecord(paths);
@@ -271,11 +278,15 @@ describe("th tester record — the missing writer for the gate's 3rd condition (
     expect(typeof rec!.ranAt).toBe("string");
   });
 
-  it("CLEARS the production-reality gate's tester_record_missing block end-to-end", () => {
+  it("CLEARS the production-reality gate's tester_record_missing block end-to-end (requires --passed, R-31)", () => {
     const paths = greenAtFinalVerification();
     fs.rmSync(testerRecordPath(paths), { force: true });
     expect(checkProductionReality(paths, state(paths)).error).toBe("tester_record_missing");
+    // F8/R-31: a driver-only record (no --passed) is written but does NOT clear the gate.
     expect(runTesterRecord(paths, { driver: "cli-e2e" }).ok).toBe(true);
+    expect(checkProductionReality(paths, state(paths)).error).toBe("tester_record_missing");
+    // Recording it as PASSED (the bound receipt + repo snapshot) clears the rung.
+    expect(runTesterRecord(paths, { driver: "cli-e2e", passed: true }).ok).toBe(true);
     expect(checkProductionReality(paths, state(paths))).toEqual({ ok: true });
   });
 });

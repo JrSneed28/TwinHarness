@@ -2985,7 +2985,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve20.call(this, root, ref);
+      let _sch = resolve21.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3012,7 +3012,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve20(root, ref) {
+    function resolve21(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3643,7 +3643,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve20(baseURI, relativeURI, options) {
+    function resolve21(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3901,7 +3901,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve20,
+      resolve: resolve21,
       resolveComponent,
       equal,
       serialize,
@@ -14230,7 +14230,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve20) => setTimeout(resolve20, pollInterval));
+        await new Promise((resolve21) => setTimeout(resolve21, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -14247,7 +14247,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve20, reject) => {
+    return new Promise((resolve21, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -14325,7 +14325,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve20(parseResult.data);
+            resolve21(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -14586,12 +14586,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve20, reject) => {
+    return new Promise((resolve21, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve20, interval);
+      const timeoutId = setTimeout(resolve21, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -15461,12 +15461,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve20) => {
+    return new Promise((resolve21) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve20();
+        resolve21();
       } else {
-        this._stdout.once("drain", resolve20);
+        this._stdout.once("drain", resolve21);
       }
     });
   }
@@ -17629,8 +17629,45 @@ function computeBreakdown(root, opts = {}) {
 // src/core/verify.ts
 var fs12 = __toESM(require("node:fs"));
 var path10 = __toESM(require("node:path"));
+var import_node_child_process2 = require("node:child_process");
+var import_node_crypto4 = require("node:crypto");
+
+// src/core/git-revision.ts
 var import_node_child_process = require("node:child_process");
 var import_node_crypto3 = require("node:crypto");
+function git(cwd, args) {
+  try {
+    const out = (0, import_node_child_process.spawnSync)("git", args, {
+      cwd,
+      encoding: "utf8",
+      // A generous-but-bounded buffer: `git diff` on a large dirty tree can be big,
+      // but the digest only needs the bytes — overflow falls through to null (the
+      // honest "unbound" posture) rather than throwing.
+      maxBuffer: 32 * 1024 * 1024,
+      windowsHide: true
+    });
+    if (out.error) return null;
+    if (typeof out.status === "number" && out.status !== 0) return null;
+    return (out.stdout ?? "").trim();
+  } catch {
+    return null;
+  }
+}
+function gitHead(root) {
+  const head = git(root, ["rev-parse", "HEAD"]);
+  if (head === null || head === "") return null;
+  return head;
+}
+function dirtyTreeDigest(root) {
+  const status = git(root, ["status", "--porcelain"]);
+  if (status === null) return null;
+  if (status === "") return CLEAN_TREE_DIGEST;
+  const diff = git(root, ["diff", "HEAD"]) ?? "";
+  return (0, import_node_crypto3.createHash)("sha256").update(status + "\n\0\n" + diff, "utf8").digest("hex");
+}
+var CLEAN_TREE_DIGEST = "clean";
+
+// src/core/verify.ts
 var OUTPUT_TAIL_CHARS = 2e3;
 var DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60 * 1e3;
 function verifyConfigPath(paths) {
@@ -17640,7 +17677,7 @@ function verifyReportPath(paths) {
   return path10.join(paths.stateDir, "verify-report.json");
 }
 function commandSetHash(commands) {
-  return (0, import_node_crypto3.createHash)("sha256").update(JSON.stringify(commands), "utf8").digest("hex");
+  return (0, import_node_crypto4.createHash)("sha256").update(JSON.stringify(commands), "utf8").digest("hex");
 }
 function loadVerifyConfig(paths) {
   const file = verifyConfigPath(paths);
@@ -17711,6 +17748,10 @@ function isValidApprovalEvent(parsed) {
 function readVerifyApprovals(paths) {
   return readJsonlValues(verifyApprovalsPath(paths), isValidApprovalEvent);
 }
+function lastApprovalRecordHash(paths) {
+  const last = scanTailValid(verifyApprovalsPath(paths), isValidApprovalEvent);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
 function verifyApprovalChain(events) {
   let expectedPrev = GENESIS_PREV_HASH;
   for (let i = 0; i < events.length; i++) {
@@ -17758,9 +17799,67 @@ function readVerifyReport(paths) {
   }
   return null;
 }
-function writeVerifyReport(paths, report) {
+function writeVerifyReportEnvelope(paths, report, commands) {
+  const binding = currentVerifyBinding(paths, commands);
+  const envelope = {
+    ...report,
+    schemaVersion: VERIFY_REPORT_SCHEMA_VERSION,
+    commandSetHash: binding.commandSetHash,
+    configLockDigest: binding.configLockDigest,
+    gitHead: binding.gitHead,
+    dirtyTreeDigest: binding.dirtyTreeDigest
+  };
   fs12.mkdirSync(paths.stateDir, { recursive: true });
-  atomicWriteFile(verifyReportPath(paths), JSON.stringify(report, null, 2) + "\n", { root: paths.root });
+  atomicWriteFile(verifyReportPath(paths), JSON.stringify(envelope, null, 2) + "\n", { root: paths.root });
+}
+var VERIFY_REPORT_SCHEMA_VERSION = 2;
+function hasEnvelopeBinding(v) {
+  return typeof v.schemaVersion === "number" && typeof v.commandSetHash === "string" && typeof v.configLockDigest === "string";
+}
+function currentVerifyBinding(paths, commands) {
+  return {
+    commandSetHash: commandSetHash(commands),
+    configLockDigest: lastApprovalRecordHash(paths),
+    gitHead: gitHead(paths.root),
+    dirtyTreeDigest: dirtyTreeDigest(paths.root)
+  };
+}
+function readVerifyReportValidated(paths) {
+  const file = verifyReportPath(paths);
+  if (!fs12.existsSync(file)) return { status: "absent" };
+  let raw;
+  try {
+    raw = readFileWithRetry(file);
+  } catch {
+    return { status: "absent" };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { status: "corrupt" };
+  }
+  if (parsed === null || typeof parsed !== "object") return { status: "corrupt" };
+  const obj = parsed;
+  if (typeof obj.ok !== "boolean") return { status: "corrupt" };
+  const report = obj;
+  if (!hasEnvelopeBinding(obj) || obj.schemaVersion < VERIFY_REPORT_SCHEMA_VERSION) {
+    return { status: "legacy", report };
+  }
+  const envelope = obj;
+  const config2 = loadVerifyConfig(paths).config;
+  const expected = currentVerifyBinding(paths, config2.commands);
+  const staleReasons = [];
+  if (envelope.commandSetHash !== expected.commandSetHash) staleReasons.push("commandSetHash");
+  if (envelope.configLockDigest !== expected.configLockDigest) staleReasons.push("configLockDigest");
+  if (envelope.gitHead !== null && expected.gitHead !== null && envelope.gitHead !== expected.gitHead) {
+    staleReasons.push("gitHead");
+  }
+  if (envelope.dirtyTreeDigest !== null && expected.dirtyTreeDigest !== null && envelope.dirtyTreeDigest !== expected.dirtyTreeDigest) {
+    staleReasons.push("dirtyTreeDigest");
+  }
+  if (staleReasons.length > 0) return { status: "stale", report, envelope, staleReasons };
+  return { status: "valid", report, envelope };
 }
 var REDACTION_RULES = [
   // key=value / key: value for secret-ish keys (token, secret, password, api_key, ...).
@@ -17916,7 +18015,7 @@ function parseWmicProcessTable(stdout) {
   return childrenOf;
 }
 var runSnapshotCommand = (cmd, args) => {
-  const out = (0, import_node_child_process.spawnSync)(cmd, args, { encoding: "utf8" });
+  const out = (0, import_node_child_process2.spawnSync)(cmd, args, { encoding: "utf8" });
   return out.error ? "" : out.stdout ?? "";
 };
 function snapshotChildrenMap() {
@@ -17954,7 +18053,7 @@ function snapshotChildrenMap() {
 function killOne(pid) {
   try {
     if (process.platform === "win32") {
-      (0, import_node_child_process.spawnSync)("taskkill", ["/pid", String(pid), "/F"], { stdio: "ignore" });
+      (0, import_node_child_process2.spawnSync)("taskkill", ["/pid", String(pid), "/F"], { stdio: "ignore" });
     } else {
       process.kill(pid, "SIGKILL");
     }
@@ -17973,7 +18072,7 @@ function killProcessTree(pid) {
     const childrenOf = snapshotChildrenMap();
     if (childrenOf.size === 0 && process.platform === "win32") {
       try {
-        (0, import_node_child_process.spawnSync)("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+        (0, import_node_child_process2.spawnSync)("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
       } catch {
       }
     }
@@ -18026,7 +18125,7 @@ function runCommands(root, commands, nowOrOpts = () => /* @__PURE__ */ new Date(
       env
     };
     spawnOpts.detached = process.platform !== "win32";
-    const proc = (0, import_node_child_process.spawnSync)(command, spawnOpts);
+    const proc = (0, import_node_child_process2.spawnSync)(command, spawnOpts);
     const durationMs = Date.now() - start;
     const errCode = proc.error?.code;
     const timedOut = errCode === "ETIMEDOUT";
@@ -18054,7 +18153,7 @@ function runCommands(root, commands, nowOrOpts = () => /* @__PURE__ */ new Date(
 // src/core/decisions.ts
 var fs13 = __toESM(require("node:fs"));
 var path11 = __toESM(require("node:path"));
-var import_node_crypto4 = require("node:crypto");
+var import_node_crypto5 = require("node:crypto");
 var APPROVAL_TRANSITIONS = /* @__PURE__ */ new Set(["approved", "rejected", "superseded"]);
 function decisionsPath(paths) {
   return path11.join(paths.stateDir, "decisions.jsonl");
@@ -18105,7 +18204,7 @@ function computeRecordHash(event) {
   return hashContent(canonicalText(event));
 }
 function computeKeyedHash(event, key) {
-  return (0, import_node_crypto4.createHmac)("sha256", key).update(canonicalText(event)).digest("hex");
+  return (0, import_node_crypto5.createHmac)("sha256", key).update(canonicalText(event)).digest("hex");
 }
 var ID_RE = /^DECISION-\d{3,}$/;
 var EVENT_TYPES = /* @__PURE__ */ new Set(["proposed", "approved", "rejected", "superseded"]);
@@ -19888,9 +19987,9 @@ var path15 = __toESM(require("node:path"));
 function containLcovPath(absRoot, lcovDirRel, sfPath) {
   if (sfPath.length === 0) return null;
   const norm = sfPath.replace(/\\/g, "/");
-  const isAbsolute6 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
+  const isAbsolute7 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
   let abs;
-  if (isAbsolute6) {
+  if (isAbsolute7) {
     abs = path15.resolve(norm);
   } else {
     abs = path15.resolve(absRoot, lcovDirRel, norm);
@@ -21500,6 +21599,40 @@ var path18 = __toESM(require("node:path"));
 function testerRecordPath(paths) {
   return path18.join(paths.stateDir, "tester-record.json");
 }
+function isRemoteEvidenceRef(ref) {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(ref);
+}
+function resolveEvidencePath(root, ref) {
+  return path18.isAbsolute(ref) ? ref : path18.resolve(root, ref);
+}
+function localEvidenceReadable(root, ref) {
+  const abs = resolveEvidencePath(root, ref);
+  try {
+    return fs18.existsSync(abs) && fs18.statSync(abs).isFile();
+  } catch {
+    return false;
+  }
+}
+function computeReceiptDigest(root, parts) {
+  let evidenceContent = "";
+  if (parts.evidenceRef && !isRemoteEvidenceRef(parts.evidenceRef)) {
+    const abs = resolveEvidencePath(root, parts.evidenceRef);
+    try {
+      if (fs18.existsSync(abs) && fs18.statSync(abs).isFile()) {
+        evidenceContent = fs18.readFileSync(abs, "utf8");
+      }
+    } catch {
+    }
+  }
+  const canonical = JSON.stringify({
+    driver: parts.driver,
+    provider: parts.provider ?? null,
+    evidenceRef: parts.evidenceRef ?? null,
+    passed: parts.passed,
+    evidenceContentHash: evidenceContent ? hashContent(evidenceContent) : null
+  });
+  return hashContent(canonical);
+}
 function readTesterRecord(paths) {
   const file = testerRecordPath(paths);
   if (!fs18.existsSync(file)) return null;
@@ -21522,11 +21655,51 @@ function readTesterRecord(paths) {
     driver: r.driver,
     provider: typeof r.provider === "string" ? r.provider : void 0,
     evidenceRef: typeof r.evidenceRef === "string" ? r.evidenceRef : void 0,
-    ranAt: typeof r.ranAt === "string" ? r.ranAt : void 0
+    ranAt: typeof r.ranAt === "string" ? r.ranAt : void 0,
+    passed: typeof r.passed === "boolean" ? r.passed : void 0,
+    receiptDigest: typeof r.receiptDigest === "string" ? r.receiptDigest : void 0,
+    gitHead: typeof r.gitHead === "string" ? r.gitHead : r.gitHead === null ? null : void 0,
+    dirtyTreeDigest: typeof r.dirtyTreeDigest === "string" ? r.dirtyTreeDigest : r.dirtyTreeDigest === null ? null : void 0
   };
 }
+function readTesterRecordValidated(paths) {
+  const record2 = readTesterRecord(paths);
+  if (record2 === null) return { status: "absent" };
+  if (record2.passed === void 0 && record2.receiptDigest === void 0) {
+    return { status: "driver_only", record: record2 };
+  }
+  if (record2.passed !== true) return { status: "not_passed", record: record2 };
+  if (typeof record2.receiptDigest !== "string" || record2.receiptDigest.trim() === "") {
+    return { status: "unbound", record: record2 };
+  }
+  if (record2.evidenceRef && !isRemoteEvidenceRef(record2.evidenceRef)) {
+    if (!localEvidenceReadable(paths.root, record2.evidenceRef)) {
+      return { status: "evidence_missing", record: record2 };
+    }
+    const recomputed = computeReceiptDigest(paths.root, {
+      driver: record2.driver,
+      provider: record2.provider,
+      evidenceRef: record2.evidenceRef,
+      passed: record2.passed === true
+    });
+    if (recomputed !== record2.receiptDigest) {
+      return { status: "evidence_mismatch", record: record2 };
+    }
+  }
+  const curHead = gitHead(paths.root);
+  const curDirty = dirtyTreeDigest(paths.root);
+  const staleReasons = [];
+  if (record2.gitHead != null && curHead != null && record2.gitHead !== curHead) {
+    staleReasons.push("gitHead");
+  }
+  if (record2.dirtyTreeDigest != null && curDirty != null && record2.dirtyTreeDigest !== curDirty) {
+    staleReasons.push("dirtyTreeDigest");
+  }
+  if (staleReasons.length > 0) return { status: "stale", record: record2, staleReasons };
+  return { status: "valid", record: record2 };
+}
 function testerRecordPresent(paths) {
-  return readTesterRecord(paths) !== null;
+  return readTesterRecordValidated(paths).status === "valid";
 }
 
 // src/core/gate-preconditions.ts
@@ -21701,13 +21874,18 @@ function checkProductionReality(paths, state) {
     return { ok: false, error: "production_verify_not_green", detail: { reason: "config_corrupt" } };
   }
   const verifyCfg = verifyLoaded.config;
-  const report = readVerifyReport(paths);
-  if (verifyCfg.commands.length > 0 && !report) {
-    return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
-  }
-  if (report && !report.ok) {
-    const failed = report.results.filter((x) => !x.ok).length;
-    return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
+  if (verifyCfg.commands.length > 0) {
+    const validated = readVerifyReportValidated(paths);
+    if (validated.status === "absent") {
+      return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
+    }
+    if (validated.status !== "valid") {
+      return { ok: false, error: "production_verify_not_green", detail: { reason: validated.status, ...validated.staleReasons ? { staleReasons: validated.staleReasons } : {} } };
+    }
+    if (!validated.report.ok) {
+      const failed = validated.report.results.filter((x) => !x.ok).length;
+      return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
+    }
   }
   if (!testerRecordPresent(paths)) {
     return { ok: false, error: "tester_record_missing", detail: {} };
@@ -21742,27 +21920,44 @@ function checkInterview(paths, state) {
   }
   return PASS;
 }
+var GLOBAL_RUNGS = [
+  { id: "checkBlockingDrift", bucket: "always-run", scope: "global", run: (_p, s) => checkBlockingDrift(s) },
+  { id: "checkReviseEscalation", bucket: "always-run", scope: "global", run: (_p, s) => checkReviseEscalation(s) },
+  { id: "checkVerifySuite", bucket: "forward-only", scope: "global", run: (p) => checkVerifySuite(p) },
+  { id: "checkArtifactDrift", bucket: "forward-only", scope: "global", run: (p, s) => checkArtifactDrift(p, s) },
+  { id: "checkTierSet", bucket: "forward-only", scope: "global", run: (_p, s) => checkTierSet(s) },
+  { id: "checkInterview", bucket: "forward-only", scope: "global", run: (p, s) => checkInterview(p, s) },
+  { id: "checkRepoMap", bucket: "forward-only", scope: "global", run: (p, s) => checkRepoMap(p, s) },
+  { id: "checkDecisionObligations", bucket: "always-run", scope: "global", run: (p, s) => checkDecisionObligations(p, s) },
+  { id: "checkDebate", bucket: "always-run", scope: "global", run: (_p, s) => checkDebate(s) }
+];
+var STAGE_RUNGS = [
+  { id: "checkGoverningArtifact", bucket: "forward-only", scope: "stage:non-final-artifact", run: (p, s) => checkGoverningArtifact(p, s) },
+  { id: "checkCoverage", bucket: "forward-only", scope: "stage:implementation-planning", run: (p) => checkCoverage(p) },
+  { id: "checkImplementationSettled", bucket: "forward-only", scope: "stage:implementation", run: (_p, s) => checkImplementationSettled(s) },
+  { id: "checkFinalVerification", bucket: "final", scope: "stage:final", run: (p, s) => checkFinalVerification(p, s) }
+];
+var CAN_ADVANCE_RUNGS = [...GLOBAL_RUNGS, ...STAGE_RUNGS];
+function rungAppliesAtStage(rung, stage) {
+  switch (rung.scope) {
+    case "global":
+      return true;
+    case "stage:non-final-artifact":
+      return !isFinalVerification(stage);
+    case "stage:implementation-planning":
+      return stage === "implementation-planning";
+    case "stage:implementation":
+      return stage === "implementation";
+    case "stage:final":
+      return isFinalVerification(stage);
+  }
+}
 function canAdvanceStage(paths, state) {
-  let r;
-  if (!(r = checkBlockingDrift(state)).ok) return r;
-  if (!(r = checkReviseEscalation(state)).ok) return r;
-  if (!(r = checkVerifySuite(paths)).ok) return r;
-  if (!(r = checkArtifactDrift(paths, state)).ok) return r;
-  if (!(r = checkTierSet(state)).ok) return r;
-  if (!(r = checkInterview(paths, state)).ok) return r;
-  if (!(r = checkRepoMap(paths, state)).ok) return r;
-  if (!(r = checkDecisionObligations(paths, state)).ok) return r;
-  if (!(r = checkDebate(state)).ok) return r;
   const current = canonicalizeStage(state.current_stage);
-  if (isFinalVerification(current)) {
-    return checkFinalVerification(paths, state);
-  }
-  if (!(r = checkGoverningArtifact(paths, state)).ok) return r;
-  if (current === "implementation-planning") {
-    if (!(r = checkCoverage(paths)).ok) return r;
-  }
-  if (current === "implementation") {
-    if (!(r = checkImplementationSettled(state)).ok) return r;
+  for (const rung of CAN_ADVANCE_RUNGS) {
+    if (!rungAppliesAtStage(rung, current)) continue;
+    const r = rung.run(paths, state);
+    if (!r.ok) return r;
   }
   return PASS;
 }
@@ -24147,7 +24342,7 @@ function runTesterRecord(paths, opts) {
   const driver = (opts.driver ?? "").trim();
   if (driver === "") {
     return failure({
-      human: "usage: th tester record --driver <playwright|curl|cli-e2e|\u2026> [--provider real|sandbox] [--evidence-ref <path|url>]",
+      human: "usage: th tester record --driver <playwright|curl|cli-e2e|\u2026> --passed [--provider real|sandbox] [--evidence-ref <path|url>]",
       data: { error: "missing_driver" }
     });
   }
@@ -24155,21 +24350,35 @@ function runTesterRecord(paths, opts) {
   if (st.result) return st.result;
   const provider = opts.provider?.trim();
   const evidenceRef = opts.evidenceRef?.trim();
+  const passed = opts.passed === true;
+  if (evidenceRef && !isRemoteEvidenceRef(evidenceRef) && !localEvidenceReadable(paths.root, evidenceRef)) {
+    return failure({
+      human: `Evidence file not found or not a readable file: ${evidenceRef}
+Pass --evidence-ref pointing at the live run's saved output (a readable file under the project), or a URL (e.g. https://\u2026) for remotely-hosted evidence.`,
+      data: { error: "evidence_unreadable", evidenceRef }
+    });
+  }
+  const receiptDigest = computeReceiptDigest(paths.root, { driver, provider, evidenceRef, passed });
   const record2 = {
     driver,
     ...provider ? { provider } : {},
     ...evidenceRef ? { evidenceRef } : {},
-    ranAt: (/* @__PURE__ */ new Date()).toISOString()
+    ranAt: (/* @__PURE__ */ new Date()).toISOString(),
+    passed,
+    receiptDigest,
+    gitHead: gitHead(paths.root),
+    dirtyTreeDigest: dirtyTreeDigest(paths.root)
   };
   const body = JSON.stringify(record2, null, 2) + "\n";
   atomicWriteFile(testerRecordPath(paths), body, { root: paths.root });
   const hash = shortHash(body);
   const rel = path27.relative(paths.root, testerRecordPath(paths)).split(path27.sep).join("/");
-  appendLedger(paths, { event: "tester-record", driver: record2.driver, provider: record2.provider ?? null });
-  structuredLog({ cmd: "tester record", driver: record2.driver, provider: record2.provider ?? null });
+  appendLedger(paths, { event: "tester-record", driver: record2.driver, provider: record2.provider ?? null, passed });
+  structuredLog({ cmd: "tester record", driver: record2.driver, provider: record2.provider ?? null, passed });
+  const gateNote = passed ? "The production-reality gate's Tester condition is now satisfied." : "NOTE: recorded as NOT passed (`--passed` absent) \u2014 the production-reality gate's Tester condition is NOT satisfied. Re-record with `--passed` once the live run is green.";
   return success({
     data: { file: rel, ...record2, hash },
-    human: `Recorded live-QA Tester evidence at ${rel} (driver: ${record2.driver}${record2.provider ? `, provider: ${record2.provider}` : ""}${record2.evidenceRef ? `, evidence: ${record2.evidenceRef}` : ""}). The production-reality gate's Tester condition is now satisfied.`,
+    human: `Recorded live-QA Tester evidence at ${rel} (driver: ${record2.driver}${record2.provider ? `, provider: ${record2.provider}` : ""}${record2.evidenceRef ? `, evidence: ${record2.evidenceRef}` : ""}, passed: ${passed}). ` + gateNote,
     receipts: [{ file: rel, hash }]
   });
 }
@@ -24403,7 +24612,7 @@ function normalizeTemplateName(name) {
   if (trimmed === "." || trimmed === "..") return null;
   return trimmed.toLowerCase().endsWith(TEMPLATE_EXT) ? trimmed : trimmed + TEMPLATE_EXT;
 }
-function resolve16(name, projectRoot, plugin) {
+function resolve17(name, projectRoot, plugin) {
   const projectPath = path29.join(projectRoot, PROJECT_TEMPLATE_REL, name);
   const pluginPath = path29.join(plugin, PLUGIN_TEMPLATE_REL, name);
   for (const [abs, source] of [
@@ -24431,7 +24640,7 @@ function runTemplateGet(paths, name) {
       data: { error: "invalid_name", name }
     });
   }
-  const r = resolve16(normalized, paths.root, pluginRoot());
+  const r = resolve17(normalized, paths.root, pluginRoot());
   if ("error" in r) {
     structuredLog({ cmd: "template get", name: normalized, error: "template_not_found" });
     return failure({
@@ -25275,7 +25484,7 @@ function runVerifyRun(paths, opts = {}) {
     });
   }
   const report = runCommands(paths.root, config2.commands, { readOnly: opts.readOnly });
-  writeVerifyReport(paths, report);
+  writeVerifyReportEnvelope(paths, report, config2.commands);
   structuredLog({ cmd: "verify run", ok: report.ok, commands: report.results.length, readOnly: Boolean(opts.readOnly) });
   const data = { ok: report.ok, ranAt: report.ranAt, results: report.results };
   return report.ok ? success({ data, human: renderReport(report) }) : failure({ data, human: renderReport(report) });
@@ -27209,11 +27418,12 @@ var TOOL_DEFS = [
   // gate's `tester_record_missing` rung can be cleared through the documented workflow.
   {
     name: "th_tester_record",
-    description: "Attach the live-QA Tester run record (.twinharness/tester-record.json) that satisfies the production-reality gate's 3rd condition (tester_record_missing). `driver` is required (e.g. playwright|curl|cli-e2e); optional provider (real|sandbox) and evidenceRef (path/URL to raw output) are recorded for the verification report's Tester Evidence. Stamps ranAt. Returns a {file, hash} receipt. Mechanical: it records that a live run EXISTS; it does not judge pass/fail.",
+    description: "Attach the live-QA Tester run record (.twinharness/tester-record.json) that satisfies the production-reality gate's 3rd condition (tester_record_missing). `driver` is required (e.g. playwright|curl|cli-e2e). F8: pass `passed:true` to record a PASSING live run \u2014 the gate's STRICT predicate requires it (a record without `passed` is written but does NOT clear the rung). Optional provider (real|sandbox) and evidenceRef (path/URL to raw output) bind the execution receipt; the record is also bound to the repo snapshot (gitHead/dirtyTreeDigest) so a copied/stale record is rejected. Stamps ranAt. Returns a {file, hash} receipt. Mechanical: it records the verdict the live Tester supplies; it does not re-run or re-judge.",
     inputSchema: {
       type: "object",
       properties: {
         driver: stringProp("Driver/runner the live QA used (playwright | curl | cli-e2e | \u2026). Required, non-empty."),
+        passed: { type: "boolean", description: "F8 \u2014 the live run's pass verdict. true \u21D2 satisfies the production-reality Tester condition; absent/false \u21D2 recorded but the rung stays blocked." },
         provider: stringProp("Provider tier the live run exercised (real | sandbox)."),
         evidenceRef: stringProp("Path/URL to the raw live-run output or screenshots.")
       },
@@ -27222,6 +27432,7 @@ var TOOL_DEFS = [
     },
     run: (paths, args) => runTesterRecord(paths, {
       driver: optString(args, "driver"),
+      passed: optBool(args, "passed"),
       provider: optString(args, "provider"),
       evidenceRef: optString(args, "evidenceRef")
     })

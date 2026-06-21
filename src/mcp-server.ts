@@ -1684,11 +1684,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_tester_record",
     description:
-      "Attach the live-QA Tester run record (.twinharness/tester-record.json) that satisfies the production-reality gate's 3rd condition (tester_record_missing). `driver` is required (e.g. playwright|curl|cli-e2e); optional provider (real|sandbox) and evidenceRef (path/URL to raw output) are recorded for the verification report's Tester Evidence. Stamps ranAt. Returns a {file, hash} receipt. Mechanical: it records that a live run EXISTS; it does not judge pass/fail.",
+      "Attach the live-QA Tester run record (.twinharness/tester-record.json) that satisfies the production-reality gate's 3rd condition (tester_record_missing). `driver` is required (e.g. playwright|curl|cli-e2e). F8: pass `passed:true` to record a PASSING live run — the gate's STRICT predicate requires it (a record without `passed` is written but does NOT clear the rung). Optional provider (real|sandbox) and evidenceRef (path/URL to raw output) bind the execution receipt; the record is also bound to the repo snapshot (gitHead/dirtyTreeDigest) so a copied/stale record is rejected. Stamps ranAt. Returns a {file, hash} receipt. Mechanical: it records the verdict the live Tester supplies; it does not re-run or re-judge.",
     inputSchema: {
       type: "object",
       properties: {
         driver: stringProp("Driver/runner the live QA used (playwright | curl | cli-e2e | …). Required, non-empty."),
+        passed: { type: "boolean", description: "F8 — the live run's pass verdict. true ⇒ satisfies the production-reality Tester condition; absent/false ⇒ recorded but the rung stays blocked." },
         provider: stringProp("Provider tier the live run exercised (real | sandbox)."),
         evidenceRef: stringProp("Path/URL to the raw live-run output or screenshots."),
       },
@@ -1698,6 +1699,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     run: (paths, args) =>
       runTesterRecord(paths, {
         driver: optString(args, "driver"),
+        passed: optBool(args, "passed"),
         provider: optString(args, "provider"),
         evidenceRef: optString(args, "evidenceRef"),
       }),
