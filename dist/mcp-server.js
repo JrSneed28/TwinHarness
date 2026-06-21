@@ -16142,6 +16142,22 @@ function readLockOwner(ownerFile) {
     return null;
   }
 }
+function parseOwnerPid(token) {
+  if (token === null) return null;
+  const m = /^(\d+)-/.exec(token.trim());
+  if (m === null) return null;
+  const pid = Number(m[1]);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
 var STALE_MS = 15e3;
 var realLockOps = {
   now: Date.now,
@@ -16150,7 +16166,8 @@ var realLockOps = {
   mtimeMs: (lockDir) => fs3.statSync(lockDir).mtimeMs,
   remove: (lockDir) => fs3.rmSync(lockDir, { recursive: true, force: true }),
   readOwner: readLockOwner,
-  writeOwner: (ownerFile, token) => fs3.writeFileSync(ownerFile, token, "utf8")
+  writeOwner: (ownerFile, token) => fs3.writeFileSync(ownerFile, token, "utf8"),
+  isPidAlive
 };
 var DEFAULT_LOCK_TIMEOUT_MS = 25e3;
 function lockTimeoutMs() {
@@ -16206,11 +16223,15 @@ function withStateLock(paths, fn, ops = realLockOps) {
         }
         const age = ops.now() - ops.mtimeMs(lockDir);
         if (age > STALE_MS) {
-          if (ops.readOwner(ownerFile) === ownerBefore) {
-            ops.remove(lockDir);
+          const ownerPid = parseOwnerPid(ownerBefore);
+          const ownerAlive = ownerPid !== null && ops.isPidAlive(ownerPid);
+          if (!ownerAlive) {
+            if (ops.readOwner(ownerFile) === ownerBefore) {
+              ops.remove(lockDir);
+            }
+            backoff();
+            continue;
           }
-          backoff();
-          continue;
         }
       } catch {
         backoff();

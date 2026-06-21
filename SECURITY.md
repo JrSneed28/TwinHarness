@@ -122,8 +122,11 @@ Several boundaries keep this narrow:
   can still leak, so do not treat redaction as a guarantee.
 - **Process-tree kill on timeout.** A command that exceeds the per-command budget is
   killed together with its process tree (`taskkill /T /F` on Windows; a `ps`-walked
-  descendant SIGKILL on POSIX) so a grandchild (a spawned test runner or dev server)
-  cannot survive as an orphan.
+  descendant SIGKILL of the command's process group on POSIX) so a grandchild spawned
+  within that group (a test runner or dev server) is reaped, not left as an orphan. This
+  is best-effort: a process that DELIBERATELY detaches into its own session (`setsid`) and
+  reparents to init can escape the POSIX group reap (Windows `taskkill /T` still flattens
+  it) — the same conservative, honest-caveat posture as the other heuristics here.
 - **Optional best-effort write blocker.** `th verify run --no-obvious-writes`
   (deprecated alias: `--read-only`) blocks configured commands that match
   recognised repo-writing patterns (output redirections, package installs, git

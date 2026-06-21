@@ -59,6 +59,15 @@ jobs:
       - name: Smoke test th CLI
         run: node dist/cli.js version
 
+      # R-37 release-confidence: validate the shipped PLUGIN surfaces the host loads —
+      # plugin/marketplace manifests, the 16 agent manifests, a LIVE MCP handshake
+      # (spawn dist/mcp-server.js, JSON-RPC initialize + tools/list over stdio), and a
+      # live hook Stop-gate decision over the compiled CLI. These prove the real
+      # compiled artifacts start and speak the protocol — coverage the in-process unit
+      # suite cannot give. Runs on EVERY OS in the matrix (pure node core, no deps).
+      - name: Validate plugin + live MCP handshake
+        run: node scripts/ci-plugin-mcp-validate.cjs
+
       - name: Test
         run: npm test
 

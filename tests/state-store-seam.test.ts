@@ -54,6 +54,13 @@ function makeFakeOps(behavior: {
   age?: number;
   owners?: () => string | null;
   mtimeThrows?: string | ((attempt: number) => string | null);
+  /**
+   * R-38 — the owner-PID liveness verdict the steal branch consults. Default `false`
+   * (owner DEAD) so the existing steal cases (which use unparseable owner tokens →
+   * age-only fallback anyway) are unaffected; the R-38 tests set this explicitly to
+   * model a live-but-slow holder (no steal) vs a dead holder (steal).
+   */
+  pidAlive?: boolean;
 }): { state: FakeState; ops: LockOps } {
   const state: FakeState = { now: 1_000_000, attempts: 0, sleeps: [], removes: 0 };
   const ops: LockOps = {
@@ -82,6 +89,7 @@ function makeFakeOps(behavior: {
     },
     readOwner: () => (behavior.owners ? behavior.owners() : "tok"),
     writeOwner: () => {},
+    isPidAlive: () => behavior.pidAlive ?? false,
   };
   return { state, ops };
 }

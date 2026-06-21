@@ -317,6 +317,51 @@ function readLockOwner(ownerFile: string): string | null {
 }
 
 /**
+ * Parse the OWNER PID out of an owner token, or null if the token is missing or
+ * not in the expected `<pid>-<nonce>` shape. The token is minted in
+ * {@link withStateLock} as `${process.pid}-${nonce}`, so the leading integer
+ * before the first `-` is the holder's pid. A token we cannot parse (legacy,
+ * truncated, or corrupt) yields null so the caller falls back to the age-only
+ * steal (an unparseable owner stamp is treated as an abandoned lock — never a
+ * reason to REGRESS crash-recovery).
+ */
+export function parseOwnerPid(token: string | null): number | null {
+  if (token === null) return null;
+  const m = /^(\d+)-/.exec(token.trim());
+  if (m === null) return null;
+  const pid = Number(m[1]);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+/**
+ * R-38 — is the process `pid` ALIVE? Cross-platform liveness probe via signal 0
+ * (`process.kill(pid, 0)` sends no signal; it only checks the target exists and
+ * is signalable). Three outcomes:
+ *   - no throw            → the process EXISTS → ALIVE.
+ *   - throws EPERM        → the process EXISTS but we lack permission to signal it
+ *                           (a holder under a different uid) → ALIVE.
+ *   - throws ESRCH (else) → no such process → DEAD.
+ * A non-integer / non-positive pid is treated as NOT alive (the caller will have
+ * already fallen back to age-only when the pid is unparseable; this is defensive).
+ *
+ * Known accepted limitation (per the R-38 decision): PID REUSE — a dead holder's
+ * pid recycled by an unrelated live process reads as "alive", so the waiter does
+ * not steal and instead waits up to `TIMEOUT_MS` then errors LOUDLY (a recoverable
+ * `state_lock_timeout`, never a silent lost-update). We deliberately do NOT add
+ * nonce-vs-live-process verification — a bounded loud timeout is the right tradeoff.
+ */
+export function isPidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true; // exists and signalable
+  } catch (e) {
+    // EPERM = exists-but-not-permitted = ALIVE; anything else (ESRCH) = DEAD.
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
  * Age (ms) after which an unrefreshed `.state.lock` is considered stale and
  * may be stolen by a waiting caller. Exported so tests can use `STALE_MS + N`
  * rather than hardcoding the magic literal (TEST-006).
@@ -352,6 +397,13 @@ export interface LockOps {
   readOwner: (ownerFile: string) => string | null;
   /** Stamp the owner token (best-effort). Real: `fs.writeFileSync`. */
   writeOwner: (ownerFile: string, token: string) => void;
+  /**
+   * R-38 — is the owner process `pid` alive? An ADDITIONAL precondition on stealing
+   * a stale lock (steal only an aged-out lock whose owner is NOT alive). Injectable
+   * so the steal/liveness branch is deterministically unit-testable with a synthetic
+   * dead/alive verdict (no real second process). Real: {@link isPidAlive}.
+   */
+  isPidAlive: (pid: number) => boolean;
 }
 
 /** Production lock ops — the real clock + sleep + `node:fs` primitives. */
@@ -363,6 +415,7 @@ export const realLockOps: LockOps = {
   remove: (lockDir) => fs.rmSync(lockDir, { recursive: true, force: true }),
   readOwner: readLockOwner,
   writeOwner: (ownerFile, token) => fs.writeFileSync(ownerFile, token, "utf8"),
+  isPidAlive,
 };
 
 /** Default lock-acquisition deadline (ms). Kept < no realistic critical section. */
@@ -510,16 +563,40 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T, ops: LockOps 
         }
         const age = ops.now() - ops.mtimeMs(lockDir);
         if (age > STALE_MS) {
-          // TOCTOU guard: only steal if the owner token is unchanged since we
-          // observed the stale lock. If another waiter already stole and
-          // re-acquired (fresh token, or a fresh mtime), we must NOT clobber its
-          // live lock — fall through and retry/wait instead. (`ownerBefore` is now
-          // provably non-null here, so this compares two real stamps, never null===null.)
-          if (ops.readOwner(ownerFile) === ownerBefore) {
-            ops.remove(lockDir);
+          // R-38 — steal a stale lock ONLY when its owner is NOT alive. The
+          // pre-R-38 rule stole on age alone, which ROBBED a LIVE holder whose
+          // critical section legitimately ran past STALE_MS (the owner token is
+          // stamped once and never refreshed, so "stale" by age says nothing about
+          // liveness) → both ran fn() → lost update. The age check now gates a
+          // LIVENESS check:
+          //   - owner pid parseable + ALIVE  ⇒ DO NOT steal. Fall through to the
+          //     plain wait; the loop-head deadline (TIMEOUT_MS) bounds the wait and
+          //     then errors LOUDLY (a recoverable `state_lock_timeout`), never a
+          //     silent lost-update. This is the whole fix: a live-but-slow holder
+          //     is never robbed.
+          //   - owner pid parseable + DEAD    ⇒ steal (crash-recovery preserved).
+          //   - owner pid UNPARSEABLE         ⇒ fall back to the age-only steal — an
+          //     unreadable/malformed owner stamp is an abandoned lock; do NOT
+          //     regress recovery for it.
+          // PID reuse (a dead holder's pid reused by an unrelated live process) reads
+          // as "alive": accepted — the waiter waits to a bounded loud timeout, far
+          // better than a silent corruption (see isPidAlive).
+          const ownerPid = parseOwnerPid(ownerBefore);
+          const ownerAlive = ownerPid !== null && ops.isPidAlive(ownerPid);
+          if (!ownerAlive) {
+            // TOCTOU guard (UNCHANGED): only steal if the owner token is unchanged
+            // since we observed the stale lock. If another waiter already stole and
+            // re-acquired (fresh token), we must NOT clobber its live lock — fall
+            // through and retry/wait instead. (`ownerBefore` is provably non-null
+            // here, so this compares two real stamps, never null===null.)
+            if (ops.readOwner(ownerFile) === ownerBefore) {
+              ops.remove(lockDir);
+            }
+            backoff(); // bound the post-steal retry — re-checks the deadline at the head (#3)
+            continue;
           }
-          backoff(); // bound the post-steal retry — re-checks the deadline at the head (#3)
-          continue;
+          // Owner is ALIVE despite the stale age: do NOT steal. Fall through to the
+          // plain wait below (backoff + retry), bounded by the loop-head deadline.
         }
       } catch {
         // The lock was HELD (acquire threw a contention code) but the follow-up stat
@@ -550,8 +627,9 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T, ops: LockOps 
         backoff(); // bound the steal-churn retry (#3) — re-checks the deadline at the head
         continue; // stat failed mid-steal-churn — back off and retry
       }
-      // Plain wait path (held + not stale): back off, then retry from the loop head
-      // (which enforces the deadline). The old `while`-spin pegged a core here.
+      // Plain wait path: held + (not stale OR stale-but-owner-ALIVE, R-38). Back off,
+      // then retry from the loop head (which enforces the deadline). The old
+      // `while`-spin pegged a core here.
       backoff();
     }
   }
