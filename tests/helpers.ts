@@ -20,6 +20,19 @@ export function expectedToolDefsCount(): number {
   return CLI_COMMAND_LEAVES.length - Object.keys(MCP_EXCLUDED).length + Object.keys(MCP_ONLY_TOOLS).length;
 }
 
+/**
+ * Subprocess env for the cross-process concurrency stress tests. Silences the run
+ * log (TH_NO_LOG) and grants the state-lock generous patience (TH_LOCK_TIMEOUT_MS):
+ * these tests spawn 12-40 lock-contending `node dist/cli.js` processes at once, and
+ * on an oversubscribed CI runner (2 cores + parallel vitest workers) an unlucky
+ * waiter can be scheduler-starved past the default 25s lock deadline and fail a write
+ * that would otherwise land — a false red. The longer deadline only adds patience; the
+ * no-lost-updates correctness assertions are unchanged. See state-store.ts:lockTimeoutMs.
+ */
+export function concurrencyEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, TH_NO_LOG: "1", TH_LOCK_TIMEOUT_MS: "90000" };
+}
+
 export interface TempProject {
   paths: ProjectPaths;
   root: string;

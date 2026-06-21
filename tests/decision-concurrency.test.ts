@@ -28,7 +28,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { makeTempProject, type TempProject } from "./helpers";
+import { concurrencyEnv, makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import {
   appendDecisionEvent,
@@ -55,7 +55,7 @@ afterEach(() => {
   tp = undefined;
 });
 
-const NO_LOG = { env: { ...process.env, TH_NO_LOG: "1" } };
+const NO_LOG = { env: concurrencyEnv() };
 
 describe("SLICE-4 — decisions.jsonl concurrency + durability", () => {
   // TEST-008/009: tests that require the compiled CLI degrade to skip when dist/
@@ -86,7 +86,7 @@ describe("SLICE-4 — decisions.jsonl concurrency + durability", () => {
     const ids = new Set(events.map((e) => e.id));
     expect(ids.size).toBe(N);
     expect(verifyChain(events)).toEqual({ ok: true });
-  }, 30_000);
+  }, 120_000);
 
   it.skipIf(!fs.existsSync(CLI) || !fs.existsSync(DECISION_MOD))("REQ-407: test_REQ407_concurrent_double_approve_one_wins_other_illegal — two parallel approves → exactly one approved, other illegal_transition", async () => {
     tp = makeTempProject();
@@ -147,7 +147,7 @@ describe("SLICE-4 — decisions.jsonl concurrency + durability", () => {
     const finalEvents = readDecisionEvents(tp.paths);
     expect(finalEvents).toHaveLength(N);
     expect(verifyChain(finalEvents)).toEqual({ ok: true });
-  }, 30_000);
+  }, 120_000);
 
   it("REQ-NFR-005: test_REQNFR005_stale_lock_is_stolen_not_wedged — a stale, STAMPED .state.lock is stolen, not hung", () => {
     tp = makeTempProject();

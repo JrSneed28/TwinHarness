@@ -16029,12 +16029,19 @@ var realLockOps = {
   readOwner: readLockOwner,
   writeOwner: (ownerFile, token) => fs3.writeFileSync(ownerFile, token, "utf8")
 };
+var DEFAULT_LOCK_TIMEOUT_MS = 25e3;
+function lockTimeoutMs() {
+  const raw = process.env.TH_LOCK_TIMEOUT_MS;
+  if (raw === void 0) return DEFAULT_LOCK_TIMEOUT_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_LOCK_TIMEOUT_MS;
+}
 function withStateLock(paths, fn, ops = realLockOps) {
   if (!fs3.existsSync(paths.stateDir)) return fn();
   const lockDir = path3.join(paths.stateDir, ".state.lock");
   const ownerFile = path3.join(lockDir, "owner");
   const myToken = `${process.pid}-${Math.random().toString(36).slice(2)}`;
-  const TIMEOUT_MS = 25e3;
+  const TIMEOUT_MS = lockTimeoutMs();
   const deadline = ops.now() + TIMEOUT_MS;
   const BACKOFF_BASE_MS = 5;
   const BACKOFF_CAP_MS = 80;

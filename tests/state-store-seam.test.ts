@@ -21,10 +21,10 @@
  * possible) lands in the next checkpoint; this one proves the seam changes nothing.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import { makeTempProject } from "./helpers";
-import { withStateLock, LockTimeoutError, LockStampError, STALE_MS, realLockOps, type LockOps } from "../src/core/state-store";
+import { withStateLock, LockTimeoutError, LockStampError, STALE_MS, realLockOps, lockTimeoutMs, DEFAULT_LOCK_TIMEOUT_MS, type LockOps } from "../src/core/state-store";
 
 /** A node ErrnoException with a given `code`. */
 function errno(code: string): NodeJS.ErrnoException {
@@ -491,6 +491,36 @@ describe("#3: the deadline is enforced at the LOOP HEAD — no retry path can bu
       expect(state.attempts).toBeLessThan(5_000);
     } finally {
       tp.cleanup();
+    }
+  });
+});
+
+// The lock-acquisition deadline is env-tunable (TH_LOCK_TIMEOUT_MS) so an
+// oversubscribed CI runner — or an operator on a slow/networked filesystem —
+// can grant a heavily contended waiter more patience than the 25s default
+// before it gives up. The default and the parse guard are pinned here.
+describe("lockTimeoutMs: TH_LOCK_TIMEOUT_MS deadline override", () => {
+  const saved = process.env.TH_LOCK_TIMEOUT_MS;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.TH_LOCK_TIMEOUT_MS;
+    else process.env.TH_LOCK_TIMEOUT_MS = saved;
+  });
+
+  it("defaults to 25s when the env var is unset", () => {
+    delete process.env.TH_LOCK_TIMEOUT_MS;
+    expect(lockTimeoutMs()).toBe(DEFAULT_LOCK_TIMEOUT_MS);
+    expect(DEFAULT_LOCK_TIMEOUT_MS).toBe(25_000);
+  });
+
+  it("honors a positive integer override", () => {
+    process.env.TH_LOCK_TIMEOUT_MS = "90000";
+    expect(lockTimeoutMs()).toBe(90_000);
+  });
+
+  it("falls back to the default for non-numeric / non-positive values", () => {
+    for (const bad of ["abc", "", "0", "-5", "NaN"]) {
+      process.env.TH_LOCK_TIMEOUT_MS = bad;
+      expect(lockTimeoutMs(), `"${bad}" must fall back`).toBe(DEFAULT_LOCK_TIMEOUT_MS);
     }
   });
 });

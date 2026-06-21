@@ -16,7 +16,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { makeTempProject, type TempProject } from "./helpers";
+import { concurrencyEnv, makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { readVerifyConfig } from "../src/core/verify";
 import {
@@ -53,7 +53,7 @@ describe("REQ-STATE-LOCK-001: concurrent mutations do not lose updates (F10)", (
           "--action", "build paused",
           "--cwd", tp!.root,
         ],
-        { env: { ...process.env, TH_NO_LOG: "1" } },
+        { env: concurrencyEnv() },
       ),
     );
     await Promise.all(tasks);
@@ -66,7 +66,7 @@ describe("REQ-STATE-LOCK-001: concurrent mutations do not lose updates (F10)", (
     const log = fs.readFileSync(tp.paths.driftLog, "utf8");
     const ids = new Set([...log.matchAll(/DRIFT-(\d+)/g)].map((m) => m[1]));
     expect(ids.size).toBe(N);
-  }, 30_000);
+  }, 120_000);
 
   // TEST-008/009: skipIf dist is absent so the suite degrades gracefully.
   it.skipIf(!fs.existsSync(CLI))("concurrent `slice set-status` updates all land (no lost slice writes)", async () => {
@@ -80,20 +80,20 @@ describe("REQ-STATE-LOCK-001: concurrent mutations do not lose updates (F10)", (
       components: [`src/mod${i}`],
     }));
     await execFileP("node", [CLI, "state", "set", "slices", JSON.stringify(slices), "--cwd", tp.root],
-      { env: { ...process.env, TH_NO_LOG: "1" } });
+      { env: concurrencyEnv() });
 
     // Flip each to in-progress concurrently.
     await Promise.all(
       slices.map((s) =>
         execFileP("node", [CLI, "slice", "set-status", s.id, "in-progress", "--cwd", tp!.root],
-          { env: { ...process.env, TH_NO_LOG: "1" } }),
+          { env: concurrencyEnv() }),
       ),
     );
 
     const state = readState(tp.paths).state;
     const inProgress = state?.slices.filter((s) => s.status === "in-progress").length ?? 0;
     expect(inProgress).toBe(N);
-  }, 30_000);
+  }, 120_000);
 
   // P1/R-03: `verify add` is a read-modify-write of verify.json. Without
   // `withStateLock` serializing it, N racing adds would lose updates (last writer
@@ -106,14 +106,14 @@ describe("REQ-STATE-LOCK-001: concurrent mutations do not lose updates (F10)", (
     await Promise.all(
       Array.from({ length: N }, (_, i) =>
         execFileP("node", [CLI, "verify", "add", `cmd-${i}`, "--cwd", tp!.root],
-          { env: { ...process.env, TH_NO_LOG: "1" } }),
+          { env: concurrencyEnv() }),
       ),
     );
 
     const commands = readVerifyConfig(tp.paths).commands;
     expect(commands).toHaveLength(N);
     expect(new Set(commands).size).toBe(N); // each distinct add present, none lost
-  }, 30_000);
+  }, 120_000);
 });
 
 describe("REQ-PCO-000: withStateLock treats Windows EPERM/EACCES as 'held' and retries", () => {

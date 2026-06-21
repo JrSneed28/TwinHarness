@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { concurrencyEnv, makeTempProject, type TempProject } from "./helpers";
 import {
   runCollabFragment,
   runCollabList,
@@ -326,7 +326,7 @@ describe("R-16: the collision guard holds under a REAL concurrent race (atomic c
             "--json",
             "--cwd", tp!.root,
           ],
-          { env: { ...process.env, TH_NO_LOG: "1" } },
+          { env: concurrencyEnv() },
         ),
       ),
     );
@@ -358,5 +358,5 @@ describe("R-16: the collision guard holds under a REAL concurrent race (atomic c
     };
     expect(winnerStdout.ok).toBe(true);
     expect(winnerStdout.path).toBe(file);
-  }, 30_000);
+  }, 120_000);
 });

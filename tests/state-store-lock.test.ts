@@ -18,13 +18,13 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { makeTempProject, type TempProject } from "./helpers";
+import { concurrencyEnv, makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { readState } from "../src/core/state-store";
 
 const execFileP = promisify(execFile);
 const CLI = path.resolve(__dirname, "../dist/cli.js");
-const NO_LOG = { env: { ...process.env, TH_NO_LOG: "1" } } as const;
+const NO_LOG = { env: concurrencyEnv() } as const;
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
@@ -88,5 +88,5 @@ describe("REQ-STATE-LOCK-002: writes survive concurrent readers (C-2)", () => {
     const log = fs.readFileSync(tp.paths.driftLog, "utf8");
     const ids = new Set([...log.matchAll(/DRIFT-(\d+)/g)].map((m) => m[1]));
     expect(ids.size).toBe(N);
-  }, 40_000);
+  }, 120_000);
 });

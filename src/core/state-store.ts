@@ -216,6 +216,27 @@ export const realLockOps: LockOps = {
   writeOwner: (ownerFile, token) => fs.writeFileSync(ownerFile, token, "utf8"),
 };
 
+/** Default lock-acquisition deadline (ms). Kept < no realistic critical section. */
+export const DEFAULT_LOCK_TIMEOUT_MS = 25_000;
+
+/**
+ * The lock-acquisition deadline (ms): {@link DEFAULT_LOCK_TIMEOUT_MS} (25s) unless
+ * `TH_LOCK_TIMEOUT_MS` overrides it. The override grants more PATIENCE for heavy
+ * cross-process contention under I/O pressure — an oversubscribed CI runner spawning
+ * the concurrency stress tests, or an operator on a slow/networked filesystem — where
+ * an unlucky waiter can otherwise be scheduler-starved past 25s and fail a write that
+ * would have landed. It changes ONLY how long a waiter waits: steal-if-stale (STALE_MS),
+ * the owner-token TOCTOU guard, and acquisition are all unchanged. A non-numeric or
+ * non-positive value falls back to the default. Keep STALE_MS < the effective timeout
+ * so a crashed holder stays reclaimable.
+ */
+export function lockTimeoutMs(): number {
+  const raw = process.env.TH_LOCK_TIMEOUT_MS;
+  if (raw === undefined) return DEFAULT_LOCK_TIMEOUT_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_LOCK_TIMEOUT_MS;
+}
+
 export function withStateLock<T>(paths: ProjectPaths, fn: () => T, ops: LockOps = realLockOps): T {
   if (!fs.existsSync(paths.stateDir)) return fn();
 
@@ -227,7 +248,7 @@ export function withStateLock<T>(paths: ProjectPaths, fn: () => T, ops: LockOps 
   // STALE_MS is the module-level exported constant (15 s). See its declaration
   // above for the full rationale. Referenced here by name so tests can import
   // it and use STALE_MS + N instead of hardcoding the magic literal (TEST-006).
-  const TIMEOUT_MS = 25_000;
+  const TIMEOUT_MS = lockTimeoutMs(); // default 25s; TH_LOCK_TIMEOUT_MS override (see lockTimeoutMs)
   const deadline = ops.now() + TIMEOUT_MS;
 
   // Backoff-with-jitter for the inter-attempt wait (PERF-008). A FIXED cadence
