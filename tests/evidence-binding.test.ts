@@ -203,6 +203,65 @@ describe("F8/R-31 — the Tester record must be PASSED + receipt + repo-bound to
     }
   });
 
+  // PR #28 review (P1): a record naming a LOCAL evidence file must require that file to
+  // be readable at record time AND re-verify it (existence + content digest) on read,
+  // so absent / deleted / swapped evidence cannot fake the mandatory live QA.
+  it("rejects recording when a LOCAL evidence ref names a nonexistent file (evidence_unreadable)", () => {
+    const paths = initialized();
+    const res = runTesterRecord(paths, { driver: "cli-e2e", passed: true, evidenceRef: "out/missing.log" });
+    expect(res.ok).toBe(false);
+    expect(res.data!.error).toBe("evidence_unreadable");
+    // Nothing was written → the gate sees no record at all.
+    expect(readTesterRecordValidated(paths).status).toBe("absent");
+  });
+
+  it("accepts + binds a record whose LOCAL evidence file is readable (valid)", () => {
+    const paths = initialized();
+    fs.mkdirSync(path.join(paths.root, "out"), { recursive: true });
+    fs.writeFileSync(path.join(paths.root, "out", "run.log"), "screenshot+log bytes\n", "utf8");
+    expect(runTesterRecord(paths, { driver: "cli-e2e", passed: true, evidenceRef: "out/run.log" }).ok).toBe(true);
+    expect(readTesterRecordValidated(paths).status).toBe("valid");
+    expect(testerRecordPresent(paths)).toBe(true);
+  });
+
+  it("goes evidence_missing when the local evidence file is deleted AFTER recording", () => {
+    const paths = initialized();
+    const ev = path.join(paths.root, "out", "run.log");
+    fs.mkdirSync(path.dirname(ev), { recursive: true });
+    fs.writeFileSync(ev, "evidence\n", "utf8");
+    expect(runTesterRecord(paths, { driver: "cli-e2e", passed: true, evidenceRef: "out/run.log" }).ok).toBe(true);
+    expect(readTesterRecordValidated(paths).status).toBe("valid");
+    // Evidence deleted outside the tracked tree — the repo coordinates would not notice.
+    fs.rmSync(ev, { force: true });
+    expect(readTesterRecordValidated(paths).status).toBe("evidence_missing");
+    expect(testerRecordPresent(paths)).toBe(false);
+  });
+
+  it("goes evidence_mismatch when the local evidence content is replaced AFTER recording", () => {
+    const paths = initialized();
+    const ev = path.join(paths.root, "out", "run.log");
+    fs.mkdirSync(path.dirname(ev), { recursive: true });
+    fs.writeFileSync(ev, "original evidence\n", "utf8");
+    expect(runTesterRecord(paths, { driver: "cli-e2e", passed: true, evidenceRef: "out/run.log" }).ok).toBe(true);
+    expect(readTesterRecordValidated(paths).status).toBe("valid");
+    // Swap the evidence bytes — the bound receipt no longer reproduces.
+    fs.writeFileSync(ev, "TAMPERED evidence\n", "utf8");
+    expect(readTesterRecordValidated(paths).status).toBe("evidence_mismatch");
+    expect(testerRecordPresent(paths)).toBe(false);
+  });
+
+  it("accepts a REMOTE (URL) evidence ref with no local file (valid)", () => {
+    const paths = initialized();
+    const res = runTesterRecord(paths, {
+      driver: "playwright",
+      passed: true,
+      evidenceRef: "https://ci.example.com/run/42",
+    });
+    expect(res.ok).toBe(true);
+    expect(readTesterRecordValidated(paths).status).toBe("valid");
+    expect(testerRecordPresent(paths)).toBe(true);
+  });
+
   it("the tester-record anchor is write-denied across Bash and Write/Edit", () => {
     const paths = initialized();
     writeState(paths, { ...readState(paths).state!, current_stage: "stage-05", implementation_allowed: false });

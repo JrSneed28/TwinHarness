@@ -48,15 +48,76 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.testerRecordPath = testerRecordPath;
+exports.isRemoteEvidenceRef = isRemoteEvidenceRef;
+exports.localEvidenceReadable = localEvidenceReadable;
+exports.computeReceiptDigest = computeReceiptDigest;
 exports.readTesterRecord = readTesterRecord;
 exports.readTesterRecordValidated = readTesterRecordValidated;
 exports.testerRecordPresent = testerRecordPresent;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const git_revision_1 = require("./git-revision");
+const hash_1 = require("./hash");
 /** `<stateDir>/tester-record.json` — the live-QA Tester evidence marker. */
 function testerRecordPath(paths) {
     return path.join(paths.stateDir, "tester-record.json");
+}
+/**
+ * An evidence reference is REMOTE (a URL like `https://…`, `s3://…`) rather than a
+ * local file when it carries a URI scheme. A remote ref is not a file we can re-read,
+ * so the local-evidence integrity checks are skipped for it (its string still binds
+ * into the receipt digest). A bare path — absolute or relative — is treated as local.
+ */
+function isRemoteEvidenceRef(ref) {
+    return /^[a-z][a-z0-9+.-]*:\/\//i.test(ref);
+}
+/** Resolve a LOCAL evidence ref against the project root (absolute refs pass through). */
+function resolveEvidencePath(root, ref) {
+    return path.isAbsolute(ref) ? ref : path.resolve(root, ref);
+}
+/** True iff `ref` names a readable, regular file once resolved against `root`. */
+function localEvidenceReadable(root, ref) {
+    const abs = resolveEvidencePath(root, ref);
+    try {
+        return fs.existsSync(abs) && fs.statSync(abs).isFile();
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Compute the execution-receipt digest binding a Tester record to a real run
+ * (F8/R-31). Hashes the run's identifying inputs (driver + provider + pass verdict +
+ * evidence reference) AND, when `evidenceRef` names a readable LOCAL file, a content
+ * hash of that file — so a fabricated marker without the real evidence cannot
+ * reproduce the digest. A remote (URL) ref contributes only its string.
+ *
+ * The SINGLE source of truth shared by the `th tester record` writer
+ * (`src/commands/tester.ts`) and {@link readTesterRecordValidated}'s
+ * recompute-and-compare, so the writer and the validator can never drift apart on
+ * the binding formula.
+ */
+function computeReceiptDigest(root, parts) {
+    let evidenceContent = "";
+    if (parts.evidenceRef && !isRemoteEvidenceRef(parts.evidenceRef)) {
+        const abs = resolveEvidencePath(root, parts.evidenceRef);
+        try {
+            if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
+                evidenceContent = fs.readFileSync(abs, "utf8");
+            }
+        }
+        catch {
+            /* unreadable → contribute nothing extra; the ref string still binds */
+        }
+    }
+    const canonical = JSON.stringify({
+        driver: parts.driver,
+        provider: parts.provider ?? null,
+        evidenceRef: parts.evidenceRef ?? null,
+        passed: parts.passed,
+        evidenceContentHash: evidenceContent ? (0, hash_1.hashContent)(evidenceContent) : null,
+    });
+    return (0, hash_1.hashContent)(canonical);
 }
 /**
  * Read the Tester record, returning `null` when absent or unreadable/malformed
@@ -102,9 +163,10 @@ function readTesterRecord(paths) {
 /**
  * Read + CLASSIFY the Tester record against the F8 binding (R-31). The git
  * coordinates discriminate only when BOTH sides are non-null (the honest "unbound"
- * posture — a coordinate we cannot compute cannot prove staleness). `commands`-style
- * content hashing is not needed here: the record's identity is its receipt + the
- * repo snapshot it ran against.
+ * posture — a coordinate we cannot compute cannot prove staleness). When the record
+ * names a LOCAL evidence file, that file is re-read and the receipt RECOMPUTED, so a
+ * record bound to absent evidence, or evidence deleted/replaced after the run, is
+ * caught even when it lives outside the tracked tree (where the repo coordinates miss it).
  */
 function readTesterRecordValidated(paths) {
     const record = readTesterRecord(paths);
@@ -118,6 +180,26 @@ function readTesterRecordValidated(paths) {
         return { status: "not_passed", record };
     if (typeof record.receiptDigest !== "string" || record.receiptDigest.trim() === "") {
         return { status: "unbound", record };
+    }
+    // Local-evidence integrity: a record naming a LOCAL evidence file must still be able
+    // to read that file AND reproduce the bound receipt from its content. This catches a
+    // record written against absent local evidence (the digest bound a null content hash),
+    // and evidence deleted/replaced AFTER recording — neither of which the repo-snapshot
+    // coordinates detect when the evidence lives outside the tracked tree. A remote (URL)
+    // ref is not a file we can re-read → skipped (it contributes only its string).
+    if (record.evidenceRef && !isRemoteEvidenceRef(record.evidenceRef)) {
+        if (!localEvidenceReadable(paths.root, record.evidenceRef)) {
+            return { status: "evidence_missing", record };
+        }
+        const recomputed = computeReceiptDigest(paths.root, {
+            driver: record.driver,
+            provider: record.provider,
+            evidenceRef: record.evidenceRef,
+            passed: record.passed === true,
+        });
+        if (recomputed !== record.receiptDigest) {
+            return { status: "evidence_mismatch", record };
+        }
     }
     // Repo-snapshot binding: stale when a present coordinate diverged from the current tree.
     const curHead = (0, git_revision_1.gitHead)(paths.root);
@@ -138,12 +220,14 @@ function readTesterRecordValidated(paths) {
  * production-reality gate's 3rd condition (R-31, ENFORCED).
  *
  * STRICT: a record counts ONLY when the live run is recorded as PASSED, carries an
- * execution-receipt digest, and its repo-snapshot binding matches the current tree
+ * execution-receipt digest, its LOCAL evidence file (if any) is readable and still
+ * reproduces that digest, and its repo-snapshot binding matches the current tree
  * (`readTesterRecordValidated(...).status === "valid"`). A driver-only marker, a
- * missing/false pass verdict, an unbound (no-receipt) record, or one staled by a code
- * change since the run no longer clears the rung — closing the F8 gap where a bare
- * `{driver}` marker (copyable, unbound to any real run) could fake the mandatory live
- * QA. The richer classification + token are available via `readTesterRecordValidated`.
+ * missing/false pass verdict, an unbound (no-receipt) record, one whose local evidence
+ * is absent or altered, or one staled by a code change since the run no longer clears
+ * the rung — closing the F8 gap where a bare `{driver}` marker (copyable, unbound to
+ * any real run) could fake the mandatory live QA. The richer classification + token
+ * are available via `readTesterRecordValidated`.
  */
 function testerRecordPresent(paths) {
     return readTesterRecordValidated(paths).status === "valid";

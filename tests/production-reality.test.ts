@@ -265,6 +265,9 @@ describe("th tester record — the missing writer for the gate's 3rd condition (
   it("writes a well-shaped record (driver/provider/evidence/ranAt) the gate's read predicate accepts", () => {
     const paths = greenAtFinalVerification();
     fs.rmSync(testerRecordPath(paths), { force: true });
+    // PR #28 review: a LOCAL evidence ref must name a readable file — provide it.
+    fs.mkdirSync(path.join(paths.root, "out"), { recursive: true });
+    fs.writeFileSync(path.join(paths.root, "out", "run.log"), "live run output\n", "utf8");
     const res = runTesterRecord(paths, { driver: "playwright", provider: "sandbox", evidenceRef: "out/run.log" });
     expect(res.ok).toBe(true);
     const rec = readTesterRecord(paths);
