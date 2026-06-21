@@ -167,6 +167,7 @@ describe("REQ-NFR-002: TOOL_DEFS baseline — exactly 60 tools registered (on to
     "th_sim_scan",
     "th_gate_production_reality",
     "th_inspector_write",
+    "th_tester_record",
   ] as const;
 
   it("REQ-NFR-002 — TOOL_DEFS.length === 60 (the MCP-tool-expansion adds 5 typed gate-transition tools + 16 wired handlers on top of the prior 39 → 60)", () => {
