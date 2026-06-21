@@ -16157,7 +16157,7 @@ function lockTimeoutMs() {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_LOCK_TIMEOUT_MS;
 }
 function withStateLock(paths, fn, ops = realLockOps) {
-  if (!fs3.existsSync(paths.stateDir)) return fn();
+  fs3.mkdirSync(paths.stateDir, { recursive: true });
   const lockDir = path3.join(paths.stateDir, ".state.lock");
   const ownerFile = path3.join(lockDir, "owner");
   const myToken = `${process.pid}-${Math.random().toString(36).slice(2)}`;

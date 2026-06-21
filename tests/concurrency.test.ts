@@ -19,8 +19,10 @@ import * as fs from "node:fs";
 import { concurrencyEnv, makeTempProject, SKIP_SPAWN_HEAVY_IN_CI, LIGHT_SPAWN_CONCURRENCY, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { readVerifyConfig } from "../src/core/verify";
+import { initialState } from "../src/core/state-schema";
 import {
   readState,
+  writeState,
   withStateLock,
   isLockHeldError,
   realLockOps,
@@ -261,4 +263,102 @@ describe("REQ-PCO-000: withStateLock treats Windows EPERM/EACCES as 'held' and r
       }
     },
   );
+});
+
+describe("R-35 / F6: the PRE-INIT window is locked too (no lost first-writes to a FRESH root)", () => {
+  // The bug (F6): `withStateLock` USED to run `fn` UNLOCKED whenever `<stateDir>` did
+  // not exist yet — "no shared state to race on". But N concurrent FIRST-writers
+  // against a fresh root each read-init-write `state.json`/`verify.json` with NO lock
+  // covering the read→write span, so all but one update is lost (the 28/29/30-of-30
+  // loss). `th verify add` against a fresh root (no `th init` first) is the cleanest
+  // repro: every process loads an empty/absent config, pushes its own command, writes.
+  // Without the pre-init lock the file ends with ONE command; with it, all N land.
+  //
+  // CI-SKIP convention (SKIP_SPAWN_HEAVY_IN_CI — same as the heavy waves above): this
+  // spawns N real `node dist/cli.js` lock contenders, scheduler-starvation-prone on
+  // windows-latest. Runs on every local `npm test`; the LIGHT in-process cases below
+  // run EVERYWHERE (including CI) and pin the same fix without spawning.
+  it.skipIf(!fs.existsSync(CLI) || SKIP_SPAWN_HEAVY_IN_CI)(
+    "N parallel `verify add` against a FRESH (un-init'd) root all land (pre-init lock)",
+    async () => {
+      tp = makeTempProject();
+      // DELIBERATELY do NOT runInit — the state dir/file do not exist, so every
+      // process hits the pre-init window. (HEAD ran these unlocked → lost updates.)
+      const N = 16;
+      await Promise.all(
+        Array.from({ length: N }, (_, i) =>
+          execFileP("node", [CLI, "verify", "add", `precmd-${i}`, "--cwd", tp!.root],
+            { env: concurrencyEnv() }),
+        ),
+      );
+
+      const commands = readVerifyConfig(tp.paths).commands;
+      expect(commands).toHaveLength(N); // none lost in the pre-init race
+      expect(new Set(commands).size).toBe(N); // each distinct add present
+    },
+    120_000,
+  );
+
+  // LIGHT cross-process wave that runs EVERYWHERE (incl. CI), low enough not to
+  // scheduler-starve a waiter past the 90s deadline — proves the compiled CLI
+  // serializes the pre-init read-modify-write through the real OS file lock.
+  it.skipIf(!fs.existsSync(CLI))(
+    "a few parallel `verify add` against a fresh root each land (CI-safe pre-init lock)",
+    async () => {
+      tp = makeTempProject();
+      const N = LIGHT_SPAWN_CONCURRENCY;
+      await Promise.all(
+        Array.from({ length: N }, (_, i) =>
+          execFileP("node", [CLI, "verify", "add", `lightpre-${i}`, "--cwd", tp!.root],
+            { env: concurrencyEnv() }),
+        ),
+      );
+      const commands = readVerifyConfig(tp.paths).commands;
+      expect(commands).toHaveLength(N);
+      expect(new Set(commands).size).toBe(N);
+    },
+    120_000,
+  );
+
+  // In-process: the pre-init lock must ACTUALLY engage (create `<stateDir>` and the
+  // lock dir) for a fresh root, not bypass it. Drive two serial critical sections
+  // through `withStateLock` against a never-init'd root and assert each ran under a
+  // real lock (the lock dir existed during fn, released after).
+  it("withStateLock against a fresh root creates the state dir and locks fn (no unlocked bypass)", () => {
+    tp = makeTempProject();
+    // Fresh: state dir does not exist yet.
+    expect(fs.existsSync(tp.paths.stateDir)).toBe(false);
+
+    const lockDir = path.join(tp.paths.stateDir, ".state.lock");
+    let lockedDuringFn = false;
+    const out = withStateLock(tp.paths, () => {
+      // The lock dir exists WHILE fn runs ⇒ fn is genuinely under the lock (the old
+      // bypass ran fn with no lock dir ever created).
+      lockedDuringFn = fs.existsSync(lockDir);
+      return "ran";
+    });
+    expect(out).toBe("ran");
+    expect(lockedDuringFn).toBe(true); // pre-init window was covered by the lock
+    expect(fs.existsSync(tp.paths.stateDir)).toBe(true); // state dir was created
+    expect(fs.existsSync(lockDir)).toBe(false); // released in the finally
+  });
+
+  // In-process add/clear race semantics before init: a fresh-root locked write is
+  // ALLOWED by assertWriteAllowed (arm 1: no file ⇒ allow), and a second locked
+  // read-modify-write sees the first's result (no lost update across the two spans).
+  it("serial pre-init read-modify-writes accumulate (fresh-root first write allowed, second sees it)", () => {
+    tp = makeTempProject();
+    // First locked write to a fresh root: must be ALLOWED (no SchemaTooNewError).
+    expect(() =>
+      withStateLock(tp.paths, () => writeState(tp!.paths, { ...initialState(), max_tokens: 111 })),
+    ).not.toThrow();
+    // Second locked read-modify-write sees the first's persisted value.
+    const after = withStateLock(tp.paths, () => {
+      const s = readState(tp!.paths).state!;
+      expect(s.max_tokens).toBe(111); // first write was not lost
+      writeState(tp!.paths, { ...s, max_tokens: 222 });
+      return readState(tp!.paths).state!.max_tokens;
+    });
+    expect(after).toBe(222);
+  });
 });

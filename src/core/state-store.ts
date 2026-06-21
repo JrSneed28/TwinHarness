@@ -277,9 +277,21 @@ export function writeState(paths: ProjectPaths, state: TwinHarnessState): void {
  * REQ-STATE-LOCK-001 on windows-latest CI). This is the targeted fix only — the
  * mkdir mechanism is unchanged (no migration to flock).
  *
- * When the state directory does not yet exist there is no shared state to race
- * on, so `fn` runs directly without creating anything (preserves the behaviour
- * of commands that return "not initialized").
+ * R-35 / finding F6 — the PRE-INIT window MUST be locked too. The lock dir lives
+ * UNDER `<stateDir>`, so when `<stateDir>` does not yet exist there is nowhere to
+ * place it. The old code treated that as "no shared state to race on" and ran `fn`
+ * UNLOCKED — but a wave of concurrent first-writers against a FRESH root each
+ * read-init-write `state.json` with NO shared lock covering the read→write span, so
+ * all but one update is lost (the classic 28/29/30-of-30 loss). That is precisely
+ * the race a lock exists to prevent, and it is WORST at init (every writer starts
+ * from the same empty state and clobbers the others). So we now CREATE `<stateDir>`
+ * (idempotent `mkdir -p`) and fall through into the normal lock loop, covering the
+ * pre-init read-modify-write under the held lock. Creating an empty state dir is
+ * inert: with no `state.json` in it `readState` still returns `{exists:false}`, so a
+ * "not initialized" command observes the same verdict. The first locked write to a
+ * fresh root is then ALLOWED by {@link assertWriteAllowed} (arm 1: no file ⇒ allow);
+ * F4's refuse arms now run UNDER the held lock (complementary, not conflicting). The
+ * owner-stamp R-08/R-23 semantics are unchanged (the same loop, same token).
  */
 /**
  * Classify a `mkdirSync` failure as "the lock is already held" (→ wait/steal/
@@ -375,7 +387,12 @@ export function lockTimeoutMs(): number {
 }
 
 export function withStateLock<T>(paths: ProjectPaths, fn: () => T, ops: LockOps = realLockOps): T {
-  if (!fs.existsSync(paths.stateDir)) return fn();
+  // R-35 / F6: the lock dir lives under `<stateDir>`. Ensure `<stateDir>` exists so a
+  // FRESH-root first-writer wave is serialized under the lock (the pre-init window),
+  // instead of bypassing the lock and racing N read-init-writes into a lost-update.
+  // Idempotent: existing projects' `mkdir -p` is a no-op, and an empty state dir with
+  // no `state.json` still reads as "not initialized" (readState → {exists:false}).
+  fs.mkdirSync(paths.stateDir, { recursive: true });
 
   const lockDir = path.join(paths.stateDir, ".state.lock");
   const ownerFile = path.join(lockDir, "owner");
