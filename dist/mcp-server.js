@@ -15797,12 +15797,15 @@ function hasValidStateFile(stateFile) {
   }
   return validateState(parsed).ok;
 }
+function hasPresentStateFile(stateFile) {
+  return fs.existsSync(stateFile);
+}
 function resolveStateCandidates(root) {
   const startAbs = path.resolve(root);
   let abs = startAbs;
   let cursor = startAbs;
   while (true) {
-    if (hasValidStateFile(path.join(cursor, ".twinharness", "state.json")) || hasValidStateFile(path.join(cursor, ".agentic-sdlc", "state.json"))) {
+    if (hasPresentStateFile(path.join(cursor, ".twinharness", "state.json")) || hasPresentStateFile(path.join(cursor, ".agentic-sdlc", "state.json"))) {
       abs = cursor;
       break;
     }
@@ -27801,7 +27804,11 @@ async function callTool(name, args = {}) {
       return toToolResult(
         failure({
           human: err.message,
-          data: { error: err.code, kind: err.kind, candidates: err.candidates }
+          data: { error: err.code, kind: err.kind, candidates: err.candidates },
+          // Preserve the CLI/MCP exit-code taxonomy: `mapDispatchError` maps this
+          // client-correctable conflict to exit 2, so `structuredContent.exitCode`
+          // must read 2 here too — not the `failure()` default of 1.
+          exitCode: 2
         })
       );
     }

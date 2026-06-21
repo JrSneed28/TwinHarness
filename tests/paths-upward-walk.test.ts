@@ -87,4 +87,41 @@ describe("resolveProjectPaths — upward walk (M-7)", () => {
     const paths = resolveProjectPaths(deep);
     expect(real(paths.root)).toBe(real(inner));
   });
+
+  // P1 regression (PR #27): the walk must STOP at the nearest PRESENT state file —
+  // valid or not. A child project whose `state.json` is malformed must be diagnosed
+  // THERE, never skipped so that a valid OUTER ancestor is selected and state/build
+  // mutations land in the wrong project.
+  it("stops at the nearest present-but-INVALID child state file instead of a valid outer ancestor", () => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "th-upward-invalid-child-"));
+    const outer = path.join(tmp, "outer");
+    const inner = path.join(outer, "inner");
+    writeValidState(path.join(outer, ".twinharness")); // outer is a real, valid project
+    // inner holds a PRESENT but malformed state.json (corrupt / mid-write).
+    fs.mkdirSync(path.join(inner, ".twinharness"), { recursive: true });
+    fs.writeFileSync(path.join(inner, ".twinharness", "state.json"), '{ "tier": ', "utf8");
+    const deep = path.join(inner, "sub");
+    fs.mkdirSync(deep, { recursive: true });
+
+    const paths = resolveProjectPaths(deep);
+    expect(real(paths.root)).toBe(real(inner)); // NOT outer
+    expect(paths.stateDir).toBe(path.join(paths.root, ".twinharness"));
+  });
+
+  // A bare `.twinharness` directory with only `templates/` (no state.json) must
+  // still NOT anchor a project — the original M-7 fail-open the presence stop keeps
+  // closed. The walk should pass through it to the valid outer ancestor.
+  it("does NOT stop at a templates-only .twinharness dir with no state.json", () => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "th-upward-templates-only-"));
+    const outer = path.join(tmp, "outer");
+    const inner = path.join(outer, "inner");
+    writeValidState(path.join(outer, ".twinharness"));
+    fs.mkdirSync(path.join(inner, ".twinharness", "templates"), { recursive: true });
+    fs.writeFileSync(path.join(inner, ".twinharness", "templates", "x.md"), "# t", "utf8");
+    const deep = path.join(inner, "sub");
+    fs.mkdirSync(deep, { recursive: true });
+
+    const paths = resolveProjectPaths(deep);
+    expect(real(paths.root)).toBe(real(outer)); // passed through inner (no state file)
+  });
 });

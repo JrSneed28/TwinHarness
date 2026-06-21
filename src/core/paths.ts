@@ -303,6 +303,24 @@ export function hasValidStateFile(stateFile: string): boolean {
 }
 
 /**
+ * R-34 — the upward-walk STOP predicate. Returns true iff `<stateFile>` is PRESENT
+ * on disk, parseable or not. Keys on the state FILE (never a bare `.twinharness` /
+ * `.agentic-sdlc` DIRECTORY, which may hold only `templates/`), so a templates-only
+ * dir still does NOT anchor a project — the original M-7 fail-open that this preserves.
+ *
+ * Distinct from {@link hasValidStateFile}: the walk must stop at the nearest PRESENT
+ * state file even when it does not validate, so a command run below a nested project
+ * whose `state.json` is malformed diagnoses THAT child's invalid state (via the
+ * present-but-invalid arm of {@link resolveProjectPaths}) instead of skipping the
+ * child and silently selecting a valid OUTER ancestor — which would land state/build
+ * mutations in the wrong project. Validity is decided afterward by the selection
+ * policy; presence alone anchors the root.
+ */
+export function hasPresentStateFile(stateFile: string): boolean {
+  return fs.existsSync(stateFile);
+}
+
+/**
  * Resolve all project paths from a root directory.
  *
  * State-location selection (R-34 / F5) keys on a VALID `state.json` FILE, never on
@@ -356,20 +374,26 @@ export function resolveStateCandidates(root: string): StateLocationCandidates {
   const startAbs = path.resolve(root);
 
   // M-7 — walk UP from the start dir to the nearest ancestor that already holds a
-  // VALID TwinHarness state file (R-34: a valid FILE, not a bare directory). A
+  // PRESENT TwinHarness state FILE (R-34: a state FILE, not a bare directory). A
   // session whose cwd is a subdirectory of the project must still find the
   // project's gates instead of failing OPEN (treating the subdir as untracked and
-  // allowing the run). Keying the stop-condition on a valid state file — rather
+  // allowing the run). Keying the stop-condition on a present state FILE — rather
   // than on a `.twinharness` directory that may hold only `templates/` — closes
   // the fail-open seam where a bare state dir was mistaken for the project root.
-  // If no ancestor has valid state, fall back to the start dir (fresh-project path
-  // through the selection below).
+  //
+  // The stop keys on PRESENCE, not VALIDITY: stopping only at a *valid* file would
+  // skip a nearer child whose `state.json` is malformed and select a valid OUTER
+  // ancestor, so state/build mutations could land in the wrong project instead of
+  // diagnosing the child's invalid state. Stopping at the nearest PRESENT file lets
+  // the selection policy below run the present-but-invalid diagnose/block arm at the
+  // CHILD. If no ancestor has any state file, fall back to the start dir
+  // (fresh-project path through the selection below).
   let abs = startAbs;
   let cursor = startAbs;
   while (true) {
     if (
-      hasValidStateFile(path.join(cursor, ".twinharness", "state.json")) ||
-      hasValidStateFile(path.join(cursor, ".agentic-sdlc", "state.json"))
+      hasPresentStateFile(path.join(cursor, ".twinharness", "state.json")) ||
+      hasPresentStateFile(path.join(cursor, ".agentic-sdlc", "state.json"))
     ) {
       abs = cursor;
       break;
