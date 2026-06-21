@@ -39,7 +39,7 @@ import {
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { resolveProjectPaths, isAbsoluteOrEscaping, type ProjectPaths } from "./core/paths";
+import { resolveProjectPaths, isAbsoluteOrEscaping, StateLocationConflictError, type ProjectPaths } from "./core/paths";
 import { type CommandResult, failure } from "./core/output";
 
 import { runStateGet, runStateSet, applyGateMutation } from "./commands/state";
@@ -78,7 +78,7 @@ import { runScorecard } from "./commands/scorecard";
 import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
 
 // --- Component B: typed gate-transition tooling (precondition helpers + locked setter) ---
-import { readState } from "./core/state-store";
+import { readState, SchemaTooNewError } from "./core/state-store";
 import { nextStageAfterFor, canonicalizeStage } from "./core/stages";
 import {
   TIERS,
@@ -2212,6 +2212,34 @@ export async function callTool(name: string, args: ToolArgs = {}): Promise<CallT
     const cmd = def.runAsync ? await def.runAsync(paths, args) : def.run(paths, args);
     return toToolResult(cmd);
   } catch (err) {
+    // R-33 / F4 — the mutation-boundary seam refused a too-new / corrupt on-disk
+    // state. Map it to a STRUCTURED tool failure (parity with the CLI's
+    // `mapDispatchError`): surface the stable `schema_too_new` token + the
+    // on-disk/current versions in structuredContent so an MCP caller can react,
+    // instead of an opaque "Tool failed" string.
+    if (err instanceof SchemaTooNewError) {
+      return toToolResult(
+        failure({
+          human: err.message,
+          data: { error: err.code, onDisk: err.onDisk, current: err.current },
+        }),
+      );
+    }
+    // R-34 / F5 — the SHARED resolver refused an ambiguous/unsafe state LOCATION.
+    // Map it to a structured tool failure (parity with the CLI's mapDispatchError)
+    // so the MCP surface agrees with the CLI surface on the same input.
+    if (err instanceof StateLocationConflictError) {
+      return toToolResult(
+        failure({
+          human: err.message,
+          data: { error: err.code, kind: err.kind, candidates: err.candidates },
+          // Preserve the CLI/MCP exit-code taxonomy: `mapDispatchError` maps this
+          // client-correctable conflict to exit 2, so `structuredContent.exitCode`
+          // must read 2 here too — not the `failure()` default of 1.
+          exitCode: 2,
+        }),
+      );
+    }
     const message = err instanceof Error ? err.message : String(err);
     return { content: [{ type: "text", text: `Tool ${def.name} failed: ${message}` }], isError: true };
   }

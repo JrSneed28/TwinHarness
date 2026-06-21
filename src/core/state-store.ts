@@ -6,6 +6,7 @@ import { sleepSync } from "./sleep";
 import {
   type TwinHarnessState,
   type ValidationIssue,
+  CURRENT_SCHEMA_VERSION,
   serializeState,
   validateState,
 } from "./state-schema";
@@ -43,6 +44,39 @@ export class LockStampError extends Error {
         `(the filesystem may be read-only/full, or the lock dir is being blocked).`,
     );
     this.name = "LockStampError";
+  }
+}
+
+/**
+ * Thrown by {@link writeState} (R-33, finding F4) when a MUTATION would clobber a
+ * state file this binary is not authorized to rewrite. Two refuse arms (see
+ * {@link assertWriteAllowed}):
+ *   • the on-disk file VALIDATES and its `schema_version` is NEWER than this
+ *     binary's {@link CURRENT_SCHEMA_VERSION} — a forward-compat file an older
+ *     binary must NOT silently downgrade; or
+ *   • the on-disk file is PRESENT but does not validate (corrupt / partially
+ *     written) — never blindly overwritten, and (crucially) never misread as an
+ *     "absent fresh first write".
+ *
+ * On either arm the on-disk file is left BYTE-IDENTICAL: we throw BEFORE the
+ * `atomicWriteFile` rename, so nested + top-level future fields survive intact.
+ *
+ * Carries a stable `code = "schema_too_new"` so the single CLI boundary
+ * (`mapDispatchError`) and the MCP `callTool` boundary map it to a clean
+ * structured failure — matching the convention the lock/contention errors use.
+ * Reads NEVER raise this: `readState` / `th doctor` only WARN on a too-new file.
+ */
+export class SchemaTooNewError extends Error {
+  readonly code = "schema_too_new";
+  constructor(
+    /** The on-disk `schema_version` that triggered the refusal (undefined when the file is present-but-invalid). */
+    public readonly onDisk: number | undefined,
+    /** This binary's current schema version (the ceiling we refuse above). */
+    public readonly current: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SchemaTooNewError";
   }
 }
 
@@ -100,12 +134,115 @@ export function readState(paths: ProjectPaths): ReadStateResult {
 }
 
 /**
+ * R-33 / finding F4 — the SINGLE mutation-boundary refuse seam. Decide whether a
+ * pending state-mutation may overwrite whatever is on disk RIGHT NOW, leaving the
+ * file byte-identical if not.
+ *
+ * Called by {@link writeState} (the one universal state.json write chokepoint —
+ * every mutating command, including `th init` which bypasses `withStateLock`,
+ * ends here), so EVERY mutating command inherits the refusal without per-command
+ * wiring.
+ *
+ * The first-write predicate is keyed on the VALIDATED-STATE result, NEVER on a
+ * bare `existsSync`/try-catch — that is the truncation trap (a partially-written
+ * future file misread as "absent" and wrongly allowed). The four arms:
+ *
+ *   1. No state file present                         → ALLOW (fresh first write).
+ *   2. File validates AND schema_version === undefined → ALLOW (legacy v1, a
+ *                                                        normal first/ongoing write).
+ *   2b. File validates AND schema_version <= CURRENT  → ALLOW (the ordinary case:
+ *                                                        an in-range existing run).
+ *   3. File PRESENT but does NOT validate (corrupt /  → REFUSE: take the existing
+ *      partially-written future)                        invalid-state path; NEVER
+ *                                                        misread as an absent fresh
+ *                                                        write, NEVER clobbered.
+ *   4. File validates AND schema_version > CURRENT    → REFUSE `schema_too_new`.
+ *
+ * Arms 3 and 4 both throw {@link SchemaTooNewError} — BEFORE the serialize/rename
+ * in {@link writeState} — so the on-disk bytes (nested + top-level future fields)
+ * survive intact. Precedent making the validated-state key safe: `validateState`
+ * treats an absent `schema_version` as legacy-v1 (structurally valid) but a
+ * non-integer / `< 1` value as a HARD error, so a present-but-corrupt newer file
+ * FAILS `validateState` first → arm 3 → never mistaken for arm 1.
+ */
+export function assertWriteAllowed(paths: ProjectPaths): void {
+  // Arm 1 — no file on disk: a genuine fresh first write. Note we DELEGATE the
+  // present/absent decision to the read+validate below rather than trusting
+  // `existsSync` alone for the refuse arms: existsSync only gates the cheap
+  // "nothing here yet" case; a present file's verdict comes from validateState.
+  if (!fs.existsSync(paths.stateFile)) return;
+
+  // Read the CURRENT on-disk bytes and validate. A present file that fails to
+  // parse or validate is arm 3 (corrupt/partial) — refuse rather than clobber,
+  // and (critically) never let a truncated future file masquerade as absent.
+  let raw: string;
+  try {
+    raw = readFileWithRetry(paths.stateFile);
+  } catch {
+    // Present (existsSync true) but unreadable right now — treat as the
+    // invalid/corrupt arm; do not overwrite something we cannot inspect.
+    throw new SchemaTooNewError(
+      undefined,
+      CURRENT_SCHEMA_VERSION,
+      `Refusing to mutate state.json: the file is present but could not be read to verify its schema version. ` +
+        `Resolve the read error before mutating.`,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new SchemaTooNewError(
+      undefined,
+      CURRENT_SCHEMA_VERSION,
+      `Refusing to mutate state.json: the on-disk file is present but not valid JSON (corrupt or partially written). ` +
+        `Repair it (e.g. \`th doctor\`, then \`th migrate\`) before mutating; the file is left untouched.`,
+    );
+  }
+  const result = validateState(parsed);
+  if (!result.ok) {
+    // Arm 3 — present but invalid: refuse, leave byte-identical. This is the SAME
+    // existing invalid-state path corrupt files already take; a present-but-corrupt
+    // FUTURE file lands here (not arm 1) because validateState rejects a non-integer
+    // / `< 1` schema_version as a hard error.
+    throw new SchemaTooNewError(
+      undefined,
+      CURRENT_SCHEMA_VERSION,
+      `Refusing to mutate state.json: the on-disk file is present but does not validate (corrupt or partially written). ` +
+        `Repair it before mutating; the file is left untouched.`,
+    );
+  }
+  const onDisk = result.state!.schema_version;
+  // Arms 2 / 2b — absent (legacy v1) or in-range version: ALLOW.
+  if (onDisk === undefined || onDisk <= CURRENT_SCHEMA_VERSION) return;
+  // Arm 4 — validates but NEWER than this binary: refuse `schema_too_new`, leave
+  // byte-identical (a newer binary wrote it; we must not silently downgrade).
+  throw new SchemaTooNewError(
+    onDisk,
+    CURRENT_SCHEMA_VERSION,
+    `Refusing to mutate state.json: it is schema v${onDisk}, newer than this th (v${CURRENT_SCHEMA_VERSION}). ` +
+      `Upgrade th; refusing to downgrade. The file is left untouched.`,
+  );
+}
+
+/**
  * Write state.json atomically (write temp, then rename over the target).
  *
  * The rename is atomic within the directory, so a crashed/partial write is never
  * observed and is *replaced, not duplicated* on resume (spec §18 idempotency).
+ *
+ * R-33 / F4: BEFORE serializing/replacing, the mutation-boundary seam
+ * ({@link assertWriteAllowed}) is consulted. If the on-disk file is a too-new
+ * (forward-compat) state or present-but-corrupt, it throws {@link SchemaTooNewError}
+ * here — before any byte is written — so the file is left byte-identical and the
+ * older binary cannot clobber/downgrade it. This is the SINGLE seam every mutating
+ * command inherits (init included, which does not take `withStateLock`).
  */
 export function writeState(paths: ProjectPaths, state: TwinHarnessState): void {
+  // R-33: refuse the mutation at the boundary if the on-disk file is too-new or
+  // corrupt — throws SchemaTooNewError and leaves the file byte-identical (no
+  // serialize-rewrite). Runs for EVERY writer because this is the one chokepoint.
+  assertWriteAllowed(paths);
   // atomicWriteFile retries the rename on transient contention (a concurrent
   // reader holding the file open → EPERM/EACCES/EBUSY on Windows) and, only if
   // the budget is exhausted, throws StateWriteContendedError — which the CLI

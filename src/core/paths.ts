@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { validateState } from "./state-schema";
 
 /**
  * Thrown when a caller attempts to operate on a path that escapes the project
@@ -49,6 +50,36 @@ export class WriteSurfaceError extends Error {
   ) {
     super(message);
     this.name = "WriteSurfaceError";
+  }
+}
+
+/**
+ * Thrown by {@link resolveProjectPaths} (R-34, finding F5) when the state LOCATION
+ * cannot be unambiguously selected by a valid `state.json` file:
+ *   • BOTH the `.twinharness` and the legacy `.agentic-sdlc` locations hold a VALID
+ *     `state.json` (a genuine ambiguity — picking one silently could clobber the
+ *     other's run); or
+ *   • a state file is PRESENT at a location but does NOT validate AND the other
+ *     location has no valid state either, so there is no safe location to select
+ *     (refuse to fail OPEN by treating it as a fresh untracked project).
+ *
+ * A DISTINCT, typed error with a stable `code` so the single CLI boundary maps it
+ * to a structured `failure(...)` — every command (including the READ-ONLY
+ * `th doctor`) surfaces it cleanly instead of silently picking the wrong location.
+ * The message carries a recovery pointer to a MUTATING command (`th state adopt …`);
+ * `th doctor` itself never recovers — it only reports.
+ */
+export class StateLocationConflictError extends Error {
+  readonly code = "state_location_conflict";
+  constructor(
+    message: string,
+    /** Machine token: "both-valid" (ambiguous) or "no-valid-location" (corrupt, no fail-open). */
+    public readonly kind: "both-valid" | "no-valid-location",
+    /** The two candidate state files, echoed into the structured failure data. */
+    public readonly candidates: { twinharness: string; legacy: string },
+  ) {
+    super(message);
+    this.name = "StateLocationConflictError";
   }
 }
 
@@ -244,30 +275,125 @@ export function realpathExistingPrefix(abs: string): string {
 }
 
 /**
+ * R-34 / finding F5 — the state-location selection predicate. Returns true iff
+ * `<stateFile>` exists AND parses AND VALIDATES against the state schema.
+ *
+ * Keying selection on a VALID FILE (not mere directory/file existence) is the
+ * whole point of R-34: an `.twinharness` directory that holds only `templates/`
+ * (no `state.json`), or a `state.json` that is corrupt/half-written, must NOT be
+ * treated as "this is the project's state location" — that fail-open let the
+ * resolver pick the wrong (empty) location while the real run lived in legacy.
+ * A present-but-invalid file returns FALSE here (it is not a usable location);
+ * the caller decides between legacy-fallback and a hard error from there.
+ */
+export function hasValidStateFile(stateFile: string): boolean {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(stateFile, "utf8");
+  } catch {
+    return false; // absent or unreadable → not a usable state location
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false; // present but not JSON (corrupt/partial) → not usable
+  }
+  return validateState(parsed).ok;
+}
+
+/**
+ * R-34 — the upward-walk STOP predicate. Returns true iff `<stateFile>` is PRESENT
+ * on disk, parseable or not. Keys on the state FILE (never a bare `.twinharness` /
+ * `.agentic-sdlc` DIRECTORY, which may hold only `templates/`), so a templates-only
+ * dir still does NOT anchor a project — the original M-7 fail-open that this preserves.
+ *
+ * Distinct from {@link hasValidStateFile}: the walk must stop at the nearest PRESENT
+ * state file even when it does not validate, so a command run below a nested project
+ * whose `state.json` is malformed diagnoses THAT child's invalid state (via the
+ * present-but-invalid arm of {@link resolveProjectPaths}) instead of skipping the
+ * child and silently selecting a valid OUTER ancestor — which would land state/build
+ * mutations in the wrong project. Validity is decided afterward by the selection
+ * policy; presence alone anchors the root.
+ */
+export function hasPresentStateFile(stateFile: string): boolean {
+  return fs.existsSync(stateFile);
+}
+
+/**
  * Resolve all project paths from a root directory.
  *
- * Directory selection for the state directory (cheap fs existence checks —
- * acceptable because this is called once per CLI invocation):
- * 1. If `<root>/.twinharness` exists → use it.
- * 2. Else if `<root>/.agentic-sdlc/state.json` exists → legacy fallback, keep
- *    using `.agentic-sdlc` so the existing project is not broken.
- * 3. Otherwise → default to `.twinharness` (fresh projects).
+ * State-location selection (R-34 / F5) keys on a VALID `state.json` FILE, never on
+ * mere directory existence, so the resolver cannot fail OPEN onto an empty/corrupt
+ * location while the real run lives elsewhere:
+ * 1. `.twinharness/state.json` valid + legacy invalid/absent → `.twinharness`.
+ * 2. legacy `.agentic-sdlc/state.json` valid + `.twinharness` has NO valid state
+ *    (empty, or only `templates/`, or corrupt) → legacy fallback (existing project
+ *    is never broken).
+ * 3. BOTH valid → hard conflict ({@link StateLocationConflictError}) — refuse to
+ *    silently pick one; point the operator at the mutating `th state adopt` recovery.
+ * 4. A present-but-INVALID state file with NO valid alternative → hard error (no
+ *    fail-open onto a fresh untracked project).
+ * 5. Neither location has any state file → default to `.twinharness` (fresh project).
+ *
+ * @throws {StateLocationConflictError} on both-valid or no-valid-location (#3/#4).
  */
-export function resolveProjectPaths(root: string): ProjectPaths {
+/**
+ * The two candidate state locations for a resolved root, plus their validity. The
+ * SHARED basis for both {@link resolveProjectPaths} (the throwing selector every
+ * surface uses — CLI / hook / MCP) and the {@link StateLocationConflictError}
+ * recovery command (`th state adopt`), so the recovery never re-derives the root
+ * differently from the resolver it is recovering. Computing this is side-effect
+ * free and does NOT throw on the both-valid / no-valid cases — the selection
+ * policy (and its throws) lives in `resolveProjectPaths`.
+ */
+export interface StateLocationCandidates {
+  /** Canonical project root (post ancestor-walk + realpath). */
+  root: string;
+  /** `<root>/.twinharness`. */
+  newDir: string;
+  /** `<root>/.agentic-sdlc` (legacy). */
+  legacyDir: string;
+  /** `<root>/.twinharness/state.json`. */
+  newStateFile: string;
+  /** `<root>/.agentic-sdlc/state.json`. */
+  legacyStateFile: string;
+  /** Whether `newStateFile` exists+parses+validates (R-34 selection key). */
+  newValid: boolean;
+  /** Whether `legacyStateFile` exists+parses+validates (R-34 selection key). */
+  legacyValid: boolean;
+}
+
+/**
+ * Compute the canonical root and the two candidate state locations for `root`
+ * WITHOUT applying the selection policy (never throws). Shared by
+ * {@link resolveProjectPaths} and the `th state adopt` recovery so both anchor on
+ * the SAME root + candidate set (R-34 parity).
+ */
+export function resolveStateCandidates(root: string): StateLocationCandidates {
   const startAbs = path.resolve(root);
 
-  // M-7: walk UP from the start dir to the nearest ancestor that already holds a
-  // TwinHarness state dir. A session whose cwd is a subdirectory of the project
-  // must still find the project's gates instead of failing OPEN (treating the
-  // subdir as an untracked project and allowing the run). If no ancestor has
-  // state, fall back to treating the start dir as the root (fresh-project path
-  // through the selection logic below).
+  // M-7 — walk UP from the start dir to the nearest ancestor that already holds a
+  // PRESENT TwinHarness state FILE (R-34: a state FILE, not a bare directory). A
+  // session whose cwd is a subdirectory of the project must still find the
+  // project's gates instead of failing OPEN (treating the subdir as untracked and
+  // allowing the run). Keying the stop-condition on a present state FILE — rather
+  // than on a `.twinharness` directory that may hold only `templates/` — closes
+  // the fail-open seam where a bare state dir was mistaken for the project root.
+  //
+  // The stop keys on PRESENCE, not VALIDITY: stopping only at a *valid* file would
+  // skip a nearer child whose `state.json` is malformed and select a valid OUTER
+  // ancestor, so state/build mutations could land in the wrong project instead of
+  // diagnosing the child's invalid state. Stopping at the nearest PRESENT file lets
+  // the selection policy below run the present-but-invalid diagnose/block arm at the
+  // CHILD. If no ancestor has any state file, fall back to the start dir
+  // (fresh-project path through the selection below).
   let abs = startAbs;
   let cursor = startAbs;
   while (true) {
     if (
-      fs.existsSync(path.join(cursor, ".twinharness")) ||
-      fs.existsSync(path.join(cursor, ".agentic-sdlc", "state.json"))
+      hasPresentStateFile(path.join(cursor, ".twinharness", "state.json")) ||
+      hasPresentStateFile(path.join(cursor, ".agentic-sdlc", "state.json"))
     ) {
       abs = cursor;
       break;
@@ -287,17 +413,88 @@ export function resolveProjectPaths(root: string): ProjectPaths {
   // not-yet-created root (fresh `th init`) by resolving its longest existing prefix.
   abs = realpathExistingPrefix(abs);
 
-  let stateDir: string;
   const newDir = path.join(abs, ".twinharness");
-  const legacyStateFile = path.join(abs, ".agentic-sdlc", "state.json");
+  const legacyDir = path.join(abs, ".agentic-sdlc");
+  const newStateFile = path.join(newDir, "state.json");
+  const legacyStateFile = path.join(legacyDir, "state.json");
 
-  if (fs.existsSync(newDir)) {
+  return {
+    root: abs,
+    newDir,
+    legacyDir,
+    newStateFile,
+    legacyStateFile,
+    // R-34 — validity is by VALID state FILE; the directory's mere existence is
+    // deliberately NOT consulted (that was the fail-open vector).
+    newValid: hasValidStateFile(newStateFile),
+    legacyValid: hasValidStateFile(legacyStateFile),
+  };
+}
+
+export function resolveProjectPaths(root: string): ProjectPaths {
+  const { root: abs, newDir, legacyDir, newStateFile, legacyStateFile, newValid, legacyValid } =
+    resolveStateCandidates(root);
+
+  let stateDir: string;
+  if (newValid && legacyValid) {
+    // Both locations hold a valid state — a genuine ambiguity. Refuse to pick one
+    // (picking silently could clobber/strand the other run). Recovery lives in a
+    // MUTATING command; `th doctor` stays read-only and just surfaces this error.
+    throw new StateLocationConflictError(
+      `Two valid TwinHarness state files were found and the location is ambiguous:\n` +
+        `  - ${newStateFile} (.twinharness)\n` +
+        `  - ${legacyStateFile} (.agentic-sdlc, legacy)\n` +
+        `Refusing to guess. Consolidate onto one location with the mutating recovery command:\n` +
+        `  th state adopt --twinharness   (keep .twinharness, retire the legacy state file)\n` +
+        `  th state adopt --legacy        (keep .agentic-sdlc, retire the .twinharness state file)`,
+      "both-valid",
+      { twinharness: newStateFile, legacy: legacyStateFile },
+    );
+  } else if (newValid) {
     stateDir = newDir;
-  } else if (fs.existsSync(legacyStateFile)) {
-    // Legacy project: `.agentic-sdlc/state.json` present — stay in legacy dir.
-    stateDir = path.join(abs, ".agentic-sdlc");
+  } else if (legacyValid) {
+    // Legacy project: a valid `.agentic-sdlc/state.json`, and `.twinharness` has no
+    // valid state (empty, only `templates/`, or corrupt). Stay in the legacy dir so
+    // the existing project keeps working without migration.
+    stateDir = legacyDir;
   } else {
-    stateDir = newDir;
+    // Neither location has a VALID state file. There are three sub-cases:
+    //   (a) BOTH locations have a state file present but NEITHER validates → a true
+    //       both-invalid ambiguity with NO safe location: HARD ERROR, never fail
+    //       open onto a fresh project (R-34 "no fail-open"). Picking one silently
+    //       could resume the wrong broken run.
+    //   (b) exactly ONE location has a present-but-invalid file → selection is
+    //       UNAMBIGUOUS (that location); select it so the EXISTING present-but-invalid
+    //       machinery runs — `readState` returns `{exists:true, issues}`, `th doctor`
+    //       reports "present but INVALID", and the gates BLOCK. This is a diagnosable
+    //       corrupt-file state, NOT a location-selection failure, so it must NOT throw.
+    //   (c) NO state file at either location → a genuinely fresh project: default to
+    //       `.twinharness`.
+    const newPresent = fs.existsSync(newStateFile);
+    const legacyPresent = fs.existsSync(legacyStateFile);
+    if (newPresent && legacyPresent) {
+      // (a) both present, both invalid — no fail-open.
+      throw new StateLocationConflictError(
+        `Both TwinHarness state files are present but NEITHER validates, so there is no safe ` +
+          `location to select:\n` +
+          `  - ${newStateFile} (.twinharness)\n` +
+          `  - ${legacyStateFile} (.agentic-sdlc, legacy)\n` +
+          `Refusing to fail open (treating this as a fresh untracked project would silently ` +
+          `bypass the broken run's gates). Repair one file (\`th doctor\` to see why, then ` +
+          `\`th migrate\`), or retire one with \`th state adopt\`.`,
+        "no-valid-location",
+        { twinharness: newStateFile, legacy: legacyStateFile },
+      );
+    } else if (legacyPresent && !newPresent) {
+      // (b) only the legacy file is present (and invalid) — select legacy so the
+      // existing present-but-invalid path diagnoses + blocks there.
+      stateDir = legacyDir;
+    } else {
+      // (b) only `.twinharness/state.json` is present-but-invalid → select
+      //     `.twinharness` (the diagnose/block path), OR (c) neither present → fresh
+      //     project defaults to `.twinharness`. Both resolve to the new dir.
+      stateDir = newDir;
+    }
   }
 
   return {
