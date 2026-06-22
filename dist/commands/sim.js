@@ -532,7 +532,10 @@ function retirementGrounded(paths, entry) {
     if (entry.status !== "retired")
         return true;
     const s = (0, receipts_1.readReceiptValidated)(paths, "sim-retire", entry.id).status;
-    return s === "valid" || s === "legacy";
+    // Slice-1b: a grounded external `sim-retire` (`valid-grounded`) also exonerates,
+    // alongside an in-process attested (`valid`) or grandfathered (`legacy`) one. A
+    // `forged` external claim does NOT — it is not grounded, so the entry still blocks.
+    return s === "valid" || s === "valid-grounded" || s === "legacy";
 }
 /**
  * Rung-1 receipt-aware blocker (control d — no double-exoneration). A user-visible

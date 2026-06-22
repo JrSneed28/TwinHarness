@@ -409,7 +409,10 @@ function checkProductionReality(paths, state) {
         if (ent.kind === "sim-retire")
             continue; // owned by rung 1's receipt-aware blocker
         const v = (0, receipts_1.readReceiptValidated)(paths, ent.kind, ent.refId);
-        if (v.status !== "valid" && v.status !== "legacy") {
+        // Accept set (slice-1b): `valid` (in-process attested), `valid-grounded` (external
+        // keyed receipt that verified), or `legacy` (grandfathered). A `forged` external
+        // claim — and the existing absent/target_missing/target_mismatch/stale — BLOCK.
+        if (v.status !== "valid" && v.status !== "valid-grounded" && v.status !== "legacy") {
             return {
                 ok: false,
                 error: "terminal_receipt_unverified",
