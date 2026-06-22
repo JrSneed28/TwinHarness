@@ -38,6 +38,7 @@ exports.hashContent = hashContent;
 exports.shortHash = shortHash;
 exports.hashDir = hashDir;
 exports.hashFileBytes = hashFileBytes;
+exports.hashFileStreaming = hashFileStreaming;
 exports.hashPathContent = hashPathContent;
 exports.shortHashPath = shortHashPath;
 const node_crypto_1 = require("node:crypto");
@@ -164,6 +165,45 @@ function hashDir(absDir, limits = exports.DEFAULT_HASH_LIMITS) {
  */
 function hashFileBytes(abs) {
     return (0, node_crypto_1.createHash)("sha256").update(fs.readFileSync(abs)).digest("hex");
+}
+/**
+ * BSC-6 (Axis-B slice-2a) — bounded-memory content hash of a SINGLE file, read in
+ * fixed-size chunks instead of `readFileSync`-ing the whole file into memory. Used
+ * by the dist simulation-scan's always-on enumeration tier (`commands/sim.ts`),
+ * which must streaming-content-hash EVERY `dist/` path regardless of size so a large
+ * file can never blow up memory the way a whole-file read would.
+ *
+ * Byte-IDENTICAL output to {@link hashFileBytes} for the same bytes: both digest the
+ * RAW bytes with NO utf8 decode and NO CRLF normalization. The only difference is the
+ * read strategy — chunked (constant memory) vs whole-file. A test pins the equality.
+ *
+ * SYNCHRONOUS by design (`openSync`/`readSync`, not the async `createReadStream`):
+ * the entire dist-scan + completion-gate call chain
+ * (`scanForSimulationHits` → `checkProductionReality` → `canAdvanceStage`) is
+ * synchronous, so an async hash would force async through the whole gate. A
+ * `readSync` loop over a reused 64 KB buffer delivers the SAME bounded-memory
+ * property the streaming requirement is actually about (Principle 4: never read a
+ * whole large file into memory at once) without that blast radius.
+ *
+ * NOTE: deliberately a SEPARATE function — {@link hashFileBytes} stays byte-untouched
+ * because it is half of the repo-map freshness byte-exact store/re-check pair
+ * (`repo.ts`), where any change risks the freshness invariant.
+ */
+function hashFileStreaming(abs) {
+    const hash = (0, node_crypto_1.createHash)("sha256");
+    const fd = fs.openSync(abs, "r");
+    try {
+        const buf = Buffer.allocUnsafe(64 * 1024);
+        let bytesRead;
+        // readSync returns 0 at EOF; position=null advances the fd's internal offset.
+        while ((bytesRead = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
+            hash.update(bytesRead === buf.length ? buf : buf.subarray(0, bytesRead));
+        }
+    }
+    finally {
+        fs.closeSync(fd);
+    }
+    return hash.digest("hex");
 }
 /** Full hash of a path that may be a file OR a directory (artifact registration §12/§18). */
 function hashPathContent(abs) {

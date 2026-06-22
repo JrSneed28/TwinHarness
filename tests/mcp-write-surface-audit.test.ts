@@ -126,6 +126,9 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   // simulation ledger (SG3 P2-C; append/transition under stateDir — not path-taking)
   th_sim_add: { classification: "Mocked" },
   th_sim_retire: { id: "SIM-001" },
+  // BSC-6: th_sim_scan appends an incomplete-scan receipt under stateDir when dist/
+  // coverage is incomplete (now a mutating tool); not path-taking.
+  th_sim_scan: {},
   // build leases (append to stateDir)
   th_build_claim: { sliceId: "SLICE-1" },
   th_build_release: { sliceId: "SLICE-1" },

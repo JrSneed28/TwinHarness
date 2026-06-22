@@ -201,8 +201,8 @@ Usage:
                                     Append a simulation-ledger entry (.twinharness/simulation-ledger.json); a user-visible simulated entry BLOCKS the production-reality gate until retired
   th sim list                       List simulation-ledger entries + the ids that block production-reality
   th sim retire <SIM-NNN> [--retire-slice ...] [--target <path>]  Mark a simulation entry retired (a user-visible simulation requires --target resolving in source, recording a BSC-4 receipt)
-  th sim scan                       Grep dist/+tests for unledgered simulation patterns (mock|fake|stub|fixture|placeholder|demo|TODO|canned|hardcoded); advisory (exit 0)
-  th gate production-reality        Reader: report the production-reality gate (no unretired user-visible simulation, verify green, Tester record, no unledgered dist/ patterns)
+  th sim scan                       Two-tier dist/ scan: unledgered simulation patterns + 'unobserved' coverage gaps the gate blocks on (file_limit|aggregate_limit|watchdog|read_error → scan_coverage_incomplete); advisory (exit 0)
+  th gate production-reality        Reader: report the production-reality gate (no unretired user-visible simulation, verify green, Tester record, no unledgered dist/ patterns, complete dist/ scan coverage)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
   th manifest tools                 List the advertised MCP tool set (name + summary); CLI mirror of ListTools; --json for full

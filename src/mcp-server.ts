@@ -1646,14 +1646,14 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_sim_scan",
     description:
-      "Grep dist/ and tests/ for simulation patterns (mock|fake|stub|fixture|placeholder|demo|TODO|canned|hardcoded) and flag any hit in dist/ that has no active ledger entry. Advisory/read-only (exit 0); the production-reality GATE — not scan — refuses advance.",
+      "Two-tier scan of dist/ for simulation patterns (mock|fake|stub|fixture|placeholder|demo|TODO|canned|hardcoded): enumerate + streaming-hash EVERY dist/ path, deep-inspect within a layered budget (per-file/aggregate/watchdog), and report both unledgered dist/ hits AND `unobserved` dist/ files the scan could not deep-inspect (file_limit|aggregate_limit|watchdog|read_error) — the coverage gaps the production-reality GATE blocks on (scan_coverage_incomplete). Advisory (exit 0; the gate refuses, not scan); records an incomplete-scan receipt under the state lock when coverage is incomplete. tests/ hits stay advisory.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runSimScan(paths, {}),
   },
   {
     name: "th_gate_production_reality",
     description:
-      "Reader: report the production-reality gate (checkProductionReality). FOUR conditions, each a stable error token: simulation_unretired (a non-retired user-visible simulation), production_verify_not_green, tester_record_missing, unledgered_simulation_in_dist. The SAME predicate canAdvanceStage/canUnlockImplementation/checkFinalVerification compose, so a blocked th_stage_advance/th_implementation_unlock returns the IDENTICAL token. Read-only.",
+      "Reader: report the production-reality gate (checkProductionReality). FIVE conditions, each a stable error token: simulation_unretired (a non-retired user-visible simulation), production_verify_not_green, tester_record_missing, unledgered_simulation_in_dist, scan_coverage_incomplete (a dist/ file the two-tier scan could not deep-inspect, not exonerated by a signed exception). The SAME predicate canAdvanceStage/canUnlockImplementation/checkFinalVerification compose, so a blocked th_stage_advance/th_implementation_unlock returns the IDENTICAL token. Read-only.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runGateProductionReality(paths),
   },
@@ -1804,7 +1804,10 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_sim_add: wr("simulation", { idempotent: false }),
   th_sim_list: ro("simulation"),
   th_sim_retire: wr("simulation", { idempotent: false }),
-  th_sim_scan: ro("simulation"),
+  // th_sim_scan now APPENDS an incomplete-scan receipt under the state lock when dist/
+  // coverage is incomplete (BSC-6), so its honest hint is NOT read-only; append-per-call
+  // ⇒ not idempotent (mirrors the other append/ledger tools).
+  th_sim_scan: wr("simulation", { idempotent: false }),
   th_gate_production_reality: ro("gate"),
   // build oracles (read-only) + leases (mutating)
   th_build_next_wave: ro("oracle"),
