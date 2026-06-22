@@ -22769,8 +22769,9 @@ function checkHumanApprovalAdvance(paths, state) {
     return PASS;
   }
   return {
-    ok: true,
-    notice: { token: "human_approval_unverified", detail: { stage: current, status: validated.status } }
+    ok: false,
+    error: "human_approval_unverified",
+    detail: { stage: current, status: validated.status }
   };
 }
 function checkFinalVerification(paths, state) {

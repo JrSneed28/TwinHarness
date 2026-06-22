@@ -13,7 +13,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, mintApprovalForFixture, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
@@ -75,6 +75,12 @@ function readyAtRequirements(): ProjectPaths {
   writeState(paths, { ...initialState(), tier: "T2", current_stage: "requirements", interview_required: false });
   const reg = runArtifactRegister(paths, "docs/01-requirements.md", 1);
   expect(reg.ok).toBe(true);
+  // BSC-7 / Axis-B slice-3a (ENFORCE): `requirements` is a humanGate stage, so the
+  // human-approval advance rung now BLOCKS canAdvanceStage unless a snapshot+digest-bound
+  // approval exists. This helper isolates the stage-ordinal TAIL rung (not the approval
+  // rung), so mint a valid approval bound to the just-registered governing artifact so the
+  // advance ladder reaches a clean PASS and the test perturbs only the ordinal tail.
+  mintApprovalForFixture(paths, "requirements");
   return paths;
 }
 

@@ -1,16 +1,21 @@
 /**
- * Axis-B slice-3a (BSC-7) — human-approval stage-advance rung, WARN PHASE (commit C-1).
+ * Axis-B slice-3a (BSC-7) — human-approval stage-advance rung, ENFORCE PHASE (commit C-3).
  *
- * This commit registers + invokes the rung but blocks NOTHING. The rung fires when
- * advancing OUT of a `humanGate` stage; when the stage carries no valid approval it
- * surfaces a NON-blocking `notice` (stable token `human_approval_unverified` + the
- * `{ stage, status }` detail) while STILL returning `ok:true`. These tests pin that
- * warn-only behavior so the later enforce-flip (C-3) is a deliberate, observable change:
+ * The prior commit (C-1, `e1de8fd`) introduced this rung in a WARN phase: it surfaced a
+ * NON-blocking `notice` (token `human_approval_unverified`) but still returned `ok:true`,
+ * so advancing out of a `humanGate` stage with no approval SUCCEEDED. This commit (C-3)
+ * flips the single seam return warn→block: the rung now returns `ok:false` with
+ * `error:"human_approval_unverified"` and `detail:{ stage, status }`. These tests are the
+ * INVERSE of the C-1 warn assertions — they pin the BLOCK so the warn→enforce flip is a
+ * deliberate, observable change (a reviewer can `git revert` C-3 and land back on the
+ * green warn baseline, whose assertions this file replaced):
  *
- *   1. The exported rung `checkHumanApprovalAdvance` returns ok:true + the notice when
- *      no approval exists, and a clean PASS (no notice) once an approval is minted.
- *   2. Driven through the real `canAdvanceStage` ladder, advancing out of a humanGate
- *      stage with NO approval still SUCCEEDS (ok:true) AND carries the warning notice.
+ *   1. The exported rung `checkHumanApprovalAdvance` returns ok:false + the stable token +
+ *      `{ stage, status }` detail when no approval exists, and a clean PASS once an
+ *      approval is minted.
+ *   2. Driven through the real `canAdvanceStage` ladder, advancing out of a humanGate stage
+ *      with NO approval now BLOCKS (ok:false) with the same token — and a minted approval
+ *      lets the ladder reach a clean PASS.
  *   3. `mintApprovalForFixture()` mints a VALID approval (smoke test of the helper).
  *
  * Deterministic + Windows-safe (path.join, no shell).
@@ -77,40 +82,34 @@ function greenAtHumanGateStage(stage: string): ProjectPaths {
   return paths;
 }
 
-describe("BSC-7 slice-3a — human-approval advance rung (WARN phase, blocks nothing)", () => {
-  it("checkHumanApprovalAdvance warns (ok:true + notice naming stage+token) when no approval exists", () => {
+describe("BSC-7 slice-3a — human-approval advance rung (ENFORCE phase, blocks the advance)", () => {
+  it("checkHumanApprovalAdvance BLOCKS (ok:false + token + {stage,status}) when no approval exists", () => {
     const paths = greenAtHumanGateStage(HUMAN_GATE_STAGE);
     const state = readState(paths).state!;
     const r = gate.checkHumanApprovalAdvance(paths, state);
 
-    // WARN: passes (blocks nothing) but surfaces the structured notice.
-    expect(r.ok).toBe(true);
-    expect(r.error).toBeUndefined();
-    expect(r.notice).toBeDefined();
-    expect(r.notice!.token).toBe("human_approval_unverified");
-    expect(r.notice!.detail).toMatchObject({ stage: HUMAN_GATE_STAGE, status: "absent" });
+    // ENFORCE: the rung now blocks with the stable token and structured detail; the warn
+    // baseline (C-1, e1de8fd) instead returned ok:true + a non-blocking `notice`.
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("human_approval_unverified");
+    expect(r.notice).toBeUndefined();
+    expect(r.detail).toMatchObject({ stage: HUMAN_GATE_STAGE, status: "absent" });
   });
 
-  it("advancing OUT of a humanGate stage with NO approval still SUCCEEDS (canAdvanceStage stays a clean PASS — blocks nothing)", () => {
+  it("advancing OUT of a humanGate stage with NO approval now BLOCKS (canAdvanceStage returns the token)", () => {
     const paths = greenAtHumanGateStage(HUMAN_GATE_STAGE);
     const state = readState(paths).state!;
 
-    // WARN-PHASE TRANSPARENCY: the whole advance ladder still passes and is UNPERTURBED
-    // (no block, no error) — the warn rung does not change canAdvanceStage's verdict. The
-    // warning itself is observed on the rung's OWN result (next assertion), which is the
-    // seam the enforce-flip (C-3) turns into a block.
+    // ENFORCE SEAM: the rung's verdict is now canAdvanceStage's verdict — the whole advance
+    // ladder refuses with human_approval_unverified (the inverse of the C-1 warn test, which
+    // asserted the ladder stayed a clean ok:true PASS while only the rung carried a notice).
     const adv = gate.canAdvanceStage(paths, state);
-    expect(adv.ok).toBe(true);
-    expect(adv.error).toBeUndefined();
-
-    // The warning IS observable on the rung (names the offending stage + token).
-    const r = gate.checkHumanApprovalAdvance(paths, state);
-    expect(r.ok).toBe(true);
-    expect(r.notice!.token).toBe("human_approval_unverified");
-    expect(r.notice!.detail).toMatchObject({ stage: HUMAN_GATE_STAGE, status: "absent" });
+    expect(adv.ok).toBe(false);
+    expect(adv.error).toBe("human_approval_unverified");
+    expect(adv.detail).toMatchObject({ stage: HUMAN_GATE_STAGE, status: "absent" });
   });
 
-  it("with a minted approval the rung passes cleanly with NO warning", () => {
+  it("with a minted approval the rung passes cleanly and the advance ladder reaches PASS", () => {
     const paths = greenAtHumanGateStage(HUMAN_GATE_STAGE);
     // Mint a valid in-process approval bound to the registered artifact's digest.
     mintApprovalForFixture(paths, HUMAN_GATE_STAGE);
@@ -119,9 +118,10 @@ describe("BSC-7 slice-3a — human-approval advance rung (WARN phase, blocks not
     const state = readState(paths).state!;
     const r = gate.checkHumanApprovalAdvance(paths, state);
     expect(r.ok).toBe(true);
+    expect(r.error).toBeUndefined();
     expect(r.notice).toBeUndefined();
 
-    // canAdvanceStage still a clean pass (no warning to surface).
+    // canAdvanceStage now reaches a clean pass (the approval cleared the only blocking rung).
     const adv = gate.canAdvanceStage(paths, state);
     expect(adv.ok).toBe(true);
   });

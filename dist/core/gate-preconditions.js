@@ -324,11 +324,17 @@ function checkHumanApprovalAdvance(paths, state) {
         validated.status === "legacy") {
         return PASS;
     }
-    // WARN PHASE: blocks NOTHING. The flip to ENFORCE (slice-3a C-3) replaces THIS single
-    // return with `{ ok:false, error: "human_approval_unverified", detail: { stage: current, status: validated.status } }`.
+    // ENFORCE PHASE (slice-3a C-3) — advancing OUT of a humanGate stage without a
+    // snapshot+governing-artifact-digest-bound approval is a hard block. The warn baseline
+    // (e1de8fd) attached the SAME token as a non-blocking `notice`; this is the one-line
+    // warn→enforce flip (move the payload into `error`/`detail` and set `ok:false`), so a
+    // reviewer can `git revert` this commit and land back on the green warn state. The
+    // {ok:false, error, detail} field shape mirrors the sibling blocking rungs in this file
+    // (e.g. checkGoverningArtifact / the BSC-4 terminal rung in checkProductionReality).
     return {
-        ok: true,
-        notice: { token: "human_approval_unverified", detail: { stage: current, status: validated.status } },
+        ok: false,
+        error: "human_approval_unverified",
+        detail: { stage: current, status: validated.status },
     };
 }
 /**
