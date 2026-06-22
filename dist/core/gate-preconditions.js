@@ -68,6 +68,7 @@ exports.checkGoverningArtifact = checkGoverningArtifact;
 exports.checkCoverage = checkCoverage;
 exports.implementationRequiresSlices = implementationRequiresSlices;
 exports.checkImplementationSettled = checkImplementationSettled;
+exports.checkHumanApprovalAdvance = checkHumanApprovalAdvance;
 exports.checkFinalVerification = checkFinalVerification;
 exports.checkProductionReality = checkProductionReality;
 exports.interviewRequired = interviewRequired;
@@ -89,6 +90,7 @@ const interview_1 = require("../commands/interview");
 const sim_1 = require("../commands/sim");
 const tester_1 = require("./tester");
 const receipts_1 = require("./receipts");
+const approvals_1 = require("./approvals");
 const PASS = { ok: true };
 // ---------------------------------------------------------------------------
 // Global rungs (stage-independent) — checked before any stage-specific work, in
@@ -285,6 +287,48 @@ function checkImplementationSettled(state) {
         };
     }
     return PASS;
+}
+/**
+ * Rung (NEW — BSC-7 / Axis-B slice-3a, WARN PHASE) — the human-approval stage-advance
+ * rung. `humanGate` was a declarative-only flag with ZERO predicate consumers (pure
+ * gate theater): this is the missing sensor. It fires when advancing OUT of a
+ * `humanGate` stage — that stage must carry a `valid`/`valid-grounded`/`legacy`
+ * approval bound to the current snapshot + governing-artifact digest
+ * ({@link readApprovalValidated}).
+ *
+ * WARN PHASE (this commit, slice-3a C-1): the rung is registered + invoked but blocks
+ * NOTHING — it ALWAYS returns `ok:true`. When the approval is missing/invalid it
+ * attaches a NON-blocking {@link GateResult.notice} carrying the stable token
+ * `human_approval_unverified` plus `{ stage, status }`, so the soft anomaly is
+ * observable on the result without reding any fixture that previously advanced freely.
+ *
+ * WARN→ENFORCE SEAM (slice-3a C-3): the flip to a hard block is a ONE-LINE change at
+ * the marked return below — swap the `notice` payload into `error`/`detail` and set
+ * `ok:false`. The completion rung (C-2) reuses the SAME token over the closed
+ * required-set; this advance rung gates only the single stage being crossed.
+ */
+function checkHumanApprovalAdvance(paths, state) {
+    const current = (0, stages_1.canonicalizeStage)(state.current_stage);
+    // Only applies when advancing OUT of a humanGate stage (mirrors rungAppliesAtStage's
+    // arm). A non-humanGate current stage carries no approval obligation.
+    if (!(0, approvals_1.isHumanGateStage)(current))
+        return PASS;
+    const validated = (0, approvals_1.readApprovalValidated)(paths, current);
+    // Accept set: a `valid` (in-process attested), `valid-grounded` (external keyed,
+    // slice-3b), or `legacy` (grandfathered) approval clears the rung. Anything else —
+    // absent / stale / target_missing / target_mismatch / forged / tampered — is a
+    // missing/invalid approval.
+    if (validated.status === "valid" ||
+        validated.status === "valid-grounded" ||
+        validated.status === "legacy") {
+        return PASS;
+    }
+    // WARN PHASE: blocks NOTHING. The flip to ENFORCE (slice-3a C-3) replaces THIS single
+    // return with `{ ok:false, error: "human_approval_unverified", detail: { stage: current, status: validated.status } }`.
+    return {
+        ok: true,
+        notice: { token: "human_approval_unverified", detail: { stage: current, status: validated.status } },
+    };
 }
 /**
  * Rung l (next.ts:258-314) — the final-verification ladder, returning the FIRST
@@ -572,6 +616,12 @@ const STAGE_RUNGS = [
     { id: "checkGoverningArtifact", bucket: "forward-only", scope: "stage:non-final-artifact", run: (p, s) => checkGoverningArtifact(p, s) },
     { id: "checkCoverage", bucket: "forward-only", scope: "stage:implementation-planning", run: (p) => checkCoverage(p) },
     { id: "checkImplementationSettled", bucket: "forward-only", scope: "stage:implementation", run: (_p, s) => checkImplementationSettled(s) },
+    // BSC-7 / Axis-B slice-3a — the human-approval advance rung. `forward-only`: it gates
+    // advancing OUT of a humanGate stage (a per-stage forward-progress block), NOT
+    // completion. Completion enforcement over the CLOSED required-set is the separate C-2
+    // rung composed inside checkFinalVerification (`final`), so this entry must NOT be
+    // `final` or it would double-gate at the completion boundary.
+    { id: "checkHumanApprovalAdvance", bucket: "forward-only", scope: "stage:human-approval-advance", run: (p, s) => checkHumanApprovalAdvance(p, s) },
     { id: "checkFinalVerification", bucket: "final", scope: "stage:final", run: (p, s) => checkFinalVerification(p, s) },
 ];
 /**
@@ -601,6 +651,11 @@ function rungAppliesAtStage(rung, stage) {
             return stage === "implementation-planning";
         case "stage:implementation":
             return stage === "implementation";
+        case "stage:human-approval-advance":
+            // Applies when advancing OUT of a humanGate stage — i.e. the CURRENT stage is one
+            // of the 8 humanGate stages (the per-stage approval obligation is owed by the stage
+            // being crossed). Mirrors checkHumanApprovalAdvance's own guard.
+            return (0, approvals_1.isHumanGateStage)((0, stages_1.canonicalizeStage)(stage));
         case "stage:final":
             return (0, stages_1.isFinalVerification)(stage);
     }

@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { resolveProjectPaths, type ProjectPaths } from "../src/core/paths";
 import { CLI_COMMAND_LEAVES, MCP_EXCLUDED, MCP_ONLY_TOOLS } from "../src/mcp-server";
+import { stageContract } from "../src/core/stages";
+import { appendApprovalReceipt, type HumanApprovalReceipt } from "../src/core/approvals";
 
 /**
  * The SELF-DERIVING MCP tool count, computed from the CLI↔MCP partition rather
@@ -68,6 +70,46 @@ export interface TempProject {
   paths: ProjectPaths;
   root: string;
   cleanup: () => void;
+}
+
+/**
+ * Mint a VALID in-process human-approval receipt for a `humanGate` `stage` (BSC-7 /
+ * Axis-B slice-3a). Used by the warn→enforce fixtures (slice-3a C-3) to make a run pass
+ * the human-approval rung in-process, exactly as `th approve` would.
+ *
+ * It guarantees `readApprovalValidated(paths, stage) === "valid"`: the stage's governing
+ * artifact (`produces`) must resolve in source for the digest to bind, so this writes a
+ * minimal artifact first when one is not already present (a caller that already authored
+ * the real artifact keeps it — the approval then binds the REAL digest). The approval is
+ * sealed onto the in-process chain via the production `appendApprovalReceipt` path under
+ * the current snapshot coordinate + that artifact's digest, so a later validation re-reads
+ * the SAME artifact and matches. NOT wired into any fixture here (slice-3a C-3 does that);
+ * defined + smoke-tested only.
+ *
+ * Single-process temp projects do not need an explicit `withStateLock` span (the test is
+ * the only writer) — mirrors how `tests/approvals.test.ts` calls `appendApprovalReceipt`.
+ */
+export function mintApprovalForFixture(
+  paths: ProjectPaths,
+  stage: string,
+  opts: { producerIdentity?: string } = {},
+): HumanApprovalReceipt {
+  const contract = stageContract(stage);
+  if (!contract || !contract.humanGate) {
+    throw new Error(`mintApprovalForFixture: "${stage}" is not a humanGate stage.`);
+  }
+  // Ensure the governing artifact resolves so the mandatory digest binds (R3). A caller
+  // that already wrote the real artifact keeps it; otherwise lay down a minimal placeholder.
+  const abs = path.resolve(paths.root, contract.produces.replace(/\/$/, ""));
+  if (!fs.existsSync(abs)) {
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, `# ${stage}\n\n- REQ-001 covered.\n`, "utf8");
+  }
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  return appendApprovalReceipt(paths, {
+    stage,
+    producerIdentity: opts.producerIdentity ?? "fixture:mintApprovalForFixture",
+  });
 }
 
 /** Create an isolated temp project dir so tests never touch the repo root. */

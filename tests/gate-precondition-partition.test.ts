@@ -58,6 +58,10 @@ const SPEC_BUCKETS: Record<string, "always-run" | "forward-only" | "final"> = {
   checkGoverningArtifact: "forward-only",
   checkCoverage: "forward-only",
   checkImplementationSettled: "forward-only",
+  // BSC-7 / Axis-B slice-3a — the human-approval advance rung gates advancing OUT of a
+  // humanGate stage (per-stage forward progress), so it is forward-only — NOT a
+  // completion authority (that is the separate completion rung inside checkFinalVerification).
+  checkHumanApprovalAdvance: "forward-only",
   checkFinalVerification: "final",
 };
 
