@@ -539,13 +539,35 @@ function approvalMigrationDone(paths) {
     return readMigrationMarker(paths) !== undefined;
 }
 /**
- * The grandfathered baseline stage-set captured at migration time. Members are stage ids.
+ * The grandfathered baseline stage-set captured at migration time — CROSS-CHECKED
+ * against the on-disk ledger (carry-forward review hardening). Members are stage ids.
  * Empty set when not yet migrated — which (with the fail-closed absent-classification)
  * means an absent marker downgrades NO stage to a free pass.
+ *
+ * The marker's `baseline[]` array is NOT trusted verbatim: a hand-edited marker that
+ * names a stage with no on-disk chain-sealed `legacy:true` stamp would otherwise
+ * manufacture a bogus `legacy`-PASS (the `ensureApprovalMigration` writer always seals a
+ * real `legacy:true` stamp for every baseline member, so a legitimate baseline member
+ * ALWAYS has one). So each baseline member is intersected with the set of stages that
+ * carry an actual chain-sealed `legacy:true` approval in the in-process ledger; a
+ * baseline entry with no matching stamp is dropped (fail-closed). A tampered chain (the
+ * walk does not verify) contributes NOTHING, so a forged stamp cannot smuggle a stage in.
  */
 function grandfatheredBaseline(paths) {
     const marker = readMigrationMarker(paths);
-    return new Set(marker ? marker.baseline : []);
+    if (!marker)
+        return new Set();
+    // Stages with a REAL chain-sealed `legacy:true` stamp on disk. A non-verifying chain
+    // contributes nothing — a forged/edited stamp cannot manufacture a legacy stage.
+    const receipts = readApprovalReceipts(paths);
+    if (!verifyApprovalChain(receipts).ok)
+        return new Set();
+    const stampedLegacy = new Set();
+    for (const r of receipts) {
+        if (r.legacy === true)
+            stampedLegacy.add(r.stage);
+    }
+    return new Set(marker.baseline.filter((s) => stampedLegacy.has(s)));
 }
 /**
  * Idempotent, marker-guarded migration (plan §4 3a-5). MUST be called holding the state

@@ -22639,7 +22639,14 @@ function readMigrationMarker2(paths) {
 }
 function grandfatheredBaseline2(paths) {
   const marker = readMigrationMarker2(paths);
-  return new Set(marker ? marker.baseline : []);
+  if (!marker) return /* @__PURE__ */ new Set();
+  const receipts = readApprovalReceipts(paths);
+  if (!verifyApprovalChain2(receipts).ok) return /* @__PURE__ */ new Set();
+  const stampedLegacy = /* @__PURE__ */ new Set();
+  for (const r of receipts) {
+    if (r.legacy === true) stampedLegacy.add(r.stage);
+  }
+  return new Set(marker.baseline.filter((s) => stampedLegacy.has(s)));
 }
 
 // src/core/gate-preconditions.ts
