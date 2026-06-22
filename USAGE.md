@@ -85,6 +85,18 @@ From a local clone:
 `claude plugin install twinharness@twinharness`). The plugin installs at **user scope** — it is
 available in every project. For a throwaway test session instead: `claude --plugin-dir <path>`.
 
+**Development / preview channel.** The `dev` branch is published as a separate marketplace named
+`twinharness-dev`, so it installs side-by-side with the stable channel. Pin the marketplace to the
+`dev` ref with `@dev`:
+
+```
+/plugin marketplace add JrSneed28/TwinHarness@dev
+/plugin install twinharness@twinharness-dev
+```
+
+The plugin name stays `twinharness`; only the marketplace ID differs. A local clone checked out on
+`dev` registers as `twinharness-dev` as well, so install it with `twinharness@twinharness-dev`.
+
 Requirements: **Node ≥ 20** on PATH (declared in `engines.node`; the bundled `th` CLI has zero
 runtime dependencies). Claude Code ≥ 1.0.0 (the plugin targets the hook + agent manifest schema v1).
 

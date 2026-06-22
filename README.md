@@ -48,6 +48,17 @@ claude --plugin-dir C:\path\to\TwinHarness
 
 The plugin installs at user scope and is available in every project.
 
+#### Development / preview channel (`dev` branch)
+
+The `dev` branch ships as its own marketplace, named `twinharness-dev`, so you can run the in-development build **side-by-side** with the stable `twinharness` channel above. Pin the marketplace to the `dev` ref with `@dev`:
+
+```
+/plugin marketplace add JrSneed28/TwinHarness@dev
+/plugin install twinharness@twinharness-dev
+```
+
+The plugin name is still `twinharness`; only the marketplace differs (`@twinharness-dev` vs `@twinharness`), which is what lets both channels coexist. If you instead add a **local clone that is checked out on `dev`** (`/plugin marketplace add C:\path\to\TwinHarness`), it registers as `twinharness-dev` too — install it with `/plugin install twinharness@twinharness-dev`.
+
 ### First run
 
 Open Claude Code in the directory where you want the software built (an empty directory is fine):
