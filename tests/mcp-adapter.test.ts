@@ -429,6 +429,7 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 60 + schema/no-exec battery (REQ
     "th_gate_production_reality",
     "th_inspector_write",
     "th_tester_record",
+    "th_driver_record",
     "th_approve",
   ];
 

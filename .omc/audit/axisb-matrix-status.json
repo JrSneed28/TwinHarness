@@ -1,0 +1,92 @@
+[
+  {
+    "bsc": 1,
+    "title": "Realization/reachability receipt — artifact actually reachable, not just identified",
+    "phase": "todo",
+    "independence": 0,
+    "pr": [],
+    "probe": ".omc/audit/probes/bsc1",
+    "anchors": ["core/anchors.ts:19", "core/gate-preconditions.ts:190-205"],
+    "updatedAt": "2026-06-22T13:10:00Z"
+  },
+  {
+    "bsc": 2,
+    "title": "Assertion-quality / mutation-kill receipt — trusted runner observes test quality",
+    "phase": "todo",
+    "independence": 0,
+    "pr": [],
+    "probe": ".omc/audit/probes/bsc2",
+    "anchors": ["core/coverage.ts:117-124,208-218"],
+    "updatedAt": "2026-06-22T13:10:00Z"
+  },
+  {
+    "bsc": 3,
+    "title": "VerificationDriver — trusted runner records which verification dimensions were exercised",
+    "phase": "done-phase",
+    "independence": 0,
+    "pr": [38],
+    "probe": ".omc/audit/probes/bsc3",
+    "anchors": ["core/verification-driver.ts", "core/receipts.ts", "core/bsc3-flag.ts", "core/gate-preconditions.ts:434+,849"],
+    "updatedAt": "2026-06-22T16:00:00Z"
+  },
+  {
+    "bsc": 4,
+    "title": "Terminal-transition receipt — self-attested state flip bound to re-checkable source+snapshot",
+    "phase": "done-phase",
+    "independence": ">0",
+    "pr": [32, 33],
+    "probe": ".omc/audit/probes/bsc4",
+    "anchors": ["commands/drift.ts:185-234", "commands/sim.ts:255-289,461-463", "core/decisions.ts:550-567"],
+    "updatedAt": "2026-06-22T13:10:00Z"
+  },
+  {
+    "bsc": 5,
+    "title": "Dimension-set-coverage rung — completion asserts coverage of the declared spec dimension set",
+    "phase": "todo",
+    "independence": 0,
+    "pr": [],
+    "probe": null,
+    "anchors": ["core/gate-preconditions.ts:521-557,635-648"],
+    "updatedAt": "2026-06-22T13:10:00Z"
+  },
+  {
+    "bsc": 6,
+    "title": "Scan-completeness receipt — fail-closed; files scanned/skipped/cap",
+    "phase": "done-phase",
+    "independence": ">0",
+    "pr": [34, 35],
+    "probe": ".omc/audit/probes/new-a-scancap",
+    "anchors": ["commands/sim.ts:419-422,430", "core/gate-preconditions.ts:411-413"],
+    "updatedAt": "2026-06-22T13:10:00Z"
+  },
+  {
+    "bsc": 7,
+    "title": "Human-approval rung — external-signed approval over the closed required set",
+    "phase": "done-phase",
+    "independence": ">0",
+    "pr": [36, 37],
+    "probe": null,
+    "anchors": ["core/approvals.ts", "core/gate-preconditions.ts"],
+    "updatedAt": "2026-06-22T13:10:00Z"
+  },
+  {
+    "bsc": 8,
+    "title": "Tier↔complexity correspondence receipt + stage-invalidation",
+    "phase": "todo",
+    "independence": 0,
+    "pr": [],
+    "probe": null,
+    "anchors": ["core/tier.ts:324-348", "commands/state.ts:331-358,160-173"],
+    "updatedAt": "2026-06-22T13:10:00Z"
+  },
+  {
+    "bsc": 9,
+    "title": "MCP behavioral-parity + readiness receipt",
+    "phase": "todo",
+    "independence": 0,
+    "pr": [],
+    "probe": null,
+    "anchors": ["tests/mcp-cli-parity.test.ts", "commands/interview.ts:185-188"],
+    "updatedAt": "2026-06-22T13:10:00Z"
+  }
+]

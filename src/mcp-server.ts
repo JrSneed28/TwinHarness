@@ -59,6 +59,7 @@ import { runHandoffWrite } from "./commands/handoff";
 import { runInspectorWrite } from "./commands/inspector";
 import { runTesterRecord } from "./commands/tester";
 import { runApprove } from "./commands/approve";
+import { runDriverRecord } from "./commands/driver";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
 import { runTemplateGet, runTemplateList } from "./commands/template";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
@@ -1709,6 +1710,30 @@ export const TOOL_DEFS: readonly ToolDef[] = [
         evidenceRef: optString(args, "evidenceRef"),
       }),
   },
+  // Axis-B slice-4a (BSC-3) — in-process driver-dimension receipt writer. The SENSOR
+  // that records which verification dimensions verify-report.json observed, grounding the
+  // production-reality verification-driver rung. Registration is ALWAYS-ON (parity with
+  // the CLI `th driver record`); the TH_BSC3_ENFORCE flag governs ENFORCEMENT only.
+  {
+    name: "th_driver_record",
+    description:
+      "Axis-B/BSC-3: mint the IN-PROCESS driver-dimension receipt the production-reality verification-driver rung reads (<stateDir>/driver-receipts.jsonl, hash-chained, under the state lock). Records which seed dimensions (tests-executed, typecheck, build) `verify-report.json` actually OBSERVED. SENSOR + refuse-at-creation: optional `dimension` (comma-separated) is INTERSECTED with the observed set — a claimed dimension the report does not evidence is refused (driver_dimension_unobserved), and a missing/unresolving report is refused (driver_evidence_unresolved). Omit `dimension` to record every observed seed dimension. ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its trust label is `valid` NEVER `valid-grounded` — independent grounding is the slice-4b external Ed25519-signed producer. Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dimension: stringProp(
+          "Comma-separated dimension name(s) to record as observed (tests-executed | typecheck | build). Intersected with what verify-report.json observes; omit to record every observed seed dimension.",
+        ),
+        identity: stringProp("Producer identity to record (attribution-only, zero trust weight; defaults to cli:th driver record)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      const raw = optString(args, "dimension");
+      const dimensionNames = raw === undefined ? undefined : raw.split(",").map((s) => s.trim()).filter(Boolean);
+      return runDriverRecord(paths, { dimensionNames, producerIdentity: optString(args, "identity") });
+    },
+  },
   {
     name: "th_approve",
     description:
@@ -1771,7 +1796,8 @@ export type ToolCategory =
   | "interview"
   | "lifecycle"
   | "template"
-  | "tester";
+  | "tester"
+  | "driver";
 
 /** The behavior hints + category attached to a tool. */
 export interface ToolAnnotation {
@@ -1914,6 +1940,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // SG3 P2-C — live-QA Tester record writer (overwriting the marker with a fresh run is
   // an idempotent overwrite of the single tester-record.json under the state dir).
   th_tester_record: wr("tester", { idempotent: true }),
+  // Axis-B/BSC-3 — in-process driver-dimension producer. NOT idempotent: each call appends a
+  // fresh hash-chained driver receipt to driver-receipts.jsonl under the state dir.
+  th_driver_record: wr("driver", { idempotent: false }),
   // Axis-B/BSC-7 — in-process human-approval producer. NOT idempotent: each call appends a
   // fresh hash-chained approval record to approval-receipts.jsonl under the state dir.
   th_approve: wr("stage", { idempotent: false }),
@@ -2048,6 +2077,7 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "drift add", "drift list", "drift resolve",
   "sim add", "sim list", "sim retire", "sim scan",
   "tester record",
+  "driver record",
   "approve",
   "gate production-reality",
   "collab init", "collab fragment", "collab list", "collab merge",
