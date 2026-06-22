@@ -78,7 +78,9 @@ describe("REQ-LEDGER-003: blocking drift open/close is audited", () => {
     runInit(tp.paths, {});
     const add = runDriftAdd(tp.paths, { layer: "requirement", ref: "SLICE-1 / TASK-001", discovery: "x", action: "paused" });
     const id = (add.data as { id: string }).id;
-    runDriftResolve(tp.paths, id);
+    // Requirement-layer resolve now requires a target that resolves in source (BSC-4).
+    fs.writeFileSync(path.join(tp.root, "grounding.ts"), "export const g = 1;\n", "utf8");
+    runDriftResolve(tp.paths, id, { target: "grounding.ts" });
     const events = readLedger(tp.paths).map((e) => e.event);
     expect(events).toContain("drift-blocking-opened");
     expect(events).toContain("drift-blocking-resolved");

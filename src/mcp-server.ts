@@ -632,14 +632,17 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_drift_resolve",
     description:
-      "Resolve an open drift entry by id; decrements the open-blocking counter when it was a requirement-layer (blocking) entry. Errors if the id is unknown or already resolved. Serialized under the state lock.",
+      "Resolve an open drift entry by id; decrements the open-blocking counter when it was a requirement-layer (blocking) entry. A requirement-layer (blocking) resolution REQUIRES `target` — a repo-relative source path that resolves in source — and records a BSC-4 terminal-transition receipt the completion gate re-validates. Errors if the id is unknown, already resolved, or (requirement-layer) the target is missing or does not resolve in source. Serialized under the state lock.",
     inputSchema: {
       type: "object",
-      properties: { id: stringProp("The DRIFT-NNN id to resolve.") },
+      properties: {
+        id: stringProp("The DRIFT-NNN id to resolve."),
+        target: stringProp("Repo-relative source path the resolution resolves in — REQUIRED for requirement-layer (blocking) entries (the BSC-4 receipt ground)."),
+      },
       required: ["id"],
       additionalProperties: false,
     },
-    run: (paths, args) => runDriftResolve(paths, optString(args, "id")),
+    run: (paths, args) => runDriftResolve(paths, optString(args, "id"), { target: optString(args, "target") }),
   },
   {
     name: "th_build_next_wave",
@@ -1627,17 +1630,18 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_sim_retire",
     description:
-      "Mark a simulation entry retired by id (status transition active→retired; entries are never deleted). Optional retireSlice records who/what replaced it with reality. Errors on an unknown id or a double-retire. Serialized under the state lock.",
+      "Mark a simulation entry retired by id (status transition active→retired; entries are never deleted). A user-visible simulation REQUIRES `target` — a repo-relative source path that resolves in source — and records a BSC-4 terminal-transition receipt; an ungrounded retirement does NOT exonerate the entry (it still blocks the production-reality gate and the dist-scan join). Optional retireSlice records who/what replaced it with reality. Errors on an unknown id, a double-retire, or (user-visible) a missing/unresolving target. Serialized under the state lock.",
     inputSchema: {
       type: "object",
       properties: {
         id: stringProp("The SIM-NNN id to retire."),
         retireSlice: stringProp("Slice/owner that replaced the simulation with reality."),
+        target: stringProp("Repo-relative source path the retirement resolves in — REQUIRED for a user-visible simulation (the BSC-4 receipt ground)."),
       },
       required: ["id"],
       additionalProperties: false,
     },
-    run: (paths, args) => runSimRetire(paths, optString(args, "id"), { retireSlice: optString(args, "retireSlice") }),
+    run: (paths, args) => runSimRetire(paths, optString(args, "id"), { retireSlice: optString(args, "retireSlice"), target: optString(args, "target") }),
   },
   {
     name: "th_sim_scan",

@@ -45,6 +45,7 @@ const drift_log_1 = require("../core/drift-log");
 const log_1 = require("../core/log");
 const ledger_1 = require("../core/ledger");
 const guards_1 = require("../core/guards");
+const receipts_1 = require("../core/receipts");
 /**
  * `th drift` — append-only access to the bidirectional drift log (spec §10).
  * Mechanical only (plan §3 boundary rule): the CLI records discoveries and tracks
@@ -184,11 +185,17 @@ function runDriftList(paths) {
  * - The id must match an existing drift entry (no unknown ids).
  * - Double-resolving (a `## <id> — resolved` note already present) is rejected.
  * - Derived-layer entries: counter unchanged, human output says so explicitly.
+ *
+ * Grounding (Axis-B slice-1a / BSC-4): resolving a `requirement`-layer drift — the
+ * BLOCKING flip — now REQUIRES `opts.target` and mints a content-bound
+ * `drift-resolve` receipt. A missing target, or a target that does not resolve in
+ * source, refuses the flip (no resolution note, no counter change). Derived-layer
+ * resolves are unchanged (target optional, no receipt).
  */
-function runDriftResolve(paths, id) {
-    return (0, state_store_1.withStateLock)(paths, () => runDriftResolveLocked(paths, id));
+function runDriftResolve(paths, id, opts) {
+    return (0, state_store_1.withStateLock)(paths, () => runDriftResolveLocked(paths, id, opts));
 }
-function runDriftResolveLocked(paths, id) {
+function runDriftResolveLocked(paths, id, opts) {
     if (!id)
         return (0, output_1.failure)({ human: "usage: th drift resolve <DRIFT-NNN>" });
     const r = (0, state_store_1.readState)(paths);
@@ -220,8 +227,45 @@ function runDriftResolveLocked(paths, id) {
             data: { error: "already_resolved", id },
         });
     }
-    appendDriftLog(paths, `## ${id} — resolved\n`);
     const isBlocking = entry.layer === "requirement";
+    const target = opts?.target;
+    // Axis-B slice-1a (BSC-4) grounding. Migrate FIRST — before appending the
+    // resolution note — so this entity is not yet terminal and is NOT grandfathered:
+    // it earns a REAL receipt rather than a legacy backfill stamp. Idempotent; runs
+    // here holding the state lock (the migration appends receipts + writes its marker).
+    (0, receipts_1.ensureReceiptMigration)(paths);
+    if (isBlocking) {
+        // A requirement-layer (BLOCKING) flip now REQUIRES a recomputable ground.
+        if (target === undefined || target === "") {
+            return (0, output_1.failure)({
+                human: `Resolving the requirement-layer (BLOCKING) drift ${id} now requires grounding: th drift resolve ${id} --target <path>`,
+                data: { error: "drift_resolve_target_required", id },
+            });
+        }
+        // Negative-control (c): mint the content-bound receipt BEFORE the resolution
+        // note. A non-resolving target throws, leaving the drift unresolved (no partial
+        // flip — no note appended, no counter decrement).
+        try {
+            (0, receipts_1.appendTerminalReceipt)(paths, {
+                kind: "drift-resolve",
+                refId: id,
+                targetPath: target,
+                producerIdentity: "cli:th drift resolve",
+            });
+        }
+        catch (e) {
+            if (e instanceof receipts_1.TargetUnresolvedError) {
+                return (0, output_1.failure)({
+                    human: `Refusing to resolve ${id}: target "${target}" does not resolve in source.`,
+                    data: { error: e.code, id, target: e.target },
+                });
+            }
+            throw e;
+        }
+    }
+    // Derived-layer: target is OPTIONAL and NO receipt is minted (a derived drift
+    // never clears a blocking gate). Behavior otherwise unchanged.
+    appendDriftLog(paths, `## ${id} — resolved\n`);
     let driftOpenBlocking = r.state.drift_open_blocking;
     if (isBlocking) {
         driftOpenBlocking = Math.max(0, driftOpenBlocking - 1);
@@ -229,7 +273,13 @@ function runDriftResolveLocked(paths, id) {
         // Audit ledger (F5): a requirement-layer resolution clears a blocking gate.
         (0, ledger_1.appendLedger)(paths, { event: "drift-blocking-resolved", id, drift_open_blocking: driftOpenBlocking });
     }
-    (0, log_1.structuredLog)({ cmd: "drift resolve", id, layer: entry.layer, drift_open_blocking: driftOpenBlocking });
+    (0, log_1.structuredLog)({
+        cmd: "drift resolve",
+        id,
+        layer: entry.layer,
+        drift_open_blocking: driftOpenBlocking,
+        ...(isBlocking ? { target } : {}),
+    });
     const human = isBlocking
         ? `${id} marked resolved (requirement layer, blocking cleared). Open blocking drift: ${driftOpenBlocking}.`
         : `${id} marked resolved (derived layer — no blocking counter change). Open blocking drift: ${driftOpenBlocking}.`;

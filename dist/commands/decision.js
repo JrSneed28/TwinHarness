@@ -72,6 +72,7 @@ const state_store_1 = require("../core/state-store");
 const state_store_2 = require("../core/state-store");
 const decisions_1 = require("../core/decisions");
 const decision_key_1 = require("../core/decision-key");
+const receipts_1 = require("../core/receipts");
 /** `th decision check` exit code when an unapproved decision gates the stage (IF-004). */
 exports.DECISION_GATE_EXIT = 6;
 /** Parse a comma-separated flag value the same way `--components` is parsed. */
@@ -519,6 +520,26 @@ function runDecisionApprove(paths, id, opts = {}) {
         };
         if (supersede)
             event.supersededBy = supersedeTarget;
+        // BSC-4 (Axis-B slice-1a, execution doc §6): ground an APPROVAL with a
+        // terminal-transition receipt so the completion gate cannot be cleared by an
+        // approval marker alone. Migration runs BEFORE the approval event is sealed, so
+        // THIS decision is not yet terminal when the grandfathered baseline is captured
+        // — it then gets a REAL receipt below rather than a `legacy` backfill stamp.
+        // Reject/supersede mint NOTHING: they are not "approved/complete" claims (a
+        // rejected decision still gates per DQ-002, so it has nothing to ground). The
+        // mint is purely additive and runs under the SAME lock.
+        if (toEvent === "approved")
+            (0, receipts_1.ensureReceiptMigration)(paths);
+        // Mint BEFORE persisting the approval event. A receipt failure must leave the
+        // decision proposed so the command remains safely retryable; an orphan receipt
+        // is harmless because only terminal decisions are enforced by the gate.
+        if (toEvent === "approved") {
+            (0, receipts_1.appendTerminalReceipt)(paths, {
+                kind: "decision-approve",
+                refId: id,
+                producerIdentity: "cli:th decision approve",
+            });
+        }
         // Seal the approval transition with the opt-in key when one is explicitly set
         // (C-3b). resolveDecisionKey() returns null by default → no seal, no behavior change.
         (0, decisions_1.appendDecisionEvent)(paths, event, (0, decision_key_1.resolveDecisionKey)());
