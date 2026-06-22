@@ -31,10 +31,23 @@
  *   TH_RECEIPT_PRIVATE_KEYFILE=/path/to/ed25519-private.pem \
  *   node scripts/th-receipt-producer.mjs \
  *     --root <projectRoot> \
- *     --kind <drift-resolve|sim-retire|decision-approve> \
- *     --ref-id <ID> \
+ *     --kind <drift-resolve|sim-retire|decision-approve|scan-exception> \
+ *     [--ref-id <ID>] \
  *     [--target <repo-rel-path>] \
  *     [--producer-identity <string>]
+ *
+ * The terminal-receipt kinds (drift-resolve|sim-retire|decision-approve) require
+ * `--ref-id` and write the external TERMINAL-receipt store (slice-1b). `--target` is
+ * required for drift-resolve|sim-retire and forbidden-empty for decision-approve.
+ *
+ * `--kind scan-exception` (slice-2b) is a SEPARATE flow that writes a DIFFERENT store
+ * (`scan-exceptions.jsonl`) with a DIFFERENT canonical shape — an external-signed,
+ * path-and-digest-scoped ack exonerating ONE enumerated `dist/` path the two-tier scan
+ * could not deep-inspect. It REQUIRES `--target <repo-rel-path>` (the dist file being
+ * excepted), which MUST resolve in source; the ack's `digest` is that file's
+ * `hashFileStreaming` digest — byte-identical to the scan's enumerated digest, so the
+ * gate's `uncoveredAfterExceptions` subtracts exactly this `(path, digest)`. `--ref-id`
+ * is ignored for scan-exception (the `(path, digest)` IS the coordinate).
  *
  * Prints a small JSON result on stdout. Exit 0 on success, nonzero on any error.
  */
@@ -52,6 +65,8 @@ const DIST = path.join(HERE, "..", "dist");
 const receiptsMod = await import(pathToFileUrl(path.join(DIST, "core", "receipts.js")));
 const signingMod = await import(pathToFileUrl(path.join(DIST, "core", "receipt-signing.js")));
 const pathsMod = await import(pathToFileUrl(path.join(DIST, "core", "paths.js")));
+const scanMod = await import(pathToFileUrl(path.join(DIST, "core", "scan-completeness.js")));
+const hashMod = await import(pathToFileUrl(path.join(DIST, "core", "hash.js")));
 
 const {
   canonicalText,
@@ -63,6 +78,13 @@ const {
 } = receiptsMod;
 const { externalKeyId } = signingMod;
 const { resolveProjectPaths } = pathsMod;
+const {
+  scanExceptionCanonicalText,
+  computeScanExceptionRecordHash,
+  scanExceptionsPath,
+  readLastScanExceptionRecordHash,
+} = scanMod;
+const { hashFileStreaming } = hashMod;
 
 /** Convert an absolute filesystem path to a file:// URL (Windows-safe ESM import). */
 function pathToFileUrl(abs) {
@@ -90,7 +112,7 @@ function fail(message, extra = {}) {
   process.exit(1);
 }
 
-const KINDS = new Set(["drift-resolve", "sim-retire", "decision-approve"]);
+const KINDS = new Set(["drift-resolve", "sim-retire", "decision-approve", "scan-exception"]);
 
 function loadPrivateKey() {
   const file = process.env.TH_RECEIPT_PRIVATE_KEYFILE;
@@ -110,6 +132,67 @@ function loadPrivateKey() {
   }
 }
 
+/**
+ * slice-2b — produce an external-signed scan-exception ack. Writes the SEPARATE
+ * `scan-exceptions.jsonl` store with the ack canonical shape (NOT a terminal receipt).
+ *
+ * The make-or-break contract: the ack's `(path, digest)` MUST be byte-identical to what
+ * the dist scan enumerates for the file, or `uncoveredAfterExceptions` will not subtract
+ * it. The scan emits `path.relative(root, abs)` forward-slashed (see `relPath` in
+ * `commands/sim.ts`) and digests with `hashFileStreaming(abs)` — so we normalize the
+ * supplied `--target` to that exact form and hash with the SAME function. If the file
+ * does not resolve/exist we refuse at creation (mirroring the terminal flow's
+ * target-resolve refusal) rather than mint an ack for a phantom coordinate.
+ */
+function produceScanException(paths, { target, privateKey, publicKey }) {
+  const abs = path.resolve(paths.root, target);
+  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+    fail(`target "${target}" does not resolve to a file in source — refusing to mint an ungrounded scan-exception`, { target });
+  }
+  // Normalize to the SCAN's coordinate form: repo-relative, forward-slashed.
+  const relPath = path.relative(paths.root, abs).split(path.sep).join("/");
+  if (!relPath.startsWith("dist/")) {
+    fail("scan-exception --target must be a dist/ path — the scan only enumerates dist/", { target });
+  }
+  const digest = hashFileStreaming(abs);
+  const keyId = externalKeyId(publicKey);
+  const prevHash = readLastScanExceptionRecordHash(paths);
+
+  // The canonical input — EXACTLY the fields scanExceptionCanonicalText binds
+  // (signature + recordHash are trailers, excluded from the canonical text). The
+  // signature and recordHash are computed over the IDENTICAL canonical text the
+  // in-process validator re-derives, so they can never diverge on the binding.
+  const ack = {
+    path: relPath,
+    digest,
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_kind: "external",
+    key_id: keyId,
+    prevHash,
+  };
+  const canonical = scanExceptionCanonicalText(ack);
+  const signature = sign(null, Buffer.from(canonical, "utf8"), privateKey).toString("base64");
+  const recordHash = computeScanExceptionRecordHash(ack);
+  const sealed = { ...ack, signature, recordHash };
+
+  const file = scanExceptionsPath(paths);
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(sealed) + "\n", "utf8");
+
+  process.stdout.write(
+    JSON.stringify({
+      ok: true,
+      kind: "scan-exception",
+      producer_kind: "external",
+      key_id: keyId,
+      path: relPath,
+      digest,
+      recordHash,
+      file,
+    }) + "\n",
+  );
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const root = args["root"];
@@ -120,9 +203,15 @@ function main() {
 
   if (!root || root === "true") fail("--root <projectRoot> is required");
   if (!kind || !KINDS.has(kind)) fail(`--kind must be one of ${[...KINDS].join("|")}`, { kind: kind ?? null });
-  if (!refId || refId === "true") fail("--ref-id <ID> is required");
-  if ((kind === "drift-resolve" || kind === "sim-retire") && (!target || target === "true")) {
-    fail(`--target <repo-rel-path> is required for ${kind}`);
+  // scan-exception is the SEPARATE slice-2b flow: it is keyed by (path, digest), not a
+  // ref-id, so it requires --target (the dist file being excepted) and ignores --ref-id.
+  if (kind === "scan-exception") {
+    if (!target || target === "true") fail("--target <repo-rel-path> is required for scan-exception");
+  } else {
+    if (!refId || refId === "true") fail("--ref-id <ID> is required");
+    if ((kind === "drift-resolve" || kind === "sim-retire") && (!target || target === "true")) {
+      fail(`--target <repo-rel-path> is required for ${kind}`);
+    }
   }
 
   // The producer MUST have the private key — hard-fail if absent or invalid.
@@ -130,6 +219,13 @@ function main() {
   const publicKey = createPublicKey(privateKey);
 
   const paths = resolveProjectPaths(root);
+
+  // slice-2b: the external-signed exception ack writes a DIFFERENT store with a DIFFERENT
+  // canonical shape — branch BEFORE the terminal-receipt machinery so that flow is untouched.
+  if (kind === "scan-exception") {
+    produceScanException(paths, { target, privateKey, publicKey });
+    return;
+  }
 
   // Build the content-bound ground. If a --target is supplied it MUST resolve in
   // source (refuse-at-creation, mirroring appendTerminalReceipt); else empty ground
