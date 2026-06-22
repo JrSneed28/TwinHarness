@@ -224,6 +224,14 @@ export function terminalReceiptsPath(paths: ProjectPaths): string {
  * HMAC key the line is signed with; a forged line written here is rejected by
  * {@link readReceiptValidated} (no verifying signature ⇒ `forged`), exactly as one
  * written into the in-process store would be.
+ *
+ * BEST-EFFORT CHAIN (caveat): the external append is UNSYNCHRONIZED (no state lock —
+ * that is the whole point of the separate store), so concurrent producers may FORK
+ * `prevHash`. This is acceptable because per-candidate SIGNATURE verification — NOT
+ * chain order — is what {@link readReceiptValidated} treats as authoritative for the
+ * gate; `verifyReceiptChain` is deliberately NOT run on the external store. (An
+ * advisory producer-side lock to keep the external chain single-threaded is a
+ * deferred P4 follow-up; it is a tidiness, not a security, gap.)
  */
 export function externalReceiptsPath(paths: ProjectPaths): string {
   return path.join(paths.stateDir, "external-receipts.jsonl");
@@ -605,6 +613,11 @@ function classifyReceiptContent(
  * §3 / §6, extended by slice-1b). Reads BOTH stores — the in-process
  * `terminal-receipts.jsonl` AND the external `external-receipts.jsonl` — and gathers
  * every candidate matching `(kind, refId)`.
+ *
+ * An external CLAIM (`producer_kind:"external"`) is DECISIVE for `(kind, refId)`: a
+ * verifying external receipt ⇒ `valid-grounded`; an unverifiable one ⇒ `forged`/BLOCK
+ * — REGARDLESS of any in-process candidate for the SAME entity (fail-closed: an
+ * unprovable independence claim BLOCKS, it never downgrades to the in-process verdict).
  *
  * SLICE-1B PRECEDENCE (the grounded/forged asymmetry):
  *   1. If ANY candidate CLAIMS `producer_kind:"external"`:

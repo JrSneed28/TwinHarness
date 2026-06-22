@@ -19,6 +19,13 @@
  * the key: unlike the fail-SOFT validator path, a missing/unreadable key here is a
  * HARD error (nonzero exit) — a producer with no key cannot produce.
  *
+ * BEST-EFFORT CHAIN (caveat): the append to external-receipts.jsonl is
+ * UNSYNCHRONIZED — there is no state lock (that is the whole point of the separate
+ * store), so two producers running concurrently may FORK `prevHash`. The gate does
+ * not care: per-candidate SIGNATURE verification, NOT chain order, is authoritative
+ * (the validator never runs verifyReceiptChain on the external store). An advisory
+ * producer-side lock to keep this chain single-threaded is a deferred P4 follow-up.
+ *
  * Usage:
  *   TH_RECEIPT_HMAC_KEYFILE=/path/to/key \
  *   node scripts/th-receipt-producer.mjs \

@@ -337,3 +337,31 @@ describe("slice-1b — BACK-COMPAT: a slice-1a-shape receipt is byte-identical +
     expect(checkProductionReality(paths, state(paths))).toEqual({ ok: true });
   });
 });
+
+describe("slice-1b — forged EXTERNAL claim is DECISIVE over a VALID in-process receipt (R6)", () => {
+  it("a forged external-claim line BLOCKS even when a legitimate valid in-process receipt exists for the same entity", () => {
+    const { paths, targetRel } = greenWithResolvedDrift();
+    setKey(paths, "k1.key", K1); // the LOADED key is K1
+
+    // (a) A LEGITIMATE valid in-process receipt for DRIFT-001 (target resolves+matches).
+    // On its own this would classify `valid` and the gate would accept.
+    appendTerminalReceipt(paths, {
+      kind: "drift-resolve",
+      refId: "DRIFT-001",
+      targetPath: targetRel,
+      producerIdentity: "in-process",
+    });
+    // (b) A FORGED external-claim line for the SAME entity: producer_kind:"external"
+    // signed with K2 (a key the validator does not have), so it cannot verify under K1.
+    appendSignedExternal(paths, { kind: "drift-resolve", refId: "DRIFT-001", targetPath: targetRel, keyBytes: K2 });
+
+    // The external CLAIM is DECISIVE: an unverifiable one ⇒ `forged` ⇒ BLOCK, and it is
+    // NEVER silently downgraded to the in-process `valid` verdict (fail-closed). This
+    // locks the precedence so a future "downgrade-to-valid" refactor fails loudly.
+    expect(readReceiptValidated(paths, "drift-resolve", "DRIFT-001").status).toBe("forged");
+    const pr = checkProductionReality(paths, state(paths));
+    expect(pr.ok).toBe(false);
+    expect(pr.error).toBe("terminal_receipt_unverified");
+    expect(pr.detail!.status).toBe("forged");
+  });
+});
