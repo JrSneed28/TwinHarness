@@ -56,6 +56,42 @@ import {
 export type TerminalTransitionKind = "drift-resolve" | "sim-retire" | "decision-approve";
 
 /**
+ * Axis-B slice-4a / BSC-3 — the discriminator of a {@link DriverDimensionReceipt}.
+ * A FIFTH instance of the shipped receipt shape (after BSC-4 terminal, BSC-6 scan,
+ * BSC-7 approval): a distinct kind so the driver-dimension store, reader, and gate
+ * validator stay single-purpose (the F8 lesson) and never conflate with the
+ * terminal-transition domain. Lives in `src/core/verification-driver.ts`, which
+ * REUSES the shared shape/helpers here without coupling F8's `tester.ts` call path.
+ */
+export type DriverDimensionKind = "driver-dimension";
+
+/**
+ * One runner-observed verification dimension on a {@link DriverDimensionReceipt}
+ * (slice-4a / BSC-3). The receipt's GROUND is *which dimensions a trusted runner
+ * actually exercised* — never self-declared by the thing under test. A dimension is
+ * recorded ONLY when the VerificationDriver sensor bound it to a real, recomputable
+ * artifact (`evidenceRef`), so `observed` is ALWAYS `true` (an unobserved dimension is
+ * simply ABSENT, never a `false` row). The seed vocabulary is `{tests-executed,
+ * typecheck, build}`; the namespace is open (declared-SET coverage is BSC-5, assertion
+ * quality is BSC-2 — this slice builds only the sensor those rows consume).
+ */
+export interface DriverDimension {
+  /** The open-vocabulary dimension name (seed: `tests-executed` / `typecheck` / `build`). */
+  name: string;
+  /** Always `true` — an unobserved dimension is omitted, never recorded `false`. */
+  observed: true;
+  /**
+   * A recomputable reference to the runner-observation artifact this dimension was
+   * bound to — the root-relative `verify-report.json` path whose per-command
+   * `{command, exitCode, ok}` exit result evidences the dimension. NEVER
+   * `tester-record.json` (an agent-supplied MARKER, not a runner observation —
+   * binding there would reproduce BSC-3 inside its own fix). The gate re-reads this
+   * artifact at validation time, so the binding is diffable (the F8 lesson).
+   */
+  evidenceRef: string;
+}
+
+/**
  * The content-bound ground: the source path the flip claims to resolve in, and a
  * content digest of that file at mint time. `path` is the project-root-relative
  * path; `digest` is {@link computeTargetDigest} over it. Both are `""` on a
@@ -133,6 +169,77 @@ export interface TerminalTransitionReceipt {
    * is grandfathered: the gate ACCEPTS it but the validator reports it as
    * ungrounded-`legacy`. Omit-when-absent so a real receipt's canonical text
    * never carries it.
+   */
+  legacy?: boolean;
+  /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
+  prevHash: string;
+  /** SHA-256 hex (64) of THIS receipt's canonical text (computed before set). */
+  recordHash: string;
+}
+
+/**
+ * One driver-dimension receipt (Axis-B slice-4a / BSC-3). Append-only and
+ * hash-chained like a {@link TerminalTransitionReceipt}: any single field edit breaks
+ * `recordHash`, and an insert/delete/reorder breaks the next `prevHash`. Minted +
+ * validated by `src/core/verification-driver.ts` (a dedicated module + store), which
+ * REUSES the shared digest/snapshot helpers and the slice-1b/3b signing fields here
+ * without coupling F8's `tester.ts` call path.
+ *
+ * The `key_id` field is the short non-secret id of the verifying public key
+ * (`receipt-signing.externalKeyId`) — the same field the terminal/approval receipts
+ * carry. (The slice spec names it `externalKeyId?`; it is `key_id` here so the slice-4b
+ * external producer + gate verifier reuse the IDENTICAL `key_id`/signature mechanism as
+ * slices 1b/3b — a single shared verification path, not a parallel one.)
+ */
+export interface DriverDimensionReceipt {
+  /** Fixed discriminator. */
+  kind: DriverDimensionKind;
+  /**
+   * The run/verification identity this receipt grounds — the snapshot coordinate's
+   * `gitHead` (or `"no-git"` on a non-git checkout), so a re-run at a new HEAD mints a
+   * fresh receipt and the gate can find the LATEST for the current snapshot.
+   */
+  refId: string;
+  /**
+   * The runner-observed dimensions (each bound to a recomputable artifact). Empty is
+   * legal (a run that observed NOTHING) but the gate treats a CLAIMED-but-absent
+   * dimension as the negative-control block (slice-4a).
+   */
+  dimensions: DriverDimension[];
+  /** The repository snapshot coordinate at mint time (reuses `git-revision.ts`). */
+  snapshot_coord: SnapshotCoord;
+  /**
+   * The producer's self-asserted identity. ZERO trust weight in-process — an audit
+   * breadcrumb ONLY (consensus §3). The un-forgeable property arrives via the slice-4b
+   * external keyed producer (`producer_kind:"external"` + a verifying `signature`), NOT
+   * this field. Part of the canonical hash input.
+   */
+  producer_identity: string;
+  /**
+   * Slice-4b — which PRODUCER minted this receipt. `"external"` marks a receipt from the
+   * keyed out-of-process CI producer (it MUST carry a verifying `signature`);
+   * `"in-process"` (or absent) marks an in-process attested receipt (NEVER signed).
+   * Optional + omit-when-absent so a 4a receipt's canonical text — and `recordHash` — is
+   * byte-stable. Part of the canonical hash input (after `producer_identity`).
+   */
+  producer_kind?: "external" | "in-process";
+  /**
+   * Slice-4b — the short, NON-secret id of the public key that verifies an external
+   * receipt (`receipt-signing.externalKeyId`). Absent on in-process receipts. Part of
+   * the canonical hash input (after `producer_kind`), so a key_id swap breaks the signature.
+   */
+  key_id?: string;
+  /**
+   * Slice-4b — the base64 Ed25519 signature over this receipt's canonical text. A
+   * TRAILER, EXCLUDED from {@link driverCanonicalText} exactly like `recordHash`: both
+   * are computed over the IDENTICAL canonical input, so the signature covers every signed
+   * field (including each dimension). Absent on in-process receipts.
+   */
+  signature?: string;
+  /**
+   * `true` ONLY on a one-time backfill stamp (migration). A `legacy` receipt is
+   * grandfathered: the gate ACCEPTS it but the validator reports it as ungrounded-legacy.
+   * Omit-when-absent so a real receipt's canonical text never carries it.
    */
   legacy?: boolean;
   /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */

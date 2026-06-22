@@ -68,6 +68,7 @@ import { runHandoffWrite, runHandoffVerify, runResume } from "./commands/handoff
 import { runInspectorWrite } from "./commands/inspector";
 import { runTesterRecord } from "./commands/tester";
 import { runApprove } from "./commands/approve";
+import { runDriverRecord } from "./commands/driver";
 import { runManifestExport, runManifestTools } from "./commands/manifest";
 import { runPreview } from "./commands/preview";
 import { runScorecard } from "./commands/scorecard";
@@ -184,6 +185,8 @@ Usage:
                                     Codebase-Inspector governed write: emit + auto-register the source-anchored brownfield analysis at docs/00-existing-codebase-analysis.md (path is fixed; refuses any other target)
   th tester record --driver <d> --passed [--provider real|sandbox] [--evidence-ref <p>]
                                     Attach the live-QA Tester record (.twinharness/tester-record.json) that satisfies the production-reality gate's Tester condition (--passed required to clear the gate; the record is bound to the run receipt + repo snapshot)
+  th driver record [--dimension a,b] [--identity <who>]
+                                    Mint the in-process driver-dimension receipt the production-reality verification-driver rung reads (records which seed dimensions — tests-executed/typecheck/build — verify-report.json observed). SENSOR + refuse-at-creation: a claimed dimension the report does not observe is refused. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent grounding is the slice-4b external-signed producer)
   th approve [<stage>]              Mint the in-process human-approval receipt for a humanGate stage (default: current stage); bound to {stage, snapshot, governing-artifact digest}. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent grounding is the slice-3b external-signed producer)
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
@@ -310,7 +313,9 @@ Global flags:
   --driver <d>      (tester record) Driver/runner the live QA used (playwright | curl | cli-e2e | …) (required)
   --passed          (tester record) Record the live run as PASSED — required to clear the production-reality gate's Tester condition
   --provider <p>    (tester record) Provider tier the live run exercised (real | sandbox)
-  --evidence-ref <p>  (tester record) Path/URL to the raw live-run output or screenshots`;
+  --evidence-ref <p>  (tester record) Path/URL to the raw live-run output or screenshots
+  --dimension <a,b>  (driver record) Comma-separated dimension(s) to record as observed; intersected with what verify-report.json observes (default: every observed seed dimension)
+  --identity <who>  (driver record) Producer identity to record (attribution-only, zero trust weight; default: cli:th driver record)`;
 
 export interface ParsedArgs {
   positionals: string[];
@@ -441,6 +446,9 @@ export interface ParsedArgs {
     driver?: string;
     provider?: string;
     evidenceRef?: string;
+    // Axis-B slice-4a (BSC-3) — driver-dimension receipt flags (`th driver record`).
+    dimension?: string;
+    identity?: string;
     // F8/R-31 — the live run's pass verdict (boolean flag).
     passed: boolean;
   };
@@ -564,6 +572,9 @@ const STRING_FLAGS: Record<string, FlagField> = {
   "--driver": "driver",
   "--provider": "provider",
   "--evidence-ref": "evidenceRef",
+  // Axis-B slice-4a (BSC-3) — driver-dimension receipt fields (`th driver record`).
+  "--dimension": "dimension",
+  "--identity": "identity",
 };
 
 /** Flags that consume a numeric value. */
@@ -863,6 +874,25 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           });
         default:
           return failure({ human: `unknown 'tester' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    // Axis-B slice-4a (BSC-3) — mint the in-process driver-dimension receipt the
+    // production-reality verification-driver rung reads. SENSOR + refuse-at-creation.
+    case "driver":
+      switch (sub) {
+        case "record": {
+          // `--dimension` is comma-separated (mirrors `--links`); absent ⇒ undefined so
+          // the sensor records every observed seed dimension.
+          const dims =
+            parsed.flags.dimension === undefined
+              ? undefined
+              : parsed.flags.dimension.split(",").map((s) => s.trim()).filter(Boolean);
+          return runDriverRecord(paths, {
+            dimensionNames: dims,
+            producerIdentity: parsed.flags.identity,
+          });
+        }
+        default:
+          return failure({ human: `unknown 'driver' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
     // Axis-B slice-3a (BSC-7) — mint the in-process human-approval receipt the humanGate
     // precondition reads. `<stage>` defaults to the run's current stage. Attribution-only.

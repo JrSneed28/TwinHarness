@@ -42,6 +42,17 @@ import { readSimulationLedger, scanForSimulationHits, simEntryBlocksProductionRe
 import { testerRecordPresent } from "./tester";
 import { collectTerminalEntities, readReceiptValidated } from "./receipts";
 import { readApprovalValidated, isHumanGateStage } from "./approvals";
+import {
+  type DriverDimensionReceipt,
+  readDriverReceipts,
+  readExternalDriverReceipts,
+  verifyDriverChain,
+  validateDriverReceiptContent,
+  driverCanonicalText,
+  SEED_DIMENSION_NAMES,
+} from "./verification-driver";
+import { loadExternalPublicKey, externalKeyId, verifyCanonical } from "./receipt-signing";
+import { bsc3EnforcementEnabled } from "./bsc3-flag";
 
 /**
  * Result of a precondition check. `ok:true` ⇒ the rung passes. `ok:false` carries
@@ -63,6 +74,41 @@ export interface GateResult {
    * and so the warning is observable on the result without weakening the gate.
    */
   notice?: { token: string; detail?: Record<string, unknown> };
+  /**
+   * BSC-3 / Axis-B slice-4a — the per-dimension verification-driver observation +
+   * trust-label summary `checkProductionReality` computes for the final-verification run.
+   * The Integrator (I1) renders this in `th gate production-reality` output + the MCP twin
+   * WITHOUT adding logic: this rung COMPUTES `observed` (the dimension is evidenced by the
+   * current `verify-report.json`) and `trustLabel` (derived PURELY from signature
+   * verification — `valid` in-process attested, `valid-grounded` external-signature-
+   * verified, `forged` claims-external-but-fails-verify), and the renderer just surfaces it.
+   * Present on the final-verification result whether the rung PASSED or BLOCKED (and
+   * whether or not enforcement is flag-enabled), so the trust posture is always visible.
+   */
+  dimensions?: DriverDimensionSummary[];
+}
+
+/**
+ * BSC-3 trust label for a driver-dimension receipt, derived PURELY from SIGNATURE
+ * VERIFICATION — NEVER from a self-asserted `producer_kind` field:
+ *  - `valid`          — an in-process attested receipt whose content re-derives clean
+ *                       (no signature claim). `producer_identity` carries ZERO trust weight.
+ *  - `valid-grounded` — an EXTERNAL receipt whose Ed25519 signature verifies against the
+ *                       loaded external public key (the in-process surface cannot forge it).
+ *  - `forged`         — a receipt that CLAIMS external/signed (carries a signature/key_id)
+ *                       but whose signature FAILS verification (key absent, wrong key, or
+ *                       tampered/replayed bytes). The unprovable independence claim BLOCKS.
+ */
+export type DriverTrustLabel = "valid" | "valid-grounded" | "forged";
+
+/** One observed driver dimension + its trust label, for the observability hook (I1). */
+export interface DriverDimensionSummary {
+  /** The dimension name (a seed dimension this run recorded as observed). */
+  name: string;
+  /** True iff the current `verify-report.json` still evidences this dimension. */
+  observed: boolean;
+  /** The trust label derived from signature verification (see {@link DriverTrustLabel}). */
+  trustLabel: DriverTrustLabel;
 }
 
 const PASS: GateResult = { ok: true };
@@ -373,7 +419,10 @@ export function checkFinalVerification(paths: ProjectPaths, state: TwinHarnessSt
   // simulation / verify is red / no Tester record / dist carries unledgered simulation.
   const pr = checkProductionReality(paths, state);
   if (!pr.ok) return pr;
-  return PASS;
+  // Propagate the PASS result (not a bare PASS) so the BSC-3 `dimensions` trust-label
+  // summary (and any non-blocking `notice`) checkProductionReality attaches rides up to
+  // `canCompleteRun`/`th next` for the I1 observability hook.
+  return pr;
 }
 
 /**
@@ -430,7 +479,236 @@ export function checkFinalVerification(paths: ProjectPaths, state: TwinHarnessSt
  *
  * A corrupt simulation ledger fails CLOSED with `simulation_ledger_corrupt` (the same
  * fail-closed posture `checkFinalVerification` takes on a corrupt verify config).
+ *
+ * BSC-3 / Axis-B slice-4a — the SEVENTH production-reality sub-check (the
+ * verification-driver dimension grounding) is composed LAST, governed by the
+ * `bsc3EnforcementEnabled()` rollout flag (defaults ON). See {@link evaluateDriverDimensions}
+ * for the verdict logic and {@link checkDriverDimensions} for the enforcement+observability
+ * wiring. It can emit the stable token `driver_dimension_unverified`.
  */
+/**
+ * True iff a driver-dimension receipt CLAIMS to be external/signed — i.e. it carries
+ * EITHER a `signature` trailer OR a `key_id`. Such a receipt MUST prove itself with a
+ * verifying Ed25519 signature; a claim that fails verification is `forged` (BSC-3 B2/B4).
+ * A receipt with neither field is an in-process attested receipt (no external claim).
+ */
+function driverReceiptClaimsExternal(r: DriverDimensionReceipt): boolean {
+  return typeof r.signature === "string" || typeof r.key_id === "string";
+}
+
+/**
+ * The verification-driver verdict for the current run (BSC-3 B1–B4). The classification
+ * mirrors the receipts/approvals precedence EXACTLY: an EXTERNAL claim is decisive and
+ * must prove itself by signature; otherwise the in-process attested path applies; and the
+ * ABSENCE of any receipt is grandfathered as in-process attested (`valid`, allowed) —
+ * NEVER `forged` (ABSENCE ≠ FORGERY, so 4a stays green on forks/local where the CI key is
+ * absent and on legacy pre-receipt runs).
+ *
+ *  - `blocked:"chain"`         — the driver chain (in-process or external) does not verify
+ *                                (`verifyDriverChain` not ok) → tamper → BLOCK.
+ *  - `blocked:"forged"`        — a receipt CLAIMS external/signed but its signature FAILS
+ *                                verification (key absent/wrong, or tampered/replayed) →
+ *                                the unprovable independence claim BLOCKS.
+ *  - `blocked:"unobserved"`    — the selected receipt's recorded ground no longer
+ *                                re-derives from `verify-report.json`
+ *                                (`validateDriverReceiptContent` →
+ *                                `dimension_unobserved`/`evidence_missing`) → a claimed
+ *                                dimension that does not correspond to a real run → BLOCK.
+ *  - `ok:true`                 — accepted: a `valid` in-process attested receipt whose
+ *                                content re-derives clean, a `valid-grounded` external
+ *                                receipt whose signature verifies, OR no receipt at all
+ *                                (grandfathered in-process attested).
+ *
+ * In every outcome `dimensions` carries the per-dimension `{name, observed, trustLabel}`
+ * summary for the observability hook (I1) — computed even when blocked, even when
+ * enforcement is disabled, so the trust posture is always visible.
+ */
+type DriverVerdict =
+  | { ok: true; dimensions: DriverDimensionSummary[] }
+  | {
+      ok: false;
+      reason: "chain" | "forged" | "unobserved";
+      dimensions: DriverDimensionSummary[];
+      detail: Record<string, unknown>;
+    };
+
+/**
+ * Build the per-dimension observability summary for a selected receipt under a single
+ * trust label. `observed` is re-derived against `verify-report.json` via the shared
+ * {@link validateDriverReceiptContent} ground (a recorded dimension the current report no
+ * longer evidences reads `observed:false`). The seed-name order is preserved so the
+ * rendered list is deterministic.
+ */
+function summarizeDriverDimensions(
+  paths: ProjectPaths,
+  receipt: DriverDimensionReceipt,
+  trustLabel: DriverTrustLabel,
+): DriverDimensionSummary[] {
+  const content = validateDriverReceiptContent(paths, receipt);
+  const unobserved = new Set(content.unobservedDimensions ?? []);
+  // `evidence_missing` invalidates the whole ground — no recorded dimension re-derives.
+  const evidenceMissing = content.status === "evidence_missing";
+  const recorded = receipt.dimensions.map((d) => d.name);
+  const ordered = [
+    ...SEED_DIMENSION_NAMES.filter((n) => recorded.includes(n)),
+    ...recorded.filter((n) => !SEED_DIMENSION_NAMES.includes(n)),
+  ];
+  return ordered.map((name) => ({
+    name,
+    observed: !evidenceMissing && !unobserved.has(name),
+    trustLabel,
+  }));
+}
+
+/**
+ * Verify a driver receipt's Ed25519 signature against the loaded external public key —
+ * the SOLE basis for the `valid-grounded` trust label (BSC-3 B2). Mirrors
+ * `approvals.verifyExternalApproval` / `receipts.readReceiptValidated` EXACTLY: load the
+ * verifier's public key ({@link loadExternalPublicKey}, env `TH_RECEIPT_PUBLIC_KEYFILE`);
+ * with NO key (the default fork/local/test path) verification is impossible ⇒ `false` ⇒ a
+ * receipt that claimed external classifies `forged`. The candidate's `key_id` must match
+ * {@link externalKeyId} of the loaded key, then {@link verifyCanonical} the `signature`
+ * over the receipt's canonical text with the `recordHash`/`signature` trailers stripped
+ * ({@link driverCanonicalText} drops `recordHash`; we also drop `signature`). The crypto
+ * is REUSED, never reinvented.
+ */
+function driverSignatureVerifies(receipt: DriverDimensionReceipt): boolean {
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return false;
+  if (typeof receipt.signature !== "string") return false;
+  if (receipt.key_id !== externalKeyId(publicKey)) return false;
+  const { recordHash: _rh, signature: _sig, ...signedView } = receipt;
+  return verifyCanonical(driverCanonicalText(signedView), receipt.signature, publicKey);
+}
+
+/**
+ * Evaluate the verification-driver dimension grounding for the current run (BSC-3 B1–B4),
+ * reading BOTH the in-process store (`readDriverReceipts`) and the external store
+ * (`readExternalDriverReceipts`). The verdict drives BOTH enforcement (when the flag is
+ * on) AND the always-computed observability summary; see {@link DriverVerdict}.
+ *
+ * Order (fail-closed, mirroring readReceiptValidated):
+ *   0. Tamper walk BOTH chains first ({@link verifyDriverChain}). A broken chain ⇒
+ *      `blocked:"chain"` (no receipt from a tampered store can be trusted).
+ *   1. An EXTERNAL claim is DECISIVE: gather every external-store receipt that claims
+ *      external/signed; the LAST whose signature verifies (file order, so a re-mint wins)
+ *      ⇒ `valid-grounded` and is run through the content check. If an external claim exists
+ *      but NONE verifies ⇒ `forged` ⇒ BLOCK (never downgraded to the in-process verdict).
+ *   2. Else the in-process path: the LATEST in-process receipt (file order). A line that
+ *      CLAIMS external/signed in the in-process store is still held to the signature bar
+ *      (`forged` if it does not verify) — the trust label keys on the claim, not the store.
+ *   3. ABSENCE: no receipt anywhere ⇒ grandfathered in-process attested (`valid`, allowed,
+ *      EMPTY dimensions) — NEVER `forged`.
+ *
+ * For the SELECTED receipt the content ground is re-derived ({@link validateDriverReceiptContent}):
+ * `dimension_unobserved`/`evidence_missing` ⇒ `blocked:"unobserved"`. A `stale` content
+ * status is NON-blocking here (the snapshot-staleness block is owned by the verify-report
+ * and terminal/approval rungs; a re-run at a new HEAD mints a fresh driver receipt, and a
+ * stale driver receipt simply is not the current run's receipt — blocking on it would red
+ * an otherwise-clean re-run). The receipt's dimensions still summarize for observability.
+ */
+function evaluateDriverDimensions(paths: ProjectPaths): DriverVerdict {
+  const inProcess = readDriverReceipts(paths);
+  const external = readExternalDriverReceipts(paths);
+
+  // 0. Tamper walk BOTH chains before trusting any line from them.
+  const inChain = verifyDriverChain(inProcess);
+  if (!inChain.ok) {
+    return { ok: false, reason: "chain", dimensions: [], detail: { store: "in-process", brokenAt: inChain.brokenAt, chainReason: inChain.reason } };
+  }
+  const exChain = verifyDriverChain(external);
+  if (!exChain.ok) {
+    return { ok: false, reason: "chain", dimensions: [], detail: { store: "external", brokenAt: exChain.brokenAt, chainReason: exChain.reason } };
+  }
+
+  // 1. EXTERNAL claim is decisive. Gather every external-store receipt that claims
+  //    external/signed; the LAST whose signature verifies wins (file order ⇒ re-mint wins).
+  const externalClaims = external.filter(driverReceiptClaimsExternal);
+  if (externalClaims.length > 0) {
+    let verified: DriverDimensionReceipt | undefined;
+    for (const cand of externalClaims) {
+      if (driverSignatureVerifies(cand)) verified = cand;
+    }
+    if (verified) {
+      const dims = summarizeDriverDimensions(paths, verified, "valid-grounded");
+      const content = validateDriverReceiptContent(paths, verified);
+      if (content.status === "dimension_unobserved" || content.status === "evidence_missing") {
+        return { ok: false, reason: "unobserved", dimensions: dims, detail: { trustLabel: "valid-grounded", contentStatus: content.status, ...(content.unobservedDimensions ? { unobservedDimensions: content.unobservedDimensions } : {}) } };
+      }
+      return { ok: true, dimensions: dims };
+    }
+    // External claim present but no signature verifies ⇒ forged ⇒ BLOCK.
+    const forged = externalClaims[externalClaims.length - 1]!;
+    return { ok: false, reason: "forged", dimensions: summarizeDriverDimensions(paths, forged, "forged"), detail: { trustLabel: "forged", store: "external", key_id: forged.key_id ?? null } };
+  }
+
+  // 2. In-process path. The LATEST in-process receipt; a line that CLAIMS external/signed
+  //    in this store is still held to the signature bar (forged if it does not verify).
+  const latest = inProcess.length > 0 ? inProcess[inProcess.length - 1]! : undefined;
+  if (latest) {
+    if (driverReceiptClaimsExternal(latest)) {
+      if (driverSignatureVerifies(latest)) {
+        const dims = summarizeDriverDimensions(paths, latest, "valid-grounded");
+        const content = validateDriverReceiptContent(paths, latest);
+        if (content.status === "dimension_unobserved" || content.status === "evidence_missing") {
+          return { ok: false, reason: "unobserved", dimensions: dims, detail: { trustLabel: "valid-grounded", contentStatus: content.status, ...(content.unobservedDimensions ? { unobservedDimensions: content.unobservedDimensions } : {}) } };
+        }
+        return { ok: true, dimensions: dims };
+      }
+      const forged = latest;
+      return { ok: false, reason: "forged", dimensions: summarizeDriverDimensions(paths, forged, "forged"), detail: { trustLabel: "forged", store: "in-process", key_id: forged.key_id ?? null } };
+    }
+    // In-process attested receipt (no external claim) ⇒ trust label `valid`.
+    const dims = summarizeDriverDimensions(paths, latest, "valid");
+    const content = validateDriverReceiptContent(paths, latest);
+    if (content.status === "dimension_unobserved" || content.status === "evidence_missing") {
+      return { ok: false, reason: "unobserved", dimensions: dims, detail: { trustLabel: "valid", contentStatus: content.status, ...(content.unobservedDimensions ? { unobservedDimensions: content.unobservedDimensions } : {}) } };
+    }
+    return { ok: true, dimensions: dims };
+  }
+
+  // 3. ABSENCE ≠ FORGERY: no receipt anywhere ⇒ grandfathered in-process attested.
+  return { ok: true, dimensions: [] };
+}
+
+/**
+ * The BSC-3 driver-dimension sub-check (Axis-B slice-4a) — the SEVENTH production-reality
+ * sub-check, composed LAST inside {@link checkProductionReality}. It ALWAYS computes the
+ * verification-driver verdict (so the per-dimension trust-label `dimensions` summary is
+ * available on the result for the observability hook, I1), then BLOCKS on a failing verdict
+ * ONLY when enforcement is enabled ({@link bsc3EnforcementEnabled}, defaults ON).
+ *
+ * When enforcement is OFF the rung still attaches `dimensions` and returns PASS (the
+ * rollout flag governs ENFORCEMENT only — never observation). When ON, a failing verdict
+ * returns the stable token `driver_dimension_unverified` with the verdict's `reason`
+ * (`chain`/`forged`/`unobserved`) + detail, AND still carries `dimensions` so the block is
+ * fully diagnosable. The PASS result carries `dimensions` too.
+ */
+function checkDriverDimensions(paths: ProjectPaths): GateResult {
+  const verdict = evaluateDriverDimensions(paths);
+  // A clean PASS with NO observed dimensions (the grandfathered/absence case) carries an
+  // EMPTY summary, which conveys nothing — so return a BARE PASS to preserve the prior
+  // `{ ok: true }` gate contract every downstream rung composes. Only attach `dimensions`
+  // when there is something to observe (the observability hook still fires for any
+  // non-empty summary).
+  if (verdict.ok) return verdict.dimensions.length === 0 ? PASS : { ok: true, dimensions: verdict.dimensions };
+  if (!bsc3EnforcementEnabled()) {
+    // Flag OFF: observe but do not block. Surface the would-be block as a non-blocking
+    // notice so the warn posture is visible without weakening the gate.
+    return {
+      ok: true,
+      dimensions: verdict.dimensions,
+      notice: { token: "driver_dimension_unverified", detail: { reason: verdict.reason, ...verdict.detail } },
+    };
+  }
+  return {
+    ok: false,
+    error: "driver_dimension_unverified",
+    detail: { reason: verdict.reason, ...verdict.detail },
+    dimensions: verdict.dimensions,
+  };
+}
+
 export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessState): GateResult {
   // Stage-aware: production reality is a CERTIFY-COMPLETION condition, so it only
   // enforces at the completion boundary (final-verification). Earlier stages have no
@@ -592,7 +870,17 @@ export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessSt
     };
   }
 
-  return PASS;
+  // 6. (BSC-3 / Axis-B slice-4a) VERIFICATION-DRIVER DIMENSION GROUNDING — composed LAST.
+  // A run may not be certified complete on a verify-report that merely says "ok" with NO
+  // record of WHICH verification dimensions a trusted runner actually EXERCISED. The
+  // verification-driver receipt is the SENSOR; this re-derives its ground from
+  // `verify-report.json` and enforces by SIGNATURE-derived trust label (valid / valid-
+  // grounded / forged). ABSENCE ≠ FORGERY: a run with no driver receipt is grandfathered
+  // (in-process attested, allowed). Governed by `bsc3EnforcementEnabled()` (defaults ON):
+  // the verdict is ALWAYS computed (so `dimensions` summarizes the trust posture for the
+  // I1 observability hook), but it BLOCKS with `driver_dimension_unverified` only when
+  // enforcement is on. The `dimensions` summary rides on the result whether PASS or BLOCK.
+  return checkDriverDimensions(paths);
 }
 
 // ---------------------------------------------------------------------------
