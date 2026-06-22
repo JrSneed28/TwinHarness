@@ -188,6 +188,11 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   // humanGate stage is supplied (the governing artifact may not resolve in the temp
   // project → refuse-at-creation), but either way nothing escapes the surface.
   th_approve: { stage: "requirements" },
+  // Axis-B/BSC-3 — in-process driver-dimension producer; writes only
+  // .twinharness/driver-receipts.jsonl (governed state dir); not path-taking. No args
+  // are required (the temp project has no verify-report.json → refuse-at-creation), but
+  // either way nothing escapes the surface.
+  th_driver_record: {},
 };
 
 describe("MCP write-surface audit — no mutating tool escapes the governed surface (AC#1)", () => {
