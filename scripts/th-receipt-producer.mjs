@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * th-receipt-producer.mjs — the EXTERNAL, KEYED terminal-receipt producer
+ * th-receipt-producer.mjs — the EXTERNAL terminal-receipt signer
  * (Axis-B slice-1b / BSC-4 — the INDEPENDENCE primitive).
  *
  * This is DELIBERATELY a standalone Node ESM script, NOT a `th` subcommand and NOT
  * an MCP tool: adding a verb/tool would (a) defeat independence — the very surface
  * the completion gate constrains would gain a signing code path — and (b) perturb
  * the CLI/MCP parity invariant. The genuine un-forgeable property is that this
- * producer runs OUT of process, holds the HMAC key (`TH_RECEIPT_HMAC_KEYFILE`), and
+ * producer runs OUT of process, holds an Ed25519 private key
+ * (`TH_RECEIPT_PRIVATE_KEYFILE`), and
  * appends a SIGNED receipt the in-process agent cannot mint (it has no signing code
  * and, in the threat model, no key). The gate then classifies that receipt
  * `valid-grounded`; an in-process-forged equivalent is `valid` (attested, not
@@ -15,8 +16,8 @@
  *
  * The SHARED formula is imported from the COMPILED dist so the producer and the
  * in-process validator can NEVER diverge on the binding (one canonicalText, one
- * computeRecordHash, one signCanonical). It is the producer's responsibility to have
- * the key: unlike the fail-SOFT validator path, a missing/unreadable key here is a
+ * computeRecordHash). It is the producer's responsibility to have the private key:
+ * unlike the fail-SOFT validator path, a missing/unreadable key here is a
  * HARD error (nonzero exit) — a producer with no key cannot produce.
  *
  * BEST-EFFORT CHAIN (caveat): the append to external-receipts.jsonl is
@@ -27,7 +28,7 @@
  * producer-side lock to keep this chain single-threaded is a deferred P4 follow-up.
  *
  * Usage:
- *   TH_RECEIPT_HMAC_KEYFILE=/path/to/key \
+ *   TH_RECEIPT_PRIVATE_KEYFILE=/path/to/ed25519-private.pem \
  *   node scripts/th-receipt-producer.mjs \
  *     --root <projectRoot> \
  *     --kind <drift-resolve|sim-retire|decision-approve> \
@@ -40,6 +41,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createPrivateKey, createPublicKey, sign } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 // Resolve the compiled dist relative to THIS script's own location (scripts/ is a
@@ -55,11 +57,11 @@ const {
   canonicalText,
   computeRecordHash,
   computeTargetDigest,
-  currentSnapshotCoord,
+  currentReceiptSnapshotCoord,
   externalReceiptsPath,
   readLastExternalReceiptRecordHash,
 } = receiptsMod;
-const { signCanonical, loadExternalKey, externalKeyId } = signingMod;
+const { externalKeyId } = signingMod;
 const { resolveProjectPaths } = pathsMod;
 
 /** Convert an absolute filesystem path to a file:// URL (Windows-safe ESM import). */
@@ -90,6 +92,24 @@ function fail(message, extra = {}) {
 
 const KINDS = new Set(["drift-resolve", "sim-retire", "decision-approve"]);
 
+function loadPrivateKey() {
+  const file = process.env.TH_RECEIPT_PRIVATE_KEYFILE;
+  if (typeof file !== "string" || file === "") {
+    fail("TH_RECEIPT_PRIVATE_KEYFILE is unset — the external producer requires an Ed25519 private key");
+  }
+  try {
+    const key = createPrivateKey(fs.readFileSync(file));
+    if (key.asymmetricKeyType !== "ed25519") {
+      fail("TH_RECEIPT_PRIVATE_KEYFILE must contain an Ed25519 private key");
+    }
+    return key;
+  } catch (error) {
+    fail("TH_RECEIPT_PRIVATE_KEYFILE is unreadable or invalid", {
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const root = args["root"];
@@ -101,12 +121,13 @@ function main() {
   if (!root || root === "true") fail("--root <projectRoot> is required");
   if (!kind || !KINDS.has(kind)) fail(`--kind must be one of ${[...KINDS].join("|")}`, { kind: kind ?? null });
   if (!refId || refId === "true") fail("--ref-id <ID> is required");
-
-  // The producer MUST have the key — hard-fail (nonzero) if absent/unreadable/empty.
-  const key = loadExternalKey();
-  if (key === null) {
-    fail("TH_RECEIPT_HMAC_KEYFILE is unset, unreadable, or empty — the external producer requires the key");
+  if ((kind === "drift-resolve" || kind === "sim-retire") && (!target || target === "true")) {
+    fail(`--target <repo-rel-path> is required for ${kind}`);
   }
+
+  // The producer MUST have the private key — hard-fail if absent or invalid.
+  const privateKey = loadPrivateKey();
+  const publicKey = createPublicKey(privateKey);
 
   const paths = resolveProjectPaths(root);
 
@@ -124,23 +145,23 @@ function main() {
     digest = d;
   }
 
-  const keyId = externalKeyId(key);
+  const keyId = externalKeyId(publicKey);
   const prevHash = readLastExternalReceiptRecordHash(paths);
 
   // The canonical input — every signed field, recordHash + signature excluded. The
-  // canonicalText() / computeRecordHash() / signCanonical() inputs are IDENTICAL.
+  // canonicalText(), computeRecordHash(), and the Ed25519 signature bind IDENTICAL input.
   const withPrev = {
     kind,
     refId,
     target_resolves_in_source: { path: targetPath, digest },
-    snapshot_coord: currentSnapshotCoord(paths.root),
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
     producer_identity: producerIdentity,
     producer_kind: "external",
     key_id: keyId,
     prevHash,
   };
   const canonical = canonicalText(withPrev);
-  const signature = signCanonical(canonical, key);
+  const signature = sign(null, Buffer.from(canonical, "utf8"), privateKey).toString("base64");
   const recordHash = computeRecordHash(withPrev);
   const sealed = { ...withPrev, signature, recordHash };
 

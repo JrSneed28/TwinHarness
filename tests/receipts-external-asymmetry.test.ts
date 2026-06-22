@@ -1,11 +1,11 @@
 /**
- * Axis-B slice-1b (BSC-4) — the §10 acceptance test for the external keyed producer
+ * Axis-B slice-1b (BSC-4) — external Ed25519 producer/verifier asymmetry
  * and the gate's grounded/forged asymmetry.
  *
  * Core acceptance: "external-producer receipt accepted (valid-grounded); in-process-
  * forged equivalent rejected/not-grounded." The independence property is that the
  * grounded verdict requires a signature the in-process surface cannot forge — with
- * the key OFF the in-process write surface, an external receipt is `valid-grounded`
+ * the private key OFF the in-process runtime, an external receipt is `valid-grounded`
  * while the SAME (kind, refId, target) minted in-process is only `valid` (attested,
  * not grounded). Plus the negatives (wrong key / tampered sig / tampered payload /
  * replay / key absent) all classify `forged` ⇒ BLOCK, and back-compat (a slice-1a
@@ -14,16 +14,21 @@
  * Scenario 1 drives the REAL standalone producer script (`node scripts/
  * th-receipt-producer.mjs`) so the acceptance proof exercises the actual out-of-
  * process path. The negative scenarios write signed external lines via the SHARED
- * signing funcs for precise control (wrong key, byte-level tamper, replay). The gate
+ * test-only private keys for precise control (wrong key, byte-level tamper, replay). The gate
  * is exercised through `checkProductionReality` on a project whose entire final-
  * verification ladder is green except the terminal-receipt rung (mirrors
- * production-reality.test.ts). `TH_RECEIPT_HMAC_KEYFILE` is restored in afterEach.
+ * production-reality.test.ts). Key environment variables are restored in afterEach.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
+import {
+  generateKeyPairSync,
+  sign,
+  type KeyObject,
+} from "node:crypto";
 import { makeTempProject, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
@@ -34,23 +39,26 @@ import {
   canonicalText,
   computeRecordHash,
   appendTerminalReceipt,
-  ensureReceiptMigration,
   readReceiptValidated,
   externalReceiptsPath,
   readLastExternalReceiptRecordHash,
+  currentReceiptSnapshotCoord,
   currentSnapshotCoord,
   computeTargetDigest,
   type TerminalTransitionReceipt,
 } from "../src/core/receipts";
-import { signCanonical, externalKeyId } from "../src/core/receipt-signing";
+import { externalKeyId } from "../src/core/receipt-signing";
 import type { ProjectPaths } from "../src/core/paths";
 
-const SAVED_KEYFILE = process.env.TH_RECEIPT_HMAC_KEYFILE;
+const SAVED_PUBLIC_KEYFILE = process.env.TH_RECEIPT_PUBLIC_KEYFILE;
+const SAVED_PRIVATE_KEYFILE = process.env.TH_RECEIPT_PRIVATE_KEYFILE;
 let tp: TempProject | undefined;
 
 afterEach(() => {
-  if (SAVED_KEYFILE === undefined) delete process.env.TH_RECEIPT_HMAC_KEYFILE;
-  else process.env.TH_RECEIPT_HMAC_KEYFILE = SAVED_KEYFILE;
+  if (SAVED_PUBLIC_KEYFILE === undefined) delete process.env.TH_RECEIPT_PUBLIC_KEYFILE;
+  else process.env.TH_RECEIPT_PUBLIC_KEYFILE = SAVED_PUBLIC_KEYFILE;
+  if (SAVED_PRIVATE_KEYFILE === undefined) delete process.env.TH_RECEIPT_PRIVATE_KEYFILE;
+  else process.env.TH_RECEIPT_PRIVATE_KEYFILE = SAVED_PRIVATE_KEYFILE;
   tp?.cleanup();
   tp = undefined;
 });
@@ -67,12 +75,19 @@ function state(paths: ProjectPaths): TwinHarnessState {
   return readState(paths).state!;
 }
 
-/** Write a key fixture under the temp project, set the env, return its absolute path. */
-function setKey(paths: ProjectPaths, name: string, bytes: string): string {
+/** Install the verifier's public key and return its absolute path. */
+function setVerifierKey(paths: ProjectPaths, name: string, publicKey: KeyObject): string {
   const f = path.join(paths.stateDir, name);
   fs.mkdirSync(paths.stateDir, { recursive: true });
-  fs.writeFileSync(f, bytes, "utf8");
-  process.env.TH_RECEIPT_HMAC_KEYFILE = f;
+  fs.writeFileSync(f, publicKey.export({ type: "spki", format: "pem" }));
+  process.env.TH_RECEIPT_PUBLIC_KEYFILE = f;
+  return f;
+}
+
+function writeProducerKey(paths: ProjectPaths, name: string, privateKey: KeyObject): string {
+  const f = path.join(paths.stateDir, name);
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  fs.writeFileSync(f, privateKey.export({ type: "pkcs8", format: "pem" }));
   return f;
 }
 
@@ -88,25 +103,28 @@ function appendSignedExternal(
     kind: TerminalTransitionReceipt["kind"];
     refId: string;
     targetPath: string;
-    keyBytes: string;
+    keyPair: { privateKey: KeyObject; publicKey: KeyObject };
     keyId?: string;
   },
   tamper?: (sealed: TerminalTransitionReceipt) => TerminalTransitionReceipt,
 ): TerminalTransitionReceipt {
   const digest = fields.targetPath === "" ? "" : computeTargetDigest(paths.root, fields.targetPath)!;
-  const key = Buffer.from(fields.keyBytes, "utf8");
   const withPrev: Omit<TerminalTransitionReceipt, "recordHash" | "signature"> = {
     kind: fields.kind,
     refId: fields.refId,
     target_resolves_in_source: { path: fields.targetPath, digest },
-    snapshot_coord: currentSnapshotCoord(paths.root),
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
     producer_identity: "external:test",
     producer_kind: "external",
-    key_id: fields.keyId ?? externalKeyId(key),
+    key_id: fields.keyId ?? externalKeyId(fields.keyPair.publicKey),
     prevHash: readLastExternalReceiptRecordHash(paths),
   };
   const canonical = canonicalText(withPrev);
-  const signature = signCanonical(canonical, key);
+  const signature = sign(
+    null,
+    Buffer.from(canonical, "utf8"),
+    fields.keyPair.privateKey,
+  ).toString("base64");
   const recordHash = computeRecordHash(withPrev);
   let sealed: TerminalTransitionReceipt = { ...withPrev, signature, recordHash };
   if (tamper) sealed = tamper(sealed);
@@ -163,19 +181,62 @@ function greenWithResolvedDrift(): { paths: ProjectPaths; targetRel: string } {
   return { paths, targetRel };
 }
 
-const K1 = "external-key-one-0123456789abcdef";
-const K2 = "external-key-two-fedcba9876543210";
+const K1 = generateKeyPairSync("ed25519");
+const K2 = generateKeyPairSync("ed25519");
+
+describe("slice-1b — external producer target requirements", () => {
+  for (const kind of ["drift-resolve", "sim-retire"] as const) {
+    it(`rejects ${kind} when --target is omitted`, () => {
+      tp = makeTempProject();
+      const privateKeyFile = writeProducerKey(tp.paths, "producer-private.pem", K1.privateKey);
+      const res = spawnSync(
+        "node",
+        [PRODUCER, "--root", tp.root, "--kind", kind, "--ref-id", "REF-001"],
+        {
+          env: { ...process.env, TH_RECEIPT_PRIVATE_KEYFILE: privateKeyFile },
+          encoding: "utf8",
+        },
+      );
+      expect(res.status).not.toBe(0);
+      expect(JSON.parse(res.stderr).error).toContain("--target");
+      expect(fs.existsSync(externalReceiptsPath(tp.paths))).toBe(false);
+    });
+  }
+
+  it("permits decision-approve without --target", () => {
+    tp = makeTempProject();
+    const privateKeyFile = writeProducerKey(tp.paths, "producer-private.pem", K1.privateKey);
+    const res = spawnSync(
+      "node",
+      [PRODUCER, "--root", tp.root, "--kind", "decision-approve", "--ref-id", "DECISION-001"],
+      {
+        env: { ...process.env, TH_RECEIPT_PRIVATE_KEYFILE: privateKeyFile },
+        encoding: "utf8",
+      },
+    );
+    expect(res.status).toBe(0);
+    expect(JSON.parse(res.stdout).target_resolves_in_source).toEqual({ path: "", digest: "" });
+  });
+});
 
 describe("slice-1b — §10 ASYMMETRY: external valid-grounded vs in-process valid", () => {
   it("the REAL producer mints a valid-grounded receipt the gate accepts; in-process equivalent is only valid", () => {
     const { paths, targetRel } = greenWithResolvedDrift();
-    setKey(paths, "k1.key", K1);
+    const publicKeyFile = setVerifierKey(paths, "k1-public.pem", K1.publicKey);
+    const privateKeyFile = writeProducerKey(paths, "k1-private.pem", K1.privateKey);
 
     // Drive the REAL external producer script (out-of-process) for DRIFT-001.
     const res = spawnSync(
       "node",
       [PRODUCER, "--root", paths.root, "--kind", "drift-resolve", "--ref-id", "DRIFT-001", "--target", targetRel],
-      { env: { ...process.env, TH_RECEIPT_HMAC_KEYFILE: path.join(paths.stateDir, "k1.key") }, encoding: "utf8" },
+      {
+        env: {
+          ...process.env,
+          TH_RECEIPT_PUBLIC_KEYFILE: publicKeyFile,
+          TH_RECEIPT_PRIVATE_KEYFILE: privateKeyFile,
+        },
+        encoding: "utf8",
+      },
     );
     expect(res.status).toBe(0);
     const out = JSON.parse(res.stdout.trim());
@@ -208,9 +269,14 @@ describe("slice-1b — §10 ASYMMETRY: external valid-grounded vs in-process val
 describe("slice-1b — forged classifications BLOCK", () => {
   it("WRONG KEY: external receipt signed with K2 but the loaded key is K1 ⇒ forged ⇒ BLOCK", () => {
     const { paths, targetRel } = greenWithResolvedDrift();
-    setKey(paths, "k1.key", K1); // the LOADED key is K1
+    setVerifierKey(paths, "k1-public.pem", K1.publicKey);
     // Sign the external receipt with K2 (a key the validator does not have).
-    appendSignedExternal(paths, { kind: "drift-resolve", refId: "DRIFT-001", targetPath: targetRel, keyBytes: K2 });
+    appendSignedExternal(paths, {
+      kind: "drift-resolve",
+      refId: "DRIFT-001",
+      targetPath: targetRel,
+      keyPair: K2,
+    });
     expect(readReceiptValidated(paths, "drift-resolve", "DRIFT-001").status).toBe("forged");
     const pr = checkProductionReality(paths, state(paths));
     expect(pr.ok).toBe(false);
@@ -218,12 +284,12 @@ describe("slice-1b — forged classifications BLOCK", () => {
     expect(pr.detail!.status).toBe("forged");
   });
 
-  it("TAMPERED SIGNATURE: flip one hex char of a valid signature ⇒ forged", () => {
+  it("TAMPERED SIGNATURE: flip one base64 char of a valid signature ⇒ forged", () => {
     const { paths, targetRel } = greenWithResolvedDrift();
-    setKey(paths, "k1.key", K1);
+    setVerifierKey(paths, "k1-public.pem", K1.publicKey);
     appendSignedExternal(
       paths,
-      { kind: "drift-resolve", refId: "DRIFT-001", targetPath: targetRel, keyBytes: K1 },
+      { kind: "drift-resolve", refId: "DRIFT-001", targetPath: targetRel, keyPair: K1 },
       (sealed) => {
         const sig = sealed.signature!;
         const c = sig[0] === "a" ? "b" : "a";
@@ -233,29 +299,29 @@ describe("slice-1b — forged classifications BLOCK", () => {
     expect(readReceiptValidated(paths, "drift-resolve", "DRIFT-001").status).toBe("forged");
   });
 
-  it("TAMPERED PAYLOAD: edit the recorded target digest after signing ⇒ forged (MAC mismatch)", () => {
+  it("TAMPERED PAYLOAD: edit the recorded target digest after signing ⇒ forged", () => {
     const { paths, targetRel } = greenWithResolvedDrift();
-    setKey(paths, "k1.key", K1);
+    setVerifierKey(paths, "k1-public.pem", K1.publicKey);
     appendSignedExternal(
       paths,
-      { kind: "drift-resolve", refId: "DRIFT-001", targetPath: targetRel, keyBytes: K1 },
+      { kind: "drift-resolve", refId: "DRIFT-001", targetPath: targetRel, keyPair: K1 },
       (sealed) => ({
         ...sealed,
         target_resolves_in_source: { ...sealed.target_resolves_in_source, digest: "0".repeat(64) },
       }),
     );
-    // The canonical text now differs from what was signed → the MAC does not verify.
+    // The canonical text now differs from what was signed.
     expect(readReceiptValidated(paths, "drift-resolve", "DRIFT-001").status).toBe("forged");
   });
 
   it("REPLAY: a valid signature lifted onto a DIFFERENT refId ⇒ forged (canonical text differs)", () => {
     const { paths, targetRel } = greenWithResolvedDrift();
-    setKey(paths, "k1.key", K1);
+    setVerifierKey(paths, "k1-public.pem", K1.publicKey);
     // Capture a genuine signature for DRIFT-001, then replay it claiming DRIFT-001 is
     // actually DRIFT-999 (the signature was computed over DRIFT-001's canonical text).
     appendSignedExternal(
       paths,
-      { kind: "drift-resolve", refId: "DRIFT-001", targetPath: targetRel, keyBytes: K1 },
+      { kind: "drift-resolve", refId: "DRIFT-001", targetPath: targetRel, keyPair: K1 },
       (sealed) => ({ ...sealed, refId: "DRIFT-999" }),
     );
     expect(readReceiptValidated(paths, "drift-resolve", "DRIFT-999").status).toBe("forged");
@@ -265,9 +331,14 @@ describe("slice-1b — forged classifications BLOCK", () => {
     const { paths, targetRel } = greenWithResolvedDrift();
     // Sign with K1 so the receipt is well-formed, then UNSET the env so the validator
     // has no key to verify with — the external claim becomes unprovable ⇒ forged.
-    setKey(paths, "k1.key", K1);
-    appendSignedExternal(paths, { kind: "drift-resolve", refId: "DRIFT-001", targetPath: targetRel, keyBytes: K1 });
-    delete process.env.TH_RECEIPT_HMAC_KEYFILE;
+    setVerifierKey(paths, "k1-public.pem", K1.publicKey);
+    appendSignedExternal(paths, {
+      kind: "drift-resolve",
+      refId: "DRIFT-001",
+      targetPath: targetRel,
+      keyPair: K1,
+    });
+    delete process.env.TH_RECEIPT_PUBLIC_KEYFILE;
     expect(readReceiptValidated(paths, "drift-resolve", "DRIFT-001").status).toBe("forged");
     const pr = checkProductionReality(paths, state(paths));
     expect(pr.ok).toBe(false);
@@ -278,7 +349,7 @@ describe("slice-1b — forged classifications BLOCK", () => {
     // green project with a resolved drift backed ONLY by an in-process receipt.
     tp?.cleanup();
     const fresh = greenWithResolvedDrift();
-    delete process.env.TH_RECEIPT_HMAC_KEYFILE; // no key in the dev case
+    delete process.env.TH_RECEIPT_PUBLIC_KEYFILE; // no key in the dev case
     appendTerminalReceipt(fresh.paths, {
       kind: "drift-resolve",
       refId: "DRIFT-001",
@@ -293,7 +364,7 @@ describe("slice-1b — forged classifications BLOCK", () => {
 describe("slice-1b — BACK-COMPAT: a slice-1a-shape receipt is byte-identical + valid + accepted", () => {
   it("an old-shape receipt (no signing fields) has the SAME recordHash and classifies valid", () => {
     const { paths, targetRel } = greenWithResolvedDrift();
-    delete process.env.TH_RECEIPT_HMAC_KEYFILE; // no key — the slice-1a world
+    delete process.env.TH_RECEIPT_PUBLIC_KEYFILE; // no key — the slice-1a world
 
     // The slice-1a canonical input (NO producer_kind / key_id / signature). Its
     // recordHash MUST equal what computeRecordHash produced before slice-1b, i.e. it
@@ -341,7 +412,7 @@ describe("slice-1b — BACK-COMPAT: a slice-1a-shape receipt is byte-identical +
 describe("slice-1b — forged EXTERNAL claim is DECISIVE over a VALID in-process receipt (R6)", () => {
   it("a forged external-claim line BLOCKS even when a legitimate valid in-process receipt exists for the same entity", () => {
     const { paths, targetRel } = greenWithResolvedDrift();
-    setKey(paths, "k1.key", K1); // the LOADED key is K1
+    setVerifierKey(paths, "k1-public.pem", K1.publicKey);
 
     // (a) A LEGITIMATE valid in-process receipt for DRIFT-001 (target resolves+matches).
     // On its own this would classify `valid` and the gate would accept.
@@ -353,7 +424,12 @@ describe("slice-1b — forged EXTERNAL claim is DECISIVE over a VALID in-process
     });
     // (b) A FORGED external-claim line for the SAME entity: producer_kind:"external"
     // signed with K2 (a key the validator does not have), so it cannot verify under K1.
-    appendSignedExternal(paths, { kind: "drift-resolve", refId: "DRIFT-001", targetPath: targetRel, keyBytes: K2 });
+    appendSignedExternal(paths, {
+      kind: "drift-resolve",
+      refId: "DRIFT-001",
+      targetPath: targetRel,
+      keyPair: K2,
+    });
 
     // The external CLAIM is DECISIVE: an unverifiable one ⇒ `forged` ⇒ BLOCK, and it is
     // NEVER silently downgraded to the in-process `valid` verdict (fail-closed). This

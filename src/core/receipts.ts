@@ -38,7 +38,11 @@ import { readJsonlValues, scanTailValid, safeParseJson } from "./jsonl";
 import { gitHead, dirtyTreeDigest } from "./git-revision";
 import { parseDriftEntries } from "./drift-log";
 import { readDecisionEvents, reduceDecisions } from "./decisions";
-import { loadExternalKey, verifyCanonical } from "./receipt-signing";
+import {
+  externalKeyId,
+  loadExternalPublicKey,
+  verifyCanonical,
+} from "./receipt-signing";
 
 // ---------------------------------------------------------------------------
 // Schema (execution doc §2.5)
@@ -108,18 +112,18 @@ export interface TerminalTransitionReceipt {
    */
   producer_kind?: "external" | "in-process";
   /**
-   * Slice-1b — the short, NON-secret id of the HMAC key that signed an external
+   * Slice-1b — the short, NON-secret id of the public key that verifies an external
    * receipt (`receipt-signing.externalKeyId`), so a verifier knows WHICH key to
    * use and an old key can be rotated out. Absent on in-process receipts. Part of
-   * the canonical hash input (after `producer_kind`), so it is MAC-bound: a key_id
+   * the canonical hash input (after `producer_kind`), so it is signature-bound: a key_id
    * swap changes the canonical text and breaks the signature.
    */
   key_id?: string;
   /**
-   * Slice-1b — the hex HMAC-SHA256 of this receipt's canonical text under the
-   * external key (`receipt-signing.signCanonical`). A TRAILER, EXCLUDED from
+   * Slice-1b — the base64 Ed25519 signature over this receipt's canonical text.
+   * A TRAILER, EXCLUDED from
    * `canonicalText` exactly like `recordHash`: both `recordHash` and `signature`
-   * are computed over the IDENTICAL canonical input, so the MAC covers every
+   * are computed over the IDENTICAL canonical input, so the signature covers every
    * signed field. Absent on in-process receipts. Its presence + verification is
    * what the validator classifies as `valid-grounded`.
    */
@@ -154,7 +158,7 @@ const CANONICAL_FIELD_ORDER: ReadonlyArray<keyof TerminalTransitionReceipt> = [
   "target_resolves_in_source",
   "snapshot_coord",
   "producer_identity",
-  // Slice-1b — `producer_kind` + `key_id` join the canonical (and therefore MAC-
+  // Slice-1b — `producer_kind` + `key_id` join the canonical (and therefore signature-
   // bound) input AFTER producer_identity, BEFORE legacy. `signature` is DELIBERATELY
   // absent here: like `recordHash`, it is a TRAILER excluded from canonicalText, so
   // both the recordHash and the signature are computed over the IDENTICAL bytes.
@@ -221,7 +225,7 @@ export function terminalReceiptsPath(paths: ProjectPaths): string {
  * (slice-1b). A SEPARATE file purely for LOCK-ISOLATION: the out-of-process producer
  * appends here without taking the in-process `withStateLock` span, so it never
  * contends with a running `th`. The SECURITY boundary is NOT this path — it is the
- * HMAC key the line is signed with; a forged line written here is rejected by
+ * private key held only by the producer; a forged line written here is rejected by
  * {@link readReceiptValidated} (no verifying signature ⇒ `forged`), exactly as one
  * written into the in-process store would be.
  *
@@ -238,6 +242,7 @@ export function externalReceiptsPath(paths: ProjectPaths): string {
 }
 
 const KIND_VALUES = new Set<TerminalTransitionKind>(["drift-resolve", "sim-retire", "decision-approve"]);
+const ED25519_SIGNATURE_BASE64 = /^[A-Za-z0-9+/]{86}==$/;
 
 /** Validate the shape of a parsed line; malformed lines are skipped (tolerant). */
 function isValidReceipt(parsed: unknown): parsed is TerminalTransitionReceipt {
@@ -255,7 +260,12 @@ function isValidReceipt(parsed: unknown): parsed is TerminalTransitionReceipt {
   // never silently treated as a verifying external receipt).
   if (r.producer_kind !== undefined && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
   if (r.key_id !== undefined && typeof r.key_id !== "string") return false;
-  if (r.signature !== undefined && (typeof r.signature !== "string" || !HEX64.test(r.signature))) return false;
+  if (
+    r.signature !== undefined &&
+    (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE64.test(r.signature))
+  ) {
+    return false;
+  }
   // Nested ground objects must be present and shaped.
   const tgt = r.target_resolves_in_source;
   if (typeof tgt !== "object" || tgt === null) return false;
@@ -390,6 +400,21 @@ export function currentSnapshotCoord(root: string): SnapshotCoord {
   return { gitHead: gitHead(root), treeDigest: dirtyTreeDigest(root) };
 }
 
+/**
+ * Receipt snapshots bind to the source tree, not TwinHarness's own mutable
+ * governance ledgers. Excluding the selected state directory and drift log keeps a
+ * terminal command from invalidating its receipt merely by recording the flip.
+ */
+export function currentReceiptSnapshotCoord(paths: ProjectPaths): SnapshotCoord {
+  const excludePaths = [paths.stateDir, paths.driftLog]
+    .map((p) => path.relative(paths.root, p))
+    .filter((p) => p !== "" && !path.isAbsolute(p) && p !== ".." && !p.startsWith(`..${path.sep}`));
+  return {
+    gitHead: gitHead(paths.root),
+    treeDigest: dirtyTreeDigest(paths.root, excludePaths),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Producer API (caller already holds withStateLock)
 // ---------------------------------------------------------------------------
@@ -460,7 +485,7 @@ export function appendTerminalReceipt(
     kind: input.kind,
     refId: input.refId,
     target_resolves_in_source: { path: targetPath, digest },
-    snapshot_coord: currentSnapshotCoord(paths.root),
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
     producer_identity: input.producerIdentity,
   });
 }
@@ -480,7 +505,7 @@ function appendLegacyReceipt(
     kind,
     refId,
     target_resolves_in_source: { path: "", digest: "" },
-    snapshot_coord: currentSnapshotCoord(paths.root),
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
     producer_identity: "legacy-backfill",
     legacy: true,
   });
@@ -517,6 +542,7 @@ function sealAndAppend(
  * extended by slice-1b):
  *  - `absent`         — no receipt AND the entity is not grandfathered → BLOCK
  *                       (negative-control **b**: post-upgrade bypass).
+ *  - `tampered`       — the receipt hash chain does not verify → BLOCK.
  *  - `target_missing` — recorded `path` no longer resolves in source → BLOCK (c).
  *  - `target_mismatch`— `path` resolves but its digest ≠ recorded → BLOCK.
  *  - `stale`          — `snapshot_coord` diverged (gitHead/treeDigest) → BLOCK (a).
@@ -527,7 +553,7 @@ function sealAndAppend(
  *                       it; UNCHANGED from slice-1a (every slice-1a test pins this).
  *  - `valid-grounded` — slice-1b: an EXTERNAL keyed receipt whose signature verifies
  *                       under the loaded key AND whose content passes. Independently
- *                       grounded (the in-process surface cannot forge the MAC). The
+ *                       grounded (the in-process surface cannot forge the signature). The
  *                       gate ACCEPTS it; it is the STRONGER form of `valid`.
  *  - `forged`         — slice-1b: a receipt CLAIMS `producer_kind:"external"` but no
  *                       external candidate's signature verifies (key absent, or every
@@ -536,6 +562,7 @@ function sealAndAppend(
  */
 export type ReceiptValidationStatus =
   | "absent"
+  | "tampered"
   | "target_missing"
   | "target_mismatch"
   | "stale"
@@ -602,7 +629,7 @@ function classifyReceiptContent(
   if (currentDigest === null) return { status: "target_missing", receipt }; // (c)
   if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt };
 
-  const staleReasons = snapshotStaleReasons(receipt.snapshot_coord, currentSnapshotCoord(paths.root));
+  const staleReasons = snapshotStaleReasons(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
   if (staleReasons.length > 0) return { status: "stale", receipt, staleReasons }; // (a)
 
   return { status: passStatus, receipt };
@@ -625,7 +652,7 @@ function classifyReceiptContent(
  *        text and {@link verifyCanonical} its `signature`. The FIRST that
  *        authentically verifies is run through the slice-1a content checks; if it
  *        passes ⇒ `valid-grounded` (independently grounded — the in-process surface
- *        cannot forge the MAC). If it verifies but the CONTENT fails ⇒ the slice-1a
+ *        cannot forge the signature). If it verifies but the CONTENT fails ⇒ the slice-1a
  *        fail token (`target_missing` / `target_mismatch` / `stale`) or `legacy`.
  *      - If NO external candidate verifies (key absent, or every signature is
  *        bad/tampered/replayed) ⇒ `forged` ⇒ BLOCK. An unprovable independence claim
@@ -646,9 +673,11 @@ export function readReceiptValidated(
   refId: string,
 ): ValidatedReceipt {
   const matches = (r: TerminalTransitionReceipt): boolean => r.kind === kind && r.refId === refId;
+  const inProcessReceipts = readTerminalReceipts(paths);
+  if (!verifyReceiptChain(inProcessReceipts).ok) return { status: "tampered" };
   // LATEST in-process candidate in file order (a re-flip mints a newer receipt).
   let inProcess: TerminalTransitionReceipt | undefined;
-  for (const r of readTerminalReceipts(paths)) {
+  for (const r of inProcessReceipts) {
     if (matches(r)) inProcess = r;
   }
   // ALL external candidates claiming this (kind, refId) — gathered so a verifying one
@@ -659,15 +688,17 @@ export function readReceiptValidated(
 
   // (1) An external CLAIM exists → it must PROVE itself with a verifying signature.
   if (externalCandidates.length > 0) {
-    const key = loadExternalKey();
-    if (key !== null) {
+    const publicKey = loadExternalPublicKey();
+    if (publicKey !== null) {
+      const configuredKeyId = externalKeyId(publicKey);
       // The LAST verifying external candidate in file order (a re-mint wins), so a
       // newer grounded receipt supersedes an older one.
       let verified: TerminalTransitionReceipt | undefined;
       for (const cand of externalCandidates) {
         if (typeof cand.signature !== "string") continue; // no trailer ⇒ unverifiable
+        if (cand.key_id !== configuredKeyId) continue;
         const { recordHash: _rh, signature: _sig, ...signedView } = cand;
-        if (verifyCanonical(canonicalText(signedView), cand.signature, key)) verified = cand;
+        if (verifyCanonical(canonicalText(signedView), cand.signature, publicKey)) verified = cand;
       }
       if (verified) {
         if (verified.legacy === true) return { status: "legacy", receipt: verified };
@@ -806,7 +837,11 @@ export function collectTerminalEntities(paths: ProjectPaths): TerminalEntityRef[
     driftText = ""; // no drift log → no resolved drifts
   }
   if (driftText !== "") {
-    const knownDriftIds = new Set(parseDriftEntries(driftText).map((e) => e.id));
+    const blockingDriftIds = new Set(
+      parseDriftEntries(driftText)
+        .filter((e) => e.layer === "requirement")
+        .map((e) => e.id),
+    );
     const seen = new Set<string>();
     for (const line of driftText.split(/\r?\n/)) {
       const m = /^##\s+(DRIFT-\d+)\s+—\s+resolved\s*$/.exec(line.trim());
@@ -814,7 +849,7 @@ export function collectTerminalEntities(paths: ProjectPaths): TerminalEntityRef[
       const id = m[1]!;
       // Only count a resolution note that corresponds to a real drift entry, and
       // only once per id.
-      if (knownDriftIds.has(id) && !seen.has(id)) {
+      if (blockingDriftIds.has(id) && !seen.has(id)) {
         seen.add(id);
         out.push({ kind: "drift-resolve", refId: id });
       }

@@ -3649,49 +3649,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative17, options, skipNormalization) {
+    function resolveComponent(base, relative18, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative17 = parse3(serialize(relative17, options), options);
+        relative18 = parse3(serialize(relative18, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative17.scheme) {
-        target.scheme = relative17.scheme;
-        target.userinfo = relative17.userinfo;
-        target.host = relative17.host;
-        target.port = relative17.port;
-        target.path = removeDotSegments(relative17.path || "");
-        target.query = relative17.query;
+      if (!options.tolerant && relative18.scheme) {
+        target.scheme = relative18.scheme;
+        target.userinfo = relative18.userinfo;
+        target.host = relative18.host;
+        target.port = relative18.port;
+        target.path = removeDotSegments(relative18.path || "");
+        target.query = relative18.query;
       } else {
-        if (relative17.userinfo !== void 0 || relative17.host !== void 0 || relative17.port !== void 0) {
-          target.userinfo = relative17.userinfo;
-          target.host = relative17.host;
-          target.port = relative17.port;
-          target.path = removeDotSegments(relative17.path || "");
-          target.query = relative17.query;
+        if (relative18.userinfo !== void 0 || relative18.host !== void 0 || relative18.port !== void 0) {
+          target.userinfo = relative18.userinfo;
+          target.host = relative18.host;
+          target.port = relative18.port;
+          target.path = removeDotSegments(relative18.path || "");
+          target.query = relative18.query;
         } else {
-          if (!relative17.path) {
+          if (!relative18.path) {
             target.path = base.path;
-            if (relative17.query !== void 0) {
-              target.query = relative17.query;
+            if (relative18.query !== void 0) {
+              target.query = relative18.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative17.path[0] === "/") {
-              target.path = removeDotSegments(relative17.path);
+            if (relative18.path[0] === "/") {
+              target.path = removeDotSegments(relative18.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative17.path;
+                target.path = "/" + relative18.path;
               } else if (!base.path) {
-                target.path = relative17.path;
+                target.path = relative18.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative17.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative18.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative17.query;
+            target.query = relative18.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3699,7 +3699,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative17.fragment;
+      target.fragment = relative18.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -16973,11 +16973,18 @@ function gitHead(root) {
   if (head === null || head === "") return null;
   return head;
 }
-function dirtyTreeDigest(root) {
-  const status = git(root, ["status", "--porcelain"]);
+function dirtyTreeDigest(root, excludePaths = []) {
+  const pathspec = excludePaths.length === 0 ? [] : [
+    "--",
+    ".",
+    ...excludePaths.map(
+      (p) => `:(exclude,literal)${p.replace(/\\/g, "/").replace(/^\.\/+/, "")}`
+    )
+  ];
+  const status = git(root, ["status", "--porcelain", ...pathspec]);
   if (status === null) return null;
   if (status === "") return CLEAN_TREE_DIGEST;
-  const diff = git(root, ["diff", "HEAD"]) ?? "";
+  const diff = git(root, ["diff", "HEAD", ...pathspec]) ?? "";
   return (0, import_node_crypto3.createHash)("sha256").update(status + "\n\0\n" + diff, "utf8").digest("hex");
 }
 var CLEAN_TREE_DIGEST = "clean";
@@ -17171,28 +17178,41 @@ function gatingObligations(decisions, state) {
 // src/core/receipt-signing.ts
 var import_node_crypto5 = require("node:crypto");
 var fs8 = __toESM(require("node:fs"));
-var SIGNATURE_HEX = /^[0-9a-f]{64}$/;
-function verifyCanonical(canonicalText3, signature, key) {
+var SIGNATURE_BASE64 = /^[A-Za-z0-9+/]{86}==$/;
+function verifyCanonical(canonicalText3, signature, publicKey) {
   try {
-    if (typeof signature !== "string" || !SIGNATURE_HEX.test(signature)) return false;
-    const expected = (0, import_node_crypto5.createHmac)("sha256", key).update(canonicalText3, "utf8").digest();
-    const provided = Buffer.from(signature, "hex");
-    if (provided.length !== expected.length) return false;
-    return (0, import_node_crypto5.timingSafeEqual)(provided, expected);
+    if (publicKey.type !== "public" || publicKey.asymmetricKeyType !== "ed25519") return false;
+    if (typeof signature !== "string" || !SIGNATURE_BASE64.test(signature)) return false;
+    const bytes = Buffer.from(signature, "base64");
+    if (bytes.length !== 64) return false;
+    return (0, import_node_crypto5.verify)(null, Buffer.from(canonicalText3, "utf8"), publicKey, bytes);
   } catch {
     return false;
   }
 }
-function loadExternalKey() {
-  const file = process.env.TH_RECEIPT_HMAC_KEYFILE;
+function loadExternalPublicKey() {
+  const file = process.env.TH_RECEIPT_PUBLIC_KEYFILE;
   if (typeof file !== "string" || file === "") return null;
   try {
-    const buf = fs8.readFileSync(file);
-    if (buf.length === 0) return null;
-    return buf;
+    const raw = fs8.readFileSync(file);
+    try {
+      (0, import_node_crypto5.createPrivateKey)(raw);
+      return null;
+    } catch {
+    }
+    const key = (0, import_node_crypto5.createPublicKey)(raw);
+    if (key.asymmetricKeyType !== "ed25519") return null;
+    return key;
   } catch {
     return null;
   }
+}
+function externalKeyId(publicKey) {
+  if (publicKey.type !== "public" || publicKey.asymmetricKeyType !== "ed25519") {
+    throw new TypeError("externalKeyId requires an Ed25519 public key");
+  }
+  const der = publicKey.export({ type: "spki", format: "der" });
+  return (0, import_node_crypto5.createHash)("sha256").update(der).digest("hex").slice(0, 8);
 }
 
 // src/core/receipts.ts
@@ -17202,7 +17222,7 @@ var CANONICAL_FIELD_ORDER2 = [
   "target_resolves_in_source",
   "snapshot_coord",
   "producer_identity",
-  // Slice-1b — `producer_kind` + `key_id` join the canonical (and therefore MAC-
+  // Slice-1b — `producer_kind` + `key_id` join the canonical (and therefore signature-
   // bound) input AFTER producer_identity, BEFORE legacy. `signature` is DELIBERATELY
   // absent here: like `recordHash`, it is a TRAILER excluded from canonicalText, so
   // both the recordHash and the signature are computed over the IDENTICAL bytes.
@@ -17245,6 +17265,7 @@ function externalReceiptsPath(paths) {
   return path7.join(paths.stateDir, "external-receipts.jsonl");
 }
 var KIND_VALUES = /* @__PURE__ */ new Set(["drift-resolve", "sim-retire", "decision-approve"]);
+var ED25519_SIGNATURE_BASE64 = /^[A-Za-z0-9+/]{86}==$/;
 function isValidReceipt(parsed) {
   if (typeof parsed !== "object" || parsed === null) return false;
   const r = parsed;
@@ -17256,7 +17277,9 @@ function isValidReceipt(parsed) {
   if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
   if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
   if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
-  if (r.signature !== void 0 && (typeof r.signature !== "string" || !HEX64.test(r.signature))) return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE64.test(r.signature))) {
+    return false;
+  }
   const tgt = r.target_resolves_in_source;
   if (typeof tgt !== "object" || tgt === null) return false;
   const t = tgt;
@@ -17278,6 +17301,22 @@ function readLastReceiptRecordHash(paths) {
   const last = scanTailValid(terminalReceiptsPath(paths), isValidReceipt);
   return last ? last.recordHash : GENESIS_PREV_HASH;
 }
+function verifyReceiptChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeRecordHash2(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
 function computeTargetDigest(root, relPath) {
   if (relPath === "") return null;
   const abs = resolveWithinRoot(root, relPath);
@@ -17289,8 +17328,12 @@ function computeTargetDigest(root, relPath) {
     return null;
   }
 }
-function currentSnapshotCoord(root) {
-  return { gitHead: gitHead(root), treeDigest: dirtyTreeDigest(root) };
+function currentReceiptSnapshotCoord(paths) {
+  const excludePaths = [paths.stateDir, paths.driftLog].map((p) => path7.relative(paths.root, p)).filter((p) => p !== "" && !path7.isAbsolute(p) && p !== ".." && !p.startsWith(`..${path7.sep}`));
+  return {
+    gitHead: gitHead(paths.root),
+    treeDigest: dirtyTreeDigest(paths.root, excludePaths)
+  };
 }
 var TargetUnresolvedError = class extends Error {
   constructor(message, target) {
@@ -17320,7 +17363,7 @@ function appendTerminalReceipt(paths, input) {
     kind: input.kind,
     refId: input.refId,
     target_resolves_in_source: { path: targetPath, digest },
-    snapshot_coord: currentSnapshotCoord(paths.root),
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
     producer_identity: input.producerIdentity
   });
 }
@@ -17329,7 +17372,7 @@ function appendLegacyReceipt(paths, kind, refId) {
     kind,
     refId,
     target_resolves_in_source: { path: "", digest: "" },
-    snapshot_coord: currentSnapshotCoord(paths.root),
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
     producer_identity: "legacy-backfill",
     legacy: true
   });
@@ -17361,27 +17404,31 @@ function classifyReceiptContent(paths, kind, receipt, passStatus) {
   const currentDigest = computeTargetDigest(paths.root, recordedPath);
   if (currentDigest === null) return { status: "target_missing", receipt };
   if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt };
-  const staleReasons = snapshotStaleReasons(receipt.snapshot_coord, currentSnapshotCoord(paths.root));
+  const staleReasons = snapshotStaleReasons(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
   if (staleReasons.length > 0) return { status: "stale", receipt, staleReasons };
   return { status: passStatus, receipt };
 }
 function readReceiptValidated(paths, kind, refId) {
   const matches = (r) => r.kind === kind && r.refId === refId;
+  const inProcessReceipts = readTerminalReceipts(paths);
+  if (!verifyReceiptChain(inProcessReceipts).ok) return { status: "tampered" };
   let inProcess;
-  for (const r of readTerminalReceipts(paths)) {
+  for (const r of inProcessReceipts) {
     if (matches(r)) inProcess = r;
   }
   const externalCandidates = readExternalReceipts(paths).filter(
     (r) => matches(r) && r.producer_kind === "external"
   );
   if (externalCandidates.length > 0) {
-    const key = loadExternalKey();
-    if (key !== null) {
+    const publicKey = loadExternalPublicKey();
+    if (publicKey !== null) {
+      const configuredKeyId = externalKeyId(publicKey);
       let verified;
       for (const cand of externalCandidates) {
         if (typeof cand.signature !== "string") continue;
+        if (cand.key_id !== configuredKeyId) continue;
         const { recordHash: _rh, signature: _sig, ...signedView } = cand;
-        if (verifyCanonical(canonicalText2(signedView), cand.signature, key)) verified = cand;
+        if (verifyCanonical(canonicalText2(signedView), cand.signature, publicKey)) verified = cand;
       }
       if (verified) {
         if (verified.legacy === true) return { status: "legacy", receipt: verified };
@@ -17455,13 +17502,15 @@ function collectTerminalEntities(paths) {
     driftText = "";
   }
   if (driftText !== "") {
-    const knownDriftIds = new Set(parseDriftEntries(driftText).map((e) => e.id));
+    const blockingDriftIds = new Set(
+      parseDriftEntries(driftText).filter((e) => e.layer === "requirement").map((e) => e.id)
+    );
     const seen = /* @__PURE__ */ new Set();
     for (const line of driftText.split(/\r?\n/)) {
       const m = /^##\s+(DRIFT-\d+)\s+—\s+resolved\s*$/.exec(line.trim());
       if (!m) continue;
       const id = m[1];
-      if (knownDriftIds.has(id) && !seen.has(id)) {
+      if (blockingDriftIds.has(id) && !seen.has(id)) {
         seen.add(id);
         out.push({ kind: "drift-resolve", refId: id });
       }
@@ -17519,8 +17568,8 @@ function readDriftLog(paths) {
 function appendDriftLog(paths, block) {
   readDriftLog(paths);
   assertGovernedWriteSurface(paths.root, paths.driftLog);
-  const sep18 = endsWithNewline(paths.driftLog) ? "" : "\n";
-  fs10.appendFileSync(paths.driftLog, `${sep18}${block}`, "utf8");
+  const sep19 = endsWithNewline(paths.driftLog) ? "" : "\n";
+  fs10.appendFileSync(paths.driftLog, `${sep19}${block}`, "utf8");
 }
 function runDriftAdd(paths, opts) {
   return withStateLock(paths, () => runDriftAddLocked(paths, opts));
@@ -20404,9 +20453,9 @@ var path16 = __toESM(require("node:path"));
 function containLcovPath(absRoot, lcovDirRel, sfPath) {
   if (sfPath.length === 0) return null;
   const norm = sfPath.replace(/\\/g, "/");
-  const isAbsolute7 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
+  const isAbsolute8 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
   let abs;
-  if (isAbsolute7) {
+  if (isAbsolute8) {
     abs = path16.resolve(norm);
   } else {
     abs = path16.resolve(absRoot, lcovDirRel, norm);
@@ -25476,8 +25525,8 @@ function appendDebateLog(paths, block) {
   const file = debateLogPath(paths);
   readDebateLog(paths);
   assertGovernedWriteSurface(paths.root, file);
-  const sep18 = endsWithNewline(file) ? "" : "\n";
-  fs32.appendFileSync(file, `${sep18}${block}`, "utf8");
+  const sep19 = endsWithNewline(file) ? "" : "\n";
+  fs32.appendFileSync(file, `${sep19}${block}`, "utf8");
 }
 function runDebateAdd(paths, opts) {
   const locked = assertFeatureUnlocked(paths, "debate");

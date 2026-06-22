@@ -76,6 +76,7 @@ exports.verifyReceiptChain = verifyReceiptChain;
 exports.targetResolvesInSource = targetResolvesInSource;
 exports.computeTargetDigest = computeTargetDigest;
 exports.currentSnapshotCoord = currentSnapshotCoord;
+exports.currentReceiptSnapshotCoord = currentReceiptSnapshotCoord;
 exports.appendTerminalReceipt = appendTerminalReceipt;
 exports.readReceiptValidated = readReceiptValidated;
 exports.receiptMigrationDone = receiptMigrationDone;
@@ -107,7 +108,7 @@ const CANONICAL_FIELD_ORDER = [
     "target_resolves_in_source",
     "snapshot_coord",
     "producer_identity",
-    // Slice-1b — `producer_kind` + `key_id` join the canonical (and therefore MAC-
+    // Slice-1b — `producer_kind` + `key_id` join the canonical (and therefore signature-
     // bound) input AFTER producer_identity, BEFORE legacy. `signature` is DELIBERATELY
     // absent here: like `recordHash`, it is a TRAILER excluded from canonicalText, so
     // both the recordHash and the signature are computed over the IDENTICAL bytes.
@@ -170,7 +171,7 @@ function terminalReceiptsPath(paths) {
  * (slice-1b). A SEPARATE file purely for LOCK-ISOLATION: the out-of-process producer
  * appends here without taking the in-process `withStateLock` span, so it never
  * contends with a running `th`. The SECURITY boundary is NOT this path — it is the
- * HMAC key the line is signed with; a forged line written here is rejected by
+ * private key held only by the producer; a forged line written here is rejected by
  * {@link readReceiptValidated} (no verifying signature ⇒ `forged`), exactly as one
  * written into the in-process store would be.
  *
@@ -186,6 +187,7 @@ function externalReceiptsPath(paths) {
     return path.join(paths.stateDir, "external-receipts.jsonl");
 }
 const KIND_VALUES = new Set(["drift-resolve", "sim-retire", "decision-approve"]);
+const ED25519_SIGNATURE_BASE64 = /^[A-Za-z0-9+/]{86}==$/;
 /** Validate the shape of a parsed line; malformed lines are skipped (tolerant). */
 function isValidReceipt(parsed) {
     if (typeof parsed !== "object" || parsed === null)
@@ -211,8 +213,10 @@ function isValidReceipt(parsed) {
         return false;
     if (r.key_id !== undefined && typeof r.key_id !== "string")
         return false;
-    if (r.signature !== undefined && (typeof r.signature !== "string" || !hash_1.HEX64.test(r.signature)))
+    if (r.signature !== undefined &&
+        (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE64.test(r.signature))) {
         return false;
+    }
     // Nested ground objects must be present and shaped.
     const tgt = r.target_resolves_in_source;
     if (typeof tgt !== "object" || tgt === null)
@@ -339,6 +343,20 @@ function currentSnapshotCoord(root) {
     return { gitHead: (0, git_revision_1.gitHead)(root), treeDigest: (0, git_revision_1.dirtyTreeDigest)(root) };
 }
 /**
+ * Receipt snapshots bind to the source tree, not TwinHarness's own mutable
+ * governance ledgers. Excluding the selected state directory and drift log keeps a
+ * terminal command from invalidating its receipt merely by recording the flip.
+ */
+function currentReceiptSnapshotCoord(paths) {
+    const excludePaths = [paths.stateDir, paths.driftLog]
+        .map((p) => path.relative(paths.root, p))
+        .filter((p) => p !== "" && !path.isAbsolute(p) && p !== ".." && !p.startsWith(`..${path.sep}`));
+    return {
+        gitHead: (0, git_revision_1.gitHead)(paths.root),
+        treeDigest: (0, git_revision_1.dirtyTreeDigest)(paths.root, excludePaths),
+    };
+}
+/**
  * Thrown by {@link appendTerminalReceipt} when `targetPath` is supplied but does
  * NOT resolve in source (negative-control **c** at creation: a producer refuses
  * to mint a receipt whose ground is already missing).
@@ -383,7 +401,7 @@ function appendTerminalReceipt(paths, input) {
         kind: input.kind,
         refId: input.refId,
         target_resolves_in_source: { path: targetPath, digest },
-        snapshot_coord: currentSnapshotCoord(paths.root),
+        snapshot_coord: currentReceiptSnapshotCoord(paths),
         producer_identity: input.producerIdentity,
     });
 }
@@ -398,7 +416,7 @@ function appendLegacyReceipt(paths, kind, refId) {
         kind,
         refId,
         target_resolves_in_source: { path: "", digest: "" },
-        snapshot_coord: currentSnapshotCoord(paths.root),
+        snapshot_coord: currentReceiptSnapshotCoord(paths),
         producer_identity: "legacy-backfill",
         legacy: true,
     });
@@ -463,7 +481,7 @@ function classifyReceiptContent(paths, kind, receipt, passStatus) {
         return { status: "target_missing", receipt }; // (c)
     if (currentDigest !== recordedDigest)
         return { status: "target_mismatch", receipt };
-    const staleReasons = snapshotStaleReasons(receipt.snapshot_coord, currentSnapshotCoord(paths.root));
+    const staleReasons = snapshotStaleReasons(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
     if (staleReasons.length > 0)
         return { status: "stale", receipt, staleReasons }; // (a)
     return { status: passStatus, receipt };
@@ -485,7 +503,7 @@ function classifyReceiptContent(paths, kind, receipt, passStatus) {
  *        text and {@link verifyCanonical} its `signature`. The FIRST that
  *        authentically verifies is run through the slice-1a content checks; if it
  *        passes ⇒ `valid-grounded` (independently grounded — the in-process surface
- *        cannot forge the MAC). If it verifies but the CONTENT fails ⇒ the slice-1a
+ *        cannot forge the signature). If it verifies but the CONTENT fails ⇒ the slice-1a
  *        fail token (`target_missing` / `target_mismatch` / `stale`) or `legacy`.
  *      - If NO external candidate verifies (key absent, or every signature is
  *        bad/tampered/replayed) ⇒ `forged` ⇒ BLOCK. An unprovable independence claim
@@ -502,9 +520,12 @@ function classifyReceiptContent(paths, kind, receipt, passStatus) {
  */
 function readReceiptValidated(paths, kind, refId) {
     const matches = (r) => r.kind === kind && r.refId === refId;
+    const inProcessReceipts = readTerminalReceipts(paths);
+    if (!verifyReceiptChain(inProcessReceipts).ok)
+        return { status: "tampered" };
     // LATEST in-process candidate in file order (a re-flip mints a newer receipt).
     let inProcess;
-    for (const r of readTerminalReceipts(paths)) {
+    for (const r of inProcessReceipts) {
         if (matches(r))
             inProcess = r;
     }
@@ -513,16 +534,19 @@ function readReceiptValidated(paths, kind, refId) {
     const externalCandidates = readExternalReceipts(paths).filter((r) => matches(r) && r.producer_kind === "external");
     // (1) An external CLAIM exists → it must PROVE itself with a verifying signature.
     if (externalCandidates.length > 0) {
-        const key = (0, receipt_signing_1.loadExternalKey)();
-        if (key !== null) {
+        const publicKey = (0, receipt_signing_1.loadExternalPublicKey)();
+        if (publicKey !== null) {
+            const configuredKeyId = (0, receipt_signing_1.externalKeyId)(publicKey);
             // The LAST verifying external candidate in file order (a re-mint wins), so a
             // newer grounded receipt supersedes an older one.
             let verified;
             for (const cand of externalCandidates) {
                 if (typeof cand.signature !== "string")
                     continue; // no trailer ⇒ unverifiable
+                if (cand.key_id !== configuredKeyId)
+                    continue;
                 const { recordHash: _rh, signature: _sig, ...signedView } = cand;
-                if ((0, receipt_signing_1.verifyCanonical)(canonicalText(signedView), cand.signature, key))
+                if ((0, receipt_signing_1.verifyCanonical)(canonicalText(signedView), cand.signature, publicKey))
                     verified = cand;
             }
             if (verified) {
@@ -652,7 +676,9 @@ function collectTerminalEntities(paths) {
         driftText = ""; // no drift log → no resolved drifts
     }
     if (driftText !== "") {
-        const knownDriftIds = new Set((0, drift_log_1.parseDriftEntries)(driftText).map((e) => e.id));
+        const blockingDriftIds = new Set((0, drift_log_1.parseDriftEntries)(driftText)
+            .filter((e) => e.layer === "requirement")
+            .map((e) => e.id));
         const seen = new Set();
         for (const line of driftText.split(/\r?\n/)) {
             const m = /^##\s+(DRIFT-\d+)\s+—\s+resolved\s*$/.exec(line.trim());
@@ -661,7 +687,7 @@ function collectTerminalEntities(paths) {
             const id = m[1];
             // Only count a resolution note that corresponds to a real drift entry, and
             // only once per id.
-            if (knownDriftIds.has(id) && !seen.has(id)) {
+            if (blockingDriftIds.has(id) && !seen.has(id)) {
                 seen.add(id);
                 out.push({ kind: "drift-resolve", refId: id });
             }
