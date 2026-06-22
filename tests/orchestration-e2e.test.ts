@@ -12,7 +12,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runArtifactRegister } from "../src/commands/artifact";
 import { runSlicesSync, runSliceSetStatus } from "../src/commands/slices";
@@ -138,6 +138,11 @@ describe("REQ-E2E-001: a run advances init → build → coverage → final-veri
     // Still blocked: no live-QA Tester record (production-reality rung).
     expect(evaluateStopGate(paths).block).toBe(true);
     expect(runTesterRecord(paths, { driver: "cli-e2e", passed: true }).ok).toBe(true);
+    // BSC-7 slice-3a C-2: the human signs off each engaged humanGate gate. The completion
+    // ladder re-validates the closed required-set (rung 1c), so without these approvals the
+    // gate would still block on human_approval_unverified. Minting them is the e2e analogue
+    // of the operator running `th approve <stage>` for each gate at the final snapshot.
+    mintRequiredApprovals(paths, readState(paths).state!);
     // Now the full ladder is green with no verify suite configured → allows.
     expect(evaluateStopGate(paths).block).toBe(false);
 

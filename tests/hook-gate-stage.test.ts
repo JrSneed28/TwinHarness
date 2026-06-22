@@ -17,10 +17,10 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { evaluateStopGate, runHookStopGate } from "../src/commands/hook";
-import { writeState } from "../src/core/state-store";
+import { writeState, readState } from "../src/core/state-store";
 import { initialState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
 import { runTesterRecord } from "../src/commands/tester";
@@ -93,6 +93,10 @@ describe("F-2/C-1: final-verification near-misses block premature completion", (
     });
     expect(runArtifactRegister(paths, "docs/10-verification-report.md", 1).ok).toBe(true);
     expect(runTesterRecord(paths, { driver: "cli-e2e", passed: true }).ok).toBe(true);
+    // BSC-7 slice-3a C-2: the completion ladder re-validates the closed human-approval
+    // required-set (the near-miss `10-` spelling canonicalizes, so the set resolves the
+    // same as the canonical stage); mint it so the full green ladder actually allows.
+    mintRequiredApprovals(paths, readState(paths).state!);
 
     expect(evaluateStopGate(paths).block).toBe(false);
   });

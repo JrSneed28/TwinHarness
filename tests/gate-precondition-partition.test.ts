@@ -28,10 +28,10 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, mintApprovalForFixture, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState } from "../src/core/state-schema";
-import { STAGE_PIPELINE } from "../src/core/stages";
+import { STAGE_PIPELINE, stageContract } from "../src/core/stages";
 import { runArtifactRegister } from "../src/commands/artifact";
 import * as gate from "../src/core/gate-preconditions";
 import type { ProjectPaths } from "../src/core/paths";
@@ -58,6 +58,10 @@ const SPEC_BUCKETS: Record<string, "always-run" | "forward-only" | "final"> = {
   checkGoverningArtifact: "forward-only",
   checkCoverage: "forward-only",
   checkImplementationSettled: "forward-only",
+  // BSC-7 / Axis-B slice-3a — the human-approval advance rung gates advancing OUT of a
+  // humanGate stage (per-stage forward progress), so it is forward-only — NOT a
+  // completion authority (that is the separate completion rung inside checkFinalVerification).
+  checkHumanApprovalAdvance: "forward-only",
   checkFinalVerification: "final",
 };
 
@@ -144,6 +148,16 @@ describe("R-29 Item 3 — partition-exhaustiveness of the canCompleteRun re-sele
           fs.mkdirSync(path.dirname(abs), { recursive: true });
           if (!fs.existsSync(abs)) fs.writeFileSync(abs, `# ${sc.stage}\n\n- REQ-001 covered.\n`, "utf8");
           runArtifactRegister(paths, rel, 1);
+        }
+        // BSC-7 / Axis-B slice-3a (ENFORCE): the human-approval advance rung now BLOCKS
+        // when crossing a humanGate stage with no valid approval, which would short-circuit
+        // canAdvanceStage at that stage and starve the downstream rungs (notably the final
+        // ladder, which runs AFTER this rung). Breadth-of-invocation is the goal here, so
+        // mint a snapshot+digest-bound approval for each humanGate stage AFTER its governing
+        // artifact is registered (so the digest binds to the on-disk artifact) — this lets
+        // the advance rung PASS and the later rungs still get invoked across the sweep.
+        if (stageContract(sc.stage)?.humanGate) {
+          mintApprovalForFixture(paths, sc.stage);
         }
         gate.canAdvanceStage(paths, readState(paths).state!);
       }

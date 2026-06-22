@@ -69,6 +69,7 @@ const budget_1 = require("./commands/budget");
 const handoff_1 = require("./commands/handoff");
 const inspector_1 = require("./commands/inspector");
 const tester_1 = require("./commands/tester");
+const approve_1 = require("./commands/approve");
 const manifest_1 = require("./commands/manifest");
 const preview_1 = require("./commands/preview");
 const scorecard_1 = require("./commands/scorecard");
@@ -173,6 +174,7 @@ Usage:
                                     Codebase-Inspector governed write: emit + auto-register the source-anchored brownfield analysis at docs/00-existing-codebase-analysis.md (path is fixed; refuses any other target)
   th tester record --driver <d> --passed [--provider real|sandbox] [--evidence-ref <p>]
                                     Attach the live-QA Tester record (.twinharness/tester-record.json) that satisfies the production-reality gate's Tester condition (--passed required to clear the gate; the record is bound to the run receipt + repo snapshot)
+  th approve [<stage>]              Mint the in-process human-approval receipt for a humanGate stage (default: current stage); bound to {stage, snapshot, governing-artifact digest}. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent grounding is the slice-3b external-signed producer)
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
   th delegate pack [--agent A] [--slice ID] [--task T] [--intent I] [--allowed-files <a,b,c>]
@@ -712,6 +714,10 @@ function dispatch(parsed) {
                 default:
                     return (0, output_1.failure)({ human: `unknown 'tester' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
+        // Axis-B slice-3a (BSC-7) — mint the in-process human-approval receipt the humanGate
+        // precondition reads. `<stage>` defaults to the run's current stage. Attribution-only.
+        case "approve":
+            return (0, approve_1.runApprove)(paths, sub);
         case "resume":
             return (0, handoff_1.runResume)(paths);
         case "migrate":

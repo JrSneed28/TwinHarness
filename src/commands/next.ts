@@ -63,6 +63,8 @@ export type NextKind =
   | "run-tester"
   | "ledger-simulation"
   | "fix-simulation-ledger"
+  // BSC-7 / Axis-B slice-3a — the human-approval completion rung action.
+  | "approve-stage"
   | "human-signoff"
   | "advance-stage"
   | "done";
@@ -512,6 +514,19 @@ export function runNext(paths: ProjectPaths, opts: NextOptions = {}): CommandRes
           explain,
         );
       }
+      case "human_approval_unverified": {
+        const stage = (fv.detail!.stage as string) ?? "";
+        const status = (fv.detail!.status as string) ?? "";
+        return emit(
+          {
+            kind: "approve-stage",
+            action: `Final verification is blocked — the human approval for the '${stage}' stage is ${status || "missing/invalid"}. A human must approve it at the current snapshot (\`th approve ${stage}\`) before sign-off; the approval binds the stage's governing artifact, so re-approve after any change to it.`,
+            why: "BSC-7: a `humanGate` stage must carry a snapshot- and artifact-bound human approval before completion. The closed required-set (engaged-and-not-future humanGate stages) is re-validated fresh at the completion gate, so an `--emergency`/`state set` jump cannot route around it.",
+            data: { stage, status },
+          },
+          explain,
+        );
+      }
     }
   }
 
@@ -742,6 +757,12 @@ export function renderStopReason(token: string, detail?: Record<string, unknown>
     }
     case "simulation_ledger_corrupt":
       return "Final verification is blocked — .twinharness/simulation-ledger.json is corrupt/unreadable. Inspect and repair it before sign-off (it must be a JSON array of simulation entries).";
+    // --- human-approval completion rung (BSC-7 / Axis-B slice-3a) ------------------
+    case "human_approval_unverified": {
+      const stage = typeof d.stage === "string" ? d.stage : "";
+      const status = typeof d.status === "string" ? d.status : "";
+      return `Final verification is blocked — the human approval for the '${stage}' stage is ${status || "missing/invalid"}. A human must approve it at the current snapshot (\`th approve ${stage}\`) before sign-off; the approval binds the stage's governing artifact, so re-approve after any change to it.`;
+    }
     default:
       // Honest fallback: never silent. The Stop↔next parity test asserts no
       // completion-relevant token reaches here (every such token has a sentence above).

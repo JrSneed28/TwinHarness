@@ -23,7 +23,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
@@ -82,6 +82,9 @@ function greenAtFinalVerification(): ProjectPaths {
   const reg = runArtifactRegister(paths, "docs/10-verification-report.md", 1);
   expect(reg.ok).toBe(true);
   attachTesterRecord(paths);
+  // BSC-7 slice-3a C-2: mint the closed human-approval required-set (docs-only placeholders,
+  // never touching dist/) so the completion rung passes and scan-coverage stays the lever.
+  mintRequiredApprovals(paths, state(paths));
   return paths;
 }
 

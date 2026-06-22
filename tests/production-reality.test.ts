@@ -2,8 +2,8 @@
  * SG3 P2-C — the production-reality gate (audit C-05..C-08).
  *
  * Covers:
- *  - The 4 `checkProductionReality` conditions independently (one stable token each)
- *    + the corrupt-ledger fail-closed token + the stage-aware no-op pre-final.
+ *  - The `checkProductionReality` production-reality conditions independently (one stable
+ *    token each) + the corrupt-ledger fail-closed token + the stage-aware no-op pre-final.
  *  - `th sim` add/list/retire lifecycle + the blocking-id read model.
  *  - `th sim scan` flags an unledgered `stub` in dist/.
  *  - SEAM-PARITY (C-A, mandatory): `th next` (via the composed ladder) AND the
@@ -20,15 +20,18 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, mintApprovalForFixture, mintRequiredApprovals, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
 import {
   checkProductionReality,
   canAdvanceStage,
+  canCompleteRun,
   checkFinalVerification,
+  requiredHumanGateStages,
 } from "../src/core/gate-preconditions";
+import { approvalReceiptsPath } from "../src/core/approvals";
 import { runNext } from "../src/commands/next";
 import { runSimAdd, runSimList, runSimRetire, runSimScan, simulationLedgerPath } from "../src/commands/sim";
 import { runGateProductionReality } from "../src/commands/gate";
@@ -85,11 +88,16 @@ function greenAtFinalVerification(): ProjectPaths {
   const reg = runArtifactRegister(paths, "docs/10-verification-report.md", 1);
   expect(reg.ok).toBe(true);
   attachTesterRecord(paths);
+  // BSC-7 slice-3a C-2: the completion rung now re-validates the closed human-approval
+  // required-set, so a green-at-final-verification run BLOCKS with human_approval_unverified
+  // until every engaged-and-not-future humanGate stage carries a valid approval. Mint them
+  // so the ONLY remaining lever stays the production-reality condition each test perturbs.
+  mintRequiredApprovals(paths, state(paths));
   return paths;
 }
 
-describe("checkProductionReality — the 4 conditions, each a distinct stable token", () => {
-  it("GREEN baseline passes (all four conditions satisfied)", () => {
+describe("checkProductionReality — the production-reality conditions, each a distinct stable token", () => {
+  it("GREEN baseline passes (all conditions satisfied)", () => {
     const paths = greenAtFinalVerification();
     expect(checkProductionReality(paths, state(paths))).toEqual({ ok: true });
   });
@@ -427,5 +435,81 @@ describe("e2e — production-reality gate red→green leg", () => {
     // (canAdvanceStage at the terminal final stage returns PASS through the gate;
     // the only thing left is the human sign-off the CLI cannot certify).
     expect(canAdvanceStage(paths, state(paths))).toEqual({ ok: true });
+  });
+});
+
+// ===========================================================================
+// BSC-7 / Axis-B slice-3a C-2 — the human-approval COMPLETION rung over the
+// CLOSED required-set (`requiredHumanGateStages`), plus final-verification
+// non-circularity (plan §3 S3 / §8).
+// ===========================================================================
+describe("BSC-7 completion rung — closed human-approval required-set (R1)", () => {
+  it("an engaged-and-not-future humanGate stage with no approval → human_approval_unverified", () => {
+    const paths = greenAtFinalVerification();
+    // greenAtFinalVerification mints the full required-set; strip it to the post-upgrade
+    // absent state (no marker ⇒ empty grandfather baseline ⇒ every required stage `absent`).
+    fs.rmSync(approvalReceiptsPath(paths), { force: true });
+    const res = checkProductionReality(paths, state(paths));
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("human_approval_unverified");
+    // The block names the FIRST failing required stage (a bounded {stage,status}).
+    expect(typeof res.detail!.stage).toBe("string");
+    expect(res.detail!.status).toBe("absent");
+    // The MCP read tool (th_gate_production_reality) reports the IDENTICAL verdict+token.
+    const reader = runGateProductionReality(paths);
+    expect(reader.ok).toBe(false);
+    expect(reader.data!.error).toBe("human_approval_unverified");
+  });
+
+  it("the FULLY-approved required-set passes the completion rung (non-vacuous)", () => {
+    const paths = greenAtFinalVerification(); // mints the whole required-set
+    expect(checkProductionReality(paths, state(paths))).toEqual({ ok: true });
+    expect(canCompleteRun(paths, state(paths))).toEqual({ ok: true });
+  });
+
+  it("no-UI run: ux-design/ui-design are N/A (not required), so a no-approval no-UI run is not blocked on them", () => {
+    const paths = greenAtFinalVerification();
+    // Flip to has_ui:false and recompute: the UI stages drop out of the required-set.
+    writeState(paths, { ...state(paths), has_ui: false });
+    const required = requiredHumanGateStages(state(paths));
+    expect(required).not.toContain("ux-design");
+    expect(required).not.toContain("ui-design");
+    // The gate still passes (the minted approvals for the remaining required stages stand;
+    // the dropped UI stages never contribute an `absent` block).
+    expect(checkProductionReality(paths, state(paths))).toEqual({ ok: true });
+  });
+
+  it("lower-tier run (T1) does not require security/contracts (not engaged at this tier)", () => {
+    const paths = greenAtFinalVerification(); // tier T1
+    const required = requiredHumanGateStages(state(paths));
+    expect(required).not.toContain("security"); // T3-only
+    expect(required).not.toContain("contracts"); // T2/T3-only
+    // The engaged-and-not-future humanGate set at T1/final-verification is exactly these.
+    expect(required).toEqual(["requirements", "scope", "architecture", "ux-design", "ui-design", "final-verification"]);
+  });
+});
+
+describe("BSC-7 final-verification non-circularity (plan §3 S3) — approval ≠ completion", () => {
+  it("the final-verification approval is minted BEFORE completion; absent → blocks, present → completes", () => {
+    const paths = greenAtFinalVerification();
+    // Start from the absent state for final-verification only (keep the earlier gates'
+    // approvals so the FIRST failing required stage is final-verification itself).
+    fs.rmSync(approvalReceiptsPath(paths), { force: true });
+    for (const s of requiredHumanGateStages(state(paths))) {
+      if (s !== "final-verification") mintApprovalForFixture(paths, s);
+    }
+    // ABSENT final-verification approval → completion blocks naming final-verification.
+    const blocked = canCompleteRun(paths, state(paths));
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error).toBe("human_approval_unverified");
+    expect(blocked.detail!.stage).toBe("final-verification");
+
+    // The final-verification approval can be minted WITHOUT first completing the run
+    // (no completion-before-approval path): its governing artifact is the verification
+    // report `docs/10-verification-report.md`, already authored+registered at this snapshot.
+    mintApprovalForFixture(paths, "final-verification");
+
+    // canCompleteRun only RE-VALIDATES the approval; it never PRODUCES it → no deadlock.
+    expect(canCompleteRun(paths, state(paths))).toEqual({ ok: true });
   });
 });

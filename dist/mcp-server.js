@@ -3230,8 +3230,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path38) {
-      let input = path38;
+    function removeDotSegments(path40) {
+      let input = path40;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3483,8 +3483,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path38, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path38 && path38 !== "/" ? path38 : void 0;
+        const [path40, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path40 && path40 !== "/" ? path40 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -3649,49 +3649,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative18, options, skipNormalization) {
+    function resolveComponent(base, relative19, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative18 = parse3(serialize(relative18, options), options);
+        relative19 = parse3(serialize(relative19, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative18.scheme) {
-        target.scheme = relative18.scheme;
-        target.userinfo = relative18.userinfo;
-        target.host = relative18.host;
-        target.port = relative18.port;
-        target.path = removeDotSegments(relative18.path || "");
-        target.query = relative18.query;
+      if (!options.tolerant && relative19.scheme) {
+        target.scheme = relative19.scheme;
+        target.userinfo = relative19.userinfo;
+        target.host = relative19.host;
+        target.port = relative19.port;
+        target.path = removeDotSegments(relative19.path || "");
+        target.query = relative19.query;
       } else {
-        if (relative18.userinfo !== void 0 || relative18.host !== void 0 || relative18.port !== void 0) {
-          target.userinfo = relative18.userinfo;
-          target.host = relative18.host;
-          target.port = relative18.port;
-          target.path = removeDotSegments(relative18.path || "");
-          target.query = relative18.query;
+        if (relative19.userinfo !== void 0 || relative19.host !== void 0 || relative19.port !== void 0) {
+          target.userinfo = relative19.userinfo;
+          target.host = relative19.host;
+          target.port = relative19.port;
+          target.path = removeDotSegments(relative19.path || "");
+          target.query = relative19.query;
         } else {
-          if (!relative18.path) {
+          if (!relative19.path) {
             target.path = base.path;
-            if (relative18.query !== void 0) {
-              target.query = relative18.query;
+            if (relative19.query !== void 0) {
+              target.query = relative19.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative18.path[0] === "/") {
-              target.path = removeDotSegments(relative18.path);
+            if (relative19.path[0] === "/") {
+              target.path = removeDotSegments(relative19.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative18.path;
+                target.path = "/" + relative19.path;
               } else if (!base.path) {
-                target.path = relative18.path;
+                target.path = relative19.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative18.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative19.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative18.query;
+            target.query = relative19.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3699,7 +3699,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative18.fragment;
+      target.fragment = relative19.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs39, exportName) {
+    function addFormats(ajv, list, fs40, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs39[f]);
+        ajv.addFormat(f, fs40[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -7152,10 +7152,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path38) {
-  if (!path38)
+function getElementAtPath(obj, path40) {
+  if (!path40)
     return obj;
-  return path38.reduce((acc, key) => acc?.[key], obj);
+  return path40.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7564,11 +7564,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path38, issues) {
+function prefixIssues(path40, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path38);
+    iss.path.unshift(path40);
     return iss;
   });
 }
@@ -7715,16 +7715,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path38 = []) => {
+  const processError = (error3, path40 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path38, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path40, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path38, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path40, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path38, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path40, ...issue2.path]);
       } else {
-        const fullpath = [...path38, ...issue2.path];
+        const fullpath = [...path40, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -15473,8 +15473,8 @@ var StdioServerTransport = class {
 };
 
 // src/mcp-server.ts
-var fs38 = __toESM(require("node:fs"));
-var path37 = __toESM(require("node:path"));
+var fs39 = __toESM(require("node:fs"));
+var path39 = __toESM(require("node:path"));
 
 // src/core/paths.ts
 var fs = __toESM(require("node:fs"));
@@ -17582,8 +17582,8 @@ function readDriftLog(paths) {
 function appendDriftLog(paths, block) {
   readDriftLog(paths);
   assertGovernedWriteSurface(paths.root, paths.driftLog);
-  const sep19 = endsWithNewline(paths.driftLog) ? "" : "\n";
-  fs10.appendFileSync(paths.driftLog, `${sep19}${block}`, "utf8");
+  const sep20 = endsWithNewline(paths.driftLog) ? "" : "\n";
+  fs10.appendFileSync(paths.driftLog, `${sep20}${block}`, "utf8");
 }
 function runDriftAdd(paths, opts) {
   return withStateLock(paths, () => runDriftAddLocked(paths, opts));
@@ -18332,8 +18332,8 @@ function ledgerCorruptFailure(e) {
 }
 
 // src/core/gate-preconditions.ts
-var fs22 = __toESM(require("node:fs"));
-var path21 = __toESM(require("node:path"));
+var fs23 = __toESM(require("node:fs"));
+var path22 = __toESM(require("node:path"));
 
 // src/core/health.ts
 var fs13 = __toESM(require("node:fs"));
@@ -22403,6 +22403,252 @@ function testerRecordPresent(paths) {
   return readTesterRecordValidated(paths).status === "valid";
 }
 
+// src/core/approvals.ts
+var fs22 = __toESM(require("node:fs"));
+var path21 = __toESM(require("node:path"));
+var HUMAN_GATE_STAGES = new Set(
+  STAGE_PIPELINE.filter((s) => s.humanGate).map((s) => s.stage)
+);
+function isHumanGateStage(stage) {
+  return HUMAN_GATE_STAGES.has(stage);
+}
+var APPROVAL_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "stage",
+  "approval_of",
+  "producer_identity",
+  "producer_kind",
+  "key_id",
+  "legacy",
+  "prevHash"
+];
+var GROUND_FIELD_ORDER = [
+  "snapshot_coord",
+  "governing_artifact_digest"
+];
+var SNAPSHOT_FIELD_ORDER3 = ["gitHead", "treeDigest"];
+function reorder2(obj, order) {
+  const out = {};
+  for (const key of order) out[key] = obj[key];
+  return out;
+}
+function approvalCanonicalText2(receipt) {
+  const ordered = {};
+  for (const key of APPROVAL_CANONICAL_FIELD_ORDER) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "approval_of") {
+      const g = val;
+      const normalized = {
+        snapshot_coord: reorder2(g.snapshot_coord, SNAPSHOT_FIELD_ORDER3),
+        governing_artifact_digest: g.governing_artifact_digest
+      };
+      ordered[key] = reorder2(normalized, GROUND_FIELD_ORDER);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeApprovalRecordHash(receipt) {
+  return hashContent(approvalCanonicalText2(receipt));
+}
+function approvalReceiptsPath(paths) {
+  return path21.join(paths.stateDir, "approval-receipts.jsonl");
+}
+function externalApprovalsPath(paths) {
+  return path21.join(paths.stateDir, "external-approvals.jsonl");
+}
+var ED25519_SIGNATURE_BASE643 = /^[A-Za-z0-9+/]{86}==$/;
+function isValidApproval(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "human-approval") return false;
+  if (typeof r.stage !== "string" || r.stage === "") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
+  if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
+  if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE643.test(r.signature))) {
+    return false;
+  }
+  const ground = r.approval_of;
+  if (typeof ground !== "object" || ground === null) return false;
+  const g = ground;
+  if (typeof g.governing_artifact_digest !== "string") return false;
+  const snap = g.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readApprovalReceipts(paths) {
+  return readJsonlValues(approvalReceiptsPath(paths), isValidApproval);
+}
+function readExternalApprovals(paths) {
+  return readJsonlValues(externalApprovalsPath(paths), isValidApproval);
+}
+function readLastApprovalRecordHash(paths) {
+  const last = scanTailValid(approvalReceiptsPath(paths), isValidApproval);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function verifyApprovalChain2(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeApprovalRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+var ApprovalUnmintableError = class extends Error {
+  constructor(message, code, stage, artifact) {
+    super(message);
+    this.stage = stage;
+    this.artifact = artifact;
+    this.name = "ApprovalUnmintableError";
+    this.code = code;
+  }
+  stage;
+  artifact;
+  /** Stable machine token for the CLI failure envelope. */
+  code;
+};
+function appendApprovalReceipt(paths, input) {
+  const contract = stageContract(input.stage);
+  if (!contract || !contract.humanGate) {
+    throw new ApprovalUnmintableError(
+      `Refusing to mint an approval for "${input.stage}": not a humanGate stage.`,
+      "approval_stage_not_human_gate",
+      input.stage
+    );
+  }
+  const artifact = contract.produces;
+  const digest = computeTargetDigest(paths.root, artifact);
+  if (digest === null) {
+    throw new ApprovalUnmintableError(
+      `Refusing to mint an approval for "${input.stage}": governing artifact "${artifact}" does not resolve in source.`,
+      "approval_artifact_unresolved",
+      input.stage,
+      artifact
+    );
+  }
+  return sealAndAppend2(paths, {
+    kind: "human-approval",
+    stage: input.stage,
+    approval_of: {
+      snapshot_coord: currentReceiptSnapshotCoord(paths),
+      governing_artifact_digest: digest
+    },
+    producer_identity: input.producerIdentity,
+    producer_kind: "in-process"
+  });
+}
+function sealAndAppend2(paths, receipt) {
+  assertGovernedWriteSurface(paths.root, approvalReceiptsPath(paths));
+  fs22.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastApprovalRecordHash(paths);
+  const withPrev = { ...receipt, prevHash };
+  const recordHash = computeApprovalRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs22.appendFileSync(approvalReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function snapshotStaleReasons2(recorded, current) {
+  const reasons = [];
+  if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
+    reasons.push("gitHead");
+  }
+  if (recorded.treeDigest !== null && current.treeDigest !== null && recorded.treeDigest !== current.treeDigest) {
+    reasons.push("treeDigest");
+  }
+  return reasons;
+}
+function classifyApprovalContent(paths, receipt, passStatus) {
+  const contract = stageContract(receipt.stage);
+  if (!contract || !contract.humanGate) return { status: "target_missing", receipt };
+  const recordedDigest = receipt.approval_of.governing_artifact_digest;
+  const currentDigest = computeTargetDigest(paths.root, contract.produces);
+  if (currentDigest === null) return { status: "target_missing", receipt };
+  if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt };
+  const staleReasons = snapshotStaleReasons2(
+    receipt.approval_of.snapshot_coord,
+    currentReceiptSnapshotCoord(paths)
+  );
+  if (staleReasons.length > 0) return { status: "stale", receipt, staleReasons };
+  return { status: passStatus, receipt };
+}
+function readApprovalValidated(paths, stage) {
+  const canonicalStage = stage;
+  const matches = (r) => r.stage === canonicalStage;
+  const inProcessReceipts = readApprovalReceipts(paths);
+  if (!verifyApprovalChain2(inProcessReceipts).ok) return { status: "tampered" };
+  let inProcess;
+  for (const r of inProcessReceipts) {
+    if (matches(r)) inProcess = r;
+  }
+  const externalCandidates = readExternalApprovals(paths).filter(
+    (r) => matches(r) && r.producer_kind === "external"
+  );
+  if (externalCandidates.length > 0) {
+    const verified = verifyExternalApproval(externalCandidates);
+    if (verified) {
+      if (verified.legacy === true) return { status: "legacy", receipt: verified };
+      return classifyApprovalContent(paths, verified, "valid-grounded");
+    }
+    return { status: "forged", receipt: externalCandidates[externalCandidates.length - 1] };
+  }
+  if (!inProcess) {
+    if (grandfatheredBaseline2(paths).has(stage)) return { status: "legacy" };
+    return { status: "absent" };
+  }
+  if (inProcess.legacy === true) return { status: "legacy", receipt: inProcess };
+  return classifyApprovalContent(paths, inProcess, "valid");
+}
+function verifyExternalApproval(_candidates) {
+  return void 0;
+}
+function migrationMarkerPath2(paths) {
+  return path21.join(paths.stateDir, ".approval-receipts-migration");
+}
+function readMigrationMarker2(paths) {
+  const file = migrationMarkerPath2(paths);
+  if (!fs22.existsSync(file)) return void 0;
+  let raw;
+  try {
+    raw = fs22.readFileSync(file, "utf8");
+  } catch {
+    return void 0;
+  }
+  const parsed = safeParseJson(raw);
+  if (typeof parsed !== "object" || parsed === null) return void 0;
+  const m = parsed;
+  if (typeof m.migratedAt !== "string") return void 0;
+  if (!Array.isArray(m.baseline) || !m.baseline.every((x) => typeof x === "string")) return void 0;
+  return { migratedAt: m.migratedAt, baseline: m.baseline };
+}
+function grandfatheredBaseline2(paths) {
+  const marker = readMigrationMarker2(paths);
+  if (!marker) return /* @__PURE__ */ new Set();
+  const receipts = readApprovalReceipts(paths);
+  if (!verifyApprovalChain2(receipts).ok) return /* @__PURE__ */ new Set();
+  const stampedLegacy = /* @__PURE__ */ new Set();
+  for (const r of receipts) {
+    if (r.legacy === true) stampedLegacy.add(r.stage);
+  }
+  return new Set(marker.baseline.filter((s) => stampedLegacy.has(s)));
+}
+
 // src/core/gate-preconditions.ts
 var PASS = { ok: true };
 function checkBlockingDrift(state) {
@@ -22482,7 +22728,7 @@ function checkGoverningArtifact(paths, state) {
     const produced = contract.produces.replace(/\/$/, "");
     const registered = state.approved_artifacts.some((a) => a.file === produced);
     if (!registered) {
-      const exists = fs22.existsSync(path21.resolve(paths.root, produced));
+      const exists = fs23.existsSync(path22.resolve(paths.root, produced));
       if (!exists) {
         return { ok: false, error: "artifact_not_produced", detail: { stage: current, produces: contract.produces } };
       }
@@ -22522,6 +22768,19 @@ function checkImplementationSettled(state) {
   }
   return PASS;
 }
+function checkHumanApprovalAdvance(paths, state) {
+  const current = canonicalizeStage(state.current_stage);
+  if (!isHumanGateStage(current)) return PASS;
+  const validated = readApprovalValidated(paths, current);
+  if (validated.status === "valid" || validated.status === "valid-grounded" || validated.status === "legacy") {
+    return PASS;
+  }
+  return {
+    ok: false,
+    error: "human_approval_unverified",
+    detail: { stage: current, status: validated.status }
+  };
+}
 function checkFinalVerification(paths, state) {
   const prog = sliceProgress(state);
   if (!prog.allSettled && prog.total > 0) {
@@ -22543,7 +22802,7 @@ function checkFinalVerification(paths, state) {
     const produced = contract.produces.replace(/\/$/, "");
     const registered = state.approved_artifacts.some((a) => a.file === produced);
     if (!registered) {
-      const exists = fs22.existsSync(path21.resolve(paths.root, produced));
+      const exists = fs23.existsSync(path22.resolve(paths.root, produced));
       return exists ? { ok: false, error: "report_not_registered", detail: { file: produced } } : { ok: false, error: "report_not_produced", detail: { produces: produced } };
     }
   }
@@ -22582,6 +22841,20 @@ function checkProductionReality(paths, state) {
           refId: ent.refId,
           status: v.status,
           ...v.staleReasons ? { staleReasons: v.staleReasons } : {}
+        }
+      };
+    }
+  }
+  for (const stage of requiredHumanGateStages(state)) {
+    const a = readApprovalValidated(paths, stage);
+    if (a.status !== "valid" && a.status !== "valid-grounded" && a.status !== "legacy") {
+      return {
+        ok: false,
+        error: "human_approval_unverified",
+        detail: {
+          stage,
+          status: a.status,
+          ...a.staleReasons ? { staleReasons: a.staleReasons } : {}
         }
       };
     }
@@ -22634,6 +22907,10 @@ function stageOrdinal(stage) {
   const canonical = canonicalizeStage(stage);
   return STAGE_PIPELINE.findIndex((s) => s.stage === canonical);
 }
+function requiredHumanGateStages(state) {
+  const currentOrdinal = stageOrdinal(state.current_stage);
+  return engagedStagesFor(state).filter((s) => s.humanGate && stageOrdinal(s.stage) <= currentOrdinal).map((s) => s.stage);
+}
 var IMPLEMENTATION_PLANNING_ORDINAL = STAGE_PIPELINE.findIndex((s) => s.stage === "implementation-planning");
 var REQUIREMENTS_ORDINAL = STAGE_PIPELINE.findIndex((s) => s.stage === "requirements");
 function interviewRequired(state) {
@@ -22664,6 +22941,12 @@ var STAGE_RUNGS = [
   { id: "checkGoverningArtifact", bucket: "forward-only", scope: "stage:non-final-artifact", run: (p, s) => checkGoverningArtifact(p, s) },
   { id: "checkCoverage", bucket: "forward-only", scope: "stage:implementation-planning", run: (p) => checkCoverage(p) },
   { id: "checkImplementationSettled", bucket: "forward-only", scope: "stage:implementation", run: (_p, s) => checkImplementationSettled(s) },
+  // BSC-7 / Axis-B slice-3a — the human-approval advance rung. `forward-only`: it gates
+  // advancing OUT of a humanGate stage (a per-stage forward-progress block), NOT
+  // completion. Completion enforcement over the CLOSED required-set is the separate C-2
+  // rung composed inside checkFinalVerification (`final`), so this entry must NOT be
+  // `final` or it would double-gate at the completion boundary.
+  { id: "checkHumanApprovalAdvance", bucket: "forward-only", scope: "stage:human-approval-advance", run: (p, s) => checkHumanApprovalAdvance(p, s) },
   { id: "checkFinalVerification", bucket: "final", scope: "stage:final", run: (p, s) => checkFinalVerification(p, s) }
 ];
 var CAN_ADVANCE_RUNGS = [...GLOBAL_RUNGS, ...STAGE_RUNGS];
@@ -22677,6 +22960,8 @@ function rungAppliesAtStage(rung, stage) {
       return stage === "implementation-planning";
     case "stage:implementation":
       return stage === "implementation";
+    case "stage:human-approval-advance":
+      return isHumanGateStage(canonicalizeStage(stage));
     case "stage:final":
       return isFinalVerification(stage);
   }
@@ -22819,10 +23104,10 @@ function conflictPairs(slices) {
 }
 
 // src/core/leases.ts
-var fs23 = __toESM(require("node:fs"));
-var path22 = __toESM(require("node:path"));
+var fs24 = __toESM(require("node:fs"));
+var path23 = __toESM(require("node:path"));
 function leasesPath(paths) {
-  return path22.join(paths.stateDir, "build-leases.jsonl");
+  return path23.join(paths.stateDir, "build-leases.jsonl");
 }
 var LEASE_FIELD_ORDER = [
   "ts",
@@ -22842,9 +23127,9 @@ function serializeLeaseEvent(event) {
 }
 function readLeaseEvents(paths) {
   const file = leasesPath(paths);
-  if (!fs23.existsSync(file)) return [];
+  if (!fs24.existsSync(file)) return [];
   const out = [];
-  for (const line of fs23.readFileSync(file, "utf8").split(/\r?\n/)) {
+  for (const line of fs24.readFileSync(file, "utf8").split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
@@ -22862,9 +23147,9 @@ function readLeaseEvents(paths) {
 }
 function appendLeaseEvent(paths, event, now = () => /* @__PURE__ */ new Date()) {
   assertGovernedWriteSurface(paths.root, leasesPath(paths));
-  fs23.mkdirSync(paths.stateDir, { recursive: true });
+  fs24.mkdirSync(paths.stateDir, { recursive: true });
   const line = serializeLeaseEvent({ ts: now().toISOString(), ...event }) + "\n";
-  fs23.appendFileSync(leasesPath(paths), line, "utf8");
+  fs24.appendFileSync(leasesPath(paths), line, "utf8");
 }
 function activeLeases(paths) {
   const byOwner = /* @__PURE__ */ new Map();
@@ -23059,7 +23344,7 @@ function computeRoute(input) {
 }
 
 // src/core/brief.ts
-var fs24 = __toESM(require("node:fs"));
+var fs25 = __toESM(require("node:fs"));
 function isPlainObject5(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -23095,12 +23380,12 @@ function validateBrief(value) {
   return { ok: true, issues: [], brief: value };
 }
 function loadBriefFromFile(filePath) {
-  if (!fs24.existsSync(filePath)) {
+  if (!fs25.existsSync(filePath)) {
     return { ok: false, issues: [{ path: "$", message: `brief file not found: ${filePath}` }] };
   }
   let raw;
   try {
-    raw = fs24.readFileSync(filePath, "utf8");
+    raw = fs25.readFileSync(filePath, "utf8");
   } catch (e) {
     return { ok: false, issues: [{ path: "$", message: `could not read brief: ${e.message}` }] };
   }
@@ -23406,7 +23691,7 @@ function readLeaseEventsForParent(paths, parentSlice) {
 }
 
 // src/commands/coverage.ts
-var path23 = __toESM(require("node:path"));
+var path24 = __toESM(require("node:path"));
 function rejectEscapingPath(paths, opts) {
   const fields = [
     ["reqsFile", opts.reqsFile],
@@ -23425,13 +23710,13 @@ function rejectEscapingPath(paths, opts) {
 function runCoverageCheck(paths, opts = {}) {
   const escaped = rejectEscapingPath(paths, opts);
   if (escaped) return escaped;
-  const reqsAbs = path23.resolve(paths.root, opts.reqsFile ?? "docs/01-requirements.md");
-  const planAbs = path23.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
-  const testsAbs = path23.resolve(paths.root, opts.testsDir ?? "tests");
-  const scopeAbs = path23.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
+  const reqsAbs = path24.resolve(paths.root, opts.reqsFile ?? "docs/01-requirements.md");
+  const planAbs = path24.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  const testsAbs = path24.resolve(paths.root, opts.testsDir ?? "tests");
+  const scopeAbs = path24.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
   const reqsContent = readFileOrUndefined(reqsAbs);
   if (reqsContent === void 0) {
-    const rel = path23.relative(paths.root, reqsAbs).split(path23.sep).join("/");
+    const rel = path24.relative(paths.root, reqsAbs).split(path24.sep).join("/");
     return failure({
       human: `Requirements file not found: ${rel}. Run \`th init\` and author requirements first.`,
       data: { error: "reqs_file_not_found", reqsFile: rel }
@@ -23524,19 +23809,19 @@ function runCoverageReport(paths, opts = {}) {
 }
 
 // src/core/telemetry.ts
-var fs25 = __toESM(require("node:fs"));
-var path24 = __toESM(require("node:path"));
+var fs26 = __toESM(require("node:fs"));
+var path25 = __toESM(require("node:path"));
 function telemetryConfigPath(paths) {
-  return path24.join(paths.stateDir, "telemetry.json");
+  return path25.join(paths.stateDir, "telemetry.json");
 }
 function telemetryLogPath(paths) {
-  return path24.join(paths.stateDir, "telemetry.jsonl");
+  return path25.join(paths.stateDir, "telemetry.jsonl");
 }
 function readTelemetryConfig(paths) {
   const file = telemetryConfigPath(paths);
-  if (!fs25.existsSync(file)) return { enabled: false };
+  if (!fs26.existsSync(file)) return { enabled: false };
   try {
-    const parsed = JSON.parse(fs25.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs26.readFileSync(file, "utf8"));
     if (parsed && typeof parsed === "object" && typeof parsed.enabled === "boolean") {
       return { enabled: parsed.enabled };
     }
@@ -23548,8 +23833,8 @@ function appendTelemetry(paths, record2) {
   if (!readTelemetryConfig(paths).enabled) return;
   try {
     assertGovernedWriteSurface(paths.root, telemetryLogPath(paths));
-    fs25.mkdirSync(paths.stateDir, { recursive: true });
-    fs25.appendFileSync(telemetryLogPath(paths), JSON.stringify(record2) + "\n", "utf8");
+    fs26.mkdirSync(paths.stateDir, { recursive: true });
+    fs26.appendFileSync(telemetryLogPath(paths), JSON.stringify(record2) + "\n", "utf8");
   } catch {
   }
 }
@@ -23930,6 +24215,19 @@ function runNext(paths, opts = {}) {
           explain
         );
       }
+      case "human_approval_unverified": {
+        const stage = fv.detail.stage ?? "";
+        const status = fv.detail.status ?? "";
+        return emit(
+          {
+            kind: "approve-stage",
+            action: `Final verification is blocked \u2014 the human approval for the '${stage}' stage is ${status || "missing/invalid"}. A human must approve it at the current snapshot (\`th approve ${stage}\`) before sign-off; the approval binds the stage's governing artifact, so re-approve after any change to it.`,
+            why: "BSC-7: a `humanGate` stage must carry a snapshot- and artifact-bound human approval before completion. The closed required-set (engaged-and-not-future humanGate stages) is re-validated fresh at the completion gate, so an `--emergency`/`state set` jump cannot route around it.",
+            data: { stage, status }
+          },
+          explain
+        );
+      }
     }
   }
   if (current === "implementation") {
@@ -24045,11 +24343,11 @@ why: ${next.why}` : `next: ${next.action}`;
 }
 
 // src/commands/delegate.ts
-var fs27 = __toESM(require("node:fs"));
+var fs28 = __toESM(require("node:fs"));
 
 // src/commands/context.ts
-var fs26 = __toESM(require("node:fs"));
-var path25 = __toESM(require("node:path"));
+var fs27 = __toESM(require("node:fs"));
+var path26 = __toESM(require("node:path"));
 
 // src/core/summary.ts
 var SUMMARY_HEADING_RE = /^(#{1,3})\s+summary\b/i;
@@ -24130,15 +24428,15 @@ function runContextPack(paths, opts = {}) {
   if (!r.state) return failure({ human: "state.json is invalid.", data: { error: "invalid_state", issues: r.issues } });
   const s = r.state;
   const packed = s.approved_artifacts.map((a) => {
-    const abs = path25.resolve(paths.root, a.file);
+    const abs = path26.resolve(paths.root, a.file);
     let exists = false;
     let isDir = false;
     let content = "";
-    if (fs26.existsSync(abs)) {
-      const stat = fs26.statSync(abs);
+    if (fs27.existsSync(abs)) {
+      const stat = fs27.statSync(abs);
       if (stat.isFile()) {
         exists = true;
-        content = fs26.readFileSync(abs, "utf8");
+        content = fs27.readFileSync(abs, "utf8");
       } else if (stat.isDirectory()) {
         exists = true;
         isDir = true;
@@ -24282,15 +24580,15 @@ function runContextRead(paths, opts = {}) {
   let running = 0;
   let budgetExhausted = false;
   for (const f of files) {
-    const relKey = path25.relative(paths.root, path25.resolve(paths.root, f)).split(path25.sep).join("/");
+    const relKey = path26.relative(paths.root, path26.resolve(paths.root, f)).split(path26.sep).join("/");
     const abs = resolveWithinRoot(paths.root, f);
-    if (abs === null || !fs26.existsSync(abs) || !fs26.statSync(abs).isFile()) {
+    if (abs === null || !fs27.existsSync(abs) || !fs27.statSync(abs).isFile()) {
       results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
       continue;
     }
     let content;
     try {
-      content = fs26.readFileSync(abs, "utf8");
+      content = fs27.readFileSync(abs, "utf8");
     } catch {
       results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
       continue;
@@ -24610,13 +24908,13 @@ function runDelegateCheck(paths, opts) {
         data: { error: "path_outside_root", file: opts.file }
       });
     }
-    if (!fs27.existsSync(abs) || !fs27.statSync(abs).isFile()) {
+    if (!fs28.existsSync(abs) || !fs28.statSync(abs).isFile()) {
       return failure({
         human: `Capsule file not found: ${opts.file}`,
         data: { error: "capsule_not_found", file: opts.file }
       });
     }
-    text = fs27.readFileSync(abs, "utf8");
+    text = fs28.readFileSync(abs, "utf8");
   }
   const v = validateCapsule(text);
   structuredLog({ cmd: "delegate check", ok: v.ok, missing: v.missing.length });
@@ -24717,10 +25015,10 @@ function runBudgetCheck(paths, opts = {}) {
 }
 
 // src/commands/handoff.ts
-var fs28 = __toESM(require("node:fs"));
-var path26 = __toESM(require("node:path"));
+var fs29 = __toESM(require("node:fs"));
+var path27 = __toESM(require("node:path"));
 function handoffPath(paths) {
-  return path26.join(paths.stateDir, "HANDOFF.md");
+  return path27.join(paths.stateDir, "HANDOFF.md");
 }
 var HANDOFF_STATE_OPEN = "<!-- TH-HANDOFF-STATE";
 var HANDOFF_STATE_CLOSE = "TH-HANDOFF-STATE -->";
@@ -24788,9 +25086,9 @@ function runHandoffWrite(paths) {
     HANDOFF_STATE_CLOSE,
     ""
   ].join("\n");
-  fs28.mkdirSync(paths.stateDir, { recursive: true });
+  fs29.mkdirSync(paths.stateDir, { recursive: true });
   atomicWriteFile(handoffPath(paths), md, { root: paths.root });
-  const relPath2 = path26.relative(paths.root, handoffPath(paths)).split(path26.sep).join("/");
+  const relPath2 = path27.relative(paths.root, handoffPath(paths)).split(path27.sep).join("/");
   structuredLog({ cmd: "handoff write", path: relPath2, slices: slices.length, artifacts: s.approved_artifacts.length });
   return success({
     data: {
@@ -24812,14 +25110,14 @@ function runHandoffWrite(paths) {
 }
 
 // src/commands/inspector.ts
-var path28 = __toESM(require("node:path"));
+var path29 = __toESM(require("node:path"));
 
 // src/commands/artifact.ts
-var fs29 = __toESM(require("node:fs"));
-var path27 = __toESM(require("node:path"));
+var fs30 = __toESM(require("node:fs"));
+var path28 = __toESM(require("node:path"));
 function toRelKey(root, file) {
-  const abs = path27.resolve(root, file);
-  return path27.relative(root, abs).split(path27.sep).join("/");
+  const abs = path28.resolve(root, file);
+  return path28.relative(root, abs).split(path28.sep).join("/");
 }
 function runArtifactRegister(paths, file, version2) {
   return withStateLock(paths, () => runArtifactRegisterLocked(paths, file, version2));
@@ -24833,10 +25131,10 @@ function runArtifactRegisterLocked(paths, file, version2) {
   if (abs === null) {
     return failure({ human: `Path outside project root: ${file}`, data: { error: "path_outside_root", file } });
   }
-  if (!fs29.existsSync(abs)) {
+  if (!fs30.existsSync(abs)) {
     return failure({ human: `File not found: ${file}`, data: { error: "file_not_found", file } });
   }
-  const stat = fs29.statSync(abs);
+  const stat = fs30.statSync(abs);
   if (!stat.isFile() && !stat.isDirectory()) {
     return failure({ human: `Not a file or directory: ${file}`, data: { error: "not_a_file_or_dir", file } });
   }
@@ -24865,7 +25163,7 @@ ${formatIssues(r.issues)}`,
   let summaryWarning = null;
   if (stat.isFile() && /\.(md|markdown)$/i.test(relKey)) {
     try {
-      const { summary } = extractSummary(fs29.readFileSync(abs, "utf8"));
+      const { summary } = extractSummary(fs30.readFileSync(abs, "utf8"));
       if (summary === null) {
         summaryWarning = `no \`## Summary\` block \u2014 \`th context pack\` will fall back to the file head; add a Summary block to keep the handoff tight.`;
       }
@@ -24951,14 +25249,14 @@ function runArtifactSection(paths, opts = {}) {
     structuredLog({ cmd: "artifact section", error: "path_outside_root", file: opts.file });
     return failure({ human: `Path outside project root: ${opts.file}`, data: { error: "path_outside_root", file: opts.file } });
   }
-  if (!fs29.existsSync(abs) || !fs29.statSync(abs).isFile()) {
+  if (!fs30.existsSync(abs) || !fs30.statSync(abs).isFile()) {
     structuredLog({ cmd: "artifact section", error: "file_not_found", file: opts.file });
     return failure({ human: `File not found: ${opts.file}`, data: { error: "file_not_found", file: opts.file } });
   }
   const relKey = toRelKey(paths.root, opts.file);
   let content;
   try {
-    content = fs29.readFileSync(abs, "utf8");
+    content = fs30.readFileSync(abs, "utf8");
   } catch {
     structuredLog({ cmd: "artifact section", error: "read_failed", file: relKey });
     return failure({ human: `Could not read ${relKey}`, data: { error: "read_failed", file: relKey } });
@@ -25058,7 +25356,7 @@ ${formatIssues(r.issues)}`,
   const guard = guardApprovedArtifactReauthor(r.state.approved_artifacts, INSPECTOR_ANALYSIS_FILE, opts.version, `inspector write ${INSPECTOR_ANALYSIS_FILE}`);
   if (!guard.ok) return guard.result;
   const version2 = guard.version;
-  const abs = path28.resolve(paths.root, INSPECTOR_ANALYSIS_FILE);
+  const abs = path29.resolve(paths.root, INSPECTOR_ANALYSIS_FILE);
   atomicWriteFile(abs, content, { root: paths.root });
   const reg = runArtifactRegister(paths, INSPECTOR_ANALYSIS_FILE, version2);
   if (!reg.ok) {
@@ -25073,11 +25371,11 @@ ${formatIssues(r.issues)}`,
   });
 }
 function normalizeRel(p) {
-  return p.split(path28.sep).join("/").replace(/^\.\//, "");
+  return p.split(path29.sep).join("/").replace(/^\.\//, "");
 }
 
 // src/commands/tester.ts
-var path29 = __toESM(require("node:path"));
+var path30 = __toESM(require("node:path"));
 function runTesterRecord(paths, opts) {
   const driver = (opts.driver ?? "").trim();
   if (driver === "") {
@@ -25112,7 +25410,7 @@ Pass --evidence-ref pointing at the live run's saved output (a readable file und
   const body = JSON.stringify(record2, null, 2) + "\n";
   atomicWriteFile(testerRecordPath(paths), body, { root: paths.root });
   const hash = shortHash(body);
-  const rel = path29.relative(paths.root, testerRecordPath(paths)).split(path29.sep).join("/");
+  const rel = path30.relative(paths.root, testerRecordPath(paths)).split(path30.sep).join("/");
   appendLedger(paths, { event: "tester-record", driver: record2.driver, provider: record2.provider ?? null, passed });
   structuredLog({ cmd: "tester record", driver: record2.driver, provider: record2.provider ?? null, passed });
   const gateNote = passed ? "The production-reality gate's Tester condition is now satisfied." : "NOTE: recorded as NOT passed (`--passed` absent) \u2014 the production-reality gate's Tester condition is NOT satisfied. Re-record with `--passed` once the live run is green.";
@@ -25123,9 +25421,69 @@ Pass --evidence-ref pointing at the live run's saved output (a readable file und
   });
 }
 
+// src/commands/approve.ts
+var path31 = __toESM(require("node:path"));
+function runApprove(paths, stage, opts = {}) {
+  return withStateLock(paths, () => runApproveLocked(paths, stage, opts));
+}
+function runApproveLocked(paths, stageArg, opts) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: "state.json is invalid; fix it before approving a stage.",
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const raw = (stageArg ?? r.state.current_stage ?? "").trim();
+  const stage = canonicalizeStage(raw);
+  if (stage === "") {
+    return failure({
+      human: "usage: th approve <stage>  (no stage given and the run has no current_stage to default to)",
+      data: { error: "approval_stage_required" }
+    });
+  }
+  const contract = stageContract(stage);
+  if (!contract || !contract.humanGate) {
+    return failure({
+      human: `Cannot approve "${stage}": it is not a humanGate stage. humanGate stages: requirements, scope, architecture, ux-design, ui-design, contracts, security, final-verification.`,
+      data: { error: "approval_stage_not_human_gate", stage }
+    });
+  }
+  let sealed;
+  try {
+    sealed = appendApprovalReceipt(paths, {
+      stage,
+      producerIdentity: opts.producerIdentity ?? "cli:th approve"
+    });
+  } catch (e) {
+    if (e instanceof ApprovalUnmintableError) {
+      return failure({
+        human: e.code === "approval_artifact_unresolved" ? `Refusing to approve "${stage}": its governing artifact "${e.artifact}" does not resolve in source. Author and register the stage artifact first, then approve.` : `Cannot approve "${stage}": ${e.message}`,
+        data: { error: e.code, stage, ...e.artifact ? { artifact: e.artifact } : {} }
+      });
+    }
+    throw e;
+  }
+  const rel = path31.relative(paths.root, approvalReceiptsPath(paths)).split(path31.sep).join("/");
+  appendLedger(paths, { event: "approve", stage, approvalRecordHash: sealed.recordHash });
+  structuredLog({ cmd: "approve", stage, approvalRecordHash: sealed.recordHash });
+  return success({
+    data: {
+      file: rel,
+      stage,
+      producer_kind: sealed.producer_kind ?? "in-process",
+      governing_artifact_digest: sealed.approval_of.governing_artifact_digest,
+      recordHash: sealed.recordHash
+    },
+    human: `Recorded an in-process human-approval receipt for "${stage}" at ${rel} (governing artifact: ${contract.produces}). NOTE: this in-process record is ATTRIBUTION-ONLY (zero trust weight) \u2014 the agent can mint it; independent grounding requires the slice-3b external-signed producer.`,
+    receipts: [{ file: rel, hash: sealed.recordHash }]
+  });
+}
+
 // src/commands/decision.ts
-var fs30 = __toESM(require("node:fs"));
-var path30 = __toESM(require("node:path"));
+var fs31 = __toESM(require("node:fs"));
+var path32 = __toESM(require("node:path"));
 
 // src/core/decision-key.ts
 function resolveDecisionKey() {
@@ -25184,14 +25542,14 @@ function firstHeading(body) {
 }
 function runDecisionDetect(paths, _opts = {}) {
   const candidates = [];
-  const adrDir = path30.join(paths.docsDir, "05-adrs");
+  const adrDir = path32.join(paths.docsDir, "05-adrs");
   try {
-    const entries = fs30.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
+    const entries = fs31.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
     for (const f of entries) {
-      const rel = path30.posix.join("docs/05-adrs", f);
+      const rel = path32.posix.join("docs/05-adrs", f);
       let title = f;
       try {
-        const heading = firstHeading(fs30.readFileSync(path30.join(adrDir, f), "utf8"));
+        const heading = firstHeading(fs31.readFileSync(path32.join(adrDir, f), "utf8"));
         if (heading) title = heading;
       } catch {
       }
@@ -25200,7 +25558,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const driftBody = fs30.readFileSync(paths.driftLog, "utf8");
+    const driftBody = fs31.readFileSync(paths.driftLog, "utf8");
     const seen = /* @__PURE__ */ new Set();
     for (const line of driftBody.split(/\r?\n/)) {
       const m = /^##\s+(DRIFT-\d+)\b(.*)$/.exec(line);
@@ -25219,7 +25577,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const scopeBody = fs30.readFileSync(path30.join(paths.docsDir, "02-scope.md"), "utf8");
+    const scopeBody = fs31.readFileSync(path32.join(paths.docsDir, "02-scope.md"), "utf8");
     if (/(^##\s+Changes\b)|(^\s*(ADDED|CHANGED):)/m.test(scopeBody)) {
       candidates.push({
         title: "Scope signal: a post-requirements scope change is recorded",
@@ -25334,15 +25692,15 @@ function sealWarningData(events) {
 }
 
 // src/commands/template.ts
-var fs31 = __toESM(require("node:fs"));
-var path31 = __toESM(require("node:path"));
+var fs32 = __toESM(require("node:fs"));
+var path33 = __toESM(require("node:path"));
 var TEMPLATE_EXT = ".md";
-var PROJECT_TEMPLATE_REL = path31.join(".twinharness", "templates");
+var PROJECT_TEMPLATE_REL = path33.join(".twinharness", "templates");
 var PLUGIN_TEMPLATE_REL = "templates";
 function pluginRoot() {
   const env = process.env.CLAUDE_PLUGIN_ROOT;
-  if (typeof env === "string" && env.length > 0) return path31.resolve(env);
-  return path31.resolve(__dirname, "..", "..");
+  if (typeof env === "string" && env.length > 0) return path33.resolve(env);
+  return path33.resolve(__dirname, "..", "..");
 }
 function normalizeTemplateName(name) {
   const trimmed = name.trim();
@@ -25353,15 +25711,15 @@ function normalizeTemplateName(name) {
   return trimmed.toLowerCase().endsWith(TEMPLATE_EXT) ? trimmed : trimmed + TEMPLATE_EXT;
 }
 function resolve17(name, projectRoot, plugin) {
-  const projectPath = path31.join(projectRoot, PROJECT_TEMPLATE_REL, name);
-  const pluginPath = path31.join(plugin, PLUGIN_TEMPLATE_REL, name);
+  const projectPath = path33.join(projectRoot, PROJECT_TEMPLATE_REL, name);
+  const pluginPath = path33.join(plugin, PLUGIN_TEMPLATE_REL, name);
   for (const [abs, source] of [
     [projectPath, "project-override"],
     [pluginPath, "plugin-bundled"]
   ]) {
     try {
-      const st = fs31.statSync(abs);
-      if (st.isFile()) return { path: abs, content: fs31.readFileSync(abs, "utf8"), source };
+      const st = fs32.statSync(abs);
+      if (st.isFile()) return { path: abs, content: fs32.readFileSync(abs, "utf8"), source };
     } catch {
     }
   }
@@ -25396,17 +25754,17 @@ function runTemplateGet(paths, name) {
   });
 }
 function listTemplateDir(dir) {
-  if (!fs31.existsSync(dir)) return [];
+  if (!fs32.existsSync(dir)) return [];
   try {
-    if (!fs31.statSync(dir).isDirectory()) return [];
-    return fs31.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(TEMPLATE_EXT)).map((e) => e.name);
+    if (!fs32.statSync(dir).isDirectory()) return [];
+    return fs32.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(TEMPLATE_EXT)).map((e) => e.name);
   } catch {
     return [];
   }
 }
 function runTemplateList(paths) {
-  const projectDir = path31.join(paths.root, PROJECT_TEMPLATE_REL);
-  const pluginDir = path31.join(pluginRoot(), PLUGIN_TEMPLATE_REL);
+  const projectDir = path33.join(paths.root, PROJECT_TEMPLATE_REL);
+  const pluginDir = path33.join(pluginRoot(), PLUGIN_TEMPLATE_REL);
   const projectNames = new Set(listTemplateDir(projectDir));
   const pluginNames = new Set(listTemplateDir(pluginDir));
   const byName = /* @__PURE__ */ new Map();
@@ -25504,10 +25862,10 @@ function runArtifactLeases(paths) {
 }
 
 // src/core/collab.ts
-var fs32 = __toESM(require("node:fs"));
-var path32 = __toESM(require("node:path"));
+var fs33 = __toESM(require("node:fs"));
+var path34 = __toESM(require("node:path"));
 function validatePathSegment(segment, label) {
-  if (path32.isAbsolute(segment)) {
+  if (path34.isAbsolute(segment)) {
     throw new PathContainmentError(`collab: ${label} must not be an absolute path: "${segment}"`, segment);
   }
   if (segment === ".." || segment.includes("/") || segment.includes("\\")) {
@@ -25528,16 +25886,16 @@ var FragmentExistsError = class extends Error {
 function collabDir(paths, stage, round) {
   validatePathSegment(stage, "stage");
   if (round !== void 0) validatePathSegment(round, "round");
-  const base = path32.join(paths.stateDir, "collab", stage);
-  return round === void 0 ? base : path32.join(base, round);
+  const base = path34.join(paths.stateDir, "collab", stage);
+  return round === void 0 ? base : path34.join(base, round);
 }
 function writeFragment(paths, input) {
   validatePathSegment(input.name, "name");
   const dir = collabDir(paths, input.stage, input.round);
-  const file = path32.join(dir, input.name);
-  fs32.mkdirSync(dir, { recursive: true });
+  const file = path34.join(dir, input.name);
+  fs33.mkdirSync(dir, { recursive: true });
   try {
-    fs32.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
+    fs33.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
   } catch (e) {
     if (e.code === "EEXIST") throw new FragmentExistsError(file);
     throw e;
@@ -25548,10 +25906,10 @@ function listFragments(paths, stage, round) {
   const out = [];
   const readRound = (r) => {
     const dir = collabDir(paths, stage, r);
-    if (!fs32.existsSync(dir) || !fs32.statSync(dir).isDirectory()) return;
-    const names = fs32.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
+    if (!fs33.existsSync(dir) || !fs33.statSync(dir).isDirectory()) return;
+    const names = fs33.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
     for (const name of names) {
-      out.push({ stage, round: r, name, path: path32.join(dir, name) });
+      out.push({ stage, round: r, name, path: path34.join(dir, name) });
     }
   };
   if (round !== void 0) {
@@ -25559,8 +25917,8 @@ function listFragments(paths, stage, round) {
     return out;
   }
   const stageDir = collabDir(paths, stage);
-  if (!fs32.existsSync(stageDir) || !fs32.statSync(stageDir).isDirectory()) return out;
-  const rounds = fs32.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  if (!fs33.existsSync(stageDir) || !fs33.statSync(stageDir).isDirectory()) return out;
+  const rounds = fs33.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
   for (const r of rounds) readRound(r);
   return out;
 }
@@ -25569,14 +25927,14 @@ function mergeFragments(paths, stage, round) {
   const fragments = listFragments(paths, stage, round);
   const unanchored = [];
   for (const f of fragments) {
-    const content = fs32.readFileSync(f.path, "utf8");
+    const content = fs33.readFileSync(f.path, "utf8");
     if (extractReqIds(content).length === 0) unanchored.push(f.name);
   }
   if (unanchored.length > 0) {
     return { ok: false, merged: "", fragments, unanchored };
   }
   const parts = fragments.map((f) => {
-    const content = fs32.readFileSync(f.path, "utf8");
+    const content = fs33.readFileSync(f.path, "utf8");
     return content.endsWith("\n") ? content : `${content}
 `;
   });
@@ -25689,8 +26047,8 @@ function runCollabMerge(paths, opts) {
 }
 
 // src/commands/debate.ts
-var fs33 = __toESM(require("node:fs"));
-var path33 = __toESM(require("node:path"));
+var fs34 = __toESM(require("node:fs"));
+var path35 = __toESM(require("node:path"));
 
 // src/core/debate-log.ts
 var DEBATE_LEDGER = {
@@ -25758,22 +26116,22 @@ Links      : ...
 \`\`\`
 `;
 function debateLogPath(paths) {
-  return path33.join(paths.root, "debate-log.md");
+  return path35.join(paths.root, "debate-log.md");
 }
 function readDebateLog(paths) {
   const file = debateLogPath(paths);
-  if (!fs33.existsSync(file)) {
+  if (!fs34.existsSync(file)) {
     atomicWriteFile(file, DEBATE_LOG_HEADER, { root: paths.root });
     return DEBATE_LOG_HEADER;
   }
-  return fs33.readFileSync(file, "utf8");
+  return fs34.readFileSync(file, "utf8");
 }
 function appendDebateLog(paths, block) {
   const file = debateLogPath(paths);
   readDebateLog(paths);
   assertGovernedWriteSurface(paths.root, file);
-  const sep19 = endsWithNewline(file) ? "" : "\n";
-  fs33.appendFileSync(file, `${sep19}${block}`, "utf8");
+  const sep20 = endsWithNewline(file) ? "" : "\n";
+  fs34.appendFileSync(file, `${sep20}${block}`, "utf8");
 }
 function runDebateAdd(paths, opts) {
   const locked = assertFeatureUnlocked(paths, "debate");
@@ -25836,7 +26194,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs33.existsSync(file) ? fs33.readFileSync(file, "utf8") : "";
+  const text = fs34.existsSync(file) ? fs34.readFileSync(file, "utf8") : "";
   const entries = sortById(effectiveEntries(parseDebateEntries(text)));
   const openBlocking = r.state.debate_open_blocking ?? 0;
   const human = entries.length ? entries.map((e) => `${e.id}  (${e.topic})  ${e.status}`).join("\n") : "(no debate entries)";
@@ -25872,7 +26230,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs33.existsSync(file) ? fs33.readFileSync(file, "utf8") : "";
+  const text = fs34.existsSync(file) ? fs34.readFileSync(file, "utf8") : "";
   const entries = parseDebateEntries(text);
   const entry = entries.find((e) => e.id === id);
   if (!entry) {
@@ -25918,7 +26276,7 @@ ${formatIssues(r.issues)}`,
 }
 
 // src/commands/init.ts
-var fs34 = __toESM(require("node:fs"));
+var fs35 = __toESM(require("node:fs"));
 var DRIFT_LOG_HEADER2 = `# Drift Log
 
 Append-only record of implementation discoveries (spec \xA710). Each entry records the
@@ -25953,11 +26311,11 @@ function runInit(paths, opts) {
   const created = [];
   const skipped = [];
   const maxTokens = opts.maxTokens !== void 0 && Number.isFinite(opts.maxTokens) && opts.maxTokens > 0 ? kToTokens(opts.maxTokens) : void 0;
-  if (!fs34.existsSync(paths.docsDir)) {
-    fs34.mkdirSync(paths.docsDir, { recursive: true });
+  if (!fs35.existsSync(paths.docsDir)) {
+    fs35.mkdirSync(paths.docsDir, { recursive: true });
     created.push("docs/");
   }
-  fs34.mkdirSync(paths.stateDir, { recursive: true });
+  fs35.mkdirSync(paths.stateDir, { recursive: true });
   const existing = readState(paths);
   if (existing.exists && !opts.force) {
     if (maxTokens !== void 0 && existing.state) {
@@ -25983,7 +26341,7 @@ ${formatIssues(validation.issues)}`,
     writeState(paths, state);
     created.push(".twinharness/state.json");
   }
-  if (!fs34.existsSync(paths.driftLog)) {
+  if (!fs35.existsSync(paths.driftLog)) {
     atomicWriteFile(paths.driftLog, DRIFT_LOG_HEADER2, { root: paths.root });
     created.push("drift-log.md");
   } else {
@@ -26027,7 +26385,7 @@ function runInitMcp(paths, opts = {}) {
 }
 
 // src/commands/research.ts
-var path34 = __toESM(require("node:path"));
+var path36 = __toESM(require("node:path"));
 var WINDOWS_RESERVED = /* @__PURE__ */ new Set([
   "con",
   "prn",
@@ -26056,7 +26414,7 @@ function sanitizeTopic(topic) {
   const raw = topic.trim();
   if (raw === "") return { error: "empty topic" };
   if (raw.includes("/") || raw.includes("\\")) return { error: "topic must not contain a path separator" };
-  if (path34.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) return { error: "topic must not be an absolute or drive path" };
+  if (path36.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) return { error: "topic must not be an absolute or drive path" };
   if (raw.includes("..")) return { error: "topic must not contain `..`" };
   const stem = raw.replace(/\.(md|markdown)$/i, "");
   if (stem === "") return { error: "empty topic" };
@@ -26082,8 +26440,8 @@ function runResearchWrite(paths, opts) {
     return failure({ human: `Refusing research write: ${sanitized.error}: ${topic}`, data: { error: "invalid_topic", reason: sanitized.error, topic } });
   }
   const relTarget = `${RESEARCH_DIR}/${sanitized.stem}.md`;
-  const absTarget = path34.resolve(paths.root, relTarget);
-  const reRel = path34.relative(paths.root, absTarget).split(path34.sep).join("/");
+  const absTarget = path36.resolve(paths.root, relTarget);
+  const reRel = path36.relative(paths.root, absTarget).split(path36.sep).join("/");
   if (reRel !== relTarget) {
     return failure({ human: `Refusing research write outside ${RESEARCH_DIR}/: ${reRel}`, data: { error: "path_not_pinned", expected: relTarget, got: reRel } });
   }
@@ -26274,11 +26632,11 @@ function runStageCurrent(paths) {
 }
 
 // src/commands/doctor.ts
-var fs35 = __toESM(require("node:fs"));
-var path35 = __toESM(require("node:path"));
+var fs36 = __toESM(require("node:fs"));
+var path37 = __toESM(require("node:path"));
 var DOCTOR_STRICT_KEY_ALLOWLIST = /* @__PURE__ */ new Set([]);
 function pluginRoot2() {
-  return path35.resolve(__dirname, "..", "..");
+  return path37.resolve(__dirname, "..", "..");
 }
 function packagingCheck(root, files) {
   if (files.length === 0) {
@@ -26287,10 +26645,10 @@ function packagingCheck(root, files) {
   const missing = [];
   const counts = [];
   for (const entry of files) {
-    const abs = path35.join(root, entry);
+    const abs = path37.join(root, entry);
     let st;
     try {
-      st = fs35.statSync(abs);
+      st = fs36.statSync(abs);
     } catch {
       missing.push(entry);
       continue;
@@ -26298,7 +26656,7 @@ function packagingCheck(root, files) {
     if (st.isDirectory()) {
       let n = 0;
       try {
-        n = fs35.readdirSync(abs).length;
+        n = fs36.readdirSync(abs).length;
       } catch {
       }
       counts.push(`${entry}/ (${n})`);
@@ -26320,12 +26678,12 @@ function nodeMajor() {
   return m ? Number(m[1]) : 0;
 }
 function templateShadowCheck(root, pluginDir) {
-  const projectDir = path35.join(root, ".twinharness", "templates");
+  const projectDir = path37.join(root, ".twinharness", "templates");
   const mdFiles = (dir) => {
     try {
-      if (!fs35.statSync(dir).isDirectory()) return /* @__PURE__ */ new Set();
+      if (!fs36.statSync(dir).isDirectory()) return /* @__PURE__ */ new Set();
       return new Set(
-        fs35.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => e.name)
+        fs36.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => e.name)
       );
     } catch {
       return /* @__PURE__ */ new Set();
@@ -26347,7 +26705,7 @@ function templateShadowCheck(root, pluginDir) {
   };
 }
 function ledgerChecks(paths, opts) {
-  if (!fs35.existsSync(ledgerPath(paths))) return [];
+  if (!fs36.existsSync(ledgerPath(paths))) return [];
   const ledgerEntries = readLedger(paths);
   const ledgerCount = ledgerEntries.length;
   const anchors = ledgerEntries.filter((e) => e.event === "high-water").length;
@@ -26391,23 +26749,23 @@ function runDoctor(paths, opts = {}) {
     detail: major >= 20 ? `${process.version} (>= 20)` : `${process.version} \u2014 TwinHarness requires Node >= 20`
   });
   const root = pluginRoot2();
-  const distCli = path35.join(root, "dist", "cli.js");
+  const distCli = path37.join(root, "dist", "cli.js");
   checks.push({
     name: "plugin cli",
-    status: fs35.existsSync(distCli) ? "ok" : "warn",
-    detail: fs35.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary"
+    status: fs36.existsSync(distCli) ? "ok" : "warn",
+    detail: fs36.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary"
   });
   let version2 = "unknown";
   let pkgFiles = [];
   try {
-    const pkg = JSON.parse(fs35.readFileSync(path35.join(root, "package.json"), "utf8"));
+    const pkg = JSON.parse(fs36.readFileSync(path37.join(root, "package.json"), "utf8"));
     if (typeof pkg.version === "string") version2 = pkg.version;
     if (Array.isArray(pkg.files)) pkgFiles = pkg.files.filter((f) => typeof f === "string");
   } catch {
   }
   checks.push({ name: "version", status: "ok", detail: version2 });
   checks.push(packagingCheck(root, pkgFiles));
-  checks.push(templateShadowCheck(paths.root, path35.join(root, "templates")));
+  checks.push(templateShadowCheck(paths.root, path37.join(root, "templates")));
   checks.push({
     name: "claude code",
     status: "warn",
@@ -26443,11 +26801,11 @@ function runDoctor(paths, opts = {}) {
       status: "ok",
       detail: `mode: ${writeMode} \u2014 GUARDRAIL for a compliant agent, NOT a security sandbox. The Bash heuristic is conservative and fail-open (unparsed here-docs/subshells/variable indirection and program-mediated writes like \`python -c\`/\`node -e\` bypass it). Do not run TwinHarness against untrusted repos and review \`th verify list\` before \`th verify run\`.`
     });
-    const lockDir = path35.join(paths.stateDir, ".state.lock");
-    if (fs35.existsSync(lockDir)) {
+    const lockDir = path37.join(paths.stateDir, ".state.lock");
+    if (fs36.existsSync(lockDir)) {
       let age = 0;
       try {
-        age = Date.now() - fs35.statSync(lockDir).mtimeMs;
+        age = Date.now() - fs36.statSync(lockDir).mtimeMs;
       } catch {
       }
       checks.push({
@@ -26576,7 +26934,7 @@ function runDoctor(paths, opts = {}) {
 }
 
 // src/commands/scorecard.ts
-var fs36 = __toESM(require("node:fs"));
+var fs37 = __toESM(require("node:fs"));
 function summarizeRouting(paths) {
   const models = {};
   let events = 0;
@@ -26666,8 +27024,8 @@ function runScorecard(paths, opts) {
   const suiteFailures = report ? report.results.filter((x) => !x.ok).length : 0;
   let driftEntries = 0;
   try {
-    if (fs36.existsSync(paths.driftLog)) {
-      driftEntries = parseDriftEntries(fs36.readFileSync(paths.driftLog, "utf8")).length;
+    if (fs37.existsSync(paths.driftLog)) {
+      driftEntries = parseDriftEntries(fs37.readFileSync(paths.driftLog, "utf8")).length;
     }
   } catch {
   }
@@ -26731,8 +27089,8 @@ function renderScorecard(d) {
 }
 
 // src/commands/slices.ts
-var fs37 = __toESM(require("node:fs"));
-var path36 = __toESM(require("node:path"));
+var fs38 = __toESM(require("node:fs"));
+var path38 = __toESM(require("node:path"));
 function parseComponentTokens(raw) {
   const quoted = [];
   for (const m of raw.matchAll(/`([^`]+)`/g)) {
@@ -26783,15 +27141,15 @@ function runSlicesSync(paths, opts = {}) {
   return withStateLock(paths, () => runSlicesSyncLocked(paths, opts));
 }
 function runSlicesSyncLocked(paths, opts = {}) {
-  const planAbs = path36.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
-  if (!fs37.existsSync(planAbs) || !fs37.statSync(planAbs).isFile()) {
-    const rel = path36.relative(paths.root, planAbs).split(path36.sep).join("/");
+  const planAbs = path38.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  if (!fs38.existsSync(planAbs) || !fs38.statSync(planAbs).isFile()) {
+    const rel = path38.relative(paths.root, planAbs).split(path38.sep).join("/");
     return failure({
       human: `Plan file not found: ${rel}. Provide the path with --plan or author the implementation plan first.`,
       data: { error: "plan_file_not_found", planFile: rel }
     });
   }
-  const planContent = fs37.readFileSync(planAbs, "utf8");
+  const planContent = fs38.readFileSync(planAbs, "utf8");
   const planSlices = parsePlanSlices(planContent);
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
@@ -28130,7 +28488,7 @@ var TOOL_DEFS = [
   },
   {
     name: "th_gate_production_reality",
-    description: "Reader: report the production-reality gate (checkProductionReality). FIVE conditions, each a stable error token: simulation_unretired (a non-retired user-visible simulation), production_verify_not_green, tester_record_missing, unledgered_simulation_in_dist, scan_coverage_incomplete (a dist/ file the two-tier scan could not deep-inspect, not exonerated by a signed exception). The SAME predicate canAdvanceStage/canUnlockImplementation/checkFinalVerification compose, so a blocked th_stage_advance/th_implementation_unlock returns the IDENTICAL token. Read-only.",
+    description: "Reader: report the production-reality gate (checkProductionReality). SIX conditions, each a stable error token: simulation_unretired (a non-retired user-visible simulation), production_verify_not_green, tester_record_missing, unledgered_simulation_in_dist, scan_coverage_incomplete (a dist/ file the two-tier scan could not deep-inspect, not exonerated by a signed exception), human_approval_unverified (an engaged-and-not-future humanGate stage lacks a valid snapshot+artifact-bound human approval). The SAME predicate canAdvanceStage/canUnlockImplementation/checkFinalVerification compose, so a blocked th_stage_advance/th_implementation_unlock returns the IDENTICAL token. Read-only.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runGateProductionReality(paths)
   },
@@ -28180,6 +28538,18 @@ var TOOL_DEFS = [
       provider: optString(args, "provider"),
       evidenceRef: optString(args, "evidenceRef")
     })
+  },
+  {
+    name: "th_approve",
+    description: "Axis-B/BSC-7: mint the IN-PROCESS human-approval receipt the humanGate precondition reads (<stateDir>/approval-receipts.jsonl, hash-chained, under the state lock). `stage` defaults to the run's current stage; it MUST be a humanGate stage (requirements, scope, architecture, ux-design, ui-design, contracts, security, final-verification) and its governing `produces` artifact MUST resolve in source \u2014 else refused at creation. The approval is bound to {stage, snapshot_coord, governing_artifact_digest}. ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its validated status is `valid` NEVER `valid-grounded` \u2014 independent grounding is the slice-3b external Ed25519-signed producer. Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        stage: stringProp("The humanGate stage to approve (defaults to the run's current_stage when omitted).")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runApprove(paths, optString(args, "stage"))
   }
 ];
 var ro = (category) => ({ category, readOnlyHint: true, destructiveHint: false, idempotentHint: true });
@@ -28302,7 +28672,10 @@ var TOOL_ANNOTATIONS = {
   th_inspector_write: wr("artifact", { idempotent: true }),
   // SG3 P2-C — live-QA Tester record writer (overwriting the marker with a fresh run is
   // an idempotent overwrite of the single tester-record.json under the state dir).
-  th_tester_record: wr("tester", { idempotent: true })
+  th_tester_record: wr("tester", { idempotent: true }),
+  // Axis-B/BSC-7 — in-process human-approval producer. NOT idempotent: each call appends a
+  // fresh hash-chained approval record to approval-receipts.jsonl under the state dir.
+  th_approve: wr("stage", { idempotent: false })
 };
 function toolAnnotations(name) {
   return TOOL_ANNOTATIONS[name];
@@ -28422,6 +28795,7 @@ var CLI_COMMAND_LEAVES = [
   "sim retire",
   "sim scan",
   "tester record",
+  "approve",
   "gate production-reality",
   "collab init",
   "collab fragment",
@@ -28502,13 +28876,13 @@ function listTools() {
 var SERVER_NAME = "twinharness-th";
 function readServerVersion() {
   const candidates = [
-    path37.join(__dirname, "..", "package.json"),
-    path37.join(__dirname, "..", "..", "package.json")
+    path39.join(__dirname, "..", "package.json"),
+    path39.join(__dirname, "..", "..", "package.json")
   ];
   for (const candidate of candidates) {
     try {
-      if (fs38.existsSync(candidate)) {
-        const json = JSON.parse(fs38.readFileSync(candidate, "utf8"));
+      if (fs39.existsSync(candidate)) {
+        const json = JSON.parse(fs39.readFileSync(candidate, "utf8"));
         if (typeof json === "object" && json !== null && "version" in json) {
           const v = json.version;
           if (typeof v === "string") return v;
