@@ -276,6 +276,20 @@ function currentSnapshotCoord(root) {
     return { gitHead: (0, git_revision_1.gitHead)(root), treeDigest: (0, git_revision_1.dirtyTreeDigest)(root) };
 }
 /**
+ * Receipt snapshots bind to the source tree, not TwinHarness's own mutable
+ * governance ledgers. Excluding the selected state directory and drift log keeps a
+ * terminal command from invalidating its receipt merely by recording the flip.
+ */
+function currentReceiptSnapshotCoord(paths) {
+    const excludePaths = [paths.stateDir, paths.driftLog]
+        .map((p) => path.relative(paths.root, p))
+        .filter((p) => p !== "" && !path.isAbsolute(p) && p !== ".." && !p.startsWith(`..${path.sep}`));
+    return {
+        gitHead: (0, git_revision_1.gitHead)(paths.root),
+        treeDigest: (0, git_revision_1.dirtyTreeDigest)(paths.root, excludePaths),
+    };
+}
+/**
  * Thrown by {@link appendTerminalReceipt} when `targetPath` is supplied but does
  * NOT resolve in source (negative-control **c** at creation: a producer refuses
  * to mint a receipt whose ground is already missing).
@@ -320,7 +334,7 @@ function appendTerminalReceipt(paths, input) {
         kind: input.kind,
         refId: input.refId,
         target_resolves_in_source: { path: targetPath, digest },
-        snapshot_coord: currentSnapshotCoord(paths.root),
+        snapshot_coord: currentReceiptSnapshotCoord(paths),
         producer_identity: input.producerIdentity,
     });
 }
@@ -335,7 +349,7 @@ function appendLegacyReceipt(paths, kind, refId) {
         kind,
         refId,
         target_resolves_in_source: { path: "", digest: "" },
-        snapshot_coord: currentSnapshotCoord(paths.root),
+        snapshot_coord: currentReceiptSnapshotCoord(paths),
         producer_identity: "legacy-backfill",
         legacy: true,
     });
@@ -401,6 +415,8 @@ function snapshotStaleReasons(recorded, current) {
  */
 function readReceiptValidated(paths, kind, refId) {
     const receipts = readTerminalReceipts(paths);
+    if (!verifyReceiptChain(receipts).ok)
+        return { status: "tampered" };
     // LATEST matching receipt in file order (a re-flip mints a newer receipt).
     let found;
     for (const r of receipts) {
@@ -429,7 +445,7 @@ function readReceiptValidated(paths, kind, refId) {
         return { status: "target_missing", receipt: found }; // (c)
     if (currentDigest !== recordedDigest)
         return { status: "target_mismatch", receipt: found };
-    const staleReasons = snapshotStaleReasons(found.snapshot_coord, currentSnapshotCoord(paths.root));
+    const staleReasons = snapshotStaleReasons(found.snapshot_coord, currentReceiptSnapshotCoord(paths));
     if (staleReasons.length > 0)
         return { status: "stale", receipt: found, staleReasons }; // (a)
     return { status: "valid", receipt: found };
@@ -539,7 +555,9 @@ function collectTerminalEntities(paths) {
         driftText = ""; // no drift log → no resolved drifts
     }
     if (driftText !== "") {
-        const knownDriftIds = new Set((0, drift_log_1.parseDriftEntries)(driftText).map((e) => e.id));
+        const blockingDriftIds = new Set((0, drift_log_1.parseDriftEntries)(driftText)
+            .filter((e) => e.layer === "requirement")
+            .map((e) => e.id));
         const seen = new Set();
         for (const line of driftText.split(/\r?\n/)) {
             const m = /^##\s+(DRIFT-\d+)\s+—\s+resolved\s*$/.exec(line.trim());
@@ -548,7 +566,7 @@ function collectTerminalEntities(paths) {
             const id = m[1];
             // Only count a resolution note that corresponds to a real drift entry, and
             // only once per id.
-            if (knownDriftIds.has(id) && !seen.has(id)) {
+            if (blockingDriftIds.has(id) && !seen.has(id)) {
                 seen.add(id);
                 out.push({ kind: "drift-resolve", refId: id });
             }

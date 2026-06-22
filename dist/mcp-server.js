@@ -3649,49 +3649,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative17, options, skipNormalization) {
+    function resolveComponent(base, relative18, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative17 = parse3(serialize(relative17, options), options);
+        relative18 = parse3(serialize(relative18, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative17.scheme) {
-        target.scheme = relative17.scheme;
-        target.userinfo = relative17.userinfo;
-        target.host = relative17.host;
-        target.port = relative17.port;
-        target.path = removeDotSegments(relative17.path || "");
-        target.query = relative17.query;
+      if (!options.tolerant && relative18.scheme) {
+        target.scheme = relative18.scheme;
+        target.userinfo = relative18.userinfo;
+        target.host = relative18.host;
+        target.port = relative18.port;
+        target.path = removeDotSegments(relative18.path || "");
+        target.query = relative18.query;
       } else {
-        if (relative17.userinfo !== void 0 || relative17.host !== void 0 || relative17.port !== void 0) {
-          target.userinfo = relative17.userinfo;
-          target.host = relative17.host;
-          target.port = relative17.port;
-          target.path = removeDotSegments(relative17.path || "");
-          target.query = relative17.query;
+        if (relative18.userinfo !== void 0 || relative18.host !== void 0 || relative18.port !== void 0) {
+          target.userinfo = relative18.userinfo;
+          target.host = relative18.host;
+          target.port = relative18.port;
+          target.path = removeDotSegments(relative18.path || "");
+          target.query = relative18.query;
         } else {
-          if (!relative17.path) {
+          if (!relative18.path) {
             target.path = base.path;
-            if (relative17.query !== void 0) {
-              target.query = relative17.query;
+            if (relative18.query !== void 0) {
+              target.query = relative18.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative17.path[0] === "/") {
-              target.path = removeDotSegments(relative17.path);
+            if (relative18.path[0] === "/") {
+              target.path = removeDotSegments(relative18.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative17.path;
+                target.path = "/" + relative18.path;
               } else if (!base.path) {
-                target.path = relative17.path;
+                target.path = relative18.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative17.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative18.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative17.query;
+            target.query = relative18.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3699,7 +3699,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative17.fragment;
+      target.fragment = relative18.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -16973,11 +16973,18 @@ function gitHead(root) {
   if (head === null || head === "") return null;
   return head;
 }
-function dirtyTreeDigest(root) {
-  const status = git(root, ["status", "--porcelain"]);
+function dirtyTreeDigest(root, excludePaths = []) {
+  const pathspec = excludePaths.length === 0 ? [] : [
+    "--",
+    ".",
+    ...excludePaths.map(
+      (p) => `:(exclude,literal)${p.replace(/\\/g, "/").replace(/^\.\/+/, "")}`
+    )
+  ];
+  const status = git(root, ["status", "--porcelain", ...pathspec]);
   if (status === null) return null;
   if (status === "") return CLEAN_TREE_DIGEST;
-  const diff = git(root, ["diff", "HEAD"]) ?? "";
+  const diff = git(root, ["diff", "HEAD", ...pathspec]) ?? "";
   return (0, import_node_crypto3.createHash)("sha256").update(status + "\n\0\n" + diff, "utf8").digest("hex");
 }
 var CLEAN_TREE_DIGEST = "clean";
@@ -17234,6 +17241,22 @@ function readLastReceiptRecordHash(paths) {
   const last = scanTailValid(terminalReceiptsPath(paths), isValidReceipt);
   return last ? last.recordHash : GENESIS_PREV_HASH;
 }
+function verifyReceiptChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeRecordHash2(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
 function computeTargetDigest(root, relPath) {
   if (relPath === "") return null;
   const abs = resolveWithinRoot(root, relPath);
@@ -17245,8 +17268,12 @@ function computeTargetDigest(root, relPath) {
     return null;
   }
 }
-function currentSnapshotCoord(root) {
-  return { gitHead: gitHead(root), treeDigest: dirtyTreeDigest(root) };
+function currentReceiptSnapshotCoord(paths) {
+  const excludePaths = [paths.stateDir, paths.driftLog].map((p) => path7.relative(paths.root, p)).filter((p) => p !== "" && !path7.isAbsolute(p) && p !== ".." && !p.startsWith(`..${path7.sep}`));
+  return {
+    gitHead: gitHead(paths.root),
+    treeDigest: dirtyTreeDigest(paths.root, excludePaths)
+  };
 }
 var TargetUnresolvedError = class extends Error {
   constructor(message, target) {
@@ -17276,7 +17303,7 @@ function appendTerminalReceipt(paths, input) {
     kind: input.kind,
     refId: input.refId,
     target_resolves_in_source: { path: targetPath, digest },
-    snapshot_coord: currentSnapshotCoord(paths.root),
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
     producer_identity: input.producerIdentity
   });
 }
@@ -17285,7 +17312,7 @@ function appendLegacyReceipt(paths, kind, refId) {
     kind,
     refId,
     target_resolves_in_source: { path: "", digest: "" },
-    snapshot_coord: currentSnapshotCoord(paths.root),
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
     producer_identity: "legacy-backfill",
     legacy: true
   });
@@ -17312,6 +17339,7 @@ function snapshotStaleReasons(recorded, current) {
 }
 function readReceiptValidated(paths, kind, refId) {
   const receipts = readTerminalReceipts(paths);
+  if (!verifyReceiptChain(receipts).ok) return { status: "tampered" };
   let found;
   for (const r of receipts) {
     if (r.kind === kind && r.refId === refId) found = r;
@@ -17328,7 +17356,7 @@ function readReceiptValidated(paths, kind, refId) {
   const currentDigest = computeTargetDigest(paths.root, recordedPath);
   if (currentDigest === null) return { status: "target_missing", receipt: found };
   if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt: found };
-  const staleReasons = snapshotStaleReasons(found.snapshot_coord, currentSnapshotCoord(paths.root));
+  const staleReasons = snapshotStaleReasons(found.snapshot_coord, currentReceiptSnapshotCoord(paths));
   if (staleReasons.length > 0) return { status: "stale", receipt: found, staleReasons };
   return { status: "valid", receipt: found };
 }
@@ -17389,13 +17417,15 @@ function collectTerminalEntities(paths) {
     driftText = "";
   }
   if (driftText !== "") {
-    const knownDriftIds = new Set(parseDriftEntries(driftText).map((e) => e.id));
+    const blockingDriftIds = new Set(
+      parseDriftEntries(driftText).filter((e) => e.layer === "requirement").map((e) => e.id)
+    );
     const seen = /* @__PURE__ */ new Set();
     for (const line of driftText.split(/\r?\n/)) {
       const m = /^##\s+(DRIFT-\d+)\s+—\s+resolved\s*$/.exec(line.trim());
       if (!m) continue;
       const id = m[1];
-      if (knownDriftIds.has(id) && !seen.has(id)) {
+      if (blockingDriftIds.has(id) && !seen.has(id)) {
         seen.add(id);
         out.push({ kind: "drift-resolve", refId: id });
       }
@@ -17453,8 +17483,8 @@ function readDriftLog(paths) {
 function appendDriftLog(paths, block) {
   readDriftLog(paths);
   assertGovernedWriteSurface(paths.root, paths.driftLog);
-  const sep18 = endsWithNewline(paths.driftLog) ? "" : "\n";
-  fs9.appendFileSync(paths.driftLog, `${sep18}${block}`, "utf8");
+  const sep19 = endsWithNewline(paths.driftLog) ? "" : "\n";
+  fs9.appendFileSync(paths.driftLog, `${sep19}${block}`, "utf8");
 }
 function runDriftAdd(paths, opts) {
   return withStateLock(paths, () => runDriftAddLocked(paths, opts));
@@ -20338,9 +20368,9 @@ var path16 = __toESM(require("node:path"));
 function containLcovPath(absRoot, lcovDirRel, sfPath) {
   if (sfPath.length === 0) return null;
   const norm = sfPath.replace(/\\/g, "/");
-  const isAbsolute7 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
+  const isAbsolute8 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
   let abs;
-  if (isAbsolute7) {
+  if (isAbsolute8) {
     abs = path16.resolve(norm);
   } else {
     abs = path16.resolve(absRoot, lcovDirRel, norm);
@@ -25410,8 +25440,8 @@ function appendDebateLog(paths, block) {
   const file = debateLogPath(paths);
   readDebateLog(paths);
   assertGovernedWriteSurface(paths.root, file);
-  const sep18 = endsWithNewline(file) ? "" : "\n";
-  fs31.appendFileSync(file, `${sep18}${block}`, "utf8");
+  const sep19 = endsWithNewline(file) ? "" : "\n";
+  fs31.appendFileSync(file, `${sep19}${block}`, "utf8");
 }
 function runDebateAdd(paths, opts) {
   const locked = assertFeatureUnlocked(paths, "debate");

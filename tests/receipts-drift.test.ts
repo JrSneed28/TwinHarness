@@ -22,6 +22,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runDriftAdd, runDriftResolve } from "../src/commands/drift";
@@ -30,6 +31,7 @@ import {
   readReceiptValidated,
   readTerminalReceipts,
   receiptMigrationDone,
+  collectTerminalEntities,
 } from "../src/core/receipts";
 
 let tp: TempProject | undefined;
@@ -56,6 +58,18 @@ function writeSourceFile(root: string, rel: string, content: string): string {
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, content, "utf8");
   return rel;
+}
+
+/** Initialize and commit the complete fixture, or return false when git is unavailable. */
+function commitFixture(root: string): boolean {
+  const run = (args: string[]) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  if (run(["init"]).error) return false;
+  run(["config", "user.email", "t@t.t"]);
+  run(["config", "user.name", "t"]);
+  run(["config", "commit.gpgsign", "false"]);
+  run(["add", "-A"]);
+  const committed = run(["commit", "-m", "fixture", "--no-gpg-sign"]);
+  return !(typeof committed.status === "number" && committed.status !== 0);
 }
 
 describe("REQ-RECEIPT-DRIFT-001: requirement-layer resolve WITHOUT --target is refused", () => {
@@ -120,6 +134,16 @@ describe("REQ-RECEIPT-DRIFT-003: requirement-layer resolve with a real --target 
     expect(validated.status).toBe("valid");
     expect(validated.receipt?.target_resolves_in_source.path).toBe(rel);
   });
+
+  it("stays valid when drift-log.md and the state directory are tracked", () => {
+    tp = freshProject();
+    runDriftAdd(tp.paths, { layer: "requirement", action: "blocked" });
+    const rel = writeSourceFile(tp.root, "src/tracked.ts", "export const tracked = true;\n");
+    if (!commitFixture(tp.root)) return;
+
+    expect(runDriftResolve(tp.paths, "DRIFT-001", { target: rel }).ok).toBe(true);
+    expect(readReceiptValidated(tp.paths, "drift-resolve", "DRIFT-001").status).toBe("valid");
+  });
 });
 
 describe("REQ-RECEIPT-DRIFT-004: derived-layer resolve is unchanged — no target, no receipt", () => {
@@ -140,6 +164,10 @@ describe("REQ-RECEIPT-DRIFT-004: derived-layer resolve is unchanged — no targe
         (r) => r.kind === "drift-resolve" && r.refId === "DRIFT-001" && !r.legacy,
       ),
     ).toBe(false);
+    expect(collectTerminalEntities(tp.paths)).not.toContainEqual({
+      kind: "drift-resolve",
+      refId: "DRIFT-001",
+    });
   });
 });
 

@@ -303,6 +303,21 @@ export function currentSnapshotCoord(root: string): SnapshotCoord {
   return { gitHead: gitHead(root), treeDigest: dirtyTreeDigest(root) };
 }
 
+/**
+ * Receipt snapshots bind to the source tree, not TwinHarness's own mutable
+ * governance ledgers. Excluding the selected state directory and drift log keeps a
+ * terminal command from invalidating its receipt merely by recording the flip.
+ */
+function currentReceiptSnapshotCoord(paths: ProjectPaths): SnapshotCoord {
+  const excludePaths = [paths.stateDir, paths.driftLog]
+    .map((p) => path.relative(paths.root, p))
+    .filter((p) => p !== "" && !path.isAbsolute(p) && p !== ".." && !p.startsWith(`..${path.sep}`));
+  return {
+    gitHead: gitHead(paths.root),
+    treeDigest: dirtyTreeDigest(paths.root, excludePaths),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Producer API (caller already holds withStateLock)
 // ---------------------------------------------------------------------------
@@ -373,7 +388,7 @@ export function appendTerminalReceipt(
     kind: input.kind,
     refId: input.refId,
     target_resolves_in_source: { path: targetPath, digest },
-    snapshot_coord: currentSnapshotCoord(paths.root),
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
     producer_identity: input.producerIdentity,
   });
 }
@@ -393,7 +408,7 @@ function appendLegacyReceipt(
     kind,
     refId,
     target_resolves_in_source: { path: "", digest: "" },
-    snapshot_coord: currentSnapshotCoord(paths.root),
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
     producer_identity: "legacy-backfill",
     legacy: true,
   });
@@ -429,6 +444,7 @@ function sealAndAppend(
  * The validated status of the receipt backing a terminal flip (execution doc §3):
  *  - `absent`         — no receipt AND the entity is not grandfathered → BLOCK
  *                       (negative-control **b**: post-upgrade bypass).
+ *  - `tampered`       — the receipt hash chain does not verify → BLOCK.
  *  - `target_missing` — recorded `path` no longer resolves in source → BLOCK (c).
  *  - `target_mismatch`— `path` resolves but its digest ≠ recorded → BLOCK.
  *  - `stale`          — `snapshot_coord` diverged (gitHead/treeDigest) → BLOCK (a).
@@ -438,6 +454,7 @@ function sealAndAppend(
  */
 export type ReceiptValidationStatus =
   | "absent"
+  | "tampered"
   | "target_missing"
   | "target_mismatch"
   | "stale"
@@ -503,6 +520,7 @@ export function readReceiptValidated(
   refId: string,
 ): ValidatedReceipt {
   const receipts = readTerminalReceipts(paths);
+  if (!verifyReceiptChain(receipts).ok) return { status: "tampered" };
   // LATEST matching receipt in file order (a re-flip mints a newer receipt).
   let found: TerminalTransitionReceipt | undefined;
   for (const r of receipts) {
@@ -529,7 +547,7 @@ export function readReceiptValidated(
   if (currentDigest === null) return { status: "target_missing", receipt: found }; // (c)
   if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt: found };
 
-  const staleReasons = snapshotStaleReasons(found.snapshot_coord, currentSnapshotCoord(paths.root));
+  const staleReasons = snapshotStaleReasons(found.snapshot_coord, currentReceiptSnapshotCoord(paths));
   if (staleReasons.length > 0) return { status: "stale", receipt: found, staleReasons }; // (a)
 
   return { status: "valid", receipt: found };
@@ -652,7 +670,11 @@ export function collectTerminalEntities(paths: ProjectPaths): TerminalEntityRef[
     driftText = ""; // no drift log → no resolved drifts
   }
   if (driftText !== "") {
-    const knownDriftIds = new Set(parseDriftEntries(driftText).map((e) => e.id));
+    const blockingDriftIds = new Set(
+      parseDriftEntries(driftText)
+        .filter((e) => e.layer === "requirement")
+        .map((e) => e.id),
+    );
     const seen = new Set<string>();
     for (const line of driftText.split(/\r?\n/)) {
       const m = /^##\s+(DRIFT-\d+)\s+—\s+resolved\s*$/.exec(line.trim());
@@ -660,7 +682,7 @@ export function collectTerminalEntities(paths: ProjectPaths): TerminalEntityRef[
       const id = m[1]!;
       // Only count a resolution note that corresponds to a real drift entry, and
       // only once per id.
-      if (knownDriftIds.has(id) && !seen.has(id)) {
+      if (blockingDriftIds.has(id) && !seen.has(id)) {
         seen.add(id);
         out.push({ kind: "drift-resolve", refId: id });
       }

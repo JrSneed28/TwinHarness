@@ -527,20 +527,12 @@ function runDecisionApprove(paths, id, opts = {}) {
         // — it then gets a REAL receipt below rather than a `legacy` backfill stamp.
         // Reject/supersede mint NOTHING: they are not "approved/complete" claims (a
         // rejected decision still gates per DQ-002, so it has nothing to ground). The
-        // mint is purely additive, under the SAME lock, after the approval is sealed.
+        // mint is purely additive and runs under the SAME lock.
         if (toEvent === "approved")
             (0, receipts_1.ensureReceiptMigration)(paths);
-        // Seal the approval transition with the opt-in key when one is explicitly set
-        // (C-3b). resolveDecisionKey() returns null by default → no seal, no behavior change.
-        (0, decisions_1.appendDecisionEvent)(paths, event, (0, decision_key_1.resolveDecisionKey)());
-        // Mint the build-coordinate receipt AFTER the approval event is sealed. No
-        // `targetPath` — decision-approve is build-coordinate-only (§6): a decision
-        // approved at an earlier build STAYS approved, so the receipt records the
-        // snapshot coordinate at approval and the gate re-checks content↔build via the
-        // receipt's presence (the validator treats a present, non-legacy
-        // decision-approve receipt as `valid`). With no target it cannot throw
-        // TargetUnresolvedError; any other throw propagates so an approval that cannot
-        // be grounded fails loudly.
+        // Mint BEFORE persisting the approval event. A receipt failure must leave the
+        // decision proposed so the command remains safely retryable; an orphan receipt
+        // is harmless because only terminal decisions are enforced by the gate.
         if (toEvent === "approved") {
             (0, receipts_1.appendTerminalReceipt)(paths, {
                 kind: "decision-approve",
@@ -548,6 +540,9 @@ function runDecisionApprove(paths, id, opts = {}) {
                 producerIdentity: "cli:th decision approve",
             });
         }
+        // Seal the approval transition with the opt-in key when one is explicitly set
+        // (C-3b). resolveDecisionKey() returns null by default → no seal, no behavior change.
+        (0, decisions_1.appendDecisionEvent)(paths, event, (0, decision_key_1.resolveDecisionKey)());
         const data = { id, to: toEvent, approver, provenance };
         if (supersede)
             data.supersededBy = supersedeTarget;

@@ -3,8 +3,8 @@
  *
  * The keystone module's unit tests: the hash chain, the shared content-binding
  * digest + snapshot coordinate, the producer (refuse-at-creation), every
- * validation status (absent / target_missing / target_mismatch / stale / legacy /
- * valid) for the requirement-layer kinds, the build-coordinate-only
+ * validation status (absent / tampered / target_missing / target_mismatch / stale /
+ * legacy / valid) for the requirement-layer kinds, the build-coordinate-only
  * decision-approve branch, and the idempotent marker-guarded migration that closes
  * negative-control (b). Deterministic + Windows-safe (path.join, no shell). The
  * `stale` snapshot test uses a real git repo and skips when git is unavailable.
@@ -363,6 +363,25 @@ describe("receipts — readReceiptValidated (drift-resolve / sim-retire)", () =>
     appendTerminalReceipt(tp.paths, { kind: "drift-resolve", refId: "DRIFT-001", targetPath: v1, producerIdentity: "cli" });
     // The latest receipt matches current content → valid (the stale first one is ignored).
     expect(readReceiptValidated(tp.paths, "drift-resolve", "DRIFT-001").status).toBe("valid");
+  });
+
+  it("tampered: a schema-valid edit is rejected before candidate classification", () => {
+    tp = freshProject();
+    const rel = writeSourceFile(tp.root, "docs/req.md", "v1\n");
+    appendTerminalReceipt(tp.paths, {
+      kind: "drift-resolve",
+      refId: "DRIFT-001",
+      targetPath: rel,
+      producerIdentity: "cli",
+    });
+
+    fs.writeFileSync(path.join(tp.root, rel), "v2\n", "utf8");
+    const [receipt] = readTerminalReceipts(tp.paths);
+    expect(receipt).toBeDefined();
+    receipt!.target_resolves_in_source.digest = computeTargetDigest(tp.root, rel)!;
+    fs.writeFileSync(terminalReceiptsPath(tp.paths), JSON.stringify(receipt) + "\n", "utf8");
+
+    expect(readReceiptValidated(tp.paths, "drift-resolve", "DRIFT-001").status).toBe("tampered");
   });
 });
 

@@ -18,6 +18,7 @@
  */
 
 import { describe, it, expect, afterEach } from "vitest";
+import * as fs from "node:fs";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runDecisionAdd, runDecisionApprove } from "../src/commands/decision";
@@ -25,7 +26,9 @@ import {
   readReceiptValidated,
   readTerminalReceipts,
   receiptMigrationDone,
+  terminalReceiptsPath,
 } from "../src/core/receipts";
+import { readDecisionEvents, reduceDecisions } from "../src/core/decisions";
 
 let tp: TempProject | undefined;
 afterEach(() => {
@@ -150,5 +153,33 @@ describe("BSC-4 — th decision approve mints a build-coordinate receipt", () =>
     expect(r.data?.error).toBe("confirmation_declined");
     expect(readTerminalReceipts(tp.paths)).toHaveLength(0);
     expect(receiptMigrationDone(tp.paths)).toBe(false);
+  });
+
+  it("a receipt append failure leaves the decision proposed and retryable", () => {
+    tp = initProject();
+    runDecisionAdd(tp.paths, {
+      title: "t",
+      rationale: "r",
+      now: clock("2026-06-15T00:00:00.000Z"),
+    });
+    fs.mkdirSync(terminalReceiptsPath(tp.paths));
+
+    expect(() =>
+      runDecisionApprove(tp!.paths, "DECISION-001", {
+        as: "alice",
+        tty: { isTTY: true, stdinLine: "y" },
+        now: clock("2026-06-15T00:05:00.000Z"),
+      }),
+    ).toThrow();
+    expect(reduceDecisions(readDecisionEvents(tp.paths))[0]?.status).toBe("proposed");
+
+    fs.rmSync(terminalReceiptsPath(tp.paths), { recursive: true });
+    const retry = runDecisionApprove(tp.paths, "DECISION-001", {
+      as: "alice",
+      tty: { isTTY: true, stdinLine: "y" },
+      now: clock("2026-06-15T00:06:00.000Z"),
+    });
+    expect(retry.ok).toBe(true);
+    expect(reduceDecisions(readDecisionEvents(tp.paths))[0]?.status).toBe("approved");
   });
 });
