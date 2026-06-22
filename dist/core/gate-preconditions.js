@@ -337,7 +337,7 @@ function checkFinalVerification(paths, state) {
 /**
  * Rung m (NEW — SG3 P2-C, audit C-05..C-08) — the PRODUCTION-REALITY rung. A run may
  * not be certified complete while its user-visible production path still depends on
- * unresolved simulated behavior. FOUR sub-checks, each a DISTINCT stable error token
+ * unresolved simulated behavior. FIVE sub-checks, each a DISTINCT stable error token
  * (the order is the short-circuit order; the first failing one is returned):
  *
  *   1. `simulation_unretired`         — a non-retired simulation ledger entry maps to
@@ -349,6 +349,12 @@ function checkFinalVerification(paths, state) {
  *                                       (`tester.ts` — the audit's mandatory live QA).
  *   4. `unledgered_simulation_in_dist`— `dist/` carries simulation patterns
  *                                       (mock/fake/stub/…) with no active ledger entry.
+ *   5. `scan_coverage_incomplete`     — the two-tier dist scan could not deep-inspect
+ *                                       some enumerated `dist/` path (file_limit /
+ *                                       aggregate_limit / watchdog / read_error) and it
+ *                                       is not exonerated by a valid external-signed
+ *                                       exception ack (BSC-6 — fail closed on the scan's
+ *                                       own incompleteness; recomputed fresh every run).
  *
  * This is the mechanical form of the audit's required invariant — a COMPLETION gate.
  * It is now COMPOSED into `checkFinalVerification` (and, via it, `canAdvanceStage`'s
@@ -458,7 +464,7 @@ function checkProductionReality(paths, state) {
     // only when an ACTIVE simulation entry DECLARES that specific hit — matched
     // PER-DEPENDENCY (audit P1), so a single unrelated, non-user-visible entry no longer
     // blanket-suppresses every dist hit. The SAME `computeUnledgeredDistHits` join backs
-    // `th sim scan`, so scan and gate agree. Capped walk (never throws).
+    // `th sim scan`, so scan and gate agree. The two-tier scan never throws.
     const scan = (0, sim_1.scanForSimulationHits)(paths);
     const unledgered = (0, sim_1.computeUnledgeredDistHitsReceiptAware)(paths, entries, scan.distHits);
     if (unledgered.length > 0) {
@@ -466,6 +472,30 @@ function checkProductionReality(paths, state) {
             ok: false,
             error: "unledgered_simulation_in_dist",
             detail: { hits: unledgered.slice(0, 20), total: unledgered.length },
+        };
+    }
+    // 5. (BSC-6 / Axis-B slice-2) SCAN-COVERAGE COMPLETENESS — fail closed on the scan's
+    // OWN incompleteness, INDEPENDENT of and ADDITIONAL to the unledgered-token check
+    // above. The two-tier scan enumerated + streaming-hashed every `dist/` path; any path
+    // it could not deep-inspect (per-file / aggregate / watchdog / read error) is
+    // `unobserved` (≠ clean). This rung RECOMPUTES that set fresh every run (it MUST NOT
+    // read `scan-completeness.jsonl` to decide — trusting a persisted "complete" summary is
+    // the exact bug class BSC-6 is) and BLOCKS with the stable token `scan_coverage_incomplete`
+    // when any `unobserved` path is not exonerated by a valid external-signed exception ack.
+    // The SAME `uncoveredAfterExceptions` residual backs `th sim scan`, so scan and gate
+    // agree (control e). This closes the proven RED of `.omc/audit/probes/new-a-scancap/`:
+    // a >2 MB token-bearing file is now either deep-inspected (→ unledgered block) or
+    // `unobserved{file_limit}` (→ this block), never silently skipped.
+    const uncovered = (0, sim_1.uncoveredAfterExceptions)(paths, scan.unobserved);
+    if (uncovered.length > 0) {
+        return {
+            ok: false,
+            error: "scan_coverage_incomplete",
+            detail: {
+                unobserved: uncovered.slice(0, 20).map((u) => ({ path: u.path, reason: u.reason })),
+                total: uncovered.length,
+                reasons: [...new Set(uncovered.map((u) => u.reason))].sort(),
+            },
         };
     }
     return PASS;
