@@ -18142,7 +18142,8 @@ function collectHits(rel, content, sink) {
   }
 }
 function walkFiles(absTop) {
-  const out = [];
+  const files = [];
+  const dirReadErrors = [];
   const stack = [absTop];
   while (stack.length > 0) {
     const dir = stack.pop();
@@ -18150,6 +18151,7 @@ function walkFiles(absTop) {
     try {
       dirents = fs12.readdirSync(dir, { withFileTypes: true });
     } catch {
+      dirReadErrors.push(dir);
       continue;
     }
     for (const d of dirents) {
@@ -18159,17 +18161,21 @@ function walkFiles(absTop) {
       }
       if (!d.isFile()) continue;
       if (!SCAN_EXTENSIONS.has(path9.extname(d.name))) continue;
-      out.push(path9.join(dir, d.name));
+      files.push(path9.join(dir, d.name));
     }
   }
-  return out;
+  return { files, dirReadErrors };
 }
 function enumerateAndHash(paths, limits) {
   const absTop = resolveWithinRoot(paths.root, "dist");
   const enumerated = [];
   const readErrors = [];
   if (!absTop || !fs12.existsSync(absTop)) return { enumerated, readErrors };
-  const files = walkFiles(absTop).map((abs) => ({ abs, rel: relPath(paths.root, abs) })).sort((a, b) => a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
+  const walked = walkFiles(absTop);
+  for (const dir of walked.dirReadErrors) {
+    readErrors.push({ path: relPath(paths.root, dir), digest: null, reason: "read_error" });
+  }
+  const files = walked.files.map((abs) => ({ abs, rel: relPath(paths.root, abs) })).sort((a, b) => a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
   let count = 0;
   for (const { abs, rel } of files) {
     count += 1;
@@ -18246,7 +18252,7 @@ function scanTestsAdvisory(paths, limits) {
   const absTop = resolveWithinRoot(paths.root, "tests");
   const testHits = [];
   if (!absTop || !fs12.existsSync(absTop)) return testHits;
-  for (const abs of walkFiles(absTop)) {
+  for (const abs of walkFiles(absTop).files) {
     let size = 0;
     try {
       size = fs12.statSync(abs).size;

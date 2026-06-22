@@ -136,6 +136,25 @@ describe("two-tier scan — enumeration always runs; deep-inspection is bounded"
       fs.chmodSync(abs, 0o644); // restore so cleanup can remove it
     }
   });
+  it.skipIf(isWin)("(c2) unreadable directory → unobserved{read_error} (POSIX perms)", () => {
+    tp = makeTempProject();
+    const root = tp.root;
+    writeDist(root, "dist/ok.js", "const ok = 1;\n");
+    const blockedDir = path.join(root, "dist", "blocked");
+    writeDist(root, "dist/blocked/hidden.js", "const hidden = 1;\n");
+    fs.chmodSync(blockedDir, 0o000);
+    try {
+      const cov = scanForSimulationHits(tp.paths);
+      const blocked = cov.unobserved.find((u) => u.path === "dist/blocked");
+      expect(blocked, "an unreadable dist directory must be unobserved, never silently skipped").toBeDefined();
+      expect(blocked!.reason).toBe("read_error");
+      expect(blocked!.digest).toBeNull();
+      expect(cov.limitHit).toBe(true);
+      expect(cov.enumerated.map((e) => e.path)).toContain("dist/ok.js");
+    } finally {
+      fs.chmodSync(blockedDir, 0o755); // restore so cleanup can remove it
+    }
+  });
 
   it("determinism — the same tree yields a byte-identical descriptor", () => {
     tp = makeTempProject();

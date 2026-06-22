@@ -189,6 +189,25 @@ describe("control (c) — an unreadable dist file is unobserved → scan_coverag
   });
 });
 
+describe("control (c2) — an unreadable dist directory is unobserved → scan_coverage_incomplete (POSIX perms)", () => {
+  it.skipIf(isWin)("chmod 0 on a dist subdirectory blocks with reason read_error", () => {
+    const paths = greenAtFinalVerification();
+    writeFile(paths, "dist/ok.js", "const ok = 1;\n");
+    const blockedDir = path.resolve(paths.root, "dist", "blocked");
+    writeFile(paths, "dist/blocked/hidden.js", "const hidden = 1;\n");
+    fs.chmodSync(blockedDir, 0o000);
+    try {
+      const res = checkProductionReality(paths, state(paths));
+      expect(res.ok).toBe(false);
+      expect(res.error).toBe("scan_coverage_incomplete");
+      expect((res.detail!.reasons as string[])).toContain("read_error");
+      expect((res.detail!.unobserved as Array<{ path: string }>).some((u) => u.path === "dist/blocked")).toBe(true);
+    } finally {
+      fs.chmodSync(blockedDir, 0o755); // restore so cleanup can remove it
+    }
+  });
+});
+
 // ===========================================================================
 // (d) a clean, fully-observed dist/ → ok:true (no env override)
 // ===========================================================================

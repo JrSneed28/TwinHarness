@@ -605,8 +605,9 @@ function collectHits(rel: string, content: string, sink: ScanHit[]): void {
 }
 
 /** Recursively list every relevant (scan-extension) file under `absTop`, as absolute paths. */
-function walkFiles(absTop: string): string[] {
-  const out: string[] = [];
+function walkFiles(absTop: string): { files: string[]; dirReadErrors: string[] } {
+  const files: string[] = [];
+  const dirReadErrors: string[] = [];
   const stack: string[] = [absTop];
   while (stack.length > 0) {
     const dir = stack.pop()!;
@@ -614,7 +615,10 @@ function walkFiles(absTop: string): string[] {
     try {
       dirents = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
-      continue; // a directory we cannot read contributes no files (rare; not a file-level coverage gap)
+      // Dist traversal errors are coverage gaps, not "clean". The advisory tests/ caller
+      // ignores these; enumerateAndHash turns them into unobserved{read_error}.
+      dirReadErrors.push(dir);
+      continue;
     }
     for (const d of dirents) {
       if (d.isDirectory()) {
@@ -623,10 +627,10 @@ function walkFiles(absTop: string): string[] {
       }
       if (!d.isFile()) continue;
       if (!SCAN_EXTENSIONS.has(path.extname(d.name))) continue;
-      out.push(path.join(dir, d.name));
+      files.push(path.join(dir, d.name));
     }
   }
-  return out;
+  return { files, dirReadErrors };
 }
 
 /**
@@ -648,7 +652,11 @@ function enumerateAndHash(
 
   // Sort the file list FIRST so the sanity-bound cutoff is deterministic (readdir order
   // varies by platform; an order-dependent cutoff would be non-reproducible).
-  const files = walkFiles(absTop)
+  const walked = walkFiles(absTop);
+  for (const dir of walked.dirReadErrors) {
+    readErrors.push({ path: relPath(paths.root, dir), digest: null, reason: "read_error" });
+  }
+  const files = walked.files
     .map((abs) => ({ abs, rel: relPath(paths.root, abs) }))
     .sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
 
@@ -762,7 +770,7 @@ function scanTestsAdvisory(paths: ProjectPaths, limits: ScanLimits): ScanHit[] {
   const absTop = resolveWithinRoot(paths.root, "tests");
   const testHits: ScanHit[] = [];
   if (!absTop || !fs.existsSync(absTop)) return testHits;
-  for (const abs of walkFiles(absTop)) {
+  for (const abs of walkFiles(absTop).files) {
     let size = 0;
     try {
       size = fs.statSync(abs).size;
