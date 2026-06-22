@@ -31,9 +31,10 @@
  *   TH_RECEIPT_PRIVATE_KEYFILE=/path/to/ed25519-private.pem \
  *   node scripts/th-receipt-producer.mjs \
  *     --root <projectRoot> \
- *     --kind <drift-resolve|sim-retire|decision-approve|scan-exception> \
+ *     --kind <drift-resolve|sim-retire|decision-approve|scan-exception|approval> \
  *     [--ref-id <ID>] \
  *     [--target <repo-rel-path>] \
+ *     [--stage <humanGate-stage>] \
  *     [--producer-identity <string>]
  *
  * The terminal-receipt kinds (drift-resolve|sim-retire|decision-approve) require
@@ -48,6 +49,16 @@
  * `hashFileStreaming` digest — byte-identical to the scan's enumerated digest, so the
  * gate's `uncoveredAfterExceptions` subtracts exactly this `(path, digest)`. `--ref-id`
  * is ignored for scan-exception (the `(path, digest)` IS the coordinate).
+ *
+ * `--kind approval` (slice-3b) is a SEPARATE flow that writes a DIFFERENT store
+ * (`external-approvals.jsonl`) with the 3a `HumanApprovalReceipt` canonical shape — an
+ * external-signed, stage-scoped approval authorizing ONE `humanGate` stage. It REQUIRES
+ * `--stage <humanGate-stage>` (the stage being approved), which MUST be a `humanGate` stage
+ * whose governing artifact (`produces`) resolves in source; the approval's
+ * `governing_artifact_digest` is that artifact's `computeTargetDigest`. `--ref-id` /
+ * `--target` are ignored for approval (the `stage` IS the coordinate). The signed canonical
+ * text reuses 3a's `approvalCanonicalText` from the compiled dist (with `stage` IN the
+ * signed order, R5), so the 3a in-process validator's signature check (slice-3b C-I) verifies.
  *
  * Prints a small JSON result on stdout. Exit 0 on success, nonzero on any error.
  */
@@ -67,6 +78,8 @@ const signingMod = await import(pathToFileUrl(path.join(DIST, "core", "receipt-s
 const pathsMod = await import(pathToFileUrl(path.join(DIST, "core", "paths.js")));
 const scanMod = await import(pathToFileUrl(path.join(DIST, "core", "scan-completeness.js")));
 const hashMod = await import(pathToFileUrl(path.join(DIST, "core", "hash.js")));
+const approvalsMod = await import(pathToFileUrl(path.join(DIST, "core", "approvals.js")));
+const stagesMod = await import(pathToFileUrl(path.join(DIST, "core", "stages.js")));
 
 const {
   canonicalText,
@@ -85,6 +98,17 @@ const {
   readLastScanExceptionRecordHash,
 } = scanMod;
 const { hashFileStreaming } = hashMod;
+// slice-3b — reuse the 3a canonical/hash binding + external store helpers from the
+// COMPILED dist so the producer and the in-process validator can NEVER diverge on the
+// approval canonical field order (`stage` IS signed, R5).
+const {
+  approvalCanonicalText,
+  computeApprovalRecordHash,
+  externalApprovalsPath,
+  readLastExternalApprovalRecordHash,
+  isHumanGateStage,
+} = approvalsMod;
+const { stageContract } = stagesMod;
 
 /** Convert an absolute filesystem path to a file:// URL (Windows-safe ESM import). */
 function pathToFileUrl(abs) {
@@ -112,7 +136,7 @@ function fail(message, extra = {}) {
   process.exit(1);
 }
 
-const KINDS = new Set(["drift-resolve", "sim-retire", "decision-approve", "scan-exception"]);
+const KINDS = new Set(["drift-resolve", "sim-retire", "decision-approve", "scan-exception", "approval"]);
 
 function loadPrivateKey() {
   const file = process.env.TH_RECEIPT_PRIVATE_KEYFILE;
@@ -193,20 +217,94 @@ function produceScanException(paths, { target, privateKey, publicKey }) {
   );
 }
 
+/**
+ * slice-3b — produce an external-signed `HumanApprovalReceipt`. Writes the SEPARATE
+ * `external-approvals.jsonl` store (parallel to `external-receipts.jsonl` /
+ * `scan-exceptions.jsonl`) with the 3a approval canonical shape — NOT a terminal receipt.
+ *
+ * The make-or-break contract for C-I: the SIGNED canonical text MUST be byte-identical to
+ * what the 3a in-process validator re-derives, so the signature it imports
+ * (`approvalCanonicalText` + `computeApprovalRecordHash` from the compiled dist) is exactly
+ * the 3a binding (with `stage` IN the canonical input, R5). `signature` + `recordHash` are
+ * trailers, EXCLUDED from the canonical text, computed over the IDENTICAL bytes.
+ *
+ * Refuse-at-creation (mirrors the terminal flow's target-resolve refusal): `--stage` MUST
+ * be a `humanGate` stage AND its governing artifact (`produces`) MUST resolve in source —
+ * else we refuse BEFORE any write rather than mint an approval whose ground is already gone.
+ */
+function produceApproval(paths, { stage, producerIdentity, privateKey, publicKey }) {
+  if (!isHumanGateStage(stage)) {
+    fail(`--stage "${stage}" is not a humanGate stage — refusing to mint an approval`, { stage });
+  }
+  const contract = stageContract(stage);
+  const artifact = contract ? contract.produces : "";
+  const digest = computeTargetDigest(paths.root, artifact);
+  if (digest === null) {
+    fail(
+      `governing artifact "${artifact}" for stage "${stage}" does not resolve in source — refusing to mint an ungrounded approval`,
+      { stage, artifact },
+    );
+  }
+  const keyId = externalKeyId(publicKey);
+  const prevHash = readLastExternalApprovalRecordHash(paths);
+
+  // The canonical input — EXACTLY the fields approvalCanonicalText binds (signature +
+  // recordHash are trailers, excluded). Field order is owned by 3a's
+  // APPROVAL_CANONICAL_FIELD_ORDER inside approvalCanonicalText; the producer never
+  // re-orders, it hands the object to the imported helper so the bytes can never drift.
+  const withPrev = {
+    kind: "human-approval",
+    stage,
+    approval_of: {
+      snapshot_coord: currentReceiptSnapshotCoord(paths),
+      governing_artifact_digest: digest,
+    },
+    producer_identity: producerIdentity,
+    producer_kind: "external",
+    key_id: keyId,
+    prevHash,
+  };
+  const canonical = approvalCanonicalText(withPrev);
+  const signature = sign(null, Buffer.from(canonical, "utf8"), privateKey).toString("base64");
+  const recordHash = computeApprovalRecordHash(withPrev);
+  const sealed = { ...withPrev, signature, recordHash };
+
+  const file = externalApprovalsPath(paths);
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(sealed) + "\n", "utf8");
+
+  process.stdout.write(
+    JSON.stringify({
+      ok: true,
+      kind: "approval",
+      producer_kind: "external",
+      key_id: keyId,
+      stage,
+      governing_artifact_digest: digest,
+      recordHash,
+      file,
+    }) + "\n",
+  );
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const root = args["root"];
   const kind = args["kind"];
   const refId = args["ref-id"];
   const target = args["target"]; // optional
+  const stage = args["stage"]; // approval only
   const producerIdentity = args["producer-identity"] ?? "external:th-receipt-producer";
 
   if (!root || root === "true") fail("--root <projectRoot> is required");
   if (!kind || !KINDS.has(kind)) fail(`--kind must be one of ${[...KINDS].join("|")}`, { kind: kind ?? null });
   // scan-exception is the SEPARATE slice-2b flow: it is keyed by (path, digest), not a
   // ref-id, so it requires --target (the dist file being excepted) and ignores --ref-id.
+  // approval is the SEPARATE slice-3b flow: it is keyed by `stage`, not a ref-id/target.
   if (kind === "scan-exception") {
     if (!target || target === "true") fail("--target <repo-rel-path> is required for scan-exception");
+  } else if (kind === "approval") {
+    if (!stage || stage === "true") fail("--stage <humanGate-stage> is required for approval");
   } else {
     if (!refId || refId === "true") fail("--ref-id <ID> is required");
     if ((kind === "drift-resolve" || kind === "sim-retire") && (!target || target === "true")) {
@@ -224,6 +322,14 @@ function main() {
   // canonical shape — branch BEFORE the terminal-receipt machinery so that flow is untouched.
   if (kind === "scan-exception") {
     produceScanException(paths, { target, privateKey, publicKey });
+    return;
+  }
+
+  // slice-3b: the external-signed human-approval writes a DIFFERENT store
+  // (`external-approvals.jsonl`) with the 3a approval canonical shape — branch BEFORE the
+  // terminal-receipt machinery so that flow stays byte-identical.
+  if (kind === "approval") {
+    produceApproval(paths, { stage, producerIdentity, privateKey, publicKey });
     return;
   }
 
