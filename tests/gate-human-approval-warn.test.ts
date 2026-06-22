@@ -92,6 +92,10 @@ describe("BSC-7 slice-3a — human-approval advance rung (ENFORCE phase, blocks 
     // baseline (C-1, e1de8fd) instead returned ok:true + a non-blocking `notice`.
     expect(r.ok).toBe(false);
     expect(r.error).toBe("human_approval_unverified");
+    // `GateResult.notice` has no live producer after the C-3 enforce flip, but it is
+    // RETAINED as the documented warn→enforce seam: this assertion (and the PASS-path
+    // one below) pin it to `undefined`, so the field is a live contract a future
+    // warn-phase rung re-attaches to — not dead surface to delete.
     expect(r.notice).toBeUndefined();
     expect(r.detail).toMatchObject({ stage: HUMAN_GATE_STAGE, status: "absent" });
   });
