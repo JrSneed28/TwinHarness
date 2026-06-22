@@ -37,9 +37,9 @@ import { loadVerifyConfig, readVerifyReport, readVerifyReportValidated } from ".
 import { gatingObligations, reduceDecisions, readDecisionEvents } from "./decisions";
 import { runRepoCheckCached, repoMapPartialMarker, REPO_NO_MAP_EXIT } from "../commands/repo";
 import { interviewReady } from "../commands/interview";
-import { readSimulationLedger, scanForSimulationHits, computeUnledgeredDistHits, SimulationLedgerCorruptError } from "../commands/sim";
-import { blocksProductionReality } from "./simulation";
+import { readSimulationLedger, scanForSimulationHits, simEntryBlocksProductionReality, computeUnledgeredDistHitsReceiptAware, SimulationLedgerCorruptError } from "../commands/sim";
 import { testerRecordPresent } from "./tester";
+import { collectTerminalEntities, readReceiptValidated } from "./receipts";
 
 /**
  * Result of a precondition check. `ok:true` ⇒ the rung passes. `ok:false` carries
@@ -353,7 +353,11 @@ export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessSt
   // every in-flight run's obligation ladder. Mirrors checkInterview's front-gate shape.
   if (!isFinalVerification(state.current_stage)) return PASS;
 
-  // 1. A non-retired simulation entry on a user-visible production path blocks.
+  // 1. A user-visible simulation still blocks. BSC-4 receipt-aware: an entry blocks
+  // when it is active+user-visible+simulated (the original rule) OR when it is marked
+  // `retired` but that retirement is NOT grounded by a valid/legacy sim-retire receipt
+  // (a retire-by-attestation with no source replacement — no double-exoneration). The
+  // SAME `simEntryBlocksProductionReality` predicate backs `th sim`, so reporting agrees.
   let entries;
   try {
     entries = readSimulationLedger(paths);
@@ -363,13 +367,38 @@ export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessSt
     }
     throw e;
   }
-  const blocking = entries.filter(blocksProductionReality);
+  const blocking = entries.filter((e) => simEntryBlocksProductionReality(paths, e));
   if (blocking.length > 0) {
     return {
       ok: false,
       error: "simulation_unretired",
       detail: { ids: blocking.map((e) => e.id), classifications: blocking.map((e) => e.classification) },
     };
+  }
+
+  // 1b. Terminal-flip grounding (BSC-4). Every drift-resolution and decision-approval
+  // in force must carry a VALID (or grandfathered-`legacy`) TerminalTransitionReceipt.
+  // A resolve/approve done via a bypass (no receipt) — or whose recorded source target
+  // was deleted (`target_missing`) / changed (`target_mismatch`), or whose snapshot is
+  // forged/stale (`stale`) — is ungrounded and blocks. `sim-retire` grounding is owned
+  // by rung 1 (excluded here to avoid a duplicate token). Pre-upgrade projects carry no
+  // migration marker, so an absent receipt classifies `legacy` and this is a NO-OP until
+  // the receipt regime is active — it never reds an existing complete run.
+  for (const ent of collectTerminalEntities(paths)) {
+    if (ent.kind === "sim-retire") continue; // owned by rung 1's receipt-aware blocker
+    const v = readReceiptValidated(paths, ent.kind, ent.refId);
+    if (v.status !== "valid" && v.status !== "legacy") {
+      return {
+        ok: false,
+        error: "terminal_receipt_unverified",
+        detail: {
+          kind: ent.kind,
+          refId: ent.refId,
+          status: v.status,
+          ...(v.staleReasons ? { staleReasons: v.staleReasons } : {}),
+        },
+      };
+    }
   }
 
   // 2. The verify suite must be green against production-targeted commands, AND the
@@ -409,7 +438,7 @@ export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessSt
   // blanket-suppresses every dist hit. The SAME `computeUnledgeredDistHits` join backs
   // `th sim scan`, so scan and gate agree. Capped walk (never throws).
   const scan = scanForSimulationHits(paths);
-  const unledgered = computeUnledgeredDistHits(entries, scan.distHits);
+  const unledgered = computeUnledgeredDistHitsReceiptAware(paths, entries, scan.distHits);
   if (unledgered.length > 0) {
     return {
       ok: false,

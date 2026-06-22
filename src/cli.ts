@@ -157,7 +157,7 @@ Usage:
   th debate add --topic <t> [--positions ...] [--links a,b] [--source ...]  Open a BLOCKING debate (REQ-PCO-042)
   th debate list                    List debate-ledger entries + open blocking count
   th debate resolve --id <DEBATE-ID> --resolution <r>  Resolve a debate (clears the blocking obligation)
-  th drift resolve <DRIFT-NNN>      Append a resolution note; decrement blocking counter only for requirement-layer entries
+  th drift resolve <DRIFT-NNN> [--target <path>]  Append a resolution note; decrement blocking counter (requirement-layer requires --target resolving in source, recording a BSC-4 receipt)
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
   th hook pretool-gate              Emit a Claude Code PreToolUse write-gate decision
   th hook subagent-stop             Emit a Claude Code SubagentStop-hook decision (state-validity guard)
@@ -210,7 +210,7 @@ Usage:
   th sim add --classification <Real|Sandbox|Emulated|Mocked|Stubbed|Hardcoded> [--replaces ...] [--intro-slice ...] [--retire-slice ...] [--owner ...] [--user-visible]
                                     Append a simulation-ledger entry (.twinharness/simulation-ledger.json); a user-visible simulated entry BLOCKS the production-reality gate until retired
   th sim list                       List simulation-ledger entries + the ids that block production-reality
-  th sim retire <SIM-NNN> [--retire-slice ...]  Mark a simulation entry retired (status transition; entries are never deleted)
+  th sim retire <SIM-NNN> [--retire-slice ...] [--target <path>]  Mark a simulation entry retired (a user-visible simulation requires --target resolving in source, recording a BSC-4 receipt)
   th sim scan                       Grep dist/+tests for unledgered simulation patterns (mock|fake|stub|fixture|placeholder|demo|TODO|canned|hardcoded); advisory (exit 0)
   th gate production-reality        Reader: report the production-reality gate (no unretired user-visible simulation, verify green, Tester record, no unledgered dist/ patterns)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
@@ -302,6 +302,7 @@ Global flags:
   --replaces <s>    (sim add) What real dependency this simulation stands in for
   --intro-slice <s> (sim add) Slice/task that introduced the simulation
   --retire-slice <s> (sim add / sim retire) Slice/owner that will (or did) replace it with reality
+  --target <path>   (drift resolve / sim retire) Source path the terminal flip resolves in — records a BSC-4 terminal-transition receipt the completion gate re-validates
   --owner <s>       (sim add) Who owns retiring the simulation
   --user-visible    (sim add) A user-visible production path depends on this (BLOCKS production-reality until retired)
   --driver <d>      (tester record) Driver/runner the live QA used (playwright | curl | cli-e2e | …) (required)
@@ -432,6 +433,8 @@ export interface ParsedArgs {
     retireSlice?: string;
     owner?: string;
     userVisible: boolean;
+    // BSC-4 — terminal-transition receipt grounding target (`th drift resolve` / `th sim retire`).
+    target?: string;
     // SG3 P2-C — live-QA Tester record flags (`th tester record`).
     driver?: string;
     provider?: string;
@@ -553,6 +556,8 @@ const STRING_FLAGS: Record<string, FlagField> = {
   "--intro-slice": "introSlice",
   "--retire-slice": "retireSlice",
   "--owner": "owner",
+  // BSC-4 — terminal-transition receipt grounding target.
+  "--target": "target",
   // SG3 P2-C — live-QA Tester record fields (`th tester record`).
   "--driver": "driver",
   "--provider": "provider",
@@ -1082,7 +1087,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
         case "list":
           return runSimList(paths, {});
         case "retire":
-          return runSimRetire(paths, rest[0], { retireSlice: parsed.flags.retireSlice });
+          return runSimRetire(paths, rest[0], { retireSlice: parsed.flags.retireSlice, target: parsed.flags.target });
         case "scan":
           // Advisory: grep dist/+tests for unledgered simulation patterns (exit 0).
           return runSimScan(paths, {});
@@ -1362,7 +1367,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
         case "list":
           return runDriftList(paths);
         case "resolve":
-          return runDriftResolve(paths, rest[0]);
+          return runDriftResolve(paths, rest[0], { target: parsed.flags.target });
         default:
           return failure({ human: `unknown 'drift' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }

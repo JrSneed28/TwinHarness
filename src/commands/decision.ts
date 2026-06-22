@@ -45,6 +45,7 @@ import {
   gatingObligations,
 } from "../core/decisions";
 import { resolveDecisionKey } from "../core/decision-key";
+import { appendTerminalReceipt, ensureReceiptMigration } from "../core/receipts";
 
 /** `th decision check` exit code when an unapproved decision gates the stage (IF-004). */
 export const DECISION_GATE_EXIT = 6;
@@ -615,9 +616,36 @@ export function runDecisionApprove(
       provenance,
     };
     if (supersede) event.supersededBy = supersedeTarget;
+
+    // BSC-4 (Axis-B slice-1a, execution doc §6): ground an APPROVAL with a
+    // terminal-transition receipt so the completion gate cannot be cleared by an
+    // approval marker alone. Migration runs BEFORE the approval event is sealed, so
+    // THIS decision is not yet terminal when the grandfathered baseline is captured
+    // — it then gets a REAL receipt below rather than a `legacy` backfill stamp.
+    // Reject/supersede mint NOTHING: they are not "approved/complete" claims (a
+    // rejected decision still gates per DQ-002, so it has nothing to ground). The
+    // mint is purely additive, under the SAME lock, after the approval is sealed.
+    if (toEvent === "approved") ensureReceiptMigration(paths);
+
     // Seal the approval transition with the opt-in key when one is explicitly set
     // (C-3b). resolveDecisionKey() returns null by default → no seal, no behavior change.
     appendDecisionEvent(paths, event, resolveDecisionKey());
+
+    // Mint the build-coordinate receipt AFTER the approval event is sealed. No
+    // `targetPath` — decision-approve is build-coordinate-only (§6): a decision
+    // approved at an earlier build STAYS approved, so the receipt records the
+    // snapshot coordinate at approval and the gate re-checks content↔build via the
+    // receipt's presence (the validator treats a present, non-legacy
+    // decision-approve receipt as `valid`). With no target it cannot throw
+    // TargetUnresolvedError; any other throw propagates so an approval that cannot
+    // be grounded fails loudly.
+    if (toEvent === "approved") {
+      appendTerminalReceipt(paths, {
+        kind: "decision-approve",
+        refId: id,
+        producerIdentity: "cli:th decision approve",
+      });
+    }
 
     const data: Record<string, unknown> = { id, to: toEvent, approver, provenance };
     if (supersede) data.supersededBy = supersedeTarget;

@@ -66,6 +66,9 @@ exports.runSimScan = runSimScan;
 exports.scanForSimulationHits = scanForSimulationHits;
 exports.distHitLedgered = distHitLedgered;
 exports.computeUnledgeredDistHits = computeUnledgeredDistHits;
+exports.simEntryBlocksProductionReality = simEntryBlocksProductionReality;
+exports.activeOrUngroundedSimulatedEntries = activeOrUngroundedSimulatedEntries;
+exports.computeUnledgeredDistHitsReceiptAware = computeUnledgeredDistHitsReceiptAware;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const paths_1 = require("../core/paths");
@@ -77,6 +80,7 @@ const ledger_1 = require("../core/ledger");
 const guards_1 = require("../core/guards");
 const state_store_2 = require("../core/state-store");
 const simulation_1 = require("../core/simulation");
+const receipts_1 = require("../core/receipts");
 /** `<stateDir>/simulation-ledger.json` — the append-only ledger file. */
 function simulationLedgerPath(paths) {
     return path.join(paths.stateDir, "simulation-ledger.json");
@@ -247,16 +251,22 @@ function runSimList(paths, _opts = {}) {
     });
 }
 /**
- * `th sim retire <SIM-NNN> [--retire-slice ...]` — flip an entry to `retired`
- * (records the retiring slice when supplied). Refuses an unknown id and a
- * double-retire. The entry is preserved (status transition, not deletion).
+ * `th sim retire <SIM-NNN> [--retire-slice ...] [--target <path>]` — flip an entry
+ * to `retired` (records the retiring slice when supplied). Refuses an unknown id and
+ * a double-retire. The entry is preserved (status transition, not deletion).
+ *
+ * Axis-B slice-1a (BSC-4): retiring a BLOCKING entry (user-visible + active +
+ * simulated) now REQUIRES `--target` and mints a grounded `sim-retire` receipt
+ * BEFORE the status flip, so the completion gate can recompute that the retirement
+ * actually corresponds to source (negative-control **c** at creation). A failed mint
+ * leaves the entry active — no partial flip.
  */
 function runSimRetire(paths, id, opts = {}) {
     return (0, state_store_1.withStateLock)(paths, () => runSimRetireLocked(paths, id, opts));
 }
 function runSimRetireLocked(paths, id, opts) {
     if (!id)
-        return (0, output_1.failure)({ human: "usage: th sim retire <SIM-NNN> [--retire-slice ...]" });
+        return (0, output_1.failure)({ human: "usage: th sim retire <SIM-NNN> [--retire-slice ...] [--target <path>]" });
     const r = (0, state_store_2.readState)(paths);
     if (!r.exists)
         return guards_1.NOT_INIT;
@@ -280,6 +290,38 @@ function runSimRetireLocked(paths, id, opts) {
     const entry = entries[idx];
     if (entry.status === "retired") {
         return (0, output_1.failure)({ human: `${id} is already retired.`, data: { error: "already_retired", id } });
+    }
+    // Axis-B slice-1a (BSC-4) grounding. A BLOCKING retire (user-visible + active +
+    // simulated) must mint a grounded `sim-retire` receipt BEFORE the flip; a failed
+    // mint must leave the entry active (no partial flip). Run the migration FIRST so the
+    // entity is not yet terminal/grandfathered when the new producer code runs and it
+    // gets a REAL receipt rather than being implicitly grandfathered. Idempotent; the
+    // caller holds the state lock.
+    if ((0, simulation_1.blocksProductionReality)(entry)) {
+        (0, receipts_1.ensureReceiptMigration)(paths);
+        if (opts.target === undefined || opts.target === "") {
+            return (0, output_1.failure)({
+                human: "th sim retire <id> --target <path> is required for a user-visible simulation",
+                data: { error: "sim_retire_target_required", id },
+            });
+        }
+        try {
+            (0, receipts_1.appendTerminalReceipt)(paths, {
+                kind: "sim-retire",
+                refId: id,
+                targetPath: opts.target,
+                producerIdentity: "cli:th sim retire",
+            });
+        }
+        catch (e) {
+            if (e instanceof receipts_1.TargetUnresolvedError) {
+                return (0, output_1.failure)({
+                    human: `Refusing to retire ${id}: target "${opts.target}" does not resolve in source.`,
+                    data: { error: e.code, id, target: e.target },
+                });
+            }
+            throw e;
+        }
     }
     const updated = {
         ...entry,
@@ -330,10 +372,12 @@ function runSimScan(paths, _opts = {}) {
         return ledgerCorruptFailure(e);
     }
     const result = scanForSimulationHits(paths);
-    // A dist hit is "ledgered" only when an ACTIVE simulation entry DECLARES that specific
-    // hit — matched per-dependency, NOT by global existence (audit P1). The gate's 4th
-    // condition reuses the SAME `computeUnledgeredDistHits` join, so scan and gate agree.
-    const unledgeredDistHits = computeUnledgeredDistHits(entries, result.distHits);
+    // A dist hit is "ledgered" only when an ACTIVE (or retired-but-ungrounded) simulation
+    // entry DECLARES that specific hit — matched per-dependency, NOT by global existence
+    // (audit P1). The receipt-aware join (BSC-4, control d) also keeps a receipt-less
+    // retire's dependency in coverage. The gate's 4th condition reuses the SAME
+    // `computeUnledgeredDistHitsReceiptAware` join, so scan and gate agree.
+    const unledgeredDistHits = computeUnledgeredDistHitsReceiptAware(paths, entries, result.distHits);
     (0, log_1.structuredLog)({
         cmd: "sim scan",
         distHits: result.distHits.length,
@@ -470,6 +514,58 @@ function distHitLedgered(hit, active) {
  */
 function computeUnledgeredDistHits(entries, distHits) {
     const active = activeSimulatedEntries(entries);
+    if (active.length === 0)
+        return distHits.slice();
+    return distHits.filter((h) => !distHitLedgered(h, active));
+}
+// ---------------------------------------------------------------------------
+// Receipt-aware "no double-exoneration" join (Axis-B slice-1a / BSC-4, control d)
+// ---------------------------------------------------------------------------
+/**
+ * Is a retirement GROUNDED? A retired entry counts as genuinely retired ONLY when a
+ * `valid` or `legacy` (grandfathered) `sim-retire` receipt backs it. A non-retired
+ * entry is vacuously grounded (it has not claimed reality yet). This is the
+ * receipt-aware refinement of "retired": a receipt-less retire (the `--emergency` /
+ * attestation bypass) is NOT grounded, so it must not exonerate the entry.
+ */
+function retirementGrounded(paths, entry) {
+    if (entry.status !== "retired")
+        return true;
+    const s = (0, receipts_1.readReceiptValidated)(paths, "sim-retire", entry.id).status;
+    return s === "valid" || s === "legacy";
+}
+/**
+ * Rung-1 receipt-aware blocker (control d — no double-exoneration). A user-visible
+ * simulation blocks production-reality completion when it is active (the existing
+ * {@link blocksProductionReality} rule), AND ALSO when it is retired but its
+ * retirement is NOT grounded by a receipt — a receipt-less retire cannot clear the
+ * gate. `Real`/`Sandbox` and non-user-visible entries never block.
+ */
+function simEntryBlocksProductionReality(paths, entry) {
+    if (!entry.userVisible || !(0, simulation_1.isSimulatedClassification)(entry.classification))
+        return false;
+    if (entry.status !== "retired")
+        return true; // active user-visible simulation blocks
+    return !retirementGrounded(paths, entry); // retired-but-ungrounded still blocks
+}
+/**
+ * The dist-scan coverage set, receipt-aware: simulated entries that are active OR
+ * retired-but-ungrounded (control d). A receipt-less retire stays in the coverage set
+ * — its declared dependency keeps covering the corresponding dist hit, so the
+ * exoneration cannot disappear a live simulation from the scan. `Real`/`Sandbox` are
+ * reality and never simulate.
+ */
+function activeOrUngroundedSimulatedEntries(paths, entries) {
+    return entries.filter((e) => (0, simulation_1.isSimulatedClassification)(e.classification) && (e.status !== "retired" || !retirementGrounded(paths, e)));
+}
+/**
+ * Receipt-aware unledgered-dist-hit join — mirrors {@link computeUnledgeredDistHits}
+ * but uses the receipt-aware coverage set {@link activeOrUngroundedSimulatedEntries}
+ * so a receipt-less retire does not drop its dependency from coverage. Empty coverage
+ * set → every dist hit is unledgered (same posture as the non-receipt-aware join).
+ */
+function computeUnledgeredDistHitsReceiptAware(paths, entries, distHits) {
+    const active = activeOrUngroundedSimulatedEntries(paths, entries);
     if (active.length === 0)
         return distHits.slice();
     return distHits.filter((h) => !distHitLedgered(h, active));

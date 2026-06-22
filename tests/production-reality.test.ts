@@ -188,7 +188,10 @@ describe("th sim — add / list / retire lifecycle", () => {
     expect((list.data!.entries as unknown[]).length).toBe(1);
     expect((list.data!.blocking as string[])).toEqual(["SIM-001"]);
 
-    const retire = runSimRetire(paths, "SIM-001", { retireSlice: "SLICE-3" });
+    // Retiring a user-visible (blocking) simulation now requires a grounding target
+    // that resolves in source (BSC-4).
+    writeFile(paths, "src/real-payments.ts", "export const pay = () => 1;\n");
+    const retire = runSimRetire(paths, "SIM-001", { retireSlice: "SLICE-3", target: "src/real-payments.ts" });
     expect(retire.ok).toBe(true);
     expect((retire.data!.entry as { status: string }).status).toBe("retired");
 
@@ -211,8 +214,10 @@ describe("th sim — add / list / retire lifecycle", () => {
     writeState(paths, { ...initialState(), tier: "T1" });
     runSimAdd(paths, { classification: "Mocked", userVisible: true });
     expect(runSimRetire(paths, "SIM-999").data!.error).toBe("simulation_not_found");
-    runSimRetire(paths, "SIM-001");
-    expect(runSimRetire(paths, "SIM-001").data!.error).toBe("already_retired");
+    // SIM-001 is user-visible (blocking) → the first (successful) retire needs a target.
+    writeFile(paths, "src/real.ts", "export const r = 1;\n");
+    runSimRetire(paths, "SIM-001", { target: "src/real.ts" });
+    expect(runSimRetire(paths, "SIM-001", { target: "src/real.ts" }).data!.error).toBe("already_retired");
   });
 
   it("ids stay monotonic across adds (append-only, never reused)", () => {
@@ -405,8 +410,11 @@ describe("e2e — production-reality gate red→green leg", () => {
     // RED: the first production-reality blocker is the simulation.
     expect(runGateProductionReality(paths).data!.error).toBe("simulation_unretired");
 
-    // Retire the simulation → next blocker is the missing Tester record.
-    runSimRetire(paths, "SIM-001");
+    // Retire the simulation → next blocker is the missing Tester record. The retire is
+    // GROUNDED in a real source file (BSC-4): a valid receipt exonerates the entry so it
+    // no longer blocks, and the gate re-validates that ground.
+    writeFile(paths, "src/real-db.ts", "export const db = () => 1;\n");
+    runSimRetire(paths, "SIM-001", { target: "src/real-db.ts" });
     expect(runGateProductionReality(paths).data!.error).toBe("tester_record_missing");
 
     // Attach the Tester record → GREEN.

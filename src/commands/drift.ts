@@ -13,6 +13,11 @@ import {
 import { structuredLog } from "../core/log";
 import { appendLedger } from "../core/ledger";
 import { NOT_INIT, formatIssues } from "../core/guards";
+import {
+  appendTerminalReceipt,
+  ensureReceiptMigration,
+  TargetUnresolvedError,
+} from "../core/receipts";
 
 /**
  * `th drift` — append-only access to the bidirectional drift log (spec §10).
@@ -168,6 +173,18 @@ export function runDriftList(paths: ProjectPaths): CommandResult {
   return success({ data: { entries, open_blocking: openBlocking }, human });
 }
 
+/** Options for {@link runDriftResolve}. */
+export interface DriftResolveOptions {
+  /**
+   * The source path the resolution grounds in (Axis-B slice-1a / BSC-4). REQUIRED
+   * for a `requirement`-layer (BLOCKING) resolve — that flip now mints a
+   * `drift-resolve` {@link import("../core/receipts").TerminalTransitionReceipt}
+   * whose ground is recomputable at gate time. Ignored for a derived-layer resolve
+   * (those never clear a blocking gate, so they mint no receipt).
+   */
+  target?: string;
+}
+
 /**
  * `th drift resolve <id>` — append an append-only resolution note. Only
  * decrements `state.drift_open_blocking` when the resolved entry is a
@@ -177,12 +194,26 @@ export function runDriftList(paths: ProjectPaths): CommandResult {
  * - The id must match an existing drift entry (no unknown ids).
  * - Double-resolving (a `## <id> — resolved` note already present) is rejected.
  * - Derived-layer entries: counter unchanged, human output says so explicitly.
+ *
+ * Grounding (Axis-B slice-1a / BSC-4): resolving a `requirement`-layer drift — the
+ * BLOCKING flip — now REQUIRES `opts.target` and mints a content-bound
+ * `drift-resolve` receipt. A missing target, or a target that does not resolve in
+ * source, refuses the flip (no resolution note, no counter change). Derived-layer
+ * resolves are unchanged (target optional, no receipt).
  */
-export function runDriftResolve(paths: ProjectPaths, id?: string): CommandResult {
-  return withStateLock(paths, () => runDriftResolveLocked(paths, id));
+export function runDriftResolve(
+  paths: ProjectPaths,
+  id?: string,
+  opts?: DriftResolveOptions,
+): CommandResult {
+  return withStateLock(paths, () => runDriftResolveLocked(paths, id, opts));
 }
 
-function runDriftResolveLocked(paths: ProjectPaths, id?: string): CommandResult {
+function runDriftResolveLocked(
+  paths: ProjectPaths,
+  id?: string,
+  opts?: DriftResolveOptions,
+): CommandResult {
   if (!id) return failure({ human: "usage: th drift resolve <DRIFT-NNN>" });
 
   const r = readState(paths);
@@ -217,9 +248,48 @@ function runDriftResolveLocked(paths: ProjectPaths, id?: string): CommandResult 
     });
   }
 
+  const isBlocking = entry.layer === "requirement";
+  const target = opts?.target;
+
+  // Axis-B slice-1a (BSC-4) grounding. Migrate FIRST — before appending the
+  // resolution note — so this entity is not yet terminal and is NOT grandfathered:
+  // it earns a REAL receipt rather than a legacy backfill stamp. Idempotent; runs
+  // here holding the state lock (the migration appends receipts + writes its marker).
+  ensureReceiptMigration(paths);
+
+  if (isBlocking) {
+    // A requirement-layer (BLOCKING) flip now REQUIRES a recomputable ground.
+    if (target === undefined || target === "") {
+      return failure({
+        human: `Resolving the requirement-layer (BLOCKING) drift ${id} now requires grounding: th drift resolve ${id} --target <path>`,
+        data: { error: "drift_resolve_target_required", id },
+      });
+    }
+    // Negative-control (c): mint the content-bound receipt BEFORE the resolution
+    // note. A non-resolving target throws, leaving the drift unresolved (no partial
+    // flip — no note appended, no counter decrement).
+    try {
+      appendTerminalReceipt(paths, {
+        kind: "drift-resolve",
+        refId: id,
+        targetPath: target,
+        producerIdentity: "cli:th drift resolve",
+      });
+    } catch (e) {
+      if (e instanceof TargetUnresolvedError) {
+        return failure({
+          human: `Refusing to resolve ${id}: target "${target}" does not resolve in source.`,
+          data: { error: e.code, id, target: e.target },
+        });
+      }
+      throw e;
+    }
+  }
+  // Derived-layer: target is OPTIONAL and NO receipt is minted (a derived drift
+  // never clears a blocking gate). Behavior otherwise unchanged.
+
   appendDriftLog(paths, `## ${id} — resolved\n`);
 
-  const isBlocking = entry.layer === "requirement";
   let driftOpenBlocking = r.state.drift_open_blocking;
   if (isBlocking) {
     driftOpenBlocking = Math.max(0, driftOpenBlocking - 1);
@@ -228,7 +298,13 @@ function runDriftResolveLocked(paths: ProjectPaths, id?: string): CommandResult 
     appendLedger(paths, { event: "drift-blocking-resolved", id, drift_open_blocking: driftOpenBlocking });
   }
 
-  structuredLog({ cmd: "drift resolve", id, layer: entry.layer, drift_open_blocking: driftOpenBlocking });
+  structuredLog({
+    cmd: "drift resolve",
+    id,
+    layer: entry.layer,
+    drift_open_blocking: driftOpenBlocking,
+    ...(isBlocking ? { target } : {}),
+  });
   const human = isBlocking
     ? `${id} marked resolved (requirement layer, blocking cleared). Open blocking drift: ${driftOpenBlocking}.`
     : `${id} marked resolved (derived layer — no blocking counter change). Open blocking drift: ${driftOpenBlocking}.`;

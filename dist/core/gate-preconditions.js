@@ -87,8 +87,8 @@ const decisions_1 = require("./decisions");
 const repo_1 = require("../commands/repo");
 const interview_1 = require("../commands/interview");
 const sim_1 = require("../commands/sim");
-const simulation_1 = require("./simulation");
 const tester_1 = require("./tester");
+const receipts_1 = require("./receipts");
 const PASS = { ok: true };
 // ---------------------------------------------------------------------------
 // Global rungs (stage-independent) — checked before any stage-specific work, in
@@ -374,7 +374,11 @@ function checkProductionReality(paths, state) {
     // every in-flight run's obligation ladder. Mirrors checkInterview's front-gate shape.
     if (!(0, stages_1.isFinalVerification)(state.current_stage))
         return PASS;
-    // 1. A non-retired simulation entry on a user-visible production path blocks.
+    // 1. A user-visible simulation still blocks. BSC-4 receipt-aware: an entry blocks
+    // when it is active+user-visible+simulated (the original rule) OR when it is marked
+    // `retired` but that retirement is NOT grounded by a valid/legacy sim-retire receipt
+    // (a retire-by-attestation with no source replacement — no double-exoneration). The
+    // SAME `simEntryBlocksProductionReality` predicate backs `th sim`, so reporting agrees.
     let entries;
     try {
         entries = (0, sim_1.readSimulationLedger)(paths);
@@ -385,13 +389,38 @@ function checkProductionReality(paths, state) {
         }
         throw e;
     }
-    const blocking = entries.filter(simulation_1.blocksProductionReality);
+    const blocking = entries.filter((e) => (0, sim_1.simEntryBlocksProductionReality)(paths, e));
     if (blocking.length > 0) {
         return {
             ok: false,
             error: "simulation_unretired",
             detail: { ids: blocking.map((e) => e.id), classifications: blocking.map((e) => e.classification) },
         };
+    }
+    // 1b. Terminal-flip grounding (BSC-4). Every drift-resolution and decision-approval
+    // in force must carry a VALID (or grandfathered-`legacy`) TerminalTransitionReceipt.
+    // A resolve/approve done via a bypass (no receipt) — or whose recorded source target
+    // was deleted (`target_missing`) / changed (`target_mismatch`), or whose snapshot is
+    // forged/stale (`stale`) — is ungrounded and blocks. `sim-retire` grounding is owned
+    // by rung 1 (excluded here to avoid a duplicate token). Pre-upgrade projects carry no
+    // migration marker, so an absent receipt classifies `legacy` and this is a NO-OP until
+    // the receipt regime is active — it never reds an existing complete run.
+    for (const ent of (0, receipts_1.collectTerminalEntities)(paths)) {
+        if (ent.kind === "sim-retire")
+            continue; // owned by rung 1's receipt-aware blocker
+        const v = (0, receipts_1.readReceiptValidated)(paths, ent.kind, ent.refId);
+        if (v.status !== "valid" && v.status !== "legacy") {
+            return {
+                ok: false,
+                error: "terminal_receipt_unverified",
+                detail: {
+                    kind: ent.kind,
+                    refId: ent.refId,
+                    status: v.status,
+                    ...(v.staleReasons ? { staleReasons: v.staleReasons } : {}),
+                },
+            };
+        }
     }
     // 2. The verify suite must be green against production-targeted commands, AND the
     // report must be a CURRENT-binding report (F2/R-30 — not a legacy bare report, not a
@@ -428,7 +457,7 @@ function checkProductionReality(paths, state) {
     // blanket-suppresses every dist hit. The SAME `computeUnledgeredDistHits` join backs
     // `th sim scan`, so scan and gate agree. Capped walk (never throws).
     const scan = (0, sim_1.scanForSimulationHits)(paths);
-    const unledgered = (0, sim_1.computeUnledgeredDistHits)(entries, scan.distHits);
+    const unledgered = (0, sim_1.computeUnledgeredDistHitsReceiptAware)(paths, entries, scan.distHits);
     if (unledgered.length > 0) {
         return {
             ok: false,
