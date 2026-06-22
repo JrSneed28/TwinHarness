@@ -22591,22 +22591,26 @@ function classifyApprovalContent(paths, receipt, passStatus) {
 function readApprovalValidated(paths, stage) {
   const canonicalStage = stage;
   const matches = (r) => r.stage === canonicalStage;
-  const inProcessReceipts = readApprovalReceipts(paths);
-  if (!verifyApprovalChain2(inProcessReceipts).ok) return { status: "tampered" };
-  let inProcess;
-  for (const r of inProcessReceipts) {
-    if (matches(r)) inProcess = r;
-  }
-  const externalCandidates = readExternalApprovals(paths).filter(
+  const externalAll = readExternalApprovals(paths);
+  const externalCandidates = externalAll.filter(
     (r) => matches(r) && r.producer_kind === "external"
   );
   if (externalCandidates.length > 0) {
+    if (!verifyApprovalChain2(externalAll).ok) {
+      return { status: "tampered", receipt: externalCandidates[externalCandidates.length - 1] };
+    }
     const verified = verifyExternalApproval(externalCandidates);
     if (verified) {
       if (verified.legacy === true) return { status: "legacy", receipt: verified };
       return classifyApprovalContent(paths, verified, "valid-grounded");
     }
     return { status: "forged", receipt: externalCandidates[externalCandidates.length - 1] };
+  }
+  const inProcessReceipts = readApprovalReceipts(paths);
+  if (!verifyApprovalChain2(inProcessReceipts).ok) return { status: "tampered" };
+  let inProcess;
+  for (const r of inProcessReceipts) {
+    if (matches(r)) inProcess = r;
   }
   if (!inProcess) {
     if (grandfatheredBaseline2(paths).has(stage)) return { status: "legacy" };
@@ -22615,8 +22619,20 @@ function readApprovalValidated(paths, stage) {
   if (inProcess.legacy === true) return { status: "legacy", receipt: inProcess };
   return classifyApprovalContent(paths, inProcess, "valid");
 }
-function verifyExternalApproval(_candidates) {
-  return void 0;
+function verifyExternalApproval(candidates) {
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return void 0;
+  const configuredKeyId = externalKeyId(publicKey);
+  let verified;
+  for (const cand of candidates) {
+    if (typeof cand.signature !== "string") continue;
+    if (cand.key_id !== configuredKeyId) continue;
+    const { recordHash: _rh, signature: _sig, ...signedView } = cand;
+    if (verifyCanonical(approvalCanonicalText2(signedView), cand.signature, publicKey)) {
+      verified = cand;
+    }
+  }
+  return verified;
 }
 function migrationMarkerPath2(paths) {
   return path21.join(paths.stateDir, ".approval-receipts-migration");

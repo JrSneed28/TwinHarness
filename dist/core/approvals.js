@@ -89,6 +89,7 @@ const hash_1 = require("./hash");
 const jsonl_1 = require("./jsonl");
 const stages_1 = require("./stages");
 const receipts_1 = require("./receipts");
+const receipt_signing_1 = require("./receipt-signing");
 // ---------------------------------------------------------------------------
 // Schema (plan §4 step 3a-1)
 // ---------------------------------------------------------------------------
@@ -432,14 +433,24 @@ function classifyApprovalContent(paths, receipt, passStatus) {
  * `external-approvals.jsonl` — and gathers every candidate for `stage`.
  *
  * SLICE-3B PRECEDENCE (the grounded/forged asymmetry, mirrors `receipts.ts:649-721`):
- *   1. If ANY candidate CLAIMS `producer_kind:"external"`, it must PROVE itself with a
- *      verifying Ed25519 signature; a verifying one → content checks → `valid-grounded`;
- *      no external candidate verifies → `forged` → BLOCK (never silently downgraded).
- *      (Full external verify lands in slice-3b; in THIS commit the external branch is
- *      present for PRECEDENCE so an external claim cannot be ignored — it classifies
- *      `forged` until 3b loads the key + verifies the signature.)
- *   2. Else (no external claim): the slice-3a classification on the LATEST in-process
- *      candidate — absent / legacy / target_* / stale / `valid`.
+ *   1. If ANY candidate CLAIMS `producer_kind:"external"`, it must PROVE itself.
+ *      - MED-1 (external chain): the external store's append-only hash chain MUST verify
+ *        first; a tampered/reordered/truncated `external-approvals.jsonl` → `tampered` →
+ *        BLOCK (never honored).
+ *      - Then load `loadExternalPublicKey()` and `verifyCanonical` each candidate's
+ *        signature over `approvalCanonicalText(candidate)`; a verifying one → content
+ *        checks → `valid-grounded`; no external candidate verifies (key absent / wrong
+ *        key / tampered / replayed) → `forged` → BLOCK (NEVER silently downgraded to the
+ *        in-process `valid`, and NEVER deferred to the in-process `tampered` path).
+ *   2. Else (NO external claim for `stage`): the UNCHANGED slice-3a classification on the
+ *      LATEST in-process candidate — absent / legacy / target_* / stale / `valid`.
+ *
+ * MED-2 (ordering): external precedence is evaluated FIRST. The in-process
+ * `verifyApprovalChain`/`tampered` check fires ONLY in branch (2) (no external claim for
+ * `stage`), so a verifying external-signed approval for stage S is NOT masked by an
+ * UNRELATED in-process tamper (the external store outranks the forgeable in-process
+ * ledger). The common in-process-only path (no external claim) is byte-identical to
+ * slice-3a — every existing approval/fixture/neg-control test stays green.
  *
  * MARKER-INTEGRITY FAIL-CLOSED (plan §4 3a-5, R2): unlike `receipts.ts:710-715`, an
  * ABSENT migration marker does NOT blanket-`legacy`-PASS. The absent-classification keys
@@ -448,11 +459,47 @@ function classifyApprovalContent(paths, receipt, passStatus) {
  * stage to a free pass — every engaged unreceipted stage classifies `absent`.
  *
  * CHAIN-TAMPER (R2-iii): a non-verifying in-process chain (incl. head truncation) →
- * `tampered`, never a silent `absent`.
+ * `tampered`, never a silent `absent` (branch (2) only — see MED-2).
  */
 function readApprovalValidated(paths, stage) {
     const canonicalStage = stage;
     const matches = (r) => r.stage === canonicalStage;
+    // SLICE-3B MED-2 — ORDERING. External precedence is evaluated FIRST, BEFORE the
+    // in-process chain/`tampered` classification. The external store outranks the
+    // forgeable in-process ledger, so a genuine external-signed approval for stage S must
+    // NOT be masked by an UNRELATED in-process tamper. We therefore read the external
+    // store for this stage up front and only fall through to the in-process path (incl. its
+    // `verifyApprovalChain` head/tamper check) when there is NO external claim for `stage` —
+    // which keeps the common in-process-only path byte-identical to slice-3a behavior.
+    const externalAll = readExternalApprovals(paths);
+    const externalCandidates = externalAll.filter((r) => matches(r) && r.producer_kind === "external");
+    // (1) An external CLAIM exists → it must PROVE itself with a verifying Ed25519
+    // signature AND a verifying external chain (MED-1). This branch is DECISIVE: a
+    // verifying external approval grounds; a non-verifying one is `forged` and BLOCKS —
+    // never silently downgraded to the in-process `valid` path, and never deferred to the
+    // in-process `tampered` classification.
+    if (externalCandidates.length > 0) {
+        // MED-1 — external chain verification. A tampered/reordered/truncated
+        // external-approvals.jsonl must NOT be honored: if the external store's own
+        // append-only hash chain does not verify, no external candidate can be trusted →
+        // `tampered` → BLOCK (mirrors the in-process chain posture, applied to the external
+        // store before any signature is accepted).
+        if (!verifyApprovalChain(externalAll).ok) {
+            return { status: "tampered", receipt: externalCandidates[externalCandidates.length - 1] };
+        }
+        const verified = verifyExternalApproval(externalCandidates);
+        if (verified) {
+            if (verified.legacy === true)
+                return { status: "legacy", receipt: verified };
+            return classifyApprovalContent(paths, verified, "valid-grounded");
+        }
+        // No external candidate verified (key absent, wrong key, or all signatures
+        // bad/tampered/replayed) → forged.
+        return { status: "forged", receipt: externalCandidates[externalCandidates.length - 1] };
+    }
+    // (2) No external claim → the UNCHANGED slice-3a classification on the in-process line.
+    // The in-process chain/`tampered` check lives HERE (after the no-external-claim gate),
+    // so an unrelated in-process tamper can only affect a stage with no external claim.
     const inProcessReceipts = readApprovalReceipts(paths);
     if (!verifyApprovalChain(inProcessReceipts).ok)
         return { status: "tampered" };
@@ -462,20 +509,6 @@ function readApprovalValidated(paths, stage) {
         if (matches(r))
             inProcess = r;
     }
-    // ALL external candidates claiming this stage.
-    const externalCandidates = readExternalApprovals(paths).filter((r) => matches(r) && r.producer_kind === "external");
-    // (1) An external CLAIM exists → it must PROVE itself (full verify in slice-3b).
-    if (externalCandidates.length > 0) {
-        const verified = verifyExternalApproval(externalCandidates);
-        if (verified) {
-            if (verified.legacy === true)
-                return { status: "legacy", receipt: verified };
-            return classifyApprovalContent(paths, verified, "valid-grounded");
-        }
-        // No external candidate verified (key absent, or all signatures bad) → forged.
-        return { status: "forged", receipt: externalCandidates[externalCandidates.length - 1] };
-    }
-    // (2) No external claim → the slice-3a classification on the in-process line.
     if (!inProcess) {
         // Absent-classification, fail-closed marker integrity (R2): grandfathered baseline ONLY.
         if (grandfatheredBaseline(paths).has(stage))
@@ -487,18 +520,39 @@ function readApprovalValidated(paths, stage) {
     return classifyApprovalContent(paths, inProcess, "valid");
 }
 /**
- * Slice-3b precedence hook: return the verifying external candidate, or `undefined`.
+ * Slice-3b external verification: return the LAST external candidate (file order, so a
+ * re-mint wins) whose Ed25519 signature authentically verifies under the loaded public
+ * key, or `undefined` when none verify.
  *
- * In THIS commit (3a, C-A/B) the full Ed25519 verification lands in slice-3b; here the
- * function returns `undefined` for any external claim so an external candidate that
- * cannot yet be proven classifies `forged` (fail-closed) — NEVER silently accepted and
- * never downgraded to the in-process `valid` path. Slice-3b replaces this body with the
- * `loadExternalPublicKey()` + `verifyCanonical(approvalCanonicalText(...))` logic
- * (mirroring `receipts.ts:690-707`). Keeping the precedence branch present now means the
- * external store is never ignored before 3b lands.
+ * Mirrors `receipts.ts:690-707` exactly: load the verifier's public key
+ * ({@link loadExternalPublicKey}, env `TH_RECEIPT_PUBLIC_KEYFILE`). With NO key the
+ * external claim is unprovable ⇒ `undefined` ⇒ the caller classifies `forged`
+ * (fail-closed; this is the default CI path for tests that set no key). For each
+ * candidate: require its `key_id` to match {@link externalKeyId} of the loaded key, then
+ * recompute the signed canonical text via {@link approvalCanonicalText} over the
+ * candidate with the `recordHash`/`signature` trailers stripped, and
+ * {@link verifyCanonical} the `signature`. Because the C-H producer signs the IDENTICAL
+ * `approvalCanonicalText` bytes, a genuine external approval verifies; any tamper to a
+ * signed field, a wrong-key signature, or a replayed signature over a different stage
+ * fails the check.
  */
-function verifyExternalApproval(_candidates) {
-    return undefined;
+function verifyExternalApproval(candidates) {
+    const publicKey = (0, receipt_signing_1.loadExternalPublicKey)();
+    if (publicKey === null)
+        return undefined;
+    const configuredKeyId = (0, receipt_signing_1.externalKeyId)(publicKey);
+    let verified;
+    for (const cand of candidates) {
+        if (typeof cand.signature !== "string")
+            continue; // no trailer ⇒ unverifiable
+        if (cand.key_id !== configuredKeyId)
+            continue;
+        const { recordHash: _rh, signature: _sig, ...signedView } = cand;
+        if ((0, receipt_signing_1.verifyCanonical)(approvalCanonicalText(signedView), cand.signature, publicKey)) {
+            verified = cand;
+        }
+    }
+    return verified;
 }
 // ---------------------------------------------------------------------------
 // Migration / grandfather (plan §4 3a-5) — fail-closed marker integrity (R2)
