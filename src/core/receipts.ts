@@ -38,6 +38,7 @@ import { readJsonlValues, scanTailValid, safeParseJson } from "./jsonl";
 import { gitHead, dirtyTreeDigest } from "./git-revision";
 import { parseDriftEntries } from "./drift-log";
 import { readDecisionEvents, reduceDecisions } from "./decisions";
+import { loadExternalKey, verifyCanonical } from "./receipt-signing";
 
 // ---------------------------------------------------------------------------
 // Schema (execution doc §2.5)
@@ -92,10 +93,37 @@ export interface TerminalTransitionReceipt {
   snapshot_coord: SnapshotCoord;
   /**
    * The producer's self-asserted identity. ZERO trust weight in-process — an
-   * audit breadcrumb only (execution doc §2.4). The un-forgeable property is a
-   * slice-1b concern (external keyed producer).
+   * audit breadcrumb only (execution doc §2.4). The un-forgeable property arrives
+   * via the slice-1b external keyed producer (`producer_kind:"external"` + a
+   * verifying `signature`), NOT this field.
    */
   producer_identity: string;
+  /**
+   * Slice-1b (BSC-4) — which PRODUCER minted this receipt. `"external"` marks a
+   * receipt from the keyed out-of-process producer (it MUST carry a verifying
+   * `signature`); `"in-process"` (or absent) marks an in-process self-attested
+   * receipt (NEVER signed). Optional + omit-when-absent so a slice-1a receipt's
+   * canonical text — and therefore its `recordHash` — is byte-identical. Part of
+   * the canonical hash input (after `producer_identity`).
+   */
+  producer_kind?: "external" | "in-process";
+  /**
+   * Slice-1b — the short, NON-secret id of the HMAC key that signed an external
+   * receipt (`receipt-signing.externalKeyId`), so a verifier knows WHICH key to
+   * use and an old key can be rotated out. Absent on in-process receipts. Part of
+   * the canonical hash input (after `producer_kind`), so it is MAC-bound: a key_id
+   * swap changes the canonical text and breaks the signature.
+   */
+  key_id?: string;
+  /**
+   * Slice-1b — the hex HMAC-SHA256 of this receipt's canonical text under the
+   * external key (`receipt-signing.signCanonical`). A TRAILER, EXCLUDED from
+   * `canonicalText` exactly like `recordHash`: both `recordHash` and `signature`
+   * are computed over the IDENTICAL canonical input, so the MAC covers every
+   * signed field. Absent on in-process receipts. Its presence + verification is
+   * what the validator classifies as `valid-grounded`.
+   */
+  signature?: string;
   /**
    * `true` ONLY on a one-time backfill stamp (migration §4). A `legacy` receipt
    * is grandfathered: the gate ACCEPTS it but the validator reports it as
@@ -126,6 +154,14 @@ const CANONICAL_FIELD_ORDER: ReadonlyArray<keyof TerminalTransitionReceipt> = [
   "target_resolves_in_source",
   "snapshot_coord",
   "producer_identity",
+  // Slice-1b — `producer_kind` + `key_id` join the canonical (and therefore MAC-
+  // bound) input AFTER producer_identity, BEFORE legacy. `signature` is DELIBERATELY
+  // absent here: like `recordHash`, it is a TRAILER excluded from canonicalText, so
+  // both the recordHash and the signature are computed over the IDENTICAL bytes.
+  // canonicalText() skips undefined keys, so a slice-1a receipt (all three new fields
+  // absent) produces the byte-identical canonical text — and recordHash — as before.
+  "producer_kind",
+  "key_id",
   "legacy",
   "prevHash",
 ];
@@ -175,9 +211,22 @@ export function computeRecordHash(receipt: Omit<TerminalTransitionReceipt, "reco
 // Storage (mirrors decisions.ts)
 // ---------------------------------------------------------------------------
 
-/** `<stateDir>/terminal-receipts.jsonl` — the terminal-receipt ledger's location. */
+/** `<stateDir>/terminal-receipts.jsonl` — the in-process terminal-receipt ledger. */
 export function terminalReceiptsPath(paths: ProjectPaths): string {
   return path.join(paths.stateDir, "terminal-receipts.jsonl");
+}
+
+/**
+ * `<stateDir>/external-receipts.jsonl` — the EXTERNAL keyed producer's store
+ * (slice-1b). A SEPARATE file purely for LOCK-ISOLATION: the out-of-process producer
+ * appends here without taking the in-process `withStateLock` span, so it never
+ * contends with a running `th`. The SECURITY boundary is NOT this path — it is the
+ * HMAC key the line is signed with; a forged line written here is rejected by
+ * {@link readReceiptValidated} (no verifying signature ⇒ `forged`), exactly as one
+ * written into the in-process store would be.
+ */
+export function externalReceiptsPath(paths: ProjectPaths): string {
+  return path.join(paths.stateDir, "external-receipts.jsonl");
 }
 
 const KIND_VALUES = new Set<TerminalTransitionKind>(["drift-resolve", "sim-retire", "decision-approve"]);
@@ -192,6 +241,13 @@ function isValidReceipt(parsed: unknown): parsed is TerminalTransitionReceipt {
   if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
   if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
   if (r.legacy !== undefined && typeof r.legacy !== "boolean") return false;
+  // Slice-1b OPTIONAL signing fields: accepted when present, NEVER required — an old
+  // slice-1a receipt (all three absent) stays valid + hash-identical. A present field
+  // must be well-shaped (a malformed signing field makes the line tolerant-skipped,
+  // never silently treated as a verifying external receipt).
+  if (r.producer_kind !== undefined && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
+  if (r.key_id !== undefined && typeof r.key_id !== "string") return false;
+  if (r.signature !== undefined && (typeof r.signature !== "string" || !HEX64.test(r.signature))) return false;
   // Nested ground objects must be present and shaped.
   const tgt = r.target_resolves_in_source;
   if (typeof tgt !== "object" || tgt === null) return false;
@@ -213,6 +269,29 @@ function isValidReceipt(parsed: unknown): parsed is TerminalTransitionReceipt {
  */
 export function readTerminalReceipts(paths: ProjectPaths): TerminalTransitionReceipt[] {
   return readJsonlValues(terminalReceiptsPath(paths), isValidReceipt);
+}
+
+/**
+ * Read + parse every receipt in the EXTERNAL store (slice-1b), same tolerant shape
+ * as {@link readTerminalReceipts} (same `isValidReceipt`). Missing file → `[]`; bad
+ * lines skipped; never throws. The signature on a line is verified at gate time by
+ * {@link readReceiptValidated}, NOT here — this reader is shape-only, so a
+ * forged-but-well-shaped line is returned and then classified `forged` downstream.
+ */
+export function readExternalReceipts(paths: ProjectPaths): TerminalTransitionReceipt[] {
+  return readJsonlValues(externalReceiptsPath(paths), isValidReceipt);
+}
+
+/**
+ * The `recordHash` of the EXTERNAL store's last valid receipt — the `prevHash` seed
+ * for the external producer's own append-only hash chain (it is its OWN chain,
+ * anchored independently of the in-process ledger). Missing/empty/no-valid-tail →
+ * `GENESIS_PREV_HASH`. Used by the standalone producer script (`scripts/
+ * th-receipt-producer.mjs`) via the compiled dist.
+ */
+export function readLastExternalReceiptRecordHash(paths: ProjectPaths): string {
+  const last = scanTailValid(externalReceiptsPath(paths), isValidReceipt);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
 }
 
 /**
@@ -426,7 +505,8 @@ function sealAndAppend(
 // ---------------------------------------------------------------------------
 
 /**
- * The validated status of the receipt backing a terminal flip (execution doc §3):
+ * The validated status of the receipt backing a terminal flip (execution doc §3,
+ * extended by slice-1b):
  *  - `absent`         — no receipt AND the entity is not grandfathered → BLOCK
  *                       (negative-control **b**: post-upgrade bypass).
  *  - `target_missing` — recorded `path` no longer resolves in source → BLOCK (c).
@@ -434,7 +514,17 @@ function sealAndAppend(
  *  - `stale`          — `snapshot_coord` diverged (gitHead/treeDigest) → BLOCK (a).
  *  - `legacy`         — a grandfathered backfill stamp → gate ACCEPTS, reported as
  *                       ungrounded-legacy.
- *  - `valid`          — present, non-legacy, target resolves + matches, not stale.
+ *  - `valid`          — present, non-legacy, in-process/attested receipt whose content
+ *                       passes (target resolves + matches, not stale). The gate ACCEPTS
+ *                       it; UNCHANGED from slice-1a (every slice-1a test pins this).
+ *  - `valid-grounded` — slice-1b: an EXTERNAL keyed receipt whose signature verifies
+ *                       under the loaded key AND whose content passes. Independently
+ *                       grounded (the in-process surface cannot forge the MAC). The
+ *                       gate ACCEPTS it; it is the STRONGER form of `valid`.
+ *  - `forged`         — slice-1b: a receipt CLAIMS `producer_kind:"external"` but no
+ *                       external candidate's signature verifies (key absent, or every
+ *                       signature is bad/tampered/replayed) → BLOCK. An unprovable
+ *                       independence claim is rejected, never silently downgraded.
  */
 export type ReceiptValidationStatus =
   | "absent"
@@ -442,7 +532,9 @@ export type ReceiptValidationStatus =
   | "target_mismatch"
   | "stale"
   | "legacy"
-  | "valid";
+  | "valid"
+  | "valid-grounded"
+  | "forged";
 
 /** The validated receipt + its status (and any staleness reasons). */
 export interface ValidatedReceipt {
@@ -476,63 +568,112 @@ function snapshotStaleReasons(recorded: SnapshotCoord, current: SnapshotCoord): 
 }
 
 /**
+ * Apply the slice-1a CONTENT checks to a present, non-legacy receipt, returning a
+ * pass/fail status. On PASS, the caller-supplied `passStatus` is returned —
+ * `"valid"` for an in-process/attested receipt (slice-1a, unchanged) or
+ * `"valid-grounded"` for a signature-verified external receipt (slice-1b). On FAIL,
+ * the specific slice-1a fail token (`target_missing` / `target_mismatch` / `stale`)
+ * — IDENTICAL discrimination for both producer kinds, so an external receipt whose
+ * target was deleted/edited or whose snapshot drifted blocks exactly like an
+ * in-process one.
+ *
+ * decision-approve is build-coordinate-only (execution doc §6): no target block, no
+ * snapshot staleness — a present non-legacy receipt passes.
+ */
+function classifyReceiptContent(
+  paths: ProjectPaths,
+  kind: TerminalTransitionKind,
+  receipt: TerminalTransitionReceipt,
+  passStatus: "valid" | "valid-grounded",
+): ValidatedReceipt {
+  if (kind === "decision-approve") return { status: passStatus, receipt };
+
+  const recordedPath = receipt.target_resolves_in_source.path;
+  const recordedDigest = receipt.target_resolves_in_source.digest;
+  const currentDigest = computeTargetDigest(paths.root, recordedPath);
+  if (currentDigest === null) return { status: "target_missing", receipt }; // (c)
+  if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt };
+
+  const staleReasons = snapshotStaleReasons(receipt.snapshot_coord, currentSnapshotCoord(paths.root));
+  if (staleReasons.length > 0) return { status: "stale", receipt, staleReasons }; // (a)
+
+  return { status: passStatus, receipt };
+}
+
+/**
  * Validate the receipt backing the terminal flip `(kind, refId)` (execution doc
- * §3 / §6). Finds the LATEST receipt matching `(kind, refId)` in file order, then
- * classifies it.
+ * §3 / §6, extended by slice-1b). Reads BOTH stores — the in-process
+ * `terminal-receipts.jsonl` AND the external `external-receipts.jsonl` — and gathers
+ * every candidate matching `(kind, refId)`.
+ *
+ * SLICE-1B PRECEDENCE (the grounded/forged asymmetry):
+ *   1. If ANY candidate CLAIMS `producer_kind:"external"`:
+ *      - Load the external key. For each external candidate, re-derive its canonical
+ *        text and {@link verifyCanonical} its `signature`. The FIRST that
+ *        authentically verifies is run through the slice-1a content checks; if it
+ *        passes ⇒ `valid-grounded` (independently grounded — the in-process surface
+ *        cannot forge the MAC). If it verifies but the CONTENT fails ⇒ the slice-1a
+ *        fail token (`target_missing` / `target_mismatch` / `stale`) or `legacy`.
+ *      - If NO external candidate verifies (key absent, or every signature is
+ *        bad/tampered/replayed) ⇒ `forged` ⇒ BLOCK. An unprovable independence claim
+ *        is never silently downgraded to `valid`.
+ *   2. Else (no external claim): the EXISTING slice-1a classification on the LATEST
+ *      in-process candidate — absent / legacy / target_* / stale / `valid` —
+ *      UNCHANGED, so every slice-1a test (and the no-key dev path) stays green.
  *
  * ABSENT classification (the load-bearing negative-control **b** / migration §4):
- * when NO receipt is found —
- *   - `!receiptMigrationDone(paths)` → `legacy`. The project never ran the new
- *     producer code: it is genuinely pre-upgrade, so treat a flip as
- *     grandfathered-implicitly. Keeps existing complete projects / existing gate
- *     tests green.
- *   - migrated AND `${kind}:${refId}` is in {@link grandfatheredBaseline} → `legacy`.
- *   - migrated AND NOT in the baseline → `absent` → BLOCK. This is the
- *     post-upgrade bypass via `--emergency` / raw `state set`.
- *
- * KIND-SPECIFIC branch (execution doc §6 — decision-approve):
- *   `decision-approve` is build-coordinate-only. A decision approved at an earlier
- *   build STAYS approved, so we do NOT block on a target (it may be empty) and do
- *   NOT treat snapshot drift as `stale`. Validity is simply: a present, non-legacy
- *   receipt → `valid`. (drift-resolve / sim-retire are the requirement-layer kinds
- *   that DO carry the full target + snapshot discrimination.)
+ * when NO candidate is found anywhere —
+ *   - `!receiptMigrationDone(paths)` → `legacy` (genuinely pre-upgrade).
+ *   - migrated AND `${kind}:${refId}` in {@link grandfatheredBaseline} → `legacy`.
+ *   - migrated AND NOT in the baseline → `absent` → BLOCK.
  */
 export function readReceiptValidated(
   paths: ProjectPaths,
   kind: TerminalTransitionKind,
   refId: string,
 ): ValidatedReceipt {
-  const receipts = readTerminalReceipts(paths);
-  // LATEST matching receipt in file order (a re-flip mints a newer receipt).
-  let found: TerminalTransitionReceipt | undefined;
-  for (const r of receipts) {
-    if (r.kind === kind && r.refId === refId) found = r;
+  const matches = (r: TerminalTransitionReceipt): boolean => r.kind === kind && r.refId === refId;
+  // LATEST in-process candidate in file order (a re-flip mints a newer receipt).
+  let inProcess: TerminalTransitionReceipt | undefined;
+  for (const r of readTerminalReceipts(paths)) {
+    if (matches(r)) inProcess = r;
+  }
+  // ALL external candidates claiming this (kind, refId) — gathered so a verifying one
+  // can be preferred over a non-verifying (forged) one regardless of file order.
+  const externalCandidates = readExternalReceipts(paths).filter(
+    (r) => matches(r) && r.producer_kind === "external",
+  );
+
+  // (1) An external CLAIM exists → it must PROVE itself with a verifying signature.
+  if (externalCandidates.length > 0) {
+    const key = loadExternalKey();
+    if (key !== null) {
+      // The LAST verifying external candidate in file order (a re-mint wins), so a
+      // newer grounded receipt supersedes an older one.
+      let verified: TerminalTransitionReceipt | undefined;
+      for (const cand of externalCandidates) {
+        if (typeof cand.signature !== "string") continue; // no trailer ⇒ unverifiable
+        const { recordHash: _rh, signature: _sig, ...signedView } = cand;
+        if (verifyCanonical(canonicalText(signedView), cand.signature, key)) verified = cand;
+      }
+      if (verified) {
+        if (verified.legacy === true) return { status: "legacy", receipt: verified };
+        return classifyReceiptContent(paths, kind, verified, "valid-grounded");
+      }
+    }
+    // No external candidate verified (key absent, or all signatures bad) → forged.
+    return { status: "forged", receipt: externalCandidates[externalCandidates.length - 1] };
   }
 
-  if (!found) {
+  // (2) No external claim → the UNCHANGED slice-1a classification on the in-process line.
+  if (!inProcess) {
     // Negative-control (b) / migration §4 absent-classification.
     if (!receiptMigrationDone(paths)) return { status: "legacy" }; // genuinely pre-upgrade
     if (grandfatheredBaseline(paths).has(baselineKey(kind, refId))) return { status: "legacy" };
     return { status: "absent" }; // migrated + not grandfathered → BLOCK
   }
-
-  if (found.legacy === true) return { status: "legacy", receipt: found };
-
-  // decision-approve (execution doc §6): build-coordinate-only — no target block,
-  // no snapshot staleness. A present non-legacy receipt is valid.
-  if (kind === "decision-approve") return { status: "valid", receipt: found };
-
-  // drift-resolve / sim-retire: full requirement-layer discrimination.
-  const recordedPath = found.target_resolves_in_source.path;
-  const recordedDigest = found.target_resolves_in_source.digest;
-  const currentDigest = computeTargetDigest(paths.root, recordedPath);
-  if (currentDigest === null) return { status: "target_missing", receipt: found }; // (c)
-  if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt: found };
-
-  const staleReasons = snapshotStaleReasons(found.snapshot_coord, currentSnapshotCoord(paths.root));
-  if (staleReasons.length > 0) return { status: "stale", receipt: found, staleReasons }; // (a)
-
-  return { status: "valid", receipt: found };
+  if (inProcess.legacy === true) return { status: "legacy", receipt: inProcess };
+  return classifyReceiptContent(paths, kind, inProcess, "valid");
 }
 
 // ---------------------------------------------------------------------------
