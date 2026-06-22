@@ -22837,6 +22837,20 @@ function checkProductionReality(paths, state) {
       };
     }
   }
+  for (const stage of requiredHumanGateStages(state)) {
+    const a = readApprovalValidated(paths, stage);
+    if (a.status !== "valid" && a.status !== "valid-grounded" && a.status !== "legacy") {
+      return {
+        ok: false,
+        error: "human_approval_unverified",
+        detail: {
+          stage,
+          status: a.status,
+          ...a.staleReasons ? { staleReasons: a.staleReasons } : {}
+        }
+      };
+    }
+  }
   const verifyLoaded = loadVerifyConfig(paths);
   if (verifyLoaded.status === "corrupt") {
     return { ok: false, error: "production_verify_not_green", detail: { reason: "config_corrupt" } };
@@ -22884,6 +22898,10 @@ function checkProductionReality(paths, state) {
 function stageOrdinal(stage) {
   const canonical = canonicalizeStage(stage);
   return STAGE_PIPELINE.findIndex((s) => s.stage === canonical);
+}
+function requiredHumanGateStages(state) {
+  const currentOrdinal = stageOrdinal(state.current_stage);
+  return engagedStagesFor(state).filter((s) => s.humanGate && stageOrdinal(s.stage) <= currentOrdinal).map((s) => s.stage);
 }
 var IMPLEMENTATION_PLANNING_ORDINAL = STAGE_PIPELINE.findIndex((s) => s.stage === "implementation-planning");
 var REQUIREMENTS_ORDINAL = STAGE_PIPELINE.findIndex((s) => s.stage === "requirements");
@@ -24185,6 +24203,19 @@ function runNext(paths, opts = {}) {
             kind: "fix-simulation-ledger",
             action: "Final verification is blocked \u2014 .twinharness/simulation-ledger.json is corrupt/unreadable. Inspect and repair it before sign-off (it must be a JSON array of simulation entries).",
             why: "An unreadable simulation ledger must fail CLOSED: treating it as empty would let an undeclared simulation pass as production."
+          },
+          explain
+        );
+      }
+      case "human_approval_unverified": {
+        const stage = fv.detail.stage ?? "";
+        const status = fv.detail.status ?? "";
+        return emit(
+          {
+            kind: "approve-stage",
+            action: `Final verification is blocked \u2014 the human approval for the '${stage}' stage is ${status || "missing/invalid"}. A human must approve it at the current snapshot (\`th approve ${stage}\`) before sign-off; the approval binds the stage's governing artifact, so re-approve after any change to it.`,
+            why: "BSC-7: a `humanGate` stage must carry a snapshot- and artifact-bound human approval before completion. The closed required-set (engaged-and-not-future humanGate stages) is re-validated fresh at the completion gate, so an `--emergency`/`state set` jump cannot route around it.",
+            data: { stage, status }
           },
           explain
         );
@@ -28449,7 +28480,7 @@ var TOOL_DEFS = [
   },
   {
     name: "th_gate_production_reality",
-    description: "Reader: report the production-reality gate (checkProductionReality). FIVE conditions, each a stable error token: simulation_unretired (a non-retired user-visible simulation), production_verify_not_green, tester_record_missing, unledgered_simulation_in_dist, scan_coverage_incomplete (a dist/ file the two-tier scan could not deep-inspect, not exonerated by a signed exception). The SAME predicate canAdvanceStage/canUnlockImplementation/checkFinalVerification compose, so a blocked th_stage_advance/th_implementation_unlock returns the IDENTICAL token. Read-only.",
+    description: "Reader: report the production-reality gate (checkProductionReality). SIX conditions, each a stable error token: simulation_unretired (a non-retired user-visible simulation), production_verify_not_green, tester_record_missing, unledgered_simulation_in_dist, scan_coverage_incomplete (a dist/ file the two-tier scan could not deep-inspect, not exonerated by a signed exception), human_approval_unverified (an engaged-and-not-future humanGate stage lacks a valid snapshot+artifact-bound human approval). The SAME predicate canAdvanceStage/canUnlockImplementation/checkFinalVerification compose, so a blocked th_stage_advance/th_implementation_unlock returns the IDENTICAL token. Read-only.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runGateProductionReality(paths)
   },

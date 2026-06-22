@@ -29,7 +29,7 @@ import {
   sign,
   type KeyObject,
 } from "node:crypto";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
@@ -178,6 +178,12 @@ function greenWithResolvedDrift(): { paths: ProjectPaths; targetRel: string } {
   // scenarios that must see BLOCK run ensureReceiptMigration THEMSELVES after removing
   // the implicit-legacy escape. We expose the un-migrated project and let each test
   // decide. (See per-scenario setup.)
+  // BSC-7 slice-3a C-2: the completion rung re-validates the closed human-approval
+  // required-set (it runs AFTER the terminal-flip rung 1b, so a terminal-receipt block
+  // still short-circuits first). Mint the required approvals on this non-git fixture —
+  // coords are null at mint time, so the F8 rule keeps them non-discriminating (`valid`)
+  // even after a per-scenario git init/commit — so the gate's PASS arms are reachable.
+  mintRequiredApprovals(paths, state(paths));
   return { paths, targetRel };
 }
 

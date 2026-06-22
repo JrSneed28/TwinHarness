@@ -12,7 +12,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
@@ -154,6 +154,10 @@ describe("th_stage_advance — gated stage advance", () => {
     // tail. R-31: the Tester record must be F8-BOUND (passed + receipt + repo snapshot)
     // — a bare {driver} marker no longer satisfies the strict predicate.
     expect(runTesterRecord(paths, { driver: "cli-e2e", provider: "sandbox", passed: true }).ok).toBe(true);
+    // BSC-7 slice-3a C-2: the completion rung now composes into the final-verification
+    // ladder too, so the closed human-approval required-set must be satisfied to reach the
+    // no_next_stage tail (otherwise the advance blocks on human_approval_unverified).
+    mintRequiredApprovals(paths, state(paths));
     const r = toolRun("th_stage_advance", paths);
     expect(r.ok).toBe(false);
     expect(r.data?.error).toBe("no_next_stage");

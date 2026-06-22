@@ -5,6 +5,8 @@ import { resolveProjectPaths, type ProjectPaths } from "../src/core/paths";
 import { CLI_COMMAND_LEAVES, MCP_EXCLUDED, MCP_ONLY_TOOLS } from "../src/mcp-server";
 import { stageContract } from "../src/core/stages";
 import { appendApprovalReceipt, type HumanApprovalReceipt } from "../src/core/approvals";
+import { requiredHumanGateStages } from "../src/core/gate-preconditions";
+import type { TwinHarnessState } from "../src/core/state-schema";
 
 /**
  * The SELF-DERIVING MCP tool count, computed from the CLI↔MCP partition rather
@@ -110,6 +112,26 @@ export function mintApprovalForFixture(
     stage,
     producerIdentity: opts.producerIdentity ?? "fixture:mintApprovalForFixture",
   });
+}
+
+/**
+ * Mint a VALID in-process approval for EVERY stage in the CLOSED required-set of `state`
+ * (BSC-7 / Axis-B slice-3a C-2 completion enforcement) — `requiredHumanGateStages(state)`
+ * = humanGate ∩ engagedStagesFor ∩ ordinal-≤-current. This is the green-baseline lever the
+ * completion rung needs: a green-at-final-verification fixture now BLOCKS with
+ * `human_approval_unverified` until its required-set is approved, so every such fixture
+ * calls this once after the state + governing artifacts are in place.
+ *
+ * Each stage is minted via {@link mintApprovalForFixture}, which keeps any real artifact the
+ * fixture already authored (binding its true digest) and lays down a minimal placeholder for
+ * the rest — so the later validation re-reads the SAME artifact and the approval classifies
+ * `valid`. Returns the minted approvals in required-set order.
+ */
+export function mintRequiredApprovals(
+  paths: ProjectPaths,
+  state: Pick<TwinHarnessState, "tier" | "has_ui" | "current_stage">,
+): HumanApprovalReceipt[] {
+  return requiredHumanGateStages(state).map((stage) => mintApprovalForFixture(paths, stage));
 }
 
 /** Create an isolated temp project dir so tests never touch the repo root. */

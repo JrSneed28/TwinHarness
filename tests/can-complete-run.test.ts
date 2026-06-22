@@ -12,7 +12,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
@@ -56,6 +56,9 @@ function greenAtFinal(): ProjectPaths {
   expect(runArtifactRegister(paths, "docs/10-verification-report.md", 1).ok).toBe(true);
   // F8/R-31 (enforced): the gate requires a PASSED, receipt+repo-bound Tester record.
   expect(runTesterRecord(paths, { driver: "cli-e2e", passed: true }).ok).toBe(true);
+  // BSC-7 slice-3a C-2: mint the closed human-approval required-set so the green baseline
+  // completes; the per-test perturbations red exactly one non-approval rung.
+  mintRequiredApprovals(paths, state(paths));
   return paths;
 }
 

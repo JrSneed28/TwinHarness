@@ -27,7 +27,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
@@ -173,6 +173,9 @@ function greenAtFinalVerification(): ProjectPaths {
   });
   expect(runArtifactRegister(paths, "docs/10-verification-report.md", 1).ok).toBe(true);
   expect(runTesterRecord(paths, { driver: "cli-e2e", provider: "sandbox", passed: true }).ok).toBe(true);
+  // BSC-7 slice-3a C-2: the completion rung re-validates the closed human-approval
+  // required-set; mint it so the scan-coverage condition stays the only perturbed lever.
+  mintRequiredApprovals(paths, state(paths));
   return paths;
 }
 
