@@ -183,6 +183,11 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   // live-QA Tester record (SG3 P2-C) — writes only .twinharness/tester-record.json
   // (governed state dir); not path-taking. `driver` is required.
   th_tester_record: { driver: "cli-e2e", provider: "sandbox" },
+  // Axis-B/BSC-7 — in-process human-approval producer; writes only
+  // .twinharness/approval-receipts.jsonl (governed state dir); not path-taking. A
+  // humanGate stage is supplied (the governing artifact may not resolve in the temp
+  // project → refuse-at-creation), but either way nothing escapes the surface.
+  th_approve: { stage: "requirements" },
 };
 
 describe("MCP write-surface audit — no mutating tool escapes the governed surface (AC#1)", () => {

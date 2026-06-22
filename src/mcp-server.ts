@@ -58,6 +58,7 @@ import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite } from "./commands/handoff";
 import { runInspectorWrite } from "./commands/inspector";
 import { runTesterRecord } from "./commands/tester";
+import { runApprove } from "./commands/approve";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
 import { runTemplateGet, runTemplateList } from "./commands/template";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
@@ -1708,6 +1709,19 @@ export const TOOL_DEFS: readonly ToolDef[] = [
         evidenceRef: optString(args, "evidenceRef"),
       }),
   },
+  {
+    name: "th_approve",
+    description:
+      "Axis-B/BSC-7: mint the IN-PROCESS human-approval receipt the humanGate precondition reads (<stateDir>/approval-receipts.jsonl, hash-chained, under the state lock). `stage` defaults to the run's current stage; it MUST be a humanGate stage (requirements, scope, architecture, ux-design, ui-design, contracts, security, final-verification) and its governing `produces` artifact MUST resolve in source — else refused at creation. The approval is bound to {stage, snapshot_coord, governing_artifact_digest}. ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its validated status is `valid` NEVER `valid-grounded` — independent grounding is the slice-3b external Ed25519-signed producer. Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        stage: stringProp("The humanGate stage to approve (defaults to the run's current_stage when omitted)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) => runApprove(paths, optString(args, "stage")),
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -1900,6 +1914,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // SG3 P2-C — live-QA Tester record writer (overwriting the marker with a fresh run is
   // an idempotent overwrite of the single tester-record.json under the state dir).
   th_tester_record: wr("tester", { idempotent: true }),
+  // Axis-B/BSC-7 — in-process human-approval producer. NOT idempotent: each call appends a
+  // fresh hash-chained approval record to approval-receipts.jsonl under the state dir.
+  th_approve: wr("stage", { idempotent: false }),
 };
 
 /** The MCP-standard annotation object for a tool (or undefined if unknown). */
@@ -2031,6 +2048,7 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "drift add", "drift list", "drift resolve",
   "sim add", "sim list", "sim retire", "sim scan",
   "tester record",
+  "approve",
   "gate production-reality",
   "collab init", "collab fragment", "collab list", "collab merge",
   "debate add", "debate list", "debate resolve",
