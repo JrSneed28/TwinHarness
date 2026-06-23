@@ -507,6 +507,50 @@ describe("E4 — 3-party budget authority (producer-signed budget ⇒ validGroun
       tp2.cleanup();
     }
   });
+
+  it("E4 end-to-end: the REAL producer (spawnSync) writes a budget validGroundingBudgets ACCEPTS", () => {
+    // Regression guard for the F1 fix: the producer must sign/hash the budget with the SAME shared
+    // `groundingBudgetCanonicalText` the gate verifies with. The other E4 tests hand-roll the budget
+    // line, so they cannot catch a producer/gate canonical drift; THIS one spawns the actual producer
+    // out-of-process with a budget in its report and asserts the gate accepts the producer's bytes.
+    const paths = greenProject();
+    setVerifierKey(paths, K1.publicKey);
+    const privateKeyFile = writeProducerKey(paths, "k1-private.pem", K1.privateKey);
+    const pubKeyFile = path.join(paths.stateDir, "grounding-public.pem");
+
+    const reportPath = path.join(paths.stateDir, "grounding-report.json");
+    fs.writeFileSync(
+      reportPath,
+      JSON.stringify({
+        workClass: "integration",
+        ground: { groundKind: "digest-manifest", manifestDigest: "sha256:abcd" },
+        budgets: [{ workClass: "integration", groundKind: "digest-manifest", metric: "api", threshold: 10 }],
+      }),
+      "utf8",
+    );
+
+    const spawnResult = spawnSync(
+      "node",
+      [PRODUCER, "--root", paths.root, "--kind", "grounding", "--grounding-report", path.relative(paths.root, reportPath)],
+      {
+        env: { ...process.env, TH_RECEIPT_PUBLIC_KEYFILE: pubKeyFile, TH_RECEIPT_PRIVATE_KEYFILE: privateKeyFile },
+        encoding: "utf8",
+      },
+    );
+    expect(spawnResult.status, `producer stderr: ${spawnResult.stderr as string}`).toBe(0);
+    const out = JSON.parse((spawnResult.stdout as string).trim());
+    expect(out.ok).toBe(true);
+    expect(out.budgetCount).toBe(1);
+
+    // The gate re-derives the budget canonical with groundingBudgetCanonicalText. If the producer's
+    // bytes diverged, the chain walk / signature verify would drop the line and the map would be empty.
+    process.env.TH_RECEIPT_PUBLIC_KEYFILE = pubKeyFile;
+    const budgets = validGroundingBudgets(paths);
+    expect(
+      budgets.has("integration::digest-manifest::api"),
+      "validGroundingBudgets must accept the budget the REAL producer wrote (producer/gate canonical must be byte-identical)",
+    ).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -947,9 +947,13 @@ function groundingManifestDigest(validated) {
  * approval receipts (in-process + external stores), de-duplicated. `manifest_digest` is ADDITIVE-
  * OPTIONAL (omit-when-absent), so a pre-BSC-10 receipt contributes NOTHING and the set is empty ⇒
  * back-compat (no `chain_mismatch`). The field is signature/hash-bound on each receipt (a swapped
- * digest breaks that receipt's own `recordHash`/signature and is caught by its OWN rung), so a value
- * present here is one the receipt's producer actually bound to the run — the grounding rung just
- * cross-checks it against the input-grounding manifest. Read tolerantly (the readers never throw).
+ * digest breaks that receipt's own `recordHash`/signature — but this reader does NOT itself verify
+ * those chains/signatures (and the contributing rungs may be in WARN), so a threaded value is NOT
+ * proven authentic here. That is SAFE because the cross-check is FAIL-CLOSED-ONLY: a disagreeing
+ * digest can only force a `chain_mismatch` BLOCK, never a pass. The deliberate trade-off is that a
+ * file-writer without the key can inject a bogus external `manifest_digest` to provoke a spurious
+ * block (a denial-of-completion, consistent with the system's block-on-suspicion posture) — it can
+ * NEVER suppress a real mismatch. Read tolerantly (the readers never throw).
  */
 function threadedManifestDigests(paths) {
     const digests = new Set();

@@ -18,7 +18,8 @@
  *                            (bsc2-flag.ts:34-39): unset → compiled default (two-commit toggle);
  *                            "0"/"false" (case-insensitive, trimmed) → false; ANY OTHER value
  *                            (including "yes", "on", "banana") → true (fail-closed polarity).
- *                            Slice-B compiled default: `return false` (WARN dist).
+ *                            Slice-B compiled default: `return true` (ENFORCE dist — the
+ *                            818a956 enforce-flip; the Slice-A WARN dist shipped `return false`).
  *
  * GroundingReceipt schema: receipt has a NESTED `ground: GroundingGround` field (NOT inline
  * groundKind/manifestDigest). appendGroundingReceipt takes MintGroundingInput:
@@ -578,10 +579,10 @@ describe("U8 — carve-out: signed masks region, unsigned masks nothing (M4)", (
 // U9 — bsc10EnforcementEnabled() both legs (Slice B: bsc2-mirror fail-closed polarity)
 // bsc2-flag.ts polarity (plan §U9 LOCKED decision): "0"/"false" → false; ANY OTHER value
 // (including "yes", "on", "banana") → true. Compiled default is the two-commit toggle:
-// Slice-B WARN dist: `return false`; Slice-B ENFORCE dist: `return true`.
+// Slice-A WARN dist shipped `return false`; the Slice-B ENFORCE dist (818a956) ships `return true`.
 // ---------------------------------------------------------------------------
 
-describe("U9 — bsc10EnforcementEnabled() — bsc2-mirror polarity (Slice B: default OFF compiled)", () => {
+describe("U9 — bsc10EnforcementEnabled() — bsc2-mirror polarity (Slice B: default ON / ENFORCE compiled)", () => {
   const SAVED = process.env.TH_BSC10_ENFORCE;
 
   afterEach(() => {

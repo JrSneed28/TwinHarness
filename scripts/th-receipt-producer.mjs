@@ -206,6 +206,10 @@ const {
   readLastExternalGroundingRecordHash,
   groundingBudgetsPath,
 } = groundingMod;
+// Sibling budget canonical text — the SAME helper the gate's `validGroundingBudgets` verifies
+// with, so the producer-signed budget and the gate's re-derivation can NEVER drift on field
+// order / snapshot-coord ordering (no parallel hand-rolled formula).
+const { groundingBudgetCanonicalText } = groundingMod;
 
 /** Convert an absolute filesystem path to a file:// URL (Windows-safe ESM import). */
 function pathToFileUrl(abs) {
@@ -971,8 +975,10 @@ function produceGrounding(paths, { groundingReportPath, workClassOverride, produ
 
   // PCC-4 sibling budget store: sign each budget independently and append to
   // grounding-budgets.jsonl. An unsigned budget exempts NOTHING (M4 fail-closed) — so the
-  // producer MUST sign every budget entry it writes. Uses raw hashContent over a fixed-key
-  // canonical JSON (no dedicated budgetCanonicalText helper is exported from the dist).
+  // producer MUST sign every budget entry it writes. The signed/hashed canonical text is
+  // produced by the SHARED `groundingBudgetCanonicalText` helper imported from the dist — the
+  // exact formula the gate's `validGroundingBudgets` re-derives with — so the binding can never
+  // drift between producer and gate (mirrors the main-receipt reuse of `groundingCanonicalText`).
   let budgetFile = undefined;
   let budgetCount = 0;
   if (budgets !== undefined && budgets.length > 0) {
@@ -1015,10 +1021,11 @@ function produceGrounding(paths, { groundingReportPath, workClassOverride, produ
         key_id: keyId,
         prevHash: budgetPrevHash,
       };
-      // Canonical text: fixed-key JSON over the signed fields (signature + recordHash excluded).
-      const budgetCanonical = JSON.stringify(budgetEntry);
+      // Canonical text via the SHARED dist helper (signature + recordHash excluded as trailers) —
+      // byte-identical to what `validGroundingBudgets` verifies, by construction not by accident.
+      const budgetCanonical = groundingBudgetCanonicalText(budgetEntry);
       const budgetSignature = sign(null, Buffer.from(budgetCanonical, "utf8"), privateKey).toString("base64");
-      // Import hashContent from the already-loaded hash module for the recordHash.
+      // hashContent from the already-loaded hash module for the recordHash (same as the gate's chain walk).
       const { hashContent } = hashMod;
       const budgetRecordHash = hashContent(budgetCanonical);
       const sealedBudget = { ...budgetEntry, signature: budgetSignature, recordHash: budgetRecordHash };
