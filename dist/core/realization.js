@@ -587,18 +587,16 @@ function readRealizationReceiptValidated(paths, reqId) {
         if (matches(r))
             inProcess = r;
     }
-    // ALL external candidates claiming this reqId.
+    // ALL external candidates claiming this reqId. The external chain is walked ONCE here:
+    // a tampered external chain is fail-closed (do not trust any external line) — a present
+    // external CLAIM below then cannot verify and forces `forged`, never a silent downgrade.
     const externalReceipts = readExternalRealizationReceipts(paths);
-    if (!verifyRealizationChain(externalReceipts).ok) {
-        // A tampered external chain is fail-closed: do not trust any external line. Fall back to
-        // the in-process classification (an external claim that cannot be read is not a forge of
-        // the in-process verdict — but a present external CLAIM below would force `forged`).
-    }
+    const externalChainOk = verifyRealizationChain(externalReceipts).ok;
     const externalCandidates = externalReceipts.filter((r) => matches(r) && claimsExternal(r));
     // (1) An external CLAIM exists → it must PROVE itself with a verifying signature.
     if (externalCandidates.length > 0) {
         const publicKey = (0, receipt_signing_1.loadExternalPublicKey)();
-        if (publicKey !== null && verifyRealizationChain(externalReceipts).ok) {
+        if (publicKey !== null && externalChainOk) {
             // The LAST verifying external candidate in file order (a re-mint wins).
             let verified;
             for (const cand of externalCandidates) {

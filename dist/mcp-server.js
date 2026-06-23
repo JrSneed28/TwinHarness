@@ -23162,12 +23162,11 @@ function readRealizationReceiptValidated(paths, reqId) {
     if (matches(r)) inProcess = r;
   }
   const externalReceipts = readExternalRealizationReceipts(paths);
-  if (!verifyRealizationChain(externalReceipts).ok) {
-  }
+  const externalChainOk = verifyRealizationChain(externalReceipts).ok;
   const externalCandidates = externalReceipts.filter((r) => matches(r) && claimsExternal(r));
   if (externalCandidates.length > 0) {
     const publicKey = loadExternalPublicKey();
-    if (publicKey !== null && verifyRealizationChain(externalReceipts).ok) {
+    if (publicKey !== null && externalChainOk) {
       let verified;
       for (const cand of externalCandidates) {
         if (signatureVerifies(cand)) verified = cand;
@@ -26317,16 +26316,18 @@ function runRealizeLocked(paths, opts) {
     realizationRecordHash: sealed.recordHash
   });
   structuredLog({ cmd: "realize", reqId, referent: sealed.referent.path, realizationRecordHash: sealed.recordHash });
+  const unowned = owningSlice === "";
   return success({
     data: {
       file: rel,
       reqId,
       owningSlice,
+      ...unowned ? { owningSliceResolved: false } : {},
       referent: sealed.referent,
       producer_kind: sealed.producer_kind ?? "in-process",
       recordHash: sealed.recordHash
     },
-    human: `Recorded an in-process realization receipt at ${rel} (${reqId} \u2192 ${sealed.referent.path}${owningSlice ? `, owning slice ${owningSlice}` : ""}). NOTE: this in-process record is ATTRIBUTION-ONLY (zero trust weight) \u2014 the agent can mint it; independent (signature-provenance) grounding requires the external-signed producer.`,
+    human: `Recorded an in-process realization receipt at ${rel} (${reqId} \u2192 ${sealed.referent.path}${owningSlice ? `, owning slice ${owningSlice}` : ""}). ` + (unowned ? `ADVISORY: ${reqId} is not currently owned by any \`done\` slice (the ownership join found no match), so the realization gate rung will not enforce it until its slice is marked done. ` : "") + `NOTE: this in-process record is ATTRIBUTION-ONLY (zero trust weight) \u2014 the agent can mint it; independent (signature-provenance) grounding requires the external-signed producer.`,
     receipts: [{ file: rel, hash: sealed.recordHash }]
   });
 }

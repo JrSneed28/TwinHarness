@@ -181,6 +181,35 @@ describe("BSC-1 realization — mint then validate", () => {
     fs.rmSync(path.resolve(paths.root, "src/a.ts"));
     expect(readRealizationReceiptValidated(paths, "REQ-001").status).toBe("target_missing");
   });
+
+  it("th realize surfaces an advisory when the REQ is owned by no done slice (owningSliceResolved:false)", () => {
+    tp = makeTempProject();
+    const paths = tp.paths;
+    // No repo-map / no done slice ⇒ the ownership join resolves no owning slice.
+    writeState(paths, { ...initialState(), slices: [] });
+    writeFile(paths, "src/a.ts", "export const a = 1;\n");
+    const res = runRealize(paths, { reqId: "REQ-001", artifact: "src/a.ts" });
+    expect(res.ok).toBe(true);
+    expect((res.data as { owningSlice: string }).owningSlice).toBe("");
+    expect((res.data as { owningSliceResolved?: boolean }).owningSliceResolved).toBe(false);
+    expect(res.human).toMatch(/ADVISORY: REQ-001 is not currently owned by any `done` slice/);
+  });
+
+  it("th realize omits the advisory flag when the REQ IS owned by a done slice", () => {
+    tp = makeTempProject();
+    const paths = tp.paths;
+    writeState(paths, {
+      ...initialState(),
+      slices: [{ id: "SLICE-0", status: "done", components: ["commands"] }],
+    });
+    writeFile(paths, "src/commands/a.ts", "export const a = 1;\n");
+    writeRepoMap(paths, [{ path: "src/commands/a.ts", component: "src/commands", req_ids: ["REQ-001"] }]);
+    const res = runRealize(paths, { reqId: "REQ-001", artifact: "src/commands/a.ts" });
+    expect(res.ok).toBe(true);
+    expect((res.data as { owningSlice: string }).owningSlice).toBe("SLICE-0");
+    expect((res.data as { owningSliceResolved?: boolean }).owningSliceResolved).toBeUndefined();
+    expect(res.human).not.toMatch(/ADVISORY/);
+  });
 });
 
 // ---------------------------------------------------------------------------

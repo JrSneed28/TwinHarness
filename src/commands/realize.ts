@@ -128,11 +128,20 @@ function runRealizeLocked(paths: ProjectPaths, opts: RealizeOptions): CommandRes
   });
   structuredLog({ cmd: "realize", reqId, referent: sealed.referent.path, realizationRecordHash: sealed.recordHash });
 
+  // Advisory (not a failure): an empty owningSlice means the ownership join placed this REQ
+  // under NO `done` slice — either the operator is realizing ahead of the slice→done claim, or
+  // the REQ is not yet owned by any done slice. The receipt is still recorded (it grounds the
+  // REQ for whenever its slice IS marked done), but the realization gate rung will not enforce
+  // this REQ until that claim exists. Surfaced so the operator is not misled into thinking the
+  // gate is now satisfied for an as-yet-unowned REQ.
+  const unowned = owningSlice === "";
+
   return success({
     data: {
       file: rel,
       reqId,
       owningSlice,
+      ...(unowned ? { owningSliceResolved: false } : {}),
       referent: sealed.referent,
       producer_kind: sealed.producer_kind ?? "in-process",
       recordHash: sealed.recordHash,
@@ -140,6 +149,10 @@ function runRealizeLocked(paths: ProjectPaths, opts: RealizeOptions): CommandRes
     human:
       `Recorded an in-process realization receipt at ${rel} ` +
       `(${reqId} → ${sealed.referent.path}${owningSlice ? `, owning slice ${owningSlice}` : ""}). ` +
+      (unowned
+        ? `ADVISORY: ${reqId} is not currently owned by any \`done\` slice (the ownership join found no match), ` +
+          `so the realization gate rung will not enforce it until its slice is marked done. `
+        : "") +
       `NOTE: this in-process record is ATTRIBUTION-ONLY (zero trust weight) — the agent can mint it; ` +
       `independent (signature-provenance) grounding requires the external-signed producer.`,
     receipts: [{ file: rel, hash: sealed.recordHash }],
