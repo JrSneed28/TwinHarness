@@ -134,7 +134,10 @@ describe("REQ-PCO-070: CLI_COMMAND_LEAVES is pinned to the dispatcher HELP enume
     const groups = new Set(CLI_COMMAND_LEAVES.map((l) => l.split(" ")[0]!));
     const helpGroups = new Set<string>();
     for (const line of help.split("\n")) {
-      const m = /^\s{2}th ([a-z]+)\b/.exec(line);
+      // A command group is the first `th <word>` token; a group name may contain a
+      // hyphen (e.g. `assertion-presence`), so the class includes `-` to match how
+      // CLI_COMMAND_LEAVES derives a group via `l.split(" ")[0]`.
+      const m = /^\s{2}th ([a-z-]+)\b/.exec(line);
       if (m) helpGroups.add(m[1]!);
     }
     const unmodeled = [...helpGroups].filter((g) => !groups.has(g));

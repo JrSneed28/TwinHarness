@@ -61,6 +61,7 @@ import { runTesterRecord } from "./commands/tester";
 import { runApprove } from "./commands/approve";
 import { runDriverRecord } from "./commands/driver";
 import { runRealize } from "./commands/realize";
+import { runAssertionPresenceRecord } from "./commands/assertion-presence";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
 import { runTemplateGet, runTemplateList } from "./commands/template";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
@@ -1773,6 +1774,24 @@ export const TOOL_DEFS: readonly ToolDef[] = [
         producerIdentity: optString(args, "identity"),
       }),
   },
+  // Axis-B slice-6 (BSC-2 2a) — in-process assertion-PRESENCE receipt writer. The SENSOR
+  // that records, per REQ-ID, whether its recognized test files carry a non-trivial assertion,
+  // grounding the production-reality assertion rung. Registration is ALWAYS-ON (parity with the
+  // CLI `th assertion-presence record`).
+  {
+    name: "th_assertion_presence_record",
+    description:
+      "Axis-B/BSC-2 (2a): mint the IN-PROCESS assertion-PRESENCE receipt the production-reality assertion rung reads (<stateDir>/assertion-presence-receipts.jsonl, hash-chained, under the state lock). Records, per REQ-ID, whether the recognized test files anchoring it carry a NON-TRIVIAL assertion that can fail (an empty `it()`, a smoke-only test, or a tautology like `expect(true).toBe(true)` is assertion-free). MEASURES PRESENCE / non-triviality, NOT efficacy — it does NOT prove the suite catches regressions. ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its in-process status is `valid` NEVER `valid-grounded` — the only efficacy/independence grade is the EXTERNAL Ed25519-signed mutation-kill receipt (2b). Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        identity: stringProp("Producer identity to record (attribution-only, zero trust weight; defaults to cli:th assertion-presence record)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runAssertionPresenceRecord(paths, { producerIdentity: optString(args, "identity") }),
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -1975,6 +1994,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // Axis-B/BSC-1 — in-process realization producer. NOT idempotent: each call appends a
   // fresh hash-chained realization receipt to realization-receipts.jsonl under the state dir.
   th_realize: wr("slices", { idempotent: false }),
+  // Axis-B/BSC-2 (2a) — in-process assertion-presence producer. NOT idempotent: each call appends
+  // a fresh hash-chained receipt to assertion-presence-receipts.jsonl under the state dir.
+  th_assertion_presence_record: wr("coverage", { idempotent: false }),
 };
 
 /** The MCP-standard annotation object for a tool (or undefined if unknown). */
@@ -2109,6 +2131,7 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "driver record",
   "approve",
   "realize",
+  "assertion-presence record",
   "gate production-reality",
   "collab init", "collab fragment", "collab list", "collab merge",
   "debate add", "debate list", "debate resolve",

@@ -198,6 +198,10 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   // repo-relative path that resolves WITHIN root (refuse-at-creation rejects an escaping
   // path BEFORE any write), so even a probe with a missing artifact escapes nothing.
   th_realize: { req_id: "REQ-001", artifact: "src/x.ts" },
+  // Axis-B/BSC-2 (2a) — in-process assertion-presence producer; writes only
+  // .twinharness/assertion-presence-receipts.jsonl (governed state dir); not path-taking.
+  // The sensor computes its ground from the temp project's tests/ dir; no args needed.
+  th_assertion_presence_record: {},
 };
 
 describe("MCP write-surface audit — no mutating tool escapes the governed surface (AC#1)", () => {
