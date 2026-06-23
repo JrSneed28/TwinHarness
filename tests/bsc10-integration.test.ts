@@ -477,3 +477,219 @@ describe("Determinism — hash is stable across shuffled field order", () => {
     expect(computeGroundingRecordHash(base)).toBe(computeGroundingRecordHash(shuffled));
   });
 });
+
+// ---------------------------------------------------------------------------
+// M-1 — Tamper-block: a non-empty broken in-process chain blocks under enforce;
+//        WARN leg stays ok:true with notice; empty store stays inert PASS.
+//
+// Mechanism: readGroundingValidated drops all in-process receipts when the chain
+// is broken (inProcessChainOk:false). evaluateGrounding detects this BEFORE
+// deriving declared classes and returns { ok:false, reason:"tampered" } immediately
+// (line 1231 of gate-preconditions.ts). An empty store always verifies
+// (verifyGroundingChain([]) ⇒ ok:true), so absence ≠ forgery is preserved.
+// ---------------------------------------------------------------------------
+
+describe("M-1 — tamper-block: broken in-process chain blocks under enforce, WARN is non-blocking", () => {
+  it("ENFORCE + tampered chain ⇒ ok:false, error:'grounding_unverified', detail.reason:'tampered'", () => {
+    process.env.TH_BSC10_ENFORCE = "1";
+    const paths = greenProject();
+    // Append a valid receipt first, then corrupt the JSONL file so the chain breaks.
+    appendGroundingReceipt(paths, {
+      workClass: "integration",
+      ground: {
+        groundKind: "digest-manifest",
+        manifestDigest: "sha256:aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+      },
+      conformance: [{ metric: "api", observed: 0, status: "within-budget" }],
+      producerIdentity: "test:runner",
+    });
+    // Tamper: overwrite the JSONL with a mutated recordHash so verifyGroundingChain fails.
+    const jsonlPath = path.join(paths.stateDir, "grounding-receipts.jsonl");
+    const raw = fs.readFileSync(jsonlPath, "utf8");
+    const tampered = raw.replace(/"recordHash":"[0-9a-f]{64}"/, '"recordHash":"' + "0".repeat(64) + '"');
+    fs.writeFileSync(jsonlPath, tampered, "utf8");
+
+    const res = checkProductionReality(paths, state(paths));
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("grounding_unverified");
+    expect((res.detail as { reason?: string } | undefined)?.reason).toBe("tampered");
+  });
+
+  it("WARN (TH_BSC10_ENFORCE unset) + tampered chain ⇒ ok:true, non-blocking (grounding summary empty by design)", () => {
+    delete process.env.TH_BSC10_ENFORCE; // WARN default OFF
+    const paths = greenProject();
+    appendGroundingReceipt(paths, {
+      workClass: "integration",
+      ground: {
+        groundKind: "digest-manifest",
+        manifestDigest: "sha256:aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+      },
+      conformance: [{ metric: "api", observed: 0, status: "within-budget" }],
+      producerIdentity: "test:runner",
+    });
+    const jsonlPath = path.join(paths.stateDir, "grounding-receipts.jsonl");
+    const raw = fs.readFileSync(jsonlPath, "utf8");
+    const tampered = raw.replace(/"recordHash":"[0-9a-f]{64}"/, '"recordHash":"' + "0".repeat(64) + '"');
+    fs.writeFileSync(jsonlPath, tampered, "utf8");
+
+    const res = checkProductionReality(paths, state(paths));
+    // WARN: non-blocking — ok:true, no blocking error.
+    // tamper ⇒ empty summary by design (no trustworthy per-kind data); WARN proves only non-blocking.
+    // res.notice is a single precedence-ordered slot (driver > realization > assertion > grounding);
+    // other WARN rungs can win it — assert only the non-blocking property via res.grounding.
+    expect(res.ok).toBe(true);
+    expect(res.error).toBeUndefined();
+    // The tamper verdict returns summary:[] (no trustworthy per-kind data), so grounding is empty.
+    expect(Array.isArray(res.grounding)).toBe(true);
+  });
+
+  it("ENFORCE + EMPTY store (no receipts) ⇒ inert PASS (absence ≠ forgery; tamper-block must not break this)", () => {
+    process.env.TH_BSC10_ENFORCE = "1";
+    const paths = greenProject();
+    // No receipts appended — empty store verifies (verifyGroundingChain([]) ⇒ ok:true)
+    // → evaluateGrounding: inProcessChainOk:true, byKind empty, declaredClasses empty → null → PASS
+    const res = checkProductionReality(paths, state(paths));
+    expect(res.ok).toBe(true);
+    expect(res.error).toBeUndefined();
+    // Must NOT have a grounding_unverified error or notice
+    expect(res.error).not.toBe("grounding_unverified");
+    expect(res.notice?.token).not.toBe("grounding_unverified");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// L-1 — has_ui force-rule pin: has_ui absent/undefined forces visual-hash into
+//        the required set; a run with no visual-hash receipt blocks under enforce.
+//
+// state.has_ui !== false (default undefined/true) → surfaces ["ui"] → forces
+// "visual-hash" via UX_SURFACE_LABELS. This is intentional fail-closed over-require:
+// a screen surface is grounded visually. Slice C softens when real visual measurement
+// lands; pin this behavior now so it cannot silently regress.
+// ---------------------------------------------------------------------------
+
+describe("L-1 — has_ui force-rule pin: undefined has_ui forces visual-hash into required set", () => {
+  it("has_ui:undefined + receipt declaring 'greenfield' + ENFORCE ⇒ visual-hash forced ⇒ ok:false / reason:'missing'", () => {
+    process.env.TH_BSC10_ENFORCE = "1";
+    tp = makeTempProject();
+    const paths = tp.paths;
+    const writeFile2 = (rel: string, body: string) => {
+      const abs = path.join(paths.root, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, body, "utf8");
+    };
+    writeFile2("docs/01-requirements.md", "# Requirements\n\n- REQ-001 the only requirement.\n");
+    writeFile2("docs/09-implementation-plan.md", "# Plan\n\nSLICE-0 covers REQ-001.\n");
+    writeFile2("tests/cov.test.ts", "// REQ-001 verified here\ntest('r', () => expect(1).toBe(1));\n");
+    writeFile2("docs/10-verification-report.md", "# Verification Report\n\nREQ-001 verified.\n");
+    writeState(paths, {
+      ...initialState(),
+      tier: "T1",
+      current_stage: "final-verification",
+      implementation_allowed: true,
+      // has_ui intentionally NOT set (defaults to undefined, which is !== false)
+      slices: [{ id: "SLICE-0", status: "done", components: [] }],
+    });
+    runArtifactRegister(paths, "docs/10-verification-report.md", 1);
+    runTesterRecord(paths, { driver: "cli-e2e", provider: "sandbox", passed: true });
+    mintRequiredApprovals(paths, readState(paths).state!);
+    writeVerifyReport(paths, {
+      ok: true,
+      ranAt: new Date().toISOString(),
+      results: [
+        { command: "vitest run", exitCode: 0, ok: true, durationMs: 1, outputTail: "" },
+        { command: "tsc --noEmit", exitCode: 0, ok: true, durationMs: 1, outputTail: "" },
+        { command: "npm run build", exitCode: 0, ok: true, durationMs: 1, outputTail: "" },
+      ],
+    });
+    appendDriverReceipt(paths, { producerIdentity: "test:runner" });
+    // Declare "greenfield" work-class — greenfield's required-kind matrix is empty by itself,
+    // but has_ui:undefined triggers the UX force-rule which adds "visual-hash" to the required set.
+    // No visual-hash receipt is appended, so the required kind is missing.
+    appendGroundingReceipt(paths, {
+      workClass: "greenfield",
+      ground: { groundKind: "version-pin", pkg: "some-dep", version: "1.0.0" },
+      conformance: [{ metric: "version", observed: "1.0.0", status: "within-budget" }],
+      producerIdentity: "test:runner",
+    });
+
+    const st = readState(paths).state!;
+    const res = checkProductionReality(paths, st);
+    // Intentional fail-closed over-require: the screen surface forces visual-hash.
+    // Revisit softening in Slice C when real visual measurement lands.
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("grounding_unverified");
+    expect((res.detail as { reason?: string } | undefined)?.reason).toBe("missing");
+    // The summary must expose the missing visual-hash kind
+    const vhSummary = (res.grounding ?? []).find((g) => g.groundKind === "visual-hash");
+    expect(vhSummary).toBeDefined();
+    expect(vhSummary?.grounded).toBe(false);
+    expect(vhSummary?.conformance).toBe("missing");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WARN default-path gap: TH_BSC10_ENFORCE unset (Slice A default OFF) + a run
+// where a required ground is MISSING or over-budget ⇒ ok:true (non-blocking) AND
+// the grounding notice/summary rides up. Proves the WARN advisory path is wired.
+// ---------------------------------------------------------------------------
+
+// res.notice is a single precedence-ordered advisory slot (driver > realization > assertion > grounding,
+// gate-preconditions.ts:1618). With TH_BSC2_ENFORCE=0 the BSC-2 rung is in WARN and can win the slot
+// with "assertion_unobserved", shadowing grounding's token. The DEDICATED res.grounding summary array
+// is the correct, uncontended observability channel for grounding (contract O1) — assert that instead.
+describe("WARN default-path: flag unset + failing ground ⇒ ok:true + res.grounding summary rides up", () => {
+  it("TH_BSC10_ENFORCE unset + required kind MISSING ⇒ ok:true, res.grounding has version-pin with conformance:'missing'", () => {
+    delete process.env.TH_BSC10_ENFORCE; // compiled default OFF
+    const paths = greenProject();
+    // Declare "integration" but only append digest-manifest (version-pin missing)
+    appendGroundingReceipt(paths, {
+      workClass: "integration",
+      ground: {
+        groundKind: "digest-manifest",
+        manifestDigest: "sha256:aabb",
+      },
+      conformance: [{ metric: "api", observed: 0, status: "within-budget" }],
+      producerIdentity: "test:runner",
+    });
+    // version-pin deliberately NOT appended
+
+    const res = checkProductionReality(paths, state(paths));
+    // WARN: must NOT block
+    expect(res.ok).toBe(true);
+    expect(res.error).toBeUndefined();
+    // The dedicated grounding summary is the deterministic observability channel (O1).
+    // It must be non-empty and expose the missing required kind.
+    expect(Array.isArray(res.grounding)).toBe(true);
+    expect((res.grounding ?? []).length).toBeGreaterThan(0);
+    const vpSummary = (res.grounding ?? []).find((g) => g.groundKind === "version-pin");
+    expect(vpSummary).toBeDefined();
+    expect(vpSummary?.grounded).toBe(false);
+    expect(vpSummary?.conformance).toBe("missing");
+  });
+
+  it("TH_BSC10_ENFORCE unset + over-budget ground ⇒ ok:true, res.grounding has digest-manifest with conformance:'over-budget'", () => {
+    delete process.env.TH_BSC10_ENFORCE;
+    const paths = greenProject();
+    appendGroundingReceipt(paths, {
+      workClass: "integration",
+      ground: { groundKind: "digest-manifest", manifestDigest: "sha256:aabb" },
+      conformance: [{ metric: "api", observed: 999, status: "over-budget" }],
+      producerIdentity: "test:runner",
+    });
+    appendGroundingReceipt(paths, {
+      workClass: "integration",
+      ground: { groundKind: "version-pin", pkg: "dep", version: "1.0.0" },
+      conformance: [{ metric: "version", observed: "1.0.0", status: "within-budget" }],
+      producerIdentity: "test:runner",
+    });
+
+    const res = checkProductionReality(paths, state(paths));
+    expect(res.ok).toBe(true);
+    expect(res.error).toBeUndefined();
+    // The over-budget kind must appear in the summary with the conformance hyphen-vocab token.
+    expect(Array.isArray(res.grounding)).toBe(true);
+    const dmSummary = (res.grounding ?? []).find((g) => g.groundKind === "digest-manifest");
+    expect(dmSummary).toBeDefined();
+    expect(dmSummary?.conformance).toBe("over-budget"); // hyphen — summary vocab, not gate-detail underscore
+  });
+});

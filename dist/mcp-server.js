@@ -24472,6 +24472,9 @@ function groundingConformanceOf(paths, receipt) {
 }
 function evaluateGrounding(paths, state) {
   const validated = readGroundingValidated(paths);
+  if (validated.inProcessChainOk === false) {
+    return { ok: false, reason: "tampered", required: [], summary: [], offenders: [] };
+  }
   const declaredClasses = [
     ...new Set([...validated.byKind.values()].map((e) => e.receipt.workClass))
   ].sort();

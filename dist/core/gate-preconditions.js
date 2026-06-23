@@ -930,6 +930,17 @@ function groundingConformanceOf(paths, receipt) {
  */
 function evaluateGrounding(paths, state) {
     const validated = (0, grounding_1.readGroundingValidated)(paths);
+    // M-1 fail-CLOSED on tamper (BEFORE deriving the declared classes). A tampered in-process chain
+    // makes `readGroundingValidated` drop ALL in-process receipts ("a tampered chain trusts NOTHING
+    // from it"), which would otherwise empty `byKind`, yield no declared class, and slip a
+    // required-and-missing run from FAIL to inert PASS — a fail-OPEN. Detection MUST have a gate
+    // consequence: block with the top-level `grounding_unverified` token + `detail.reason:"tampered"`.
+    // An EMPTY store verifies (`verifyGroundingChain([])` ⇒ `{ok:true}` ⇒ `inProcessChainOk:true`),
+    // so absence is NEVER blocked here (absence ≠ forgery); only a NON-EMPTY broken chain blocks.
+    // Under WARN (flag default-OFF) `checkGrounding` downgrades this to a non-blocking notice.
+    if (validated.inProcessChainOk === false) {
+        return { ok: false, reason: "tampered", required: [], summary: [], offenders: [] };
+    }
     // The DECLARED work-classes across the trusted receipts (recompute-don't-trust: the receipt is
     // the work-class CLAIM, the matrix is the verdict). No receipt ⇒ no declared class ⇒ nothing to
     // ground (the not-required inert path — absence ≠ forgery).

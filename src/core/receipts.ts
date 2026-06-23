@@ -246,9 +246,12 @@ export interface DriverDimensionReceipt {
    * Axis-B slice-BSC10a / BSC-10 — the evidence-spine continuity thread. The `manifest_digest`
    * of the signed EvidenceManifest this driver receipt was grounded against, so the SAME digest
    * can be threaded across BSC-1/3/7 receipts and a cross-receipt mismatch detected. ADDITIVE-
-   * OPTIONAL + omit-when-absent so a pre-BSC-10 receipt's canonical text — and `recordHash` — is
-   * BYTE-IDENTICAL (shipped probes stay green). Becomes load-bearing only under Slice-B enforce
-   * (the chain-mismatch FAIL is wired in Slice B); inert in slice-BSC10a.
+   * OPTIONAL + omit-when-absent, AND IN the driver's `DRIVER_CANONICAL_FIELD_ORDER`
+   * (`verification-driver.ts`, just before `prevHash`) so a PRESENT value is signature/hash-bound
+   * (tamper-evident — a swapped digest breaks `recordHash` and the signature). Omit-when-absent
+   * keeps a pre-BSC-10 receipt's canonical text — and `recordHash` — BYTE-IDENTICAL, so shipped
+   * BSC-3 probes + receipts-parity stay green. Becomes load-bearing (a producer actually sets it,
+   * and the cross-receipt chain-mismatch FAIL fires) under Slice-B enforce.
    */
   manifest_digest?: string;
   /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
