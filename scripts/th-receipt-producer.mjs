@@ -31,13 +31,15 @@
  *   TH_RECEIPT_PRIVATE_KEYFILE=/path/to/ed25519-private.pem \
  *   node scripts/th-receipt-producer.mjs \
  *     --root <projectRoot> \
- *     --kind <drift-resolve|sim-retire|decision-approve|scan-exception|approval|driver|realization|mutation-kill> \
+ *     --kind <drift-resolve|sim-retire|decision-approve|scan-exception|approval|driver|realization|mutation-kill|grounding> \
  *     [--ref-id <ID>] \
  *     [--target <repo-rel-path>] \
  *     [--stage <humanGate-stage>] \
  *     [--dimension <a,b,c>] \
  *     [--mutation-report <path>] \
  *     [--scope <module>] \
+ *     [--grounding-report <path>] \
+ *     [--work-class <greenfield|redesign|recreation|integration|migration|greenfield+dep>] \
  *     [--producer-identity <string>]
  *
  * The terminal-receipt kinds (drift-resolve|sim-retire|decision-approve) require
@@ -97,6 +99,18 @@
  * >0 — SIGNATURE-PROVENANCE over a bounded single-module mutation scope; the module-scoped efficacy
  * signal NEVER overrides the per-REQ assertion-presence rung — presence ≠ efficacy).
  *
+ * `--kind grounding` (slice-BSC10b / BSC-10 B1) is a SEPARATE flow that writes TWO stores:
+ * `external-grounding-receipts.jsonl` (the main receipt, using `groundingCanonicalText` /
+ * `computeGroundingRecordHash` from the compiled dist) and OPTIONALLY `grounding-budgets.jsonl`
+ * (the sibling external-signed budget store, PCC-4). It REQUIRES `--grounding-report <path>` (a
+ * JSON report supplying the evidence digests / version-pins / conformance values captured under a
+ * PINNED environment) and `--work-class <class>`. The report is READ, not re-run — the producer
+ * NEVER imports Stryker, a renderer, or axe-core (mirrors mutation-kill: reads a report, signs it).
+ * Refuse-at-creation: out-of-range conformance, missing required manifest digest for
+ * `digest-manifest` grounds, and inconsistent counts are rejected BEFORE any write. The signed
+ * canonical text is byte-identical to what the in-process gate validator re-derives, so a real-key
+ * signature classifies `valid-grounded` and a forged/wrong-key one classifies `forged` (blocked).
+ *
  * Prints a small JSON result on stdout. Exit 0 on success, nonzero on any error.
  */
 
@@ -120,6 +134,7 @@ const stagesMod = await import(pathToFileUrl(path.join(DIST, "core", "stages.js"
 const driverMod = await import(pathToFileUrl(path.join(DIST, "core", "verification-driver.js")));
 const realizationMod = await import(pathToFileUrl(path.join(DIST, "core", "realization.js")));
 const assertionMod = await import(pathToFileUrl(path.join(DIST, "core", "assertion-presence.js")));
+const groundingMod = await import(pathToFileUrl(path.join(DIST, "core", "grounding.js")));
 
 const {
   canonicalText,
@@ -180,6 +195,17 @@ const {
   externalMutationReceiptsPath,
   readLastExternalMutationRecordHash,
 } = assertionMod;
+// slice-BSC10b/BSC-10 (B1) — reuse the BSC-10a grounding canonical/hash binding + external store
+// helpers from the COMPILED dist so the producer and the in-process gate validator can NEVER diverge
+// on the grounding canonical field order (`groundingCanonicalText` drops `recordHash`; `signature`
+// is excluded as a trailer). `currentReceiptSnapshotCoord` is reused from receipts.js.
+const {
+  groundingCanonicalText,
+  computeGroundingRecordHash,
+  externalGroundingReceiptsPath,
+  readLastExternalGroundingRecordHash,
+  groundingBudgetsPath,
+} = groundingMod;
 
 /** Convert an absolute filesystem path to a file:// URL (Windows-safe ESM import). */
 function pathToFileUrl(abs) {
@@ -207,7 +233,7 @@ function fail(message, extra = {}) {
   process.exit(1);
 }
 
-const KINDS = new Set(["drift-resolve", "sim-retire", "decision-approve", "scan-exception", "approval", "driver", "realization", "mutation-kill"]);
+const KINDS = new Set(["drift-resolve", "sim-retire", "decision-approve", "scan-exception", "approval", "driver", "realization", "mutation-kill", "grounding"]);
 
 function loadPrivateKey() {
   const file = process.env.TH_RECEIPT_PRIVATE_KEYFILE;
@@ -699,6 +725,325 @@ function produceMutationKill(paths, { mutationReportPath, scopeOverride, private
   );
 }
 
+/**
+ * Parse + validate a grounding-report JSON into the canonical shape expected by the producer.
+ * Accepts a report object with `ground` (the computable ground fields), optional `conformance`
+ * (array of metric objects), optional `budgets` (array of budget objects to write to the sibling
+ * store), and required `workClass`. Returns `{ ground, conformance, budgets }` on success; throws
+ * an Error (message) on a malformed report so the caller can refuse-at-creation (nonzero exit, no
+ * line written). The producer NEVER imports Stryker, a renderer, or axe-core — it only reads the
+ * report a pinned CI/measurement job emitted. Refuse-at-creation mirrors mutation-kill.
+ */
+function mapGroundingReport(report, workClassOverride) {
+  if (typeof report !== "object" || report === null) {
+    throw new Error("grounding report is not a JSON object");
+  }
+  const r = report;
+
+  // Work-class: override flag wins; else report-supplied; else refuse.
+  const workClass =
+    typeof workClassOverride === "string" && workClassOverride !== "" && workClassOverride !== "true"
+      ? workClassOverride
+      : typeof r.workClass === "string" && r.workClass !== ""
+        ? r.workClass
+        : undefined;
+  if (typeof workClass !== "string" || workClass === "") {
+    throw new Error("grounding report has no `workClass` — supply one in the report or via --work-class <class>");
+  }
+
+  // Ground: the computable ground object. Must have a `groundKind` discriminator.
+  const ground = r.ground;
+  if (typeof ground !== "object" || ground === null) {
+    throw new Error("grounding report missing required `ground` field (must be an object with `groundKind`)");
+  }
+  const g = ground;
+  const groundKind = g.groundKind;
+  if (groundKind !== "digest-manifest" && groundKind !== "version-pin" && groundKind !== "visual-hash") {
+    throw new Error(
+      `grounding report \`ground.groundKind\` must be "digest-manifest", "version-pin", or "visual-hash" — got: ${JSON.stringify(groundKind)}`,
+    );
+  }
+
+  // Kind-specific refuse-at-creation checks.
+  if (groundKind === "digest-manifest") {
+    if (typeof g.manifestDigest !== "string" || g.manifestDigest === "") {
+      throw new Error('grounding report `ground.manifestDigest` is required for "digest-manifest" kind');
+    }
+    if (g.entries !== undefined) {
+      if (!Array.isArray(g.entries)) {
+        throw new Error('grounding report `ground.entries` must be an array when present');
+      }
+      for (const e of g.entries) {
+        if (typeof e !== "object" || e === null || typeof e.path !== "string" || typeof e.digest !== "string") {
+          throw new Error('grounding report `ground.entries[]` must have string `path` and `digest` fields');
+        }
+      }
+    }
+  } else if (groundKind === "version-pin") {
+    if (typeof g.pkg !== "string" || g.pkg === "") {
+      throw new Error('grounding report `ground.pkg` is required for "version-pin" kind');
+    }
+    if (typeof g.version !== "string" || g.version === "") {
+      throw new Error('grounding report `ground.version` is required for "version-pin" kind');
+    }
+  } else if (groundKind === "visual-hash") {
+    if (typeof g.perceptualHash !== "string" || g.perceptualHash === "") {
+      throw new Error('grounding report `ground.perceptualHash` is required for "visual-hash" kind');
+    }
+  }
+
+  // Conformance: optional array of metric objects in the EXACT `ConformanceMetric` shape:
+  // `{ metric: "version"|"api"|"visual"|"a11y", observed: string|number|"unobserved",
+  //    status: "within-budget"|"over-budget"|"unobserved" }`.
+  // This is the shape `isValidConformanceMetric` in grounding.ts enforces — a receipt whose
+  // conformance entries use any other field names (e.g. `value`) fails `isValidGroundingReceipt`
+  // and is never classified `valid-grounded`. Default to `[]` (absent ⇒ empty array) so the
+  // validator's `Array.isArray(r.conformance)` check always passes.
+  let conformance = [];
+  if (r.conformance !== undefined) {
+    if (!Array.isArray(r.conformance)) {
+      throw new Error("grounding report `conformance` must be an array when present");
+    }
+    const validMetrics = ["version", "api", "visual", "a11y"];
+    const validStatuses = ["within-budget", "over-budget", "unobserved"];
+    for (const m of r.conformance) {
+      if (typeof m !== "object" || m === null) {
+        throw new Error("grounding report `conformance[]` entries must be objects");
+      }
+      const cm = m;
+      if (!validMetrics.includes(cm.metric)) {
+        throw new Error(
+          `grounding report \`conformance[].metric\` must be one of ${validMetrics.join("|")} — got: ${JSON.stringify(cm.metric)}`,
+        );
+      }
+      // `observed`: measured value (string or finite number) OR the literal "unobserved".
+      if (cm.observed !== "unobserved") {
+        if (typeof cm.observed !== "string" && (typeof cm.observed !== "number" || !Number.isFinite(cm.observed))) {
+          throw new Error(
+            `grounding report \`conformance[].observed\` must be a string, finite number, or "unobserved" — got: ${JSON.stringify(cm.observed)}`,
+          );
+        }
+      }
+      // `status`: the fail-closed verdict — must be one of the three literals.
+      if (!validStatuses.includes(cm.status)) {
+        throw new Error(
+          `grounding report \`conformance[].status\` must be one of ${validStatuses.join("|")} — got: ${JSON.stringify(cm.status)}`,
+        );
+      }
+      // Consistency: "unobserved" observed value must pair with status "unobserved" (and vice versa).
+      if (cm.observed === "unobserved" && cm.status !== "unobserved") {
+        throw new Error(
+          `grounding report \`conformance[]\` inconsistency: observed="unobserved" but status="${cm.status}" — must also be "unobserved"`,
+        );
+      }
+      if (cm.observed !== "unobserved" && cm.status === "unobserved") {
+        throw new Error(
+          `grounding report \`conformance[]\` inconsistency: observed=${JSON.stringify(cm.observed)} (measured) but status="unobserved" — use "within-budget" or "over-budget"`,
+        );
+      }
+    }
+    // Strip stray keys — pass only the three canonical fields the gate validator checks.
+    conformance = r.conformance.map((m) => ({ metric: m.metric, observed: m.observed, status: m.status }));
+  }
+
+  // Budgets: optional array for the sibling grounding-budgets.jsonl store (PCC-4). Each entry
+  // must have the required budget fields — refuse rather than sign a malformed budget.
+  let budgets = undefined;
+  if (r.budgets !== undefined) {
+    if (!Array.isArray(r.budgets)) {
+      throw new Error("grounding report `budgets` must be an array when present");
+    }
+    const validKinds = ["digest-manifest", "version-pin", "visual-hash"];
+    const validMetrics = ["version", "api", "visual", "a11y"];
+    for (const b of r.budgets) {
+      if (typeof b !== "object" || b === null) {
+        throw new Error("grounding report `budgets[]` entries must be objects");
+      }
+      const bv = b;
+      if (typeof bv.workClass !== "string" || bv.workClass === "") {
+        throw new Error("grounding report `budgets[].workClass` must be a non-empty string");
+      }
+      if (!validKinds.includes(bv.groundKind)) {
+        throw new Error(
+          `grounding report \`budgets[].groundKind\` must be one of ${validKinds.join("|")} — got: ${JSON.stringify(bv.groundKind)}`,
+        );
+      }
+      if (!validMetrics.includes(bv.metric)) {
+        throw new Error(
+          `grounding report \`budgets[].metric\` must be one of ${validMetrics.join("|")} — got: ${JSON.stringify(bv.metric)}`,
+        );
+      }
+      if (typeof bv.threshold !== "number" || !Number.isFinite(bv.threshold) || bv.threshold < 0) {
+        throw new Error(
+          `grounding report \`budgets[].threshold\` must be a non-negative finite number — got: ${JSON.stringify(bv.threshold)}`,
+        );
+      }
+    }
+    budgets = r.budgets;
+  }
+
+  return { workClass, ground, conformance, budgets };
+}
+
+/**
+ * slice-BSC10b/BSC-10 (B1) — produce an external-signed {@link GroundingReceipt}. Writes the
+ * SEPARATE `external-grounding-receipts.jsonl` store (parallel to the mutation/driver/realization
+ * external stores) with the BSC-10a grounding canonical shape — NOT a terminal receipt. Optionally
+ * also writes the sibling `grounding-budgets.jsonl` store for each budget supplied in the report
+ * (PCC-4 — 3-party budget authority; the agent cannot self-sign its own budget).
+ *
+ * The make-or-break contract for the BSC-10 signature-provenance independence flip: the SIGNED
+ * canonical text MUST be byte-identical to what the in-process gate validator re-derives, so the
+ * signature it imports (`groundingCanonicalText` + `computeGroundingRecordHash` from the compiled
+ * dist) is exactly the BSC-10a binding. `signature` + `recordHash` are trailers, EXCLUDED from
+ * the canonical text. `producer_kind` is the FIXED literal `"external"`.
+ *
+ * Refuse-at-creation (mirrors mutation-kill/realization ground-resolve refusal): `--grounding-report`
+ * is required and MUST resolve + parse into a well-formed grounding ground — else we refuse BEFORE
+ * any write rather than mint an ungrounded grounding receipt. The measurement toolchain (Stryker /
+ * renderer / axe-core) is NEVER imported/run here; the producer only reads a report a pinned
+ * CI/measurement job emitted (exactly like mutation-kill reads a Stryker report).
+ *
+ * NOTE the independence is SIGNATURE-PROVENANCE only — it proves the receipt was not forged
+ * in-process. The budget authority is 3-party: the producer signs the threshold; the agent cannot
+ * alter it without the private key (unsigned/wrong-key budget exempts NOTHING, M4).
+ */
+function produceGrounding(paths, { groundingReportPath, workClassOverride, producerIdentity, privateKey, publicKey }) {
+  const abs = path.resolve(paths.root, groundingReportPath);
+  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+    fail(
+      `--grounding-report "${groundingReportPath}" does not resolve to a file — refusing to mint an ungrounded grounding receipt`,
+      { groundingReport: groundingReportPath },
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(abs, "utf8"));
+  } catch (error) {
+    fail(
+      `--grounding-report "${groundingReportPath}" is not valid JSON — refusing to mint an ungrounded grounding receipt`,
+      { detail: error instanceof Error ? error.message : String(error) },
+    );
+  }
+  let groundingData;
+  try {
+    groundingData = mapGroundingReport(parsed, workClassOverride);
+  } catch (error) {
+    fail(
+      `--grounding-report "${groundingReportPath}" is malformed — refusing to mint an ungrounded grounding receipt`,
+      { detail: error instanceof Error ? error.message : String(error) },
+    );
+  }
+  const { workClass, ground, conformance, budgets } = groundingData;
+
+  const coord = currentReceiptSnapshotCoord(paths);
+  const keyId = externalKeyId(publicKey);
+  const prevHash = readLastExternalGroundingRecordHash(paths);
+
+  // The canonical input — EXACTLY the fields groundingCanonicalText binds (signature +
+  // recordHash are trailers, excluded; `undefined` keys dropped by the helper). Field order is
+  // owned by BSC-10a's GROUNDING_CANONICAL_FIELD_ORDER inside groundingCanonicalText; the producer
+  // never re-orders, it hands the object to the imported helper so the bytes can never drift.
+  // `producer_kind` is the FIXED `"external"` literal (part of the signed input — a swap breaks
+  // the signature).
+  // `conformance` is always an array ([] when absent in the report) — isValidGroundingReceipt
+  // requires Array.isArray(r.conformance), so it must never be absent from the sealed receipt.
+  const withPrev = {
+    kind: "grounding",
+    refId: coord.gitHead ?? "no-git",
+    workClass,
+    ground,
+    conformance,
+    snapshot_coord: coord,
+    producer_identity: producerIdentity,
+    producer_kind: "external",
+    key_id: keyId,
+    prevHash,
+  };
+  const canonical = groundingCanonicalText(withPrev);
+  const signature = sign(null, Buffer.from(canonical, "utf8"), privateKey).toString("base64");
+  const recordHash = computeGroundingRecordHash(withPrev);
+  const sealed = { ...withPrev, signature, recordHash };
+
+  const file = externalGroundingReceiptsPath(paths);
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(sealed) + "\n", "utf8");
+
+  // PCC-4 sibling budget store: sign each budget independently and append to
+  // grounding-budgets.jsonl. An unsigned budget exempts NOTHING (M4 fail-closed) — so the
+  // producer MUST sign every budget entry it writes. Uses raw hashContent over a fixed-key
+  // canonical JSON (no dedicated budgetCanonicalText helper is exported from the dist).
+  let budgetFile = undefined;
+  let budgetCount = 0;
+  if (budgets !== undefined && budgets.length > 0) {
+    budgetFile = groundingBudgetsPath(paths);
+    // Read the last recordHash in the budget store to seed prevHash for the chain.
+    let budgetPrevHash = (() => {
+      try {
+        if (!fs.existsSync(budgetFile)) return "0".repeat(64);
+        const lines = fs.readFileSync(budgetFile, "utf8").trim().split("\n");
+        for (let i = lines.length - 1; i >= 0; i--) {
+          try {
+            const parsed = JSON.parse(lines[i]);
+            if (
+              typeof parsed === "object" &&
+              parsed !== null &&
+              typeof parsed.recordHash === "string" &&
+              /^[0-9a-f]{64}$/.test(parsed.recordHash)
+            ) {
+              return parsed.recordHash;
+            }
+          } catch {
+            // skip malformed line
+          }
+        }
+      } catch {
+        // file unreadable or absent
+      }
+      return "0".repeat(64);
+    })();
+
+    for (const b of budgets) {
+      const budgetEntry = {
+        kind: "grounding-budget",
+        workClass: b.workClass,
+        groundKind: b.groundKind,
+        metric: b.metric,
+        threshold: b.threshold,
+        snapshot_coord: coord,
+        producer_kind: "external",
+        key_id: keyId,
+        prevHash: budgetPrevHash,
+      };
+      // Canonical text: fixed-key JSON over the signed fields (signature + recordHash excluded).
+      const budgetCanonical = JSON.stringify(budgetEntry);
+      const budgetSignature = sign(null, Buffer.from(budgetCanonical, "utf8"), privateKey).toString("base64");
+      // Import hashContent from the already-loaded hash module for the recordHash.
+      const { hashContent } = hashMod;
+      const budgetRecordHash = hashContent(budgetCanonical);
+      const sealedBudget = { ...budgetEntry, signature: budgetSignature, recordHash: budgetRecordHash };
+
+      fs.appendFileSync(budgetFile, JSON.stringify(sealedBudget) + "\n", "utf8");
+      budgetPrevHash = budgetRecordHash;
+      budgetCount++;
+    }
+  }
+
+  process.stdout.write(
+    JSON.stringify({
+      ok: true,
+      kind: "grounding",
+      producer_kind: "external",
+      key_id: keyId,
+      workClass,
+      groundKind: ground.groundKind,
+      recordHash,
+      file,
+      ...(budgetFile !== undefined ? { budgetFile, budgetCount } : {}),
+    }) + "\n",
+  );
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const root = args["root"];
@@ -715,6 +1060,9 @@ function main() {
   // mutation-kill only: the controlled CI job's mutation-report path + optional --scope override.
   const mutationReportPath = args["mutation-report"]; // optional (required for mutation-kill)
   const scopeOverride = args["scope"]; // optional
+  // grounding only: the pinned-env measurement report path + optional --work-class override.
+  const groundingReportPath = args["grounding-report"]; // optional (required for grounding)
+  const workClassOverride = args["work-class"]; // optional (wins over report-supplied workClass)
   const producerIdentity = args["producer-identity"] ?? "external:th-receipt-producer";
 
   if (!root || root === "true") fail("--root <projectRoot> is required");
@@ -739,6 +1087,13 @@ function main() {
     // report, so it requires --mutation-report (the report path) and ignores --ref-id/--target.
     if (!mutationReportPath || mutationReportPath === "true") {
       fail("--mutation-report <path> is required for mutation-kill");
+    }
+  } else if (kind === "grounding") {
+    // grounding is the SEPARATE slice-BSC10b/BSC-10 B1 flow: keyed by the pinned-env measurement
+    // report, so it requires --grounding-report (the report path); --work-class is optional (the
+    // report may supply it). --ref-id/--target/--stage/--dimension/--mutation-report are IGNORED.
+    if (!groundingReportPath || groundingReportPath === "true") {
+      fail("--grounding-report <path> is required for grounding");
     }
   } else {
     if (!refId || refId === "true") fail("--ref-id <ID> is required");
@@ -789,6 +1144,15 @@ function main() {
   // terminal-receipt machinery so that flow stays byte-identical.
   if (kind === "mutation-kill") {
     produceMutationKill(paths, { mutationReportPath, scopeOverride, privateKey, publicKey });
+    return;
+  }
+
+  // slice-BSC10b/BSC-10 (B1): the external-signed grounding receipt writes a DIFFERENT store
+  // (`external-grounding-receipts.jsonl`) with the BSC-10a grounding canonical shape + optionally
+  // the sibling `grounding-budgets.jsonl` (PCC-4) — branch BEFORE the terminal-receipt machinery
+  // so that flow stays byte-identical.
+  if (kind === "grounding") {
+    produceGrounding(paths, { groundingReportPath, workClassOverride, producerIdentity, privateKey, publicKey });
     return;
   }
 

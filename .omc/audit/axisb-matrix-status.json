@@ -96,15 +96,17 @@
     "bsc": 10,
     "title": "External-Reference Grounding — computable ground that the real external reference was checked",
     "phase": "done-phase",
-    "independence": 0,
+    "independence": ">0",
+    "independenceNote": "signature-provenance only; external Ed25519-signed grounding control-flip proves the receipt was not forged in-process (producer-signed ⇒ valid-grounded/PASS; wrong-key/unsigned ⇒ forged+BLOCK). Honest scope: single-axis at the Ed25519 boundary; budgets 3-party-signed (agent cannot self-sign its own budget).",
     "pr": [],
     "probe": ".omc/audit/probes/bsc10",
     "anchors": [
       "core/grounding.ts",
       "core/bsc10-flag.ts",
       "commands/grounding.ts",
-      "core/gate-preconditions.ts (evaluateGrounding + checkGrounding + hoisted-verdict split rung)"
+      "core/gate-preconditions.ts (evaluateGrounding + checkGrounding + hoisted-verdict split rung)",
+      "scripts/th-receipt-producer.mjs (--kind grounding)"
     ],
-    "updatedAt": "2026-06-23T12:00:00Z"
+    "updatedAt": "2026-06-23T14:00:00Z"
   }
 ]

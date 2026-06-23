@@ -558,17 +558,20 @@ describe("M-1 — tamper-block: broken in-process chain blocks under enforce, WA
 });
 
 // ---------------------------------------------------------------------------
-// L-1 — has_ui force-rule pin: has_ui absent/undefined forces visual-hash into
-//        the required set; a run with no visual-hash receipt blocks under enforce.
+// L-1 — per-kind WARN: visual-hash-only missing under ENFORCE ⇒ ok:true + non-blocking notice
 //
-// state.has_ui !== false (default undefined/true) → surfaces ["ui"] → forces
-// "visual-hash" via UX_SURFACE_LABELS. This is intentional fail-closed over-require:
-// a screen surface is grounded visually. Slice C softens when real visual measurement
-// lands; pin this behavior now so it cannot silently regress.
+// Slice B semantics (M2 per-kind flip, plan §B2a): only the DETERMINISTIC kinds
+// (`digest-manifest`, `version-pin`) block under the master enforce switch. `visual-hash`
+// is EXCLUDED from ENFORCED_GROUND_KINDS in `bsc10-flag.ts` — it stays WARN until Slice C
+// lands pinned-renderer measurement. So a run where visual-hash is the ONLY offender must
+// produce ok:true + a non-blocking advisory, NOT ok:false.
+//
+// Previous Slice-A test asserted ok:false (was correct under old per-kind semantics where
+// all kinds blocked). Slice B LOCKS the per-kind WARN. This test is the ground truth.
 // ---------------------------------------------------------------------------
 
-describe("L-1 — has_ui force-rule pin: undefined has_ui forces visual-hash into required set", () => {
-  it("has_ui:undefined + receipt declaring 'greenfield' + ENFORCE ⇒ visual-hash forced ⇒ ok:false / reason:'missing'", () => {
+describe("L-1 — Slice-B per-kind WARN: visual-hash-only missing under ENFORCE ⇒ ok:true + notice", () => {
+  it("has_ui:undefined + receipt declaring 'greenfield' + ENFORCE ⇒ visual-hash forced required BUT is WARN-only ⇒ ok:true + non-blocking summary", () => {
     process.env.TH_BSC10_ENFORCE = "1";
     tp = makeTempProject();
     const paths = tp.paths;
@@ -604,7 +607,7 @@ describe("L-1 — has_ui force-rule pin: undefined has_ui forces visual-hash int
     appendDriverReceipt(paths, { producerIdentity: "test:runner" });
     // Declare "greenfield" work-class — greenfield's required-kind matrix is empty by itself,
     // but has_ui:undefined triggers the UX force-rule which adds "visual-hash" to the required set.
-    // No visual-hash receipt is appended, so the required kind is missing.
+    // No visual-hash receipt is appended (visual-hash is the only offender).
     appendGroundingReceipt(paths, {
       workClass: "greenfield",
       ground: { groundKind: "version-pin", pkg: "some-dep", version: "1.0.0" },
@@ -614,12 +617,12 @@ describe("L-1 — has_ui force-rule pin: undefined has_ui forces visual-hash int
 
     const st = readState(paths).state!;
     const res = checkProductionReality(paths, st);
-    // Intentional fail-closed over-require: the screen surface forces visual-hash.
-    // Revisit softening in Slice C when real visual measurement lands.
-    expect(res.ok).toBe(false);
-    expect(res.error).toBe("grounding_unverified");
-    expect((res.detail as { reason?: string } | undefined)?.reason).toBe("missing");
-    // The summary must expose the missing visual-hash kind
+    // Slice B per-kind WARN: visual-hash is NOT in ENFORCED_GROUND_KINDS → groundingVerdictBlocks
+    // returns false for a visual-hash-only offender set → ok:true (non-blocking advisory).
+    expect(res.ok).toBe(true);
+    expect(res.error).toBeUndefined();
+    // The grounding summary exposes the missing visual-hash kind (observability O1).
+    expect(Array.isArray(res.grounding)).toBe(true);
     const vhSummary = (res.grounding ?? []).find((g) => g.groundKind === "visual-hash");
     expect(vhSummary).toBeDefined();
     expect(vhSummary?.grounded).toBe(false);

@@ -616,6 +616,13 @@ export interface ValidatedGrounding {
   byKind: Map<GroundKind, { receipt: GroundingReceipt; trustLabel: "valid" | "valid-grounded" }>;
   /** True iff the in-process chain verifies (a tampered chain trusts NOTHING from it). */
   inProcessChainOk: boolean;
+  /**
+   * True iff the EXTERNAL store's hash chain verifies (Slice B). A broken/reordered/duplicated
+   * external chain trusts NOTHING from the external store — the same fail-closed posture as the
+   * in-process M-1 path. Empty/missing external store verifies (`{ok:true}`), so absence stays
+   * inert (absence ≠ forgery). Exposed for diagnostics + the external-chain negative control.
+   */
+  externalChainOk: boolean;
 }
 
 /** Verify a grounding receipt's Ed25519 signature against the loaded external public key. */
@@ -628,24 +635,36 @@ function groundingSignatureVerifies(receipt: GroundingReceipt, publicKey: KeyObj
 
 /**
  * Read + validate BOTH grounding stores and resolve, per ground-kind, the LATEST trusted
- * candidate (recompute-don't-trust posture). The in-process chain is walked once: a tampered
- * chain trusts NOTHING from the in-process store (`inProcessChainOk:false`). For each kind, a
- * signature-verified EXTERNAL receipt (`valid-grounded`) supersedes an in-process one (`valid`);
- * an external receipt that does NOT verify is simply ignored (ungrounded — absence ≠ forgery).
+ * candidate (recompute-don't-trust posture). BOTH chains are walked once and BOTH fail closed:
+ * a tampered IN-PROCESS chain trusts NOTHING from the in-process store (`inProcessChainOk:false`),
+ * and a tampered EXTERNAL chain trusts NOTHING from the external store (`externalChainOk:false`).
+ * For each kind, a signature-verified EXTERNAL receipt (`valid-grounded`) supersedes an in-process
+ * one (`valid`); an external receipt that does NOT verify is simply ignored (ungrounded — absence ≠
+ * forgery).
  *
- * EXTERNAL CHAIN-INTEGRITY ASYMMETRY (Slice A, disclosed): the EXTERNAL store's hash chain is NOT
- * walked here — each external receipt is verified INDEPENDENTLY by its own Ed25519 signature, and
- * while `prevHash` IS inside the signed canonical input, this reader never asserts that a line's
- * `prevHash` links to the prior line's `recordHash`. So a party with file-write (but not the key)
- * can REORDER or DUPLICATE validly-signed external lines to resurface a stale signed grounding as
- * the "latest per kind" without detection. The IN-PROCESS path fails closed on tamper (M-1 via
- * {@link verifyGroundingChain}); the EXTERNAL path has no equivalent in Slice A. Walking + enforcing
- * the external chain (and the `manifest_digest` cross-receipt mismatch) is owned by Slice B, where
- * the external producer ships; until then this asymmetry is documented, not silently absent.
+ * EXTERNAL CHAIN INTEGRITY (Slice B — asymmetry CLOSED): the external store's hash chain is now
+ * walked here with {@link verifyGroundingChain} (same prevHash-link + recordHash-recompute walk as
+ * the in-process M-1 path). Each external line is ALSO verified independently by its own Ed25519
+ * signature, BUT signature-validity alone does not establish CHAIN position: `prevHash` is inside
+ * the signed canonical input, yet a party with file-write (but not the key) could otherwise REORDER
+ * or DUPLICATE validly-signed lines to resurface a STALE signed grounding as the "latest per kind."
+ * The chain walk closes that: a reorder/duplicate/edit breaks the `prevHash → prior recordHash`
+ * linkage ⇒ `externalChainOk:false` ⇒ the external store is dropped wholesale (fail-closed,
+ * symmetric with the in-process M-1 posture). A SINGLE validly-signed line is a trivial chain
+ * (genesis `prevHash` + its own `recordHash`) and verifies. The COMPLEMENTARY cross-receipt
+ * `manifest_digest` mismatch (a threaded BSC-1/3/7 digest disagreeing with the grounding manifest)
+ * is enforced separately by the gate's `chain_mismatch` reason ({@link evaluateGrounding}).
  */
 export function readGroundingValidated(paths: ProjectPaths): ValidatedGrounding {
   const inProcess = readGroundingReceipts(paths);
   const inProcessChainOk = verifyGroundingChain(inProcess).ok;
+
+  // External chain integrity (Slice B): walk the external store's hash chain BEFORE trusting any of
+  // its lines. A broken/reordered/duplicated chain ⇒ trust NOTHING from the external store (fail-
+  // closed, mirroring the in-process M-1 posture). An empty/missing store verifies (`{ok:true}`).
+  const external = readExternalGroundingReceipts(paths);
+  const externalChainOk = verifyGroundingChain(external).ok;
+
   const byKind = new Map<GroundKind, { receipt: GroundingReceipt; trustLabel: "valid" | "valid-grounded" }>();
 
   // In-process candidates (attribution-only `valid`), only when the chain is intact.
@@ -655,10 +674,11 @@ export function readGroundingValidated(paths: ProjectPaths): ValidatedGrounding 
     }
   }
 
-  // External candidates supersede when their signature verifies (independently grounded).
-  const external = readExternalGroundingReceipts(paths);
+  // External candidates supersede when the external chain is intact AND their signature verifies
+  // (independently grounded). A tampered external chain drops the whole store — a forged file-write
+  // reorder/dup of validly-signed lines can no longer resurface a stale grounding.
   const publicKey = loadExternalPublicKey();
-  if (publicKey !== null) {
+  if (externalChainOk && publicKey !== null) {
     for (const r of external) {
       if (r.producer_kind !== "external") continue;
       if (!groundingSignatureVerifies(r, publicKey)) continue; // unverifiable ⇒ ungrounded, ignore
@@ -666,7 +686,7 @@ export function readGroundingValidated(paths: ProjectPaths): ValidatedGrounding 
     }
   }
 
-  return { byKind, inProcessChainOk };
+  return { byKind, inProcessChainOk, externalChainOk };
 }
 
 // ---------------------------------------------------------------------------
@@ -825,4 +845,236 @@ export function readGroundingExceptions(paths: ProjectPaths): GroundingException
 /** Read every (well-shaped) carve-out line, file order. Signatures verified at gate time, NOT here. */
 export function readGroundingCarveouts(paths: ProjectPaths): GroundingCarveout[] {
   return readJsonlValues(groundingCarveoutsPath(paths), isValidGroundingCarveout);
+}
+
+// ---------------------------------------------------------------------------
+// Sibling-store canonical text + chain walk + signature verify (Slice B / M4)
+// ---------------------------------------------------------------------------
+//
+// The Slice-B Ed25519 producer signs each sibling line over its CANONICAL TEXT (the ONE formula
+// the producer at sign time and the gate at validation time both use, so they can never diverge on
+// the binding). `signature` + `recordHash` are EXCLUDED trailers — the signature covers every other
+// field including `prevHash`. The verify path is VERIFY-ONLY (the in-process surface holds no
+// private key — `receipt-signing.ts` exports no signer), exactly like `validWaivedReqs` /
+// approvals / scan-exceptions: an UNSIGNED / wrong-key / chain-tampered line exempts NOTHING (M4).
+
+/** Canonical field order for a {@link GroundingBudget} (signature + recordHash excluded — trailers). */
+const GROUNDING_BUDGET_CANONICAL_FIELD_ORDER: ReadonlyArray<keyof GroundingBudget> = [
+  "kind",
+  "workClass",
+  "groundKind",
+  "metric",
+  "threshold",
+  "snapshot_coord",
+  "producer_kind",
+  "key_id",
+  "prevHash",
+];
+
+/** Canonical field order for a {@link GroundingException} (signature + recordHash excluded). */
+const GROUNDING_EXCEPTION_CANONICAL_FIELD_ORDER: ReadonlyArray<keyof GroundingException> = [
+  "kind",
+  "workClass",
+  "groundKind",
+  "reason",
+  "snapshot_coord",
+  "producer_kind",
+  "key_id",
+  "prevHash",
+];
+
+/** Canonical field order for a {@link GroundingCarveout} (signature + recordHash excluded). */
+const GROUNDING_CARVEOUT_CANONICAL_FIELD_ORDER: ReadonlyArray<keyof GroundingCarveout> = [
+  "kind",
+  "workClass",
+  "regionDigest",
+  "reason",
+  "snapshot_coord",
+  "producer_kind",
+  "key_id",
+  "prevHash",
+];
+
+/**
+ * One sibling-store line as a plain record (the three sibling lines share the signing-trailer +
+ * snapshot shape, so the canonical text is computed structurally over a fixed field-order list).
+ */
+type SiblingLine = {
+  snapshot_coord: SnapshotCoord;
+  key_id: string;
+  signature?: string;
+  prevHash: string;
+  recordHash: string;
+};
+
+/**
+ * Deterministic canonical text of one sibling-store line: emit `order`'s fields in sequence, the
+ * nested `snapshot_coord` re-emitted in its fixed key order, `undefined`/`signature`/`recordHash`
+ * dropped; `JSON.stringify` with no indentation. `hashContent` then CRLF→LF normalizes (harmless).
+ * The SINGLE formula both the producer (sign) and the gate (verify) use. `order` MUST exclude the
+ * `signature`/`recordHash` trailers (the three FIELD_ORDER constants already do).
+ */
+function siblingCanonicalText(line: Record<string, unknown>, order: ReadonlyArray<string>): string {
+  const ordered: Record<string, unknown> = {};
+  for (const key of order) {
+    const val = line[key];
+    if (val === undefined) continue;
+    if (key === "snapshot_coord") {
+      ordered[key] = reorder(val as SnapshotCoord, SNAPSHOT_FIELD_ORDER);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+
+/** Canonical text of a budget (signature + recordHash excluded). */
+export function groundingBudgetCanonicalText(budget: Omit<GroundingBudget, "signature" | "recordHash">): string {
+  return siblingCanonicalText(budget as Record<string, unknown>, GROUNDING_BUDGET_CANONICAL_FIELD_ORDER as string[]);
+}
+
+/** Canonical text of an exception (signature + recordHash excluded). */
+export function groundingExceptionCanonicalText(
+  exception: Omit<GroundingException, "signature" | "recordHash">,
+): string {
+  return siblingCanonicalText(
+    exception as Record<string, unknown>,
+    GROUNDING_EXCEPTION_CANONICAL_FIELD_ORDER as string[],
+  );
+}
+
+/** Canonical text of a carve-out (signature + recordHash excluded). */
+export function groundingCarveoutCanonicalText(
+  carveout: Omit<GroundingCarveout, "signature" | "recordHash">,
+): string {
+  return siblingCanonicalText(
+    carveout as Record<string, unknown>,
+    GROUNDING_CARVEOUT_CANONICAL_FIELD_ORDER as string[],
+  );
+}
+
+/**
+ * Walk a sibling store in file order with a running `expectedPrev = GENESIS`. Recompute each
+ * line's `recordHash` from its canonical text (mismatch ⇒ edited) and assert `prevHash` links to
+ * the prior `recordHash` (mismatch ⇒ inserted/deleted/reordered). Return `{ ok:false, brokenAt:N }`
+ * at the FIRST break; else `{ ok:true }`. Byte-identical posture to `verifyAssertionWaiverChain` —
+ * a tampered sibling store exempts NOTHING (fail-closed).
+ */
+function verifySiblingChain<T extends SiblingLine>(
+  lines: T[],
+  canonical: (line: T) => string,
+): VerifyChainResult {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const recomputed = hashContent(canonical(line));
+    if (recomputed !== line.recordHash) return { ok: false, brokenAt: i, reason: "edited" };
+    if (line.prevHash !== expectedPrev) return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    expectedPrev = line.recordHash;
+  }
+  return { ok: true };
+}
+
+/** Verify a sibling line's Ed25519 signature against the loaded external public key (verify-only). */
+function siblingSignatureVerifies<T extends SiblingLine>(
+  line: T,
+  publicKey: KeyObject,
+  canonical: (line: T) => string,
+): boolean {
+  const signature = line.signature;
+  if (typeof signature !== "string") return false;
+  if (line.key_id !== externalKeyId(publicKey)) return false;
+  return verifyCanonical(canonical(line), signature, publicKey);
+}
+
+/**
+ * One validly-exempted `(workClass, groundKind)` axis — a SignedException whose chain + Ed25519
+ * signature verify under the loaded external key. Carries the reason for the gate's diagnostics.
+ */
+export interface GroundingExemption {
+  workClass: string;
+  groundKind: GroundKind;
+  reason: string;
+}
+
+/**
+ * The set of validly-exempted grounding axes for the current run (the gate subtracts these from the
+ * over-budget offender set — the I5 SignedException path). A `GroundingException` exempts its
+ * `(workClass, groundKind)` ONLY when ALL of (mirroring `validWaivedReqs` symbol-for-symbol):
+ *   1. The exception store's chain verifies (a tampered chain exempts NOTHING — fail-closed).
+ *   2. An external public key is loaded AND the line's Ed25519 signature verifies under it with a
+ *      matching `key_id` (an UNSIGNED / wrong-key / self-signed line exempts NOTHING — the in-
+ *      process surface holds no private key, M4 3-party authority).
+ *
+ * With NO key loaded (the default fork/local/test path) NO exception verifies, so the set is empty
+ * and the gate enforces fully. The result is keyed `"${workClass}::${groundKind}"` so the gate
+ * can test membership by scope without ambiguity (the `::` separator + the fixed matrix's space-
+ * free class labels and kind literals make a key collision impossible).
+ */
+export function validGroundingExemptions(paths: ProjectPaths): Map<string, GroundingExemption> {
+  const exempt = new Map<string, GroundingExemption>();
+  const exceptions = readGroundingExceptions(paths);
+  if (exceptions.length === 0) return exempt;
+  // Fail-closed: a tampered chain exempts NOTHING (no line from a tampered store is trusted).
+  if (!verifySiblingChain(exceptions, groundingExceptionCanonicalText).ok) return exempt;
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return exempt; // no key ⇒ nothing verifies ⇒ exempt NOTHING
+  for (const ex of exceptions) {
+    if (!siblingSignatureVerifies(ex, publicKey, groundingExceptionCanonicalText)) continue;
+    exempt.set(groundingExemptionKey(ex.workClass, ex.groundKind), {
+      workClass: ex.workClass,
+      groundKind: ex.groundKind,
+      reason: ex.reason,
+    });
+  }
+  return exempt;
+}
+
+/** The scope key for a `(workClass, groundKind)` exemption (`::`-separated, collision-free). */
+export function groundingExemptionKey(workClass: string, groundKind: GroundKind): string {
+  return `${workClass}::${groundKind}`;
+}
+
+/**
+ * The set of validly-signed conformance BUDGETS for the current run, keyed
+ * `"${workClass}::${groundKind}::${metric}"`. A budget counts ONLY when the budget store's
+ * chain verifies AND the line's Ed25519 signature verifies under the loaded external key (3-party
+ * authority, E4: an agent cannot self-issue a passing budget — the security boundary is the private
+ * key). An UNSIGNED / wrong-key / tampered budget is INERT (M4). With no key loaded the set is empty.
+ * Exposed so the gate (and the producer-authority test E4) can confirm a threshold was externally
+ * authorized rather than agent-asserted.
+ */
+export function validGroundingBudgets(paths: ProjectPaths): Map<string, GroundingBudget> {
+  const valid = new Map<string, GroundingBudget>();
+  const budgets = readGroundingBudgets(paths);
+  if (budgets.length === 0) return valid;
+  if (!verifySiblingChain(budgets, groundingBudgetCanonicalText).ok) return valid;
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return valid;
+  for (const b of budgets) {
+    if (!siblingSignatureVerifies(b, publicKey, groundingBudgetCanonicalText)) continue;
+    valid.set(`${b.workClass}::${b.groundKind}::${b.metric}`, b);
+  }
+  return valid;
+}
+
+/**
+ * The set of validly-signed permitted-difference CARVE-OUTs for the current run, keyed by
+ * `regionDigest`. A carve-out counts ONLY when the carve-out store's chain verifies AND the line's
+ * Ed25519 signature verifies under the loaded external key. An UNSIGNED / wrong-key / tampered
+ * carve-out masks NOTHING (M4). The perceptual-region masking it authorizes is consumed by the
+ * Slice-C visual measurement; exposed here so the verify path is symmetric across all three stores.
+ */
+export function validGroundingCarveouts(paths: ProjectPaths): Map<string, GroundingCarveout> {
+  const valid = new Map<string, GroundingCarveout>();
+  const carveouts = readGroundingCarveouts(paths);
+  if (carveouts.length === 0) return valid;
+  if (!verifySiblingChain(carveouts, groundingCarveoutCanonicalText).ok) return valid;
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return valid;
+  for (const c of carveouts) {
+    if (!siblingSignatureVerifies(c, publicKey, groundingCarveoutCanonicalText)) continue;
+    valid.set(c.regionDigest, c);
+  }
+  return valid;
 }
