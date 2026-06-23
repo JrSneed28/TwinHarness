@@ -24178,7 +24178,7 @@ function groundingExemptionKey(workClass, groundKind) {
 var ENFORCED_GROUND_KINDS = /* @__PURE__ */ new Set(["digest-manifest", "version-pin"]);
 function bsc10EnforcementEnabled() {
   const raw = process.env.TH_BSC10_ENFORCE;
-  if (raw === void 0) return false;
+  if (raw === void 0) return true;
   const normalized = raw.trim().toLowerCase();
   return !(normalized === "0" || normalized === "false");
 }

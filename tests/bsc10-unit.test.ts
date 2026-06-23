@@ -589,9 +589,9 @@ describe("U9 — bsc10EnforcementEnabled() — bsc2-mirror polarity (Slice B: de
     else process.env.TH_BSC10_ENFORCE = SAVED;
   });
 
-  it("env unset ⇒ false (Slice-B WARN compiled default — two-commit toggle at `return false`)", () => {
+  it("env unset ⇒ true (Slice-B ENFORCE compiled default — two-commit toggle at `return true`)", () => {
     delete process.env.TH_BSC10_ENFORCE;
-    expect(bsc10EnforcementEnabled()).toBe(false);
+    expect(bsc10EnforcementEnabled()).toBe(true);
   });
 
   it("explicit '1' ⇒ true (force enforce ON)", () => {

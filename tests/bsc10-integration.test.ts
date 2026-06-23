@@ -516,7 +516,7 @@ describe("M-1 — tamper-block: broken in-process chain blocks under enforce, WA
   });
 
   it("WARN (TH_BSC10_ENFORCE unset) + tampered chain ⇒ ok:true, non-blocking (grounding summary empty by design)", () => {
-    delete process.env.TH_BSC10_ENFORCE; // WARN default OFF
+    process.env.TH_BSC10_ENFORCE = "0"; // explicit WARN (compiled default is now ENFORCE)
     const paths = greenProject();
     appendGroundingReceipt(paths, {
       workClass: "integration",
@@ -642,7 +642,7 @@ describe("L-1 — Slice-B per-kind WARN: visual-hash-only missing under ENFORCE 
 // is the correct, uncontended observability channel for grounding (contract O1) — assert that instead.
 describe("WARN default-path: flag unset + failing ground ⇒ ok:true + res.grounding summary rides up", () => {
   it("TH_BSC10_ENFORCE unset + required kind MISSING ⇒ ok:true, res.grounding has version-pin with conformance:'missing'", () => {
-    delete process.env.TH_BSC10_ENFORCE; // compiled default OFF
+    process.env.TH_BSC10_ENFORCE = "0"; // explicit WARN (compiled default is now ENFORCE)
     const paths = greenProject();
     // Declare "integration" but only append digest-manifest (version-pin missing)
     appendGroundingReceipt(paths, {
@@ -671,7 +671,7 @@ describe("WARN default-path: flag unset + failing ground ⇒ ok:true + res.groun
   });
 
   it("TH_BSC10_ENFORCE unset + over-budget ground ⇒ ok:true, res.grounding has digest-manifest with conformance:'over-budget'", () => {
-    delete process.env.TH_BSC10_ENFORCE;
+    process.env.TH_BSC10_ENFORCE = "0"; // explicit WARN (compiled default is now ENFORCE)
     const paths = greenProject();
     appendGroundingReceipt(paths, {
       workClass: "integration",

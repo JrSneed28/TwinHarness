@@ -932,9 +932,9 @@ describe("U9 — bsc10EnforcementEnabled(): bsc2-mirror polarity confirmation", 
     expect(bsc10EnforcementEnabled()).toBe(expected);
   });
 
-  it("unset ⇒ false (Slice-B WARN compiled default)", () => {
+  it("unset ⇒ true (Slice-B ENFORCE compiled default)", () => {
     delete process.env.TH_BSC10_ENFORCE;
-    expect(bsc10EnforcementEnabled()).toBe(false);
+    expect(bsc10EnforcementEnabled()).toBe(true);
   });
 });
 
@@ -1037,7 +1037,7 @@ describe("M-2 external-chain integrity — reorder/dup breaks external store (fl
   });
 
   it("WARN default + reordered external chain ⇒ non-blocking notice (ok:true, flag-gated)", () => {
-    delete process.env.TH_BSC10_ENFORCE;
+    process.env.TH_BSC10_ENFORCE = "0"; // explicit WARN (compiled default is now ENFORCE)
     const paths = greenProject();
     setVerifierKey(paths, K1.publicKey);
 

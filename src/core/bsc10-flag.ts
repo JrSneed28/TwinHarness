@@ -59,7 +59,7 @@ export function bsc10EnforcementEnabled(): boolean {
   const raw = process.env.TH_BSC10_ENFORCE;
   // ── COMPILED DEFAULT (two-commit toggle, Integrator-owned) ──────────────────────────────
   // Slice-A WARN: `return false`.  Slice-B ENFORCE: `return true` (mirrors bsc2-flag.ts:36).
-  if (raw === undefined) return false;
+  if (raw === undefined) return true;
   // ────────────────────────────────────────────────────────────────────────────────────────
   const normalized = raw.trim().toLowerCase();
   return !(normalized === "0" || normalized === "false");

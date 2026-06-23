@@ -60,7 +60,7 @@ function bsc10EnforcementEnabled() {
     // ── COMPILED DEFAULT (two-commit toggle, Integrator-owned) ──────────────────────────────
     // Slice-A WARN: `return false`.  Slice-B ENFORCE: `return true` (mirrors bsc2-flag.ts:36).
     if (raw === undefined)
-        return false;
+        return true;
     // ────────────────────────────────────────────────────────────────────────────────────────
     const normalized = raw.trim().toLowerCase();
     return !(normalized === "0" || normalized === "false");
