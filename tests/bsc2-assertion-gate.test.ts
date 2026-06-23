@@ -314,16 +314,49 @@ describe("BSC-2 waiver — signed, path/digest-scoped escape (negative-control d
   });
 });
 
-describe("BSC-2 MutationKill gate acceptance (the 2b independence hook)", () => {
-  it("a signature-verified MutationKillReceipt grounds efficacy → trust label valid-grounded, gate PASSES even with an offender", () => {
+describe("BSC-2 MutationKill — efficacy is a DISTINCT axis, NEVER a presence pass-override (review HIGH/MEDIUM)", () => {
+  it("a module-scoped valid-grounded MutationKillReceipt does NOT excuse an unrelated offender — still BLOCKs (enforce)", () => {
     process.env.TH_BSC2_ENFORCE = "1";
-    const paths = greenAtFinal({ asserted: false, withReceipt: false }); // an offender, no presence receipt
+    const paths = greenAtFinal({ asserted: false, withReceipt: false }); // REQ-001 is an offender
+    const kp = generateKeyPairSync("ed25519");
+    setVerifierKey(paths, kp.publicKey);
+    // The mutation receipt's scope is an UNRELATED module (src/core/hash.ts), not REQ-001.
+    appendSignedMutationKill(paths, { keyPair: kp });
+    const res = checkProductionReality(paths, state(paths));
+    expect(res.ok).toBe(false); // presence ≠ efficacy: the module-scoped spike cannot excuse REQ-001
+    // No presence receipt at all ⇒ the no-receipt fail-closed token (runs ALWAYS).
+    expect(res.error).toBe("assertion_unobserved");
+    // The efficacy signal is still recorded as a DISTINCT module-scoped observability axis...
+    expect(res.mutationEfficacy).toEqual({ status: "valid-grounded", scope: "src/core/hash.ts", score: 0.9 });
+    // ...and per-REQ presence labels stay presence-only (the type no longer admits valid-grounded).
+    expect(res.assertionPresence?.every((s) => s.trustLabel === "valid" || s.trustLabel === "attested-presence")).toBe(true);
+  });
+
+  it("a valid-grounded MutationKillReceipt + an assertion-free offender WITH a fresh receipt → still assertion_presence_unverified", () => {
+    process.env.TH_BSC2_ENFORCE = "1";
+    const paths = greenAtFinal({ asserted: false }); // offender, but a fresh presence receipt exists
     const kp = generateKeyPairSync("ed25519");
     setVerifierKey(paths, kp.publicKey);
     appendSignedMutationKill(paths, { keyPair: kp });
     const res = checkProductionReality(paths, state(paths));
-    expect(res.ok).toBe(true); // efficacy-grounded clears the 2a presence gap
-    expect(res.assertionPresence?.every((s) => s.trustLabel === "valid-grounded")).toBe(true);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("assertion_presence_unverified"); // the offender still blocks
+    expect(res.detail!.offenders).toContain("REQ-001");
+    expect(res.mutationEfficacy?.status).toBe("valid-grounded"); // efficacy recorded, did not override
+  });
+
+  it("a valid-grounded MutationKillReceipt is accepted-as-status WITHOUT pass-override on an otherwise-green run", () => {
+    process.env.TH_BSC2_ENFORCE = "1";
+    const paths = greenAtFinal(); // fully green via 2a presence (asserted REQ + receipt)
+    const kp = generateKeyPairSync("ed25519");
+    setVerifierKey(paths, kp.publicKey);
+    appendSignedMutationKill(paths, { keyPair: kp, score: 0.95 });
+    const res = checkProductionReality(paths, state(paths));
+    expect(res.ok).toBe(true); // the run is green on its OWN presence merits, not because of efficacy
+    // The efficacy signal rides up as a distinct observability axis for its scope.
+    expect(res.mutationEfficacy).toEqual({ status: "valid-grounded", scope: "src/core/hash.ts", score: 0.95 });
+    // Per-REQ presence labels remain presence-only (valid / attested-presence), never efficacy.
+    expect(res.assertionPresence?.every((s) => s.trustLabel === "valid" || s.trustLabel === "attested-presence")).toBe(true);
   });
 
   it("a FORGED MutationKillReceipt (no verifying signature) → mutation_kill_forged BLOCK", () => {
@@ -338,10 +371,10 @@ describe("BSC-2 MutationKill gate acceptance (the 2b independence hook)", () => 
     expect(res.error).toBe("mutation_kill_forged");
   });
 
-  it("an ABSENT MutationKillReceipt is a no-op (the common 2a path; a 2a-only REQ is NEVER valid-grounded)", () => {
+  it("an ABSENT MutationKillReceipt is a no-op (the common 2a path; a fully-clean run is a bare PASS)", () => {
     process.env.TH_BSC2_ENFORCE = "1";
     const paths = greenAtFinal(); // green via 2a presence only
     const res = checkProductionReality(paths, state(paths));
-    expect(res).toEqual({ ok: true }); // fully clean ⇒ bare PASS (no summary ride-up)
+    expect(res).toEqual({ ok: true }); // fully clean ⇒ bare PASS (no summary / no efficacy ride-up)
   });
 });

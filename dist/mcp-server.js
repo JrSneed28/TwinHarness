@@ -24052,7 +24052,7 @@ function evaluateAssertionPresence(paths) {
   const checkedTested = new Set(bd.rows.filter((r) => r.tested).map((r) => r.req));
   if (checkedTested.size === 0) return null;
   const mutation = readMutationKillValidated(paths);
-  const efficacyGrounded = mutation.status === "valid-grounded";
+  const mutationEfficacy = mutation.status === "valid-grounded" && mutation.receipt ? { status: "valid-grounded", scope: mutation.receipt.ground.scope, score: mutation.receipt.ground.score } : void 0;
   const ground = computeAssertionPresenceGround(paths);
   const byReq = new Map(ground.map((s) => [s.reqId, s]));
   const waived = validWaivedReqs(paths);
@@ -24061,7 +24061,7 @@ function evaluateAssertionPresence(paths) {
     const nonTrivialAssertions = s ? s.nonTrivialAssertions : 0;
     const assertionFree = s ? s.assertionFree : true;
     const isWaived = waived.has(reqId);
-    const trustLabel = efficacyGrounded ? "valid-grounded" : !assertionFree ? "attested-presence" : "valid";
+    const trustLabel = !assertionFree ? "attested-presence" : "valid";
     return { reqId, nonTrivialAssertions, assertionFree, trustLabel, waived: isWaived };
   });
   if (mutation.status === "forged") {
@@ -24072,7 +24072,6 @@ function evaluateAssertionPresence(paths) {
       detail: { scope: mutation.receipt?.ground.scope ?? null, key_id: mutation.receipt?.key_id ?? null }
     };
   }
-  if (efficacyGrounded) return { ok: true, summary };
   const receipts = readAssertionPresenceReceipts(paths);
   const chain = verifyAssertionPresenceChain(receipts);
   if (!chain.ok) {
@@ -24080,6 +24079,7 @@ function evaluateAssertionPresence(paths) {
       ok: false,
       reason: "assertion_presence_unverified",
       summary,
+      mutationEfficacy,
       detail: { contentStatus: "chain", brokenAt: chain.brokenAt, chainReason: chain.reason }
     };
   }
@@ -24089,6 +24089,7 @@ function evaluateAssertionPresence(paths) {
       ok: false,
       reason: "assertion_unobserved",
       summary,
+      mutationEfficacy,
       detail: { contentStatus: "assertion_unobserved", tested: checkedTested.size }
     };
   }
@@ -24098,6 +24099,7 @@ function evaluateAssertionPresence(paths) {
       ok: false,
       reason: "assertion_presence_unverified",
       summary,
+      mutationEfficacy,
       detail: {
         contentStatus: content.status,
         ...content.staleReasons ? { staleReasons: content.staleReasons } : {}
@@ -24109,11 +24111,12 @@ function evaluateAssertionPresence(paths) {
     const assertionFree = s ? s.assertionFree : true;
     return assertionFree && !waived.has(reqId);
   }).sort();
-  if (offenders.length === 0) return { ok: true, summary };
+  if (offenders.length === 0) return { ok: true, summary, mutationEfficacy };
   return {
     ok: false,
     reason: "assertion_presence_unverified",
     summary,
+    mutationEfficacy,
     detail: { contentStatus: content.status, offenders: offenders.slice(0, 20), total: offenders.length }
   };
 }
@@ -24121,24 +24124,29 @@ function checkAssertionPresence(paths) {
   const verdict = evaluateAssertionPresence(paths);
   if (verdict === null) return PASS;
   if (verdict.ok) {
-    const noteworthy = verdict.summary.some(
-      (s) => s.assertionFree || s.waived || s.trustLabel === "valid-grounded"
-    );
-    return noteworthy ? { ok: true, assertionPresence: verdict.summary } : PASS;
+    const noteworthy = verdict.summary.some((s) => s.assertionFree || s.waived) || verdict.mutationEfficacy !== void 0;
+    if (!noteworthy) return PASS;
+    const res2 = { ok: true, assertionPresence: verdict.summary };
+    if (verdict.mutationEfficacy) res2.mutationEfficacy = verdict.mutationEfficacy;
+    return res2;
   }
   if (!bsc2EnforcementEnabled()) {
-    return {
+    const res2 = {
       ok: true,
       assertionPresence: verdict.summary,
       notice: { token: verdict.reason, detail: verdict.detail }
     };
+    if (verdict.mutationEfficacy) res2.mutationEfficacy = verdict.mutationEfficacy;
+    return res2;
   }
-  return {
+  const res = {
     ok: false,
     error: verdict.reason,
     detail: verdict.detail,
     assertionPresence: verdict.summary
   };
+  if (verdict.mutationEfficacy) res.mutationEfficacy = verdict.mutationEfficacy;
+  return res;
 }
 function checkProductionReality(paths, state) {
   if (!isFinalVerification(state.current_stage)) return PASS;
@@ -24245,9 +24253,10 @@ function checkProductionReality(paths, state) {
   const dimensions = driver.dimensions ?? assertion.dimensions;
   if (dimensions) merged.dimensions = dimensions;
   if (assertion.assertionPresence) merged.assertionPresence = assertion.assertionPresence;
+  if (assertion.mutationEfficacy) merged.mutationEfficacy = assertion.mutationEfficacy;
   const notice = driver.notice ?? realization.notice ?? assertion.notice;
   if (notice) merged.notice = notice;
-  return merged.dimensions || merged.assertionPresence || merged.notice ? merged : PASS;
+  return merged.dimensions || merged.assertionPresence || merged.mutationEfficacy || merged.notice ? merged : PASS;
 }
 function stageOrdinal(stage) {
   const canonical = canonicalizeStage(stage);

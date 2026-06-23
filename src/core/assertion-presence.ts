@@ -27,6 +27,21 @@
  *     fail-closes on it (it becomes an offender unless waiver-covered). A MIXED REQ with ≥1
  *     parseable file counts only the parseable assertions.
  *
+ * KNOWN LIMITATIONS (disclosed, not silently ignored — review notes 6/7):
+ *   - DETERMINISM UNDER CAP-TRUNCATION: the sensor's input recognition inherits
+ *     `anchors.ts:scanDirForReqIds`'s file-count / total-bytes caps. If a `tests/` tree exceeds
+ *     those caps, the scan TRUNCATES and the truncated set is `readdirSync`-order-dependent — so
+ *     the ground is NOT fully deterministic in the cap-truncated regime. The real TwinHarness
+ *     `tests/` dir is far below the cap, so the ground is deterministic in practice; a
+ *     cap-robust deterministic partial scan (e.g. order-stable truncation) is OUT OF SCOPE for
+ *     this slice and tracked as future work, not a silent hazard.
+ *   - NO-ARG SMOKE MATCHERS COUNT AS NON-TRIVIAL: an `expect(<non-literal>).toBeDefined()` /
+ *     `.toBeTruthy()` (a matcher with no argument over a non-literal subject) is classified
+ *     NON-trivial (it is not literal-vs-literal and not a tautology). This is a known
+ *     FALSE-NEGATIVE class of the offender detector — a smoke assertion that can technically
+ *     fail but asserts little. Acceptable for a PRESENCE-not-efficacy sensor (the genuine
+ *     efficacy grade is the 2b external mutation-kill receipt); tightening it is future work.
+ *
  * Storage mirrors `src/core/verification-driver.ts` / `src/core/realization.ts` EXACTLY: a
  * DEDICATED, lock-isolated append-only SHA-256 hash-chained
  * `<stateDir>/assertion-presence-receipts.jsonl`, a tolerant reader, a tail-scan for the next
