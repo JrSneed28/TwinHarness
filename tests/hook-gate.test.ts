@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, mintAssertionPresenceForFixture, ASSERTED_COV_TEST, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { evaluateStopGate, runHookStopGate } from "../src/commands/hook";
 import { readState, writeState } from "../src/core/state-store";
@@ -29,7 +29,8 @@ function greenAtFinalExceptVerify(p: TempProject): void {
   const paths = p.paths;
   write(paths, "docs/01-requirements.md", "# Requirements\n\n- REQ-001 the only requirement.\n");
   write(paths, "docs/09-implementation-plan.md", "# Plan\n\nSLICE-1 covers REQ-001.\n");
-  write(paths, "tests/cov.test.ts", "// REQ-001 verified here\n");
+  // BSC-2 slice-6: REQ-001's test file carries a NON-TRIVIAL assertion (was a bare comment).
+  write(paths, "tests/cov.test.ts", ASSERTED_COV_TEST);
   write(paths, "docs/10-verification-report.md", "# Verification Report\n\nREQ-001 verified.\n");
   writeState(paths, {
     ...initialState(),
@@ -45,6 +46,9 @@ function greenAtFinalExceptVerify(p: TempProject): void {
   // REQ-GATE-005 verify-suite isolation would block on human_approval_unverified, not
   // the verify rung it targets.
   mintRequiredApprovals(paths, readState(paths).state!);
+  // BSC-2 slice-6: the assertion rung composes after the verify rung, so the green-except-verify
+  // fixture must also carry an F8-bound assertion-presence receipt for the PASS arm. Mint LAST.
+  mintAssertionPresenceForFixture(paths);
 }
 
 /** A GREEN bound verify report (envelope) for the current config — sealed at the

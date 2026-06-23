@@ -30,7 +30,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, mintAssertionPresenceForFixture, ASSERTED_COV_TEST, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
@@ -102,7 +102,8 @@ function greenExceptRealization(): ProjectPaths {
   tp = makeTempProject();
   const paths = tp.paths;
   writeFile(paths, "docs/01-requirements.md", "# Requirements\n\n- REQ-001 the only requirement.\n");
-  writeFile(paths, "tests/cov.test.ts", "// REQ-001 verified here\n");
+  // BSC-2 slice-6: REQ-001's test file carries a NON-TRIVIAL assertion (was a bare comment).
+  writeFile(paths, "tests/cov.test.ts", ASSERTED_COV_TEST);
   writeFile(paths, "docs/10-verification-report.md", "# Verification Report\n\nREQ-001 verified.\n");
   writeFile(paths, REFERENT, "export const a = 1; // REQ-001\n");
   writeState(paths, {
@@ -115,6 +116,8 @@ function greenExceptRealization(): ProjectPaths {
   runArtifactRegister(paths, "docs/10-verification-report.md", 1);
   runTesterRecord(paths, { driver: "cli-e2e", provider: "sandbox", passed: true });
   mintRequiredApprovals(paths, state(paths));
+  // BSC-2 slice-6: mint the F8-bound assertion-presence receipt LAST (after every tests/** write).
+  mintAssertionPresenceForFixture(paths);
   writeRepoMap(paths, [{ path: REFERENT, component: "src/commands", req_ids: ["REQ-001"] }]);
   fs.writeFileSync(
     path.join(paths.stateDir, ".realization-receipts-migration"),

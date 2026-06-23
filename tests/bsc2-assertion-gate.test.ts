@@ -180,7 +180,7 @@ function greenAtFinal(opts: { asserted?: boolean; withReceipt?: boolean } = {}):
 
 describe("BSC-2 rung — WARN phase (flag OFF) observes but never blocks", () => {
   it("an assertion-free offender with no receipt does NOT block in WARN; attaches notice + summary", () => {
-    delete process.env.TH_BSC2_ENFORCE; // default OFF in commit 1
+    process.env.TH_BSC2_ENFORCE = "0"; // explicit WARN (the default is ENFORCE since commit 2)
     const paths = greenAtFinal({ asserted: false, withReceipt: false });
     const res = checkProductionReality(paths, state(paths));
     expect(res.ok).toBe(true); // WARN never blocks

@@ -22907,9 +22907,9 @@ function realizationEnforcementEnabled() {
 // src/core/bsc2-flag.ts
 function bsc2EnforcementEnabled() {
   const raw = process.env.TH_BSC2_ENFORCE;
-  if (raw === void 0) return false;
+  if (raw === void 0) return true;
   const normalized = raw.trim().toLowerCase();
-  return normalized === "1" || normalized === "true";
+  return !(normalized === "0" || normalized === "false");
 }
 
 // src/core/assertion-presence.ts

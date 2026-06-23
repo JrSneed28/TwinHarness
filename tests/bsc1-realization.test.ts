@@ -22,7 +22,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, mintAssertionPresenceForFixture, ASSERTED_COV_TEST, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
@@ -315,7 +315,8 @@ function greenExceptRealization(opts: { stampMarker?: boolean } = {}): ProjectPa
   tp = makeTempProject();
   const paths = tp.paths;
   writeFile(paths, "docs/01-requirements.md", "# Requirements\n\n- REQ-001 the only requirement.\n");
-  writeFile(paths, "tests/cov.test.ts", "// REQ-001 verified here\n");
+  // BSC-2 slice-6: REQ-001's test file carries a NON-TRIVIAL assertion (was a bare comment).
+  writeFile(paths, "tests/cov.test.ts", ASSERTED_COV_TEST);
   writeFile(paths, "docs/10-verification-report.md", "# Verification Report\n\nREQ-001 verified.\n");
   writeFile(paths, "src/commands/a.ts", "export const a = 1; // REQ-001\n");
   writeState(paths, {
@@ -328,6 +329,10 @@ function greenExceptRealization(opts: { stampMarker?: boolean } = {}): ProjectPa
   expect(runArtifactRegister(paths, "docs/10-verification-report.md", 1).ok).toBe(true);
   expect(runTesterRecord(paths, { driver: "cli-e2e", provider: "sandbox", passed: true }).ok).toBe(true);
   mintRequiredApprovals(paths, state(paths));
+  // BSC-2 slice-6: mint the F8-bound assertion-presence receipt LAST (after every tests/** write).
+  // The assertion rung runs AFTER realization, so realization-BLOCK tests short-circuit before it;
+  // the POSITIVE (realization-cleared) tests reach the assertion rung's PASS arm and need it.
+  mintAssertionPresenceForFixture(paths);
   // Bind REQ-001 to SLICE-0's "commands" component AFTER the migration window (no marker),
   // so REQ-001 is an enforceable post-regime owned REQ.
   writeRepoMap(paths, [{ path: "src/commands/a.ts", component: "src/commands", req_ids: ["REQ-001"] }]);
