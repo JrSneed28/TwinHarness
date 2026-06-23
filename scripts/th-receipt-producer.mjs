@@ -586,6 +586,26 @@ function mapMutationReport(report, scopeOverride) {
       throw new Error(`mutation report field "${k}" is missing or not a finite number`);
     }
   }
+  // Bounds + count-invariant (refuse-at-creation parity): the in-process gate validator only
+  // checks finiteness, so a phantom efficacy signal (score 7, killed+survived > generated,
+  // negative counts) must be refused HERE rather than minted and signed.
+  for (const [k, v] of [
+    ["mutants_generated", mutants_generated],
+    ["mutants_killed", mutants_killed],
+    ["mutants_survived", mutants_survived],
+  ]) {
+    if (v < 0 || !Number.isInteger(v)) {
+      throw new Error(`mutation report field "${k}" must be a non-negative integer`);
+    }
+  }
+  if (score < 0 || score > 1) {
+    throw new Error(`mutation report \`score\` (${score}) is out of range — must be in [0, 1]`);
+  }
+  if (mutants_killed + mutants_survived > mutants_generated) {
+    throw new Error(
+      `mutation report counts are inconsistent: killed (${mutants_killed}) + survived (${mutants_survived}) exceeds generated (${mutants_generated})`,
+    );
+  }
   if (typeof scope !== "string" || scope === "") {
     throw new Error("mutation report has no `scope` — supply one in the report or via --scope <module>");
   }

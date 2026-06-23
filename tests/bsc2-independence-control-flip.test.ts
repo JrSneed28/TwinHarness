@@ -286,4 +286,32 @@ describe("BSC-2 slice-6 2b — independence control-flip (real accepted ↔ forg
     expect(readMutationKillValidated(paths).status).toBe("absent");
     expect(checkProductionReality(paths, state(paths))).toEqual({ ok: true });
   });
+
+  // REFUSE-AT-CREATION: a controlled report whose ground is out-of-bounds / count-inconsistent
+  // is refused BEFORE any line is signed/written (the gate validator only checks finiteness, so
+  // the producer must reject a phantom efficacy signal here). Each case mints NOTHING.
+  for (const bad of [
+    { name: "score out of range (> 1)", report: { mutants_generated: 50, mutants_killed: 48, mutants_survived: 2, score: 7, scope: "src/core/hash.ts" } },
+    { name: "killed + survived exceeds generated", report: { mutants_generated: 10, mutants_killed: 9, mutants_survived: 5, score: 0.9, scope: "src/core/hash.ts" } },
+    { name: "negative count", report: { mutants_generated: 50, mutants_killed: -1, mutants_survived: 2, score: 0.9, scope: "src/core/hash.ts" } },
+  ]) {
+    it(`REFUSE: ${bad.name} \u2192 nonzero exit, no line written`, () => {
+      process.env.TH_BSC2_ENFORCE = "1";
+      const paths = greenAtFinal();
+      const verifierKeyFile = setVerifierKey(paths, K1.publicKey);
+      const privateKeyFile = writeProducerKey(paths, "k1-private.pem", K1.privateKey);
+      const reportFile = path.join(paths.stateDir, "bad-report.json");
+      fs.mkdirSync(paths.stateDir, { recursive: true });
+      fs.writeFileSync(reportFile, JSON.stringify(bad.report), "utf8");
+
+      const res = spawnSync(
+        "node",
+        [PRODUCER, "--root", paths.root, "--kind", "mutation-kill", "--mutation-report", reportFile],
+        { env: { ...process.env, TH_RECEIPT_PUBLIC_KEYFILE: verifierKeyFile, TH_RECEIPT_PRIVATE_KEYFILE: privateKeyFile }, encoding: "utf8" },
+      );
+      expect(res.status).not.toBe(0);
+      expect(fs.existsSync(externalMutationReceiptsPath(paths))).toBe(false);
+      expect(readMutationKillValidated(paths).status).toBe("absent");
+    });
+  }
 });
