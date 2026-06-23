@@ -17,7 +17,7 @@
     "phase": "done-phase",
     "independence": ">0",
     "independenceNote": "signature-provenance only, over a bounded single-module mutation scope: the 2b external Ed25519-signed MutationKillReceipt control-flip proves the receipt was not forged in-process (the in-process surface holds no key ⇒ a wrong-key/unsigned line classifies forged and BLOCKs mutation_kill_forged; a producer-signed line classifies valid-grounded). The module-scoped efficacy signal is a DISTINCT observability axis that NEVER overrides the per-REQ assertion-presence rung (presence ≠ efficacy, review HIGH). The 2a in-process AssertionPresenceReceipt remains attribution-only (agent-mintable ⇒ valid/attested-presence, never valid-grounded)",
-    "pr": [41],
+    "pr": [41, 42],
     "probe": ".omc/audit/probes/bsc2",
     "anchors": ["core/assertion-presence.ts", "core/bsc2-flag.ts", "commands/assertion-presence.ts", "core/gate-preconditions.ts (checkAssertionPresence rung 8)", "core/receipts.ts (AssertionPresence + MutationKill schemas)", "scripts/th-receipt-producer.mjs (--kind mutation-kill)"],
     "updatedAt": "2026-06-23T06:10:00Z"
