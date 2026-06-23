@@ -31,11 +31,13 @@
  *   TH_RECEIPT_PRIVATE_KEYFILE=/path/to/ed25519-private.pem \
  *   node scripts/th-receipt-producer.mjs \
  *     --root <projectRoot> \
- *     --kind <drift-resolve|sim-retire|decision-approve|scan-exception|approval|driver|realization> \
+ *     --kind <drift-resolve|sim-retire|decision-approve|scan-exception|approval|driver|realization|mutation-kill> \
  *     [--ref-id <ID>] \
  *     [--target <repo-rel-path>] \
  *     [--stage <humanGate-stage>] \
  *     [--dimension <a,b,c>] \
+ *     [--mutation-report <path>] \
+ *     [--scope <module>] \
  *     [--producer-identity <string>]
  *
  * The terminal-receipt kinds (drift-resolve|sim-retire|decision-approve) require
@@ -80,6 +82,21 @@
  * from the compiled dist, so the in-process gate validator classifies it `valid-grounded`
  * (BSC-1 independence >0 — SIGNATURE-PROVENANCE only; the referent is still agent-authored).
  *
+ * `--kind mutation-kill` (slice-6 / BSC-2 2b) is a SEPARATE flow that writes a DIFFERENT store
+ * (`external-mutation-receipts.jsonl`) with the 2a `MutationKillReceipt` canonical shape — an
+ * external-signed receipt recording that a controlled mutation-testing runner's suite KILLS
+ * injected faults over ONE bounded source module (`scope`). It REQUIRES `--mutation-report <path>`
+ * (a JSON report a controlled CI job's mutation tool emitted), which MUST resolve + parse; the
+ * report supplies the kill counts + `score` (a minimal `{mutants_generated,mutants_killed,
+ * mutants_survived,score,scope}` shape OR a Stryker-style report mapped deterministically). `scope`
+ * comes from the report or an explicit `--scope <module>`. The mutation tool itself (Stryker) is
+ * NEVER imported/run here — the producer only reads a report the CI job produced, keeping the
+ * mutation tool a CI-job-only dependency absent from this producer's dist-import path. The signed
+ * canonical text reuses 2a's `mutationKillCanonicalText` / `computeMutationKillRecordHash` from the
+ * compiled dist, so the in-process gate validator classifies it `valid-grounded` (BSC-2 independence
+ * >0 — SIGNATURE-PROVENANCE over a bounded single-module mutation scope; the module-scoped efficacy
+ * signal NEVER overrides the per-REQ assertion-presence rung — presence ≠ efficacy).
+ *
  * Prints a small JSON result on stdout. Exit 0 on success, nonzero on any error.
  */
 
@@ -102,6 +119,7 @@ const approvalsMod = await import(pathToFileUrl(path.join(DIST, "core", "approva
 const stagesMod = await import(pathToFileUrl(path.join(DIST, "core", "stages.js")));
 const driverMod = await import(pathToFileUrl(path.join(DIST, "core", "verification-driver.js")));
 const realizationMod = await import(pathToFileUrl(path.join(DIST, "core", "realization.js")));
+const assertionMod = await import(pathToFileUrl(path.join(DIST, "core", "assertion-presence.js")));
 
 const {
   canonicalText,
@@ -152,6 +170,16 @@ const {
   externalRealizationReceiptsPath,
   readLastExternalRealizationRecordHash,
 } = realizationMod;
+// slice-6/BSC-2 (2b) — reuse the 2a mutation-kill canonical/hash binding + external store
+// helpers from the COMPILED dist so the producer and the in-process gate validator can NEVER
+// diverge on the mutation canonical field order (`mutationKillCanonicalText` drops `recordHash`;
+// `signature` is excluded as a trailer). `currentReceiptSnapshotCoord` is reused from receipts.js.
+const {
+  mutationKillCanonicalText,
+  computeMutationKillRecordHash,
+  externalMutationReceiptsPath,
+  readLastExternalMutationRecordHash,
+} = assertionMod;
 
 /** Convert an absolute filesystem path to a file:// URL (Windows-safe ESM import). */
 function pathToFileUrl(abs) {
@@ -179,7 +207,7 @@ function fail(message, extra = {}) {
   process.exit(1);
 }
 
-const KINDS = new Set(["drift-resolve", "sim-retire", "decision-approve", "scan-exception", "approval", "driver", "realization"]);
+const KINDS = new Set(["drift-resolve", "sim-retire", "decision-approve", "scan-exception", "approval", "driver", "realization", "mutation-kill"]);
 
 function loadPrivateKey() {
   const file = process.env.TH_RECEIPT_PRIVATE_KEYFILE;
@@ -475,6 +503,182 @@ function produceRealization(paths, { reqId, target, producerIdentity, privateKey
   );
 }
 
+/**
+ * Parse + map a mutation-report JSON into the canonical {@link MutationKillGround} shape. Accepts
+ * EITHER a minimal canonical report `{ mutants_generated, mutants_killed, mutants_survived, score,
+ * scope }` OR a Stryker-style report (mutant statuses Killed/Survived/NoCoverage/Timeout mapped to
+ * killed/survived, score from the report's `mutationScore`/100 or derived `killed/(killed+survived)`).
+ * Deterministic + simple. `scopeOverride` (the `--scope` flag) wins over any report-supplied scope.
+ * Returns `{ ground }` on success; throws an Error (message) on a malformed report so the caller can
+ * refuse-at-creation (nonzero exit, no line written).
+ */
+function mapMutationReport(report, scopeOverride) {
+  if (typeof report !== "object" || report === null) {
+    throw new Error("mutation report is not a JSON object");
+  }
+  const r = report;
+
+  let mutants_generated;
+  let mutants_killed;
+  let mutants_survived;
+  let score;
+  let scope;
+
+  if (
+    typeof r.mutants_generated === "number" &&
+    typeof r.mutants_killed === "number" &&
+    typeof r.mutants_survived === "number"
+  ) {
+    // Minimal canonical report.
+    mutants_generated = r.mutants_generated;
+    mutants_killed = r.mutants_killed;
+    mutants_survived = r.mutants_survived;
+    score =
+      typeof r.score === "number"
+        ? r.score
+        : mutants_killed + mutants_survived > 0
+          ? mutants_killed / (mutants_killed + mutants_survived)
+          : 0;
+    scope = typeof r.scope === "string" ? r.scope : undefined;
+  } else if (r.files && typeof r.files === "object") {
+    // Stryker-style report: aggregate every file's mutant statuses.
+    let killed = 0;
+    let survived = 0;
+    let total = 0;
+    for (const file of Object.values(r.files)) {
+      const mutants = file && typeof file === "object" ? file.mutants : undefined;
+      if (!Array.isArray(mutants)) continue;
+      for (const m of mutants) {
+        const status = m && typeof m === "object" ? m.status : undefined;
+        total++;
+        if (status === "Killed" || status === "Timeout") killed++;
+        else if (status === "Survived" || status === "NoCoverage") survived++;
+      }
+    }
+    mutants_generated = total;
+    mutants_killed = killed;
+    mutants_survived = survived;
+    score =
+      typeof r.mutationScore === "number"
+        ? r.mutationScore / 100
+        : killed + survived > 0
+          ? killed / (killed + survived)
+          : 0;
+    // Stryker reports are keyed by file; a single-module run has one file key.
+    const fileKeys = Object.keys(r.files);
+    scope = fileKeys.length === 1 ? fileKeys[0] : undefined;
+  } else {
+    throw new Error("mutation report is neither a minimal canonical shape nor a Stryker-style report");
+  }
+
+  if (typeof scopeOverride === "string" && scopeOverride !== "" && scopeOverride !== "true") {
+    scope = scopeOverride;
+  }
+
+  // Validate the 5 fields — refuse a malformed/incomplete ground rather than mint a phantom one.
+  for (const [k, v] of [
+    ["mutants_generated", mutants_generated],
+    ["mutants_killed", mutants_killed],
+    ["mutants_survived", mutants_survived],
+    ["score", score],
+  ]) {
+    if (typeof v !== "number" || !Number.isFinite(v)) {
+      throw new Error(`mutation report field "${k}" is missing or not a finite number`);
+    }
+  }
+  if (typeof scope !== "string" || scope === "") {
+    throw new Error("mutation report has no `scope` — supply one in the report or via --scope <module>");
+  }
+
+  return { mutants_generated, mutants_killed, mutants_survived, score, scope };
+}
+
+/**
+ * slice-6/BSC-2 (2b) — produce an external-signed {@link MutationKillReceipt}. Writes the SEPARATE
+ * `external-mutation-receipts.jsonl` store (parallel to the driver/realization/approval external
+ * stores) with the 2a mutation canonical shape — NOT a terminal receipt.
+ *
+ * The make-or-break contract for the BSC-2 signature-provenance independence flip: the SIGNED
+ * canonical text MUST be byte-identical to what the in-process gate validator re-derives, so the
+ * signature it imports (`mutationKillCanonicalText` + `computeMutationKillRecordHash` from the
+ * compiled dist) is exactly the 2a binding. `signature` + `recordHash` are trailers, EXCLUDED from
+ * the canonical text. `producer_kind` is the FIXED literal `"controlled-runner"` (part of the
+ * signed input — a producer-kind swap breaks the signature).
+ *
+ * Refuse-at-creation (mirrors the driver/realization ground-resolve refusal): `--mutation-report`
+ * is required and MUST resolve + parse into a well-formed mutation ground — else we refuse BEFORE
+ * any write rather than mint an ungrounded mutation receipt. The mutation tool (Stryker) is NEVER
+ * imported/run here; the producer only reads a report a controlled CI job emitted.
+ *
+ * NOTE the independence is SIGNATURE-PROVENANCE only over a bounded single-module `scope` — it
+ * proves the receipt was not forged in-process, NOT that the suite kills every fault everywhere;
+ * the module-scoped efficacy signal NEVER overrides the per-REQ assertion-presence rung.
+ */
+function produceMutationKill(paths, { mutationReportPath, scopeOverride, privateKey, publicKey }) {
+  const abs = path.resolve(paths.root, mutationReportPath);
+  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+    fail(`--mutation-report "${mutationReportPath}" does not resolve to a file — refusing to mint an ungrounded mutation receipt`, {
+      mutationReport: mutationReportPath,
+    });
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(abs, "utf8"));
+  } catch (error) {
+    fail(`--mutation-report "${mutationReportPath}" is not valid JSON — refusing to mint an ungrounded mutation receipt`, {
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
+  let ground;
+  try {
+    ground = mapMutationReport(parsed, scopeOverride);
+  } catch (error) {
+    fail(`--mutation-report "${mutationReportPath}" is malformed — refusing to mint an ungrounded mutation receipt`, {
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  const coord = currentReceiptSnapshotCoord(paths);
+  const keyId = externalKeyId(publicKey);
+  const prevHash = readLastExternalMutationRecordHash(paths);
+
+  // The canonical input — EXACTLY the fields mutationKillCanonicalText binds (signature +
+  // recordHash are trailers, excluded; the ground + snapshot are re-emitted in their fixed key
+  // order by the helper). Field order is owned by 2a's MUTATION_CANONICAL_FIELD_ORDER inside
+  // mutationKillCanonicalText; the producer never re-orders, it hands the object to the imported
+  // helper so the bytes can never drift. `producer_kind` is the FIXED `"controlled-runner"` literal.
+  const withPrev = {
+    kind: "mutation-kill",
+    refId: coord.gitHead ?? "no-git",
+    ground,
+    snapshot_coord: coord,
+    producer_kind: "controlled-runner",
+    key_id: keyId,
+    prevHash,
+  };
+  const canonical = mutationKillCanonicalText(withPrev);
+  const signature = sign(null, Buffer.from(canonical, "utf8"), privateKey).toString("base64");
+  const recordHash = computeMutationKillRecordHash(withPrev);
+  const sealed = { ...withPrev, signature, recordHash };
+
+  const file = externalMutationReceiptsPath(paths);
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(sealed) + "\n", "utf8");
+
+  process.stdout.write(
+    JSON.stringify({
+      ok: true,
+      kind: "mutation-kill",
+      producer_kind: "controlled-runner",
+      key_id: keyId,
+      scope: ground.scope,
+      score: ground.score,
+      recordHash,
+      file,
+    }) + "\n",
+  );
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const root = args["root"];
@@ -488,6 +692,9 @@ function main() {
     dimensionArg !== undefined && dimensionArg !== "true"
       ? dimensionArg.split(",").map((s) => s.trim()).filter((s) => s !== "")
       : undefined;
+  // mutation-kill only: the controlled CI job's mutation-report path + optional --scope override.
+  const mutationReportPath = args["mutation-report"]; // optional (required for mutation-kill)
+  const scopeOverride = args["scope"]; // optional
   const producerIdentity = args["producer-identity"] ?? "external:th-receipt-producer";
 
   if (!root || root === "true") fail("--root <projectRoot> is required");
@@ -507,6 +714,12 @@ function main() {
     // requires --ref-id (the REQ-ID) AND --target (the referent source path).
     if (!refId || refId === "true") fail("--ref-id <REQ-ID> is required for realization");
     if (!target || target === "true") fail("--target <repo-rel-path> is required for realization");
+  } else if (kind === "mutation-kill") {
+    // mutation-kill is the SEPARATE slice-6/2b flow: keyed by the controlled CI job's mutation
+    // report, so it requires --mutation-report (the report path) and ignores --ref-id/--target.
+    if (!mutationReportPath || mutationReportPath === "true") {
+      fail("--mutation-report <path> is required for mutation-kill");
+    }
   } else {
     if (!refId || refId === "true") fail("--ref-id <ID> is required");
     if ((kind === "drift-resolve" || kind === "sim-retire") && (!target || target === "true")) {
@@ -548,6 +761,14 @@ function main() {
   // branch BEFORE the terminal-receipt machinery so that flow stays byte-identical.
   if (kind === "realization") {
     produceRealization(paths, { reqId: refId, target, producerIdentity, privateKey, publicKey });
+    return;
+  }
+
+  // slice-6/2b: the external-signed mutation-kill receipt writes a DIFFERENT store
+  // (`external-mutation-receipts.jsonl`) with the 2a mutation canonical shape — branch BEFORE the
+  // terminal-receipt machinery so that flow stays byte-identical.
+  if (kind === "mutation-kill") {
+    produceMutationKill(paths, { mutationReportPath, scopeOverride, privateKey, publicKey });
     return;
   }
 
