@@ -31,10 +31,11 @@
  *   TH_RECEIPT_PRIVATE_KEYFILE=/path/to/ed25519-private.pem \
  *   node scripts/th-receipt-producer.mjs \
  *     --root <projectRoot> \
- *     --kind <drift-resolve|sim-retire|decision-approve|scan-exception|approval> \
+ *     --kind <drift-resolve|sim-retire|decision-approve|scan-exception|approval|driver> \
  *     [--ref-id <ID>] \
  *     [--target <repo-rel-path>] \
  *     [--stage <humanGate-stage>] \
+ *     [--dimension <a,b,c>] \
  *     [--producer-identity <string>]
  *
  * The terminal-receipt kinds (drift-resolve|sim-retire|decision-approve) require
@@ -60,6 +61,16 @@
  * text reuses 3a's `approvalCanonicalText` from the compiled dist (with `stage` IN the
  * signed order, R5), so the 3a in-process validator's signature check (slice-3b C-I) verifies.
  *
+ * `--kind driver` (slice-4b) is a SEPARATE flow that writes a DIFFERENT store
+ * (`external-driver-receipts.jsonl`) with the 4a `DriverDimensionReceipt` canonical shape — an
+ * external-signed receipt recording which verification dimensions a trusted runner exercised.
+ * The dimensions are DERIVED from `verify-report.json` via the shared 4a sensor
+ * (`observeDriverDimensions`), NOT supplied: `--ref-id` / `--target` are IGNORED (the snapshot
+ * coordinate + report ARE the coordinate); an optional `--dimension a,b,c` records only that
+ * observed subset (a claimed-but-unobserved name refuses at creation). The signed canonical text
+ * reuses 4a's `driverCanonicalText` / `computeDriverRecordHash` from the compiled dist, so the
+ * 4a in-process gate validator's signature check classifies it `valid-grounded` (independence >0).
+ *
  * Prints a small JSON result on stdout. Exit 0 on success, nonzero on any error.
  */
 
@@ -80,6 +91,7 @@ const scanMod = await import(pathToFileUrl(path.join(DIST, "core", "scan-complet
 const hashMod = await import(pathToFileUrl(path.join(DIST, "core", "hash.js")));
 const approvalsMod = await import(pathToFileUrl(path.join(DIST, "core", "approvals.js")));
 const stagesMod = await import(pathToFileUrl(path.join(DIST, "core", "stages.js")));
+const driverMod = await import(pathToFileUrl(path.join(DIST, "core", "verification-driver.js")));
 
 const {
   canonicalText,
@@ -109,6 +121,17 @@ const {
   isHumanGateStage,
 } = approvalsMod;
 const { stageContract } = stagesMod;
+// slice-4b — reuse the 4a driver canonical/hash binding + external store helpers + the
+// SENSOR (`observeDriverDimensions`) from the COMPILED dist so the producer and the
+// in-process gate validator can NEVER diverge on the driver canonical field order
+// (`driverCanonicalText` drops `recordHash`; `signature` is excluded as a trailer).
+const {
+  driverCanonicalText,
+  computeDriverRecordHash,
+  externalDriverReceiptsPath,
+  readLastExternalDriverRecordHash,
+  observeDriverDimensions,
+} = driverMod;
 
 /** Convert an absolute filesystem path to a file:// URL (Windows-safe ESM import). */
 function pathToFileUrl(abs) {
@@ -136,7 +159,7 @@ function fail(message, extra = {}) {
   process.exit(1);
 }
 
-const KINDS = new Set(["drift-resolve", "sim-retire", "decision-approve", "scan-exception", "approval"]);
+const KINDS = new Set(["drift-resolve", "sim-retire", "decision-approve", "scan-exception", "approval", "driver"]);
 
 function loadPrivateKey() {
   const file = process.env.TH_RECEIPT_PRIVATE_KEYFILE;
@@ -287,6 +310,85 @@ function produceApproval(paths, { stage, producerIdentity, privateKey, publicKey
   );
 }
 
+/**
+ * slice-4b — produce an external-signed {@link DriverDimensionReceipt}. Writes the SEPARATE
+ * `external-driver-receipts.jsonl` store (parallel to `external-receipts.jsonl` /
+ * `external-approvals.jsonl` / `scan-exceptions.jsonl`) with the 4a driver canonical shape —
+ * NOT a terminal receipt.
+ *
+ * The make-or-break contract for the BSC-3 independence flip: the SIGNED canonical text MUST
+ * be byte-identical to what the in-process gate validator re-derives, so the signature it
+ * imports (`driverCanonicalText` + `computeDriverRecordHash` from the compiled dist) is exactly
+ * the 4a binding. `signature` + `recordHash` are trailers, EXCLUDED from the canonical text.
+ *
+ * Refuse-at-creation (mirrors the approval flow's ground-resolve refusal): the dimensions are
+ * DERIVED from `verify-report.json` via the shared SENSOR (`observeDriverDimensions`) — a
+ * report that observes NOTHING refuses BEFORE any write rather than mint an ungrounded receipt.
+ * A `--dimension` claim is INTERSECTED with the observed set; a claimed-but-unobserved name
+ * refuses (nonzero exit, no line), exactly like the in-process `appendDriverReceipt`.
+ */
+function produceDriver(paths, { dimensionNames, producerIdentity, privateKey, publicKey }) {
+  // SENSOR: what the report actually OBSERVES (the ONLY thing recordable). A report that
+  // observes nothing ⇒ refuse — a receipt with no grounded dimension is ungrounded.
+  const observed = observeDriverDimensions(paths);
+  if (observed.length === 0) {
+    fail("no driver dimension observed in verify-report.json — refusing to mint an ungrounded driver receipt");
+  }
+
+  // Negative-control (refuse-at-creation): a CLAIMED dimension the report did not observe is
+  // refused — a claim-without-observation can never be minted. Then filter to the claimed set.
+  let dimensions = observed;
+  if (dimensionNames !== undefined) {
+    const observedNames = new Set(observed.map((d) => d.name));
+    const unobserved = dimensionNames.filter((n) => !observedNames.has(n));
+    if (unobserved.length > 0) {
+      fail(`refusing to record driver dimension(s) not observed in verify-report.json: ${unobserved.join(", ")}`, {
+        unobserved,
+      });
+    }
+    dimensions = observed.filter((d) => dimensionNames.includes(d.name));
+  }
+
+  const coord = currentReceiptSnapshotCoord(paths);
+  const keyId = externalKeyId(publicKey);
+  const prevHash = readLastExternalDriverRecordHash(paths);
+
+  // The canonical input — EXACTLY the fields driverCanonicalText binds (signature + recordHash
+  // are trailers, excluded; `undefined` keys are dropped by the helper). Field order is owned
+  // by 4a's DRIVER_CANONICAL_FIELD_ORDER inside driverCanonicalText; the producer never
+  // re-orders, it hands the object to the imported helper so the bytes can never drift.
+  const withPrev = {
+    kind: "driver-dimension",
+    refId: coord.gitHead ?? "no-git",
+    dimensions,
+    snapshot_coord: coord,
+    producer_identity: producerIdentity,
+    producer_kind: "external",
+    key_id: keyId,
+    prevHash,
+  };
+  const canonical = driverCanonicalText(withPrev);
+  const signature = sign(null, Buffer.from(canonical, "utf8"), privateKey).toString("base64");
+  const recordHash = computeDriverRecordHash(withPrev);
+  const sealed = { ...withPrev, signature, recordHash };
+
+  const file = externalDriverReceiptsPath(paths);
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(sealed) + "\n", "utf8");
+
+  process.stdout.write(
+    JSON.stringify({
+      ok: true,
+      kind: "driver",
+      producer_kind: "external",
+      key_id: keyId,
+      dimensions: dimensions.map((d) => d.name),
+      recordHash,
+      file,
+    }) + "\n",
+  );
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const root = args["root"];
@@ -294,6 +396,12 @@ function main() {
   const refId = args["ref-id"];
   const target = args["target"]; // optional
   const stage = args["stage"]; // approval only
+  // driver only: comma-separated dimension subset (optional). Omitted ⇒ all observed dims.
+  const dimensionArg = args["dimension"]; // optional
+  const dimensionNames =
+    dimensionArg !== undefined && dimensionArg !== "true"
+      ? dimensionArg.split(",").map((s) => s.trim()).filter((s) => s !== "")
+      : undefined;
   const producerIdentity = args["producer-identity"] ?? "external:th-receipt-producer";
 
   if (!root || root === "true") fail("--root <projectRoot> is required");
@@ -305,6 +413,9 @@ function main() {
     if (!target || target === "true") fail("--target <repo-rel-path> is required for scan-exception");
   } else if (kind === "approval") {
     if (!stage || stage === "true") fail("--stage <humanGate-stage> is required for approval");
+  } else if (kind === "driver") {
+    // driver is the SEPARATE slice-4b flow: dimensions derive from verify-report.json, so it
+    // requires NEITHER --ref-id NOR --target (the snapshot coordinate + report ARE the ground).
   } else {
     if (!refId || refId === "true") fail("--ref-id <ID> is required");
     if ((kind === "drift-resolve" || kind === "sim-retire") && (!target || target === "true")) {
@@ -330,6 +441,14 @@ function main() {
   // terminal-receipt machinery so that flow stays byte-identical.
   if (kind === "approval") {
     produceApproval(paths, { stage, producerIdentity, privateKey, publicKey });
+    return;
+  }
+
+  // slice-4b: the external-signed driver-dimension receipt writes a DIFFERENT store
+  // (`external-driver-receipts.jsonl`) with the 4a driver canonical shape — branch BEFORE the
+  // terminal-receipt machinery so that flow stays byte-identical.
+  if (kind === "driver") {
+    produceDriver(paths, { dimensionNames, producerIdentity, privateKey, publicKey });
     return;
   }
 
