@@ -67,6 +67,7 @@ import {
 import { externalKeyId, loadExternalPublicKey, verifyCanonical } from "./receipt-signing";
 import type { TwinHarnessState, SliceState } from "./state-schema";
 import { parseRepoMap, type RepoMap, type FileEntry } from "./repo-map/schema";
+import { readState, withStateLock } from "./state-store";
 
 // ---------------------------------------------------------------------------
 // Schema (plan Lane 1)
@@ -853,4 +854,58 @@ export function ensureRealizationMigration(
   assertGovernedWriteSurface(paths.root, migrationMarkerPath(paths));
   fs.mkdirSync(paths.stateDir, { recursive: true });
   fs.writeFileSync(migrationMarkerPath(paths), JSON.stringify(marker), "utf8");
+}
+
+/**
+ * SELF-LOCKING opportunistic grandfather stamp — the fail-open closure (team-fix #8).
+ *
+ * THE WINDOW IT CLOSES: {@link ensureRealizationMigration} is otherwise stamped ONLY at the
+ * `th slice set-status … done` transition (`commands/slices.ts`). A project that reaches a
+ * `done` slice via ANY OTHER path — an `--emergency` raw `state set`, an imported/pre-existing
+ * state file, a state hand-edited then adopted — never stamps the marker. With no marker,
+ * {@link readRealizationReceiptValidated} grandfathers EVERY REQ as `legacy`, so the
+ * realization rung silently never enforces (a fail-open: the gate that exists to catch an
+ * unbacked done-slice REQ would pass it). This stamps the baseline the FIRST time the GATE
+ * observes a `done` slice, regardless of how that slice became done — the gate is the
+ * universal chokepoint every completion path funnels through.
+ *
+ * SAFE FROM A READER: the gate (`checkProductionReality`) is a PURE READER invoked from
+ * surfaces that do NOT hold the state lock (`th gate production-reality`, `th next`, the
+ * stop-gate, the MCP gate tools). This therefore takes its OWN `withStateLock` span — it must
+ * NOT be called from a context already holding the lock (`withStateLock` is a non-reentrant
+ * mkdir mutex; the slice→done path already holds it and calls the UN-locked
+ * {@link ensureRealizationMigration} directly). It is a ONE-TIME write: after the first stamp
+ * the marker fast-path returns WITHOUT locking, so the lock is taken at most once per project.
+ *
+ * It only stamps when a `done` slice actually exists (mirrors the slice→done trigger's
+ * semantics: the obligation begins when the first done slice appears) — a project with no done
+ * slices is left un-stamped so its baseline is not frozen empty before the regime is relevant.
+ * Best-effort + fail-soft: a lock-timeout / read failure does NOT throw into the gate (the
+ * gate then sees no marker and grandfathers `legacy` for this run — the SAME pre-fix posture,
+ * never a crash; the next gate observation re-attempts the stamp).
+ */
+export function ensureRealizationMigrationOpportunistic(paths: ProjectPaths): void {
+  if (realizationMigrationDone(paths)) return; // fast-path: already stamped, no lock
+
+  const r = readState(paths);
+  if (!r.exists || !r.state) return; // not an initialized project → nothing to grandfather
+  const state = r.state;
+  if (doneSlices(state).length === 0) return; // no done slice yet → obligation not live
+
+  try {
+    withStateLock(paths, () => {
+      // Re-check UNDER the lock: another writer (or the slice→done path) may have stamped
+      // between the unlocked fast-path and acquiring the lock. The marker write is the
+      // single source of truth; this guard makes the stamp idempotent across racers.
+      if (realizationMigrationDone(paths)) return;
+      const fresh = readState(paths);
+      if (!fresh.exists || !fresh.state) return;
+      if (doneSlices(fresh.state).length === 0) return;
+      ensureRealizationMigration(paths, fresh.state, loadRepoMapForRealization(paths));
+    });
+  } catch {
+    // Fail-soft: never let a lock-timeout / transient write error crash the gate. The marker
+    // simply stays unstamped for this observation (legacy-grandfathered, the pre-fix posture)
+    // and the NEXT gate observation re-attempts — the stamp is idempotent + resume-safe.
+  }
 }

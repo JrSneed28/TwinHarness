@@ -44,6 +44,7 @@ import {
   unresolvedDoneSliceReqs,
   normalizeComponentToken,
   ensureRealizationMigration,
+  ensureRealizationMigrationOpportunistic,
   realizationMigrationDone,
   grandfatheredRealizationBaseline,
   loadRepoMapForRealization,
@@ -280,7 +281,8 @@ describe("BSC-1 realization — idempotent grandfather", () => {
  * repo-map binding REQ-001 to a `done` slice's component. The realization migration is NOT
  * run, so REQ-001 is post-regime and the rung is the only lever.
  */
-function greenExceptRealization(): ProjectPaths {
+function greenExceptRealization(opts: { stampMarker?: boolean } = {}): ProjectPaths {
+  const stampMarker = opts.stampMarker ?? true;
   tp = makeTempProject();
   const paths = tp.paths;
   writeFile(paths, "docs/01-requirements.md", "# Requirements\n\n- REQ-001 the only requirement.\n");
@@ -301,12 +303,16 @@ function greenExceptRealization(): ProjectPaths {
   // so REQ-001 is an enforceable post-regime owned REQ.
   writeRepoMap(paths, [{ path: "src/commands/a.ts", component: "src/commands", req_ids: ["REQ-001"] }]);
   // Stamp the migration marker with an EMPTY baseline (state had no done slice when first
-  // stamped) so REQ-001 is NOT grandfathered — the realization obligation is live.
-  fs.writeFileSync(
-    path.join(paths.stateDir, ".realization-receipts-migration"),
-    JSON.stringify({ migratedAt: new Date().toISOString(), baseline: [] }),
-    "utf8",
-  );
+  // stamped) so REQ-001 is NOT grandfathered — the realization obligation is live. When
+  // stampMarker is false the fixture simulates the FAIL-OPEN path: a done slice reached via a
+  // non-slice-set-status route (emergency state set / import) with NO marker yet.
+  if (stampMarker) {
+    fs.writeFileSync(
+      path.join(paths.stateDir, ".realization-receipts-migration"),
+      JSON.stringify({ migratedAt: new Date().toISOString(), baseline: [] }),
+      "utf8",
+    );
+  }
   return paths;
 }
 
@@ -356,5 +362,69 @@ describe("BSC-1 realization — gate rung at final-verification", () => {
     fs.rmSync(path.join(paths.stateDir, "repo-map.json"));
     const res = checkProductionReality(paths, state(paths));
     expect(res.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FAIL-OPEN CLOSURE (team-fix #8) — the gate stamps the grandfather baseline the
+// first time it observes a done slice, no matter how the slice became done.
+// ---------------------------------------------------------------------------
+
+describe("BSC-1 realization — opportunistic migration closes the marker fail-open window", () => {
+  it("a done slice reached WITHOUT slice set-status (no marker) makes the gate STAMP the baseline (regime now active)", () => {
+    delete process.env.TH_BSC1_ENFORCE; // defaults ON
+    // No marker stamped: simulates a done slice arriving via `--emergency state set` / import.
+    const paths = greenExceptRealization({ stampMarker: false });
+    expect(realizationMigrationDone(paths)).toBe(false); // the fail-open precondition
+
+    // The first gate observation stamps the marker (grandfathering the pre-existing owned REQ
+    // REQ-001 as legacy — work that predates the regime is not retroactively blocked). The KEY
+    // closure: the marker is now durably present, so the regime is ACTIVE for everything after.
+    const res = checkProductionReality(paths, state(paths));
+    expect(res.ok).toBe(true); // REQ-001 grandfathered (correct — pre-regime work)
+    expect(realizationMigrationDone(paths)).toBe(true); // marker stamped opportunistically
+    expect(grandfatheredRealizationBaseline(paths).has("REQ-001")).toBe(true);
+  });
+
+  it("AFTER the opportunistic stamp, a NEW owned REQ BLOCKS (pre-fix it would grandfather forever)", () => {
+    delete process.env.TH_BSC1_ENFORCE;
+    const paths = greenExceptRealization({ stampMarker: false });
+    // First gate observation stamps the baseline {REQ-001}.
+    expect(checkProductionReality(paths, state(paths)).ok).toBe(true);
+    // Now a NEW REQ-002 becomes owned by the done slice (added after the baseline). Pre-fix,
+    // the marker NEVER existed (the emergency path never stamps), so REQ-002 would classify
+    // `legacy` and the gate would silently pass forever. With the window closed, REQ-002 is
+    // post-baseline ⇒ absent ⇒ BLOCK.
+    writeRepoMap(paths, [
+      { path: "src/commands/a.ts", component: "src/commands", req_ids: ["REQ-001", "REQ-002"] },
+    ]);
+    const res = checkProductionReality(paths, state(paths));
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("realization_unverified");
+    const failures = res.detail!.failures as Array<{ reqId: string; status: string }>;
+    expect(failures.some((f) => f.reqId === "REQ-002" && f.status === "absent")).toBe(true);
+    // REQ-001 stays grandfathered (legacy) — not double-counted as a failure.
+    expect(failures.some((f) => f.reqId === "REQ-001")).toBe(false);
+  });
+
+  it("the opportunistic stamp is a no-op when no done slice exists (obligation not yet live)", () => {
+    tp = makeTempProject();
+    const paths = tp.paths;
+    writeState(paths, {
+      ...initialState(),
+      slices: [{ id: "SLICE-0", status: "in-progress", components: ["commands"] }],
+    });
+    ensureRealizationMigrationOpportunistic(paths);
+    // No done slice → no premature stamp (the baseline is not frozen before the regime matters).
+    expect(realizationMigrationDone(paths)).toBe(false);
+  });
+
+  it("the opportunistic stamp re-check under lock is idempotent (a second call double-appends nothing)", () => {
+    delete process.env.TH_BSC1_ENFORCE;
+    const paths = greenExceptRealization({ stampMarker: false });
+    ensureRealizationMigrationOpportunistic(paths);
+    const after = readRealizationReceipts(paths).length;
+    ensureRealizationMigrationOpportunistic(paths); // fast-path: marker present, no lock, no write
+    expect(readRealizationReceipts(paths).length).toBe(after);
   });
 });

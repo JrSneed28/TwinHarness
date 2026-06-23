@@ -655,6 +655,13 @@ function checkDriverDimensions(paths) {
  * `checkRepoMap` rung already owns repo-map freshness — we do not double-block here).
  */
 function checkRealization(paths, state) {
+    // FAIL-OPEN CLOSURE (team-fix #8): stamp the grandfather baseline the FIRST time the gate
+    // observes a `done` slice, regardless of how that slice became done. Without this, a `done`
+    // slice reached via `--emergency state set` / an imported state never stamps the marker
+    // (the slice→done CLI trigger is the only other writer), so readRealizationReceiptValidated
+    // grandfathers EVERY REQ as `legacy` and this rung silently never enforces. The opportunistic
+    // stamp is self-locking + fail-soft (never throws into the gate) and is a one-time write.
+    (0, realization_1.ensureRealizationMigrationOpportunistic)(paths);
     const map = (0, realization_1.loadRepoMapForRealization)(paths);
     if (map === null)
         return PASS; // no map ⇒ no owned-REQ obligation (freshness owned elsewhere)

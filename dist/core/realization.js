@@ -108,6 +108,7 @@ exports.readRealizationReceiptValidated = readRealizationReceiptValidated;
 exports.realizationMigrationDone = realizationMigrationDone;
 exports.grandfatheredRealizationBaseline = grandfatheredRealizationBaseline;
 exports.ensureRealizationMigration = ensureRealizationMigration;
+exports.ensureRealizationMigrationOpportunistic = ensureRealizationMigrationOpportunistic;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const paths_1 = require("./paths");
@@ -116,6 +117,7 @@ const jsonl_1 = require("./jsonl");
 const receipts_1 = require("./receipts");
 const receipt_signing_1 = require("./receipt-signing");
 const schema_1 = require("./repo-map/schema");
+const state_store_1 = require("./state-store");
 // ---------------------------------------------------------------------------
 // Canonical text + hashing (mirrors receipts.ts / verification-driver.ts)
 // ---------------------------------------------------------------------------
@@ -704,4 +706,62 @@ function ensureRealizationMigration(paths, state, map) {
     (0, paths_1.assertGovernedWriteSurface)(paths.root, migrationMarkerPath(paths));
     fs.mkdirSync(paths.stateDir, { recursive: true });
     fs.writeFileSync(migrationMarkerPath(paths), JSON.stringify(marker), "utf8");
+}
+/**
+ * SELF-LOCKING opportunistic grandfather stamp — the fail-open closure (team-fix #8).
+ *
+ * THE WINDOW IT CLOSES: {@link ensureRealizationMigration} is otherwise stamped ONLY at the
+ * `th slice set-status … done` transition (`commands/slices.ts`). A project that reaches a
+ * `done` slice via ANY OTHER path — an `--emergency` raw `state set`, an imported/pre-existing
+ * state file, a state hand-edited then adopted — never stamps the marker. With no marker,
+ * {@link readRealizationReceiptValidated} grandfathers EVERY REQ as `legacy`, so the
+ * realization rung silently never enforces (a fail-open: the gate that exists to catch an
+ * unbacked done-slice REQ would pass it). This stamps the baseline the FIRST time the GATE
+ * observes a `done` slice, regardless of how that slice became done — the gate is the
+ * universal chokepoint every completion path funnels through.
+ *
+ * SAFE FROM A READER: the gate (`checkProductionReality`) is a PURE READER invoked from
+ * surfaces that do NOT hold the state lock (`th gate production-reality`, `th next`, the
+ * stop-gate, the MCP gate tools). This therefore takes its OWN `withStateLock` span — it must
+ * NOT be called from a context already holding the lock (`withStateLock` is a non-reentrant
+ * mkdir mutex; the slice→done path already holds it and calls the UN-locked
+ * {@link ensureRealizationMigration} directly). It is a ONE-TIME write: after the first stamp
+ * the marker fast-path returns WITHOUT locking, so the lock is taken at most once per project.
+ *
+ * It only stamps when a `done` slice actually exists (mirrors the slice→done trigger's
+ * semantics: the obligation begins when the first done slice appears) — a project with no done
+ * slices is left un-stamped so its baseline is not frozen empty before the regime is relevant.
+ * Best-effort + fail-soft: a lock-timeout / read failure does NOT throw into the gate (the
+ * gate then sees no marker and grandfathers `legacy` for this run — the SAME pre-fix posture,
+ * never a crash; the next gate observation re-attempts the stamp).
+ */
+function ensureRealizationMigrationOpportunistic(paths) {
+    if (realizationMigrationDone(paths))
+        return; // fast-path: already stamped, no lock
+    const r = (0, state_store_1.readState)(paths);
+    if (!r.exists || !r.state)
+        return; // not an initialized project → nothing to grandfather
+    const state = r.state;
+    if (doneSlices(state).length === 0)
+        return; // no done slice yet → obligation not live
+    try {
+        (0, state_store_1.withStateLock)(paths, () => {
+            // Re-check UNDER the lock: another writer (or the slice→done path) may have stamped
+            // between the unlocked fast-path and acquiring the lock. The marker write is the
+            // single source of truth; this guard makes the stamp idempotent across racers.
+            if (realizationMigrationDone(paths))
+                return;
+            const fresh = (0, state_store_1.readState)(paths);
+            if (!fresh.exists || !fresh.state)
+                return;
+            if (doneSlices(fresh.state).length === 0)
+                return;
+            ensureRealizationMigration(paths, fresh.state, loadRepoMapForRealization(paths));
+        });
+    }
+    catch {
+        // Fail-soft: never let a lock-timeout / transient write error crash the gate. The marker
+        // simply stays unstamped for this observation (legacy-grandfathered, the pre-fix posture)
+        // and the NEXT gate observation re-attempts — the stamp is idempotent + resume-safe.
+    }
 }

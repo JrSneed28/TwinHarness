@@ -23229,6 +23229,23 @@ function ensureRealizationMigration(paths, state, map) {
   fs24.mkdirSync(paths.stateDir, { recursive: true });
   fs24.writeFileSync(migrationMarkerPath3(paths), JSON.stringify(marker), "utf8");
 }
+function ensureRealizationMigrationOpportunistic(paths) {
+  if (realizationMigrationDone(paths)) return;
+  const r = readState(paths);
+  if (!r.exists || !r.state) return;
+  const state = r.state;
+  if (doneSlices(state).length === 0) return;
+  try {
+    withStateLock(paths, () => {
+      if (realizationMigrationDone(paths)) return;
+      const fresh = readState(paths);
+      if (!fresh.exists || !fresh.state) return;
+      if (doneSlices(fresh.state).length === 0) return;
+      ensureRealizationMigration(paths, fresh.state, loadRepoMapForRealization(paths));
+    });
+  } catch {
+  }
+}
 
 // src/core/gate-preconditions.ts
 var PASS = { ok: true };
@@ -23486,6 +23503,7 @@ function checkDriverDimensions(paths) {
   };
 }
 function checkRealization(paths, state) {
+  ensureRealizationMigrationOpportunistic(paths);
   const map = loadRepoMapForRealization(paths);
   if (map === null) return PASS;
   const failures = [];
