@@ -193,6 +193,11 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   // are required (the temp project has no verify-report.json → refuse-at-creation), but
   // either way nothing escapes the surface.
   th_driver_record: {},
+  // Axis-B/BSC-1 — in-process realization producer; writes only
+  // .twinharness/realization-receipts.jsonl (governed state dir). The artifact arg is a
+  // repo-relative path that resolves WITHIN root (refuse-at-creation rejects an escaping
+  // path BEFORE any write), so even a probe with a missing artifact escapes nothing.
+  th_realize: { req_id: "REQ-001", artifact: "src/x.ts" },
 };
 
 describe("MCP write-surface audit — no mutating tool escapes the governed surface (AC#1)", () => {

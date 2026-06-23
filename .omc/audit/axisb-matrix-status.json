@@ -2,12 +2,14 @@
   {
     "bsc": 1,
     "title": "Realization/reachability receipt — artifact actually reachable, not just identified",
-    "phase": "todo",
-    "independence": 0,
-    "pr": [],
+    "phase": "done-phase",
+    "independence": ">0",
+    "independenceNote": "signature-provenance only; referent agent-authored (the external producer proves the receipt was not forged in-process, NOT that the referent is independent)",
+    "pr": [40],
+    "branch": "feat/axisb-slice5-bsc1-realization",
     "probe": ".omc/audit/probes/bsc1",
-    "anchors": ["core/anchors.ts:19", "core/gate-preconditions.ts:190-205"],
-    "updatedAt": "2026-06-22T13:10:00Z"
+    "anchors": ["core/realization.ts", "core/bsc1-flag.ts", "commands/realize.ts", "core/gate-preconditions.ts (checkRealization + checkProductionReality rung 7 + gate-time opportunistic migration stamp)", "commands/slices.ts (slice->done migration trigger)", "scripts/th-receipt-producer.mjs (--kind realization)"],
+    "updatedAt": "2026-06-23T07:30:00Z"
   },
   {
     "bsc": 2,

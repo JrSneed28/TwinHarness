@@ -69,6 +69,7 @@ import { runInspectorWrite } from "./commands/inspector";
 import { runTesterRecord } from "./commands/tester";
 import { runApprove } from "./commands/approve";
 import { runDriverRecord } from "./commands/driver";
+import { runRealize } from "./commands/realize";
 import { runManifestExport, runManifestTools } from "./commands/manifest";
 import { runPreview } from "./commands/preview";
 import { runScorecard } from "./commands/scorecard";
@@ -188,6 +189,8 @@ Usage:
   th driver record [--dimension a,b] [--identity <who>]
                                     Mint the in-process driver-dimension receipt the production-reality verification-driver rung reads (records which seed dimensions — tests-executed/typecheck/build — verify-report.json observed). SENSOR + refuse-at-creation: a claimed dimension the report does not observe is refused. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent grounding is the slice-4b external-signed producer)
   th approve [<stage>]              Mint the in-process human-approval receipt for a humanGate stage (default: current stage); bound to {stage, snapshot, governing-artifact digest}. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent grounding is the slice-3b external-signed producer)
+  th realize <REQ-ID> --artifact <path> [--identity <who>]
+                                    Mint the in-process realization receipt binding a REQ-ID to a content digest of the source artifact it is realized in (the production-reality realization rung blocks a done slice whose owned REQ-ID has no fresh, reachable referent). Does NOT set slice status — the done-claim and the referent stay separately authored. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent signature-provenance grounding is the external-signed producer)
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
   th delegate pack [--agent A] [--slice ID] [--task T] [--intent I] [--allowed-files <a,b,c>]
@@ -315,7 +318,8 @@ Global flags:
   --provider <p>    (tester record) Provider tier the live run exercised (real | sandbox)
   --evidence-ref <p>  (tester record) Path/URL to the raw live-run output or screenshots
   --dimension <a,b>  (driver record) Comma-separated dimension(s) to record as observed; intersected with what verify-report.json observes (default: every observed seed dimension)
-  --identity <who>  (driver record) Producer identity to record (attribution-only, zero trust weight; default: cli:th driver record)`;
+  --identity <who>  (driver record / realize) Producer identity to record (attribution-only, zero trust weight; default: cli:th driver record / cli:th realize)
+  --artifact <path>  (realize) Source path the REQ-ID is realized in — the referent the realization receipt binds a content digest of; must resolve in source`;
 
 export interface ParsedArgs {
   positionals: string[];
@@ -894,6 +898,15 @@ function dispatch(parsed: ParsedArgs): CommandResult {
         default:
           return failure({ human: `unknown 'driver' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
+    // Axis-B slice-5 (BSC-1) — mint the in-process realization receipt binding a REQ-ID to a
+    // digest of the source artifact it is realized in. `<REQ-ID>` is the positional; the
+    // referent path is `--artifact`. Does NOT set slice status (claim/referent separability).
+    case "realize":
+      return runRealize(paths, {
+        reqId: sub,
+        artifact: parsed.flags.artifact,
+        producerIdentity: parsed.flags.identity,
+      });
     // Axis-B slice-3a (BSC-7) — mint the in-process human-approval receipt the humanGate
     // precondition reads. `<stage>` defaults to the run's current stage. Attribution-only.
     case "approve":

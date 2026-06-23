@@ -7,6 +7,7 @@ import { type SliceState, SLICE_STATUSES, validateState } from "../core/state-sc
 import { activeLeases, appendLeaseEvent } from "../core/leases";
 import { NOT_INIT, formatIssues } from "../core/guards";
 import { structuredLog } from "../core/log";
+import { ensureRealizationMigration, loadRepoMapForRealization } from "../core/realization";
 
 /**
  * `th slices sync` — populate `state.slices` from the implementation plan
@@ -276,6 +277,17 @@ function runSliceSetStatusLocked(
   }
 
   writeState(paths, validation.state!);
+
+  // BSC-1 (Axis-B slice-5) — at the FIRST slice→done transition after the realization
+  // regime ships, stamp the idempotent `legacy:true` grandfather baseline for every REQ-ID
+  // already owned by a `done` slice, so pre-existing done-slice REQs are grandfathered
+  // (`legacy`) rather than blocking a half-migrated run. The marker makes this a no-op on
+  // every subsequent call (and resume-safe after a half-write). It is keyed off the
+  // slice→done claim authoring — the natural moment the realization obligation begins. We
+  // are already under `withStateLock`, exactly as ensureRealizationMigration requires.
+  if (status === "done") {
+    ensureRealizationMigration(paths, validation.state!, loadRepoMapForRealization(paths));
+  }
 
   // Auto-release the slice's component lease the moment it reaches a terminal
   // state, so a forgotten `th build release` can't leave a stale lease wedging
