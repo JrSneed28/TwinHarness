@@ -5,11 +5,11 @@
     "phase": "done-phase",
     "independence": ">0",
     "independenceNote": "signature-provenance only; referent agent-authored (the external producer proves the receipt was not forged in-process, NOT that the referent is independent)",
-    "pr": [],
+    "pr": [40],
     "branch": "feat/axisb-slice5-bsc1-realization",
     "probe": ".omc/audit/probes/bsc1",
-    "anchors": ["core/realization.ts", "core/bsc1-flag.ts", "commands/realize.ts", "core/gate-preconditions.ts (checkRealization + checkProductionReality rung 7)", "commands/slices.ts (slice->done migration trigger)", "scripts/th-receipt-producer.mjs (--kind realization)"],
-    "updatedAt": "2026-06-23T00:00:00Z"
+    "anchors": ["core/realization.ts", "core/bsc1-flag.ts", "commands/realize.ts", "core/gate-preconditions.ts (checkRealization + checkProductionReality rung 7 + gate-time opportunistic migration stamp)", "commands/slices.ts (slice->done migration trigger)", "scripts/th-receipt-producer.mjs (--kind realization)"],
+    "updatedAt": "2026-06-23T07:30:00Z"
   },
   {
     "bsc": 2,
