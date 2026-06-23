@@ -44,6 +44,7 @@ const state_schema_1 = require("../core/state-schema");
 const leases_1 = require("../core/leases");
 const guards_1 = require("../core/guards");
 const log_1 = require("../core/log");
+const realization_1 = require("../core/realization");
 /** Extract backtick-quoted tokens or comma-separated bare words from a component line/cell. */
 function parseComponentTokens(raw) {
     // First try backtick-quoted tokens: `foo`, `bar`.
@@ -251,6 +252,16 @@ function runSliceSetStatusLocked(paths, sliceId, status) {
         });
     }
     (0, state_store_1.writeState)(paths, validation.state);
+    // BSC-1 (Axis-B slice-5) — at the FIRST slice→done transition after the realization
+    // regime ships, stamp the idempotent `legacy:true` grandfather baseline for every REQ-ID
+    // already owned by a `done` slice, so pre-existing done-slice REQs are grandfathered
+    // (`legacy`) rather than blocking a half-migrated run. The marker makes this a no-op on
+    // every subsequent call (and resume-safe after a half-write). It is keyed off the
+    // slice→done claim authoring — the natural moment the realization obligation begins. We
+    // are already under `withStateLock`, exactly as ensureRealizationMigration requires.
+    if (status === "done") {
+        (0, realization_1.ensureRealizationMigration)(paths, validation.state, (0, realization_1.loadRepoMapForRealization)(paths));
+    }
     // Auto-release the slice's component lease the moment it reaches a terminal
     // state, so a forgotten `th build release` can't leave a stale lease wedging
     // the next wave. Only emit a release when the slice actually holds a live lease.

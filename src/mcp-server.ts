@@ -60,6 +60,7 @@ import { runInspectorWrite } from "./commands/inspector";
 import { runTesterRecord } from "./commands/tester";
 import { runApprove } from "./commands/approve";
 import { runDriverRecord } from "./commands/driver";
+import { runRealize } from "./commands/realize";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
 import { runTemplateGet, runTemplateList } from "./commands/template";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
@@ -1747,6 +1748,31 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     },
     run: (paths, args) => runApprove(paths, optString(args, "stage")),
   },
+  // Axis-B slice-5 (BSC-1) — in-process realization receipt writer. Binds a REQ-ID to a
+  // content digest of the source artifact it is realized in, grounding the production-reality
+  // realization rung. Registration is ALWAYS-ON (parity with the CLI `th realize`); the
+  // TH_BSC1_ENFORCE flag governs ENFORCEMENT only.
+  {
+    name: "th_realize",
+    description:
+      "Axis-B/BSC-1: mint the IN-PROCESS realization receipt the production-reality realization rung reads (<stateDir>/realization-receipts.jsonl, hash-chained, under the state lock). Binds `req_id` to a content digest of `artifact` (the source file the REQ-ID is realized in). The gate BLOCKS a `done` slice whose owned REQ-ID has no valid, reachable, digest-fresh referent. SEPARABILITY: this does NOT set slice status — the done-claim (SliceState.status===\"done\") and this referent stay separately authored (co-authoring would be self-grounding). Refuse-at-creation: `artifact` MUST resolve in source (realization_referent_unresolved). ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its trust label is `valid` NEVER `valid-grounded` — independent (signature-provenance) grounding is the external Ed25519-signed producer. Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        req_id: stringProp("The REQ-ID being realized (required, non-empty)."),
+        artifact: stringProp("The source path the REQ-ID is realized in — the referent the receipt binds a content digest of (required; must resolve in source)."),
+        identity: stringProp("Producer identity to record (attribution-only, zero trust weight; defaults to cli:th realize)."),
+      },
+      required: ["req_id", "artifact"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runRealize(paths, {
+        reqId: optString(args, "req_id"),
+        artifact: optString(args, "artifact"),
+        producerIdentity: optString(args, "identity"),
+      }),
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -1946,6 +1972,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // Axis-B/BSC-7 — in-process human-approval producer. NOT idempotent: each call appends a
   // fresh hash-chained approval record to approval-receipts.jsonl under the state dir.
   th_approve: wr("stage", { idempotent: false }),
+  // Axis-B/BSC-1 — in-process realization producer. NOT idempotent: each call appends a
+  // fresh hash-chained realization receipt to realization-receipts.jsonl under the state dir.
+  th_realize: wr("slices", { idempotent: false }),
 };
 
 /** The MCP-standard annotation object for a tool (or undefined if unknown). */
@@ -2079,6 +2108,7 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "tester record",
   "driver record",
   "approve",
+  "realize",
   "gate production-reality",
   "collab init", "collab fragment", "collab list", "collab merge",
   "debate add", "debate list", "debate resolve",

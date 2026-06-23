@@ -95,6 +95,8 @@ const approvals_1 = require("./approvals");
 const verification_driver_1 = require("./verification-driver");
 const receipt_signing_1 = require("./receipt-signing");
 const bsc3_flag_1 = require("./bsc3-flag");
+const bsc1_flag_1 = require("./bsc1-flag");
+const realization_1 = require("./realization");
 const PASS = { ok: true };
 // ---------------------------------------------------------------------------
 // Global rungs (stage-independent) — checked before any stage-specific work, in
@@ -631,6 +633,59 @@ function checkDriverDimensions(paths) {
         dimensions: verdict.dimensions,
     };
 }
+/**
+ * The BSC-1 realization sub-check (Axis-B slice-5) — the EIGHTH production-reality
+ * sub-check, composed LAST inside {@link checkProductionReality}. A run may not be certified
+ * complete while a REQ-ID owned by a `done` slice lacks a valid, reachable, digest-fresh
+ * realization referent.
+ *
+ * GROUND (consensus §0.2): the CLAIM is `SliceState.status==="done"` (authored
+ * independently, at a different time, than the referent); the REFERENT is a digest-bound
+ * source anchor recorded by `th realize`. The enumerator ranges over REQ-IDs owned by
+ * `done` slices (INDEPENDENT of receipt presence, so "absent receipt blocks" is reachable),
+ * recomputes the referent digest from the CACHED repo-map ({@link loadRepoMapForRealization}),
+ * COLLECTS ALL failures, and blocks on absent/stale/forged/target_missing/target_mismatch/
+ * tampered. A done-slice REQ that the ownership join cannot place under a known component is
+ * REPORTED as `unresolved` and blocks (fail-closed name-fidelity guard, control 11f).
+ *
+ * Governed by `realizationEnforcementEnabled()` (defaults ON): the verdict is ALWAYS
+ * computed (so the would-be block is surfaced as a non-blocking `notice` when enforcement is
+ * off), but it BLOCKS with `realization_unverified` only when enforcement is on. The
+ * repo-map is loaded once; an absent map means no owned REQs to enforce (the brownfield
+ * `checkRepoMap` rung already owns repo-map freshness — we do not double-block here).
+ */
+function checkRealization(paths, state) {
+    const map = (0, realization_1.loadRepoMapForRealization)(paths);
+    if (map === null)
+        return PASS; // no map ⇒ no owned-REQ obligation (freshness owned elsewhere)
+    const failures = [];
+    // Fail-closed name-fidelity guard (control 11f): a done-slice REQ the join cannot place
+    // under a known component is reported, never silently dropped ("unobserved ≠ clean").
+    for (const reqId of (0, realization_1.unresolvedDoneSliceReqs)(map, state)) {
+        failures.push({ reqId, status: "unresolved" });
+    }
+    // The enumerator: every REQ owned by a `done` slice must carry a valid, digest-fresh
+    // realization referent. ACCEPT set: `valid` (in-process attested), `valid-grounded`
+    // (external keyed + verified), `legacy` (grandfathered). Everything else BLOCKS.
+    for (const owned of (0, realization_1.ownedReqsForDoneSlices)(map, state)) {
+        const v = (0, realization_1.readRealizationReceiptValidated)(paths, owned.reqId);
+        if (v.status !== "valid" && v.status !== "valid-grounded" && v.status !== "legacy") {
+            failures.push({ reqId: owned.reqId, status: v.status, owningSlices: owned.owningSlices });
+        }
+    }
+    if (failures.length === 0)
+        return PASS;
+    const detail = {
+        failures: failures.slice(0, 20),
+        total: failures.length,
+        statuses: [...new Set(failures.map((f) => f.status))].sort(),
+    };
+    if (!(0, bsc1_flag_1.realizationEnforcementEnabled)()) {
+        // Flag OFF: observe but do not block. Surface the would-be block as a non-blocking notice.
+        return { ok: true, notice: { token: "realization_unverified", detail } };
+    }
+    return { ok: false, error: "realization_unverified", detail };
+}
 function checkProductionReality(paths, state) {
     // Stage-aware: production reality is a CERTIFY-COMPLETION condition, so it only
     // enforces at the completion boundary (final-verification). Earlier stages have no
@@ -797,7 +852,28 @@ function checkProductionReality(paths, state) {
     // the verdict is ALWAYS computed (so `dimensions` summarizes the trust posture for the
     // I1 observability hook), but it BLOCKS with `driver_dimension_unverified` only when
     // enforcement is on. The `dimensions` summary rides on the result whether PASS or BLOCK.
-    return checkDriverDimensions(paths);
+    const driver = checkDriverDimensions(paths);
+    if (!driver.ok)
+        return driver;
+    // 7. (BSC-1 / Axis-B slice-5) REALIZATION-RECEIPT GROUNDING — composed LAST. A run may not
+    // be certified complete while a REQ-ID owned by a `done` slice lacks a valid, reachable,
+    // digest-fresh realization referent. The CLAIM (`SliceState.status==="done"`) is authored
+    // independently of the REFERENT (recorded by `th realize`); this enumerates done-slice
+    // REQ-IDs from the cached repo-map, recomputes each referent digest, COLLECTS ALL failures,
+    // and blocks on absent/stale/forged/target_*/tampered/unresolved. ABSENCE is grandfathered
+    // (`legacy`) until the migration marker is stamped, so this is a NO-OP on pre-upgrade
+    // projects. Governed by `realizationEnforcementEnabled()` (defaults ON).
+    const realization = checkRealization(paths, state);
+    if (!realization.ok) {
+        // Preserve the driver `dimensions` summary on the realization block so the trust posture
+        // stays visible alongside the realization failure.
+        return driver.dimensions ? { ...realization, dimensions: driver.dimensions } : realization;
+    }
+    // Both passed: ride the driver result up (it carries `dimensions`/`notice`); fold in any
+    // realization warn-phase notice (flag OFF) without clobbering a driver notice.
+    if (realization.notice && !driver.notice)
+        return { ...driver, notice: realization.notice };
+    return driver;
 }
 // ---------------------------------------------------------------------------
 // Composed gate predicates — consumed by both `th next` and the typed MCP tools.

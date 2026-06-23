@@ -31,7 +31,7 @@
  *   TH_RECEIPT_PRIVATE_KEYFILE=/path/to/ed25519-private.pem \
  *   node scripts/th-receipt-producer.mjs \
  *     --root <projectRoot> \
- *     --kind <drift-resolve|sim-retire|decision-approve|scan-exception|approval|driver> \
+ *     --kind <drift-resolve|sim-retire|decision-approve|scan-exception|approval|driver|realization> \
  *     [--ref-id <ID>] \
  *     [--target <repo-rel-path>] \
  *     [--stage <humanGate-stage>] \
@@ -71,6 +71,15 @@
  * reuses 4a's `driverCanonicalText` / `computeDriverRecordHash` from the compiled dist, so the
  * 4a in-process gate validator's signature check classifies it `valid-grounded` (independence >0).
  *
+ * `--kind realization` (slice-5 / BSC-1) is a SEPARATE flow that writes a DIFFERENT store
+ * (`external-realization-receipts.jsonl`) with the slice-5 `RealizationReceipt` canonical shape
+ * — an external-signed receipt binding ONE REQ-ID to a digest-bound source referent. It REQUIRES
+ * `--ref-id <REQ-ID>` AND `--target <repo-rel-path>` (the referent source file, which MUST resolve
+ * in source); the receipt's `referent.digest` is that file's `computeTargetDigest`. The signed
+ * canonical text reuses the slice-5 `realizationCanonicalText` / `computeRealizationRecordHash`
+ * from the compiled dist, so the in-process gate validator classifies it `valid-grounded`
+ * (BSC-1 independence >0 — SIGNATURE-PROVENANCE only; the referent is still agent-authored).
+ *
  * Prints a small JSON result on stdout. Exit 0 on success, nonzero on any error.
  */
 
@@ -92,6 +101,7 @@ const hashMod = await import(pathToFileUrl(path.join(DIST, "core", "hash.js")));
 const approvalsMod = await import(pathToFileUrl(path.join(DIST, "core", "approvals.js")));
 const stagesMod = await import(pathToFileUrl(path.join(DIST, "core", "stages.js")));
 const driverMod = await import(pathToFileUrl(path.join(DIST, "core", "verification-driver.js")));
+const realizationMod = await import(pathToFileUrl(path.join(DIST, "core", "realization.js")));
 
 const {
   canonicalText,
@@ -132,6 +142,16 @@ const {
   readLastExternalDriverRecordHash,
   observeDriverDimensions,
 } = driverMod;
+// slice-5/BSC-1 — reuse the realization canonical/hash binding + external store helpers from
+// the COMPILED dist so the producer and the in-process gate validator can NEVER diverge on
+// the realization canonical field order (`realizationCanonicalText` drops `recordHash`;
+// `signature` is excluded as a trailer).
+const {
+  realizationCanonicalText,
+  computeRealizationRecordHash,
+  externalRealizationReceiptsPath,
+  readLastExternalRealizationRecordHash,
+} = realizationMod;
 
 /** Convert an absolute filesystem path to a file:// URL (Windows-safe ESM import). */
 function pathToFileUrl(abs) {
@@ -159,7 +179,7 @@ function fail(message, extra = {}) {
   process.exit(1);
 }
 
-const KINDS = new Set(["drift-resolve", "sim-retire", "decision-approve", "scan-exception", "approval", "driver"]);
+const KINDS = new Set(["drift-resolve", "sim-retire", "decision-approve", "scan-exception", "approval", "driver", "realization"]);
 
 function loadPrivateKey() {
   const file = process.env.TH_RECEIPT_PRIVATE_KEYFILE;
@@ -389,6 +409,72 @@ function produceDriver(paths, { dimensionNames, producerIdentity, privateKey, pu
   );
 }
 
+/**
+ * slice-5/BSC-1 — produce an external-signed {@link RealizationReceipt}. Writes the SEPARATE
+ * `external-realization-receipts.jsonl` store (parallel to the driver/approval/scan external
+ * stores) with the 5 realization canonical shape — NOT a terminal receipt.
+ *
+ * The make-or-break contract for the BSC-1 signature-provenance independence flip: the SIGNED
+ * canonical text MUST be byte-identical to what the in-process gate validator re-derives, so
+ * the signature it imports (`realizationCanonicalText` + `computeRealizationRecordHash` from
+ * the compiled dist) is exactly the in-process binding. `signature` + `recordHash` are
+ * trailers, EXCLUDED from the canonical text.
+ *
+ * Refuse-at-creation (mirrors the driver/approval ground-resolve refusal): `--ref-id` (the
+ * REQ-ID) is required and `--target` (the referent source path) MUST resolve in source — else
+ * we refuse BEFORE any write rather than mint a realization whose referent is already gone.
+ * NOTE the independence is SIGNATURE-PROVENANCE only — the referent anchor is still agent-
+ * authored (the producer signs an agent-chosen path); it proves the receipt was not forged
+ * in-process, NOT that the referent is independent.
+ */
+function produceRealization(paths, { reqId, target, producerIdentity, privateKey, publicKey }) {
+  const digest = computeTargetDigest(paths.root, target);
+  if (digest === null) {
+    fail(`--target "${target}" does not resolve in source — refusing to mint an ungrounded realization receipt`, { target });
+  }
+  const keyId = externalKeyId(publicKey);
+  const prevHash = readLastExternalRealizationRecordHash(paths);
+
+  // The canonical input — EXACTLY the fields realizationCanonicalText binds (signature +
+  // recordHash are trailers, excluded; `undefined` keys dropped by the helper). Field order
+  // is owned by the slice-5 CANONICAL_FIELD_ORDER inside realizationCanonicalText; the
+  // producer never re-orders, it hands the object to the imported helper so bytes can't drift.
+  // `owning_slice` is left empty here — the producer is out-of-process and does not consult
+  // state; the in-process gate recomputes ownership fresh and never trusts this field.
+  const withPrev = {
+    kind: "realization",
+    req_id: reqId,
+    owning_slice: "",
+    referent: { path: target, digest },
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: producerIdentity,
+    producer_kind: "external",
+    key_id: keyId,
+    prevHash,
+  };
+  const canonical = realizationCanonicalText(withPrev);
+  const signature = sign(null, Buffer.from(canonical, "utf8"), privateKey).toString("base64");
+  const recordHash = computeRealizationRecordHash(withPrev);
+  const sealed = { ...withPrev, signature, recordHash };
+
+  const file = externalRealizationReceiptsPath(paths);
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(sealed) + "\n", "utf8");
+
+  process.stdout.write(
+    JSON.stringify({
+      ok: true,
+      kind: "realization",
+      producer_kind: "external",
+      key_id: keyId,
+      req_id: reqId,
+      referent: sealed.referent,
+      recordHash,
+      file,
+    }) + "\n",
+  );
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const root = args["root"];
@@ -416,6 +502,11 @@ function main() {
   } else if (kind === "driver") {
     // driver is the SEPARATE slice-4b flow: dimensions derive from verify-report.json, so it
     // requires NEITHER --ref-id NOR --target (the snapshot coordinate + report ARE the ground).
+  } else if (kind === "realization") {
+    // realization is the SEPARATE slice-5 flow: keyed by (REQ-ID, referent path), so it
+    // requires --ref-id (the REQ-ID) AND --target (the referent source path).
+    if (!refId || refId === "true") fail("--ref-id <REQ-ID> is required for realization");
+    if (!target || target === "true") fail("--target <repo-rel-path> is required for realization");
   } else {
     if (!refId || refId === "true") fail("--ref-id <ID> is required");
     if ((kind === "drift-resolve" || kind === "sim-retire") && (!target || target === "true")) {
@@ -449,6 +540,14 @@ function main() {
   // terminal-receipt machinery so that flow stays byte-identical.
   if (kind === "driver") {
     produceDriver(paths, { dimensionNames, producerIdentity, privateKey, publicKey });
+    return;
+  }
+
+  // slice-5: the external-signed realization receipt writes a DIFFERENT store
+  // (`external-realization-receipts.jsonl`) with the slice-5 realization canonical shape —
+  // branch BEFORE the terminal-receipt machinery so that flow stays byte-identical.
+  if (kind === "realization") {
+    produceRealization(paths, { reqId: refId, target, producerIdentity, privateKey, publicKey });
     return;
   }
 
