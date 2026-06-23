@@ -14,7 +14,9 @@
  * BINDING CONTRACT (the single most important correctness rule of the slice, Principle 6):
  *   - The sensor is REGEX/LEXER-GRADE ONLY. It NEVER imports `typescript` or any AST library
  *     (a devDependency-only tool); the `expect(...)` count is a hand-rolled balanced-paren
- *     scan. The pinned assertion + trivial definition is hashed INTO the ground, so producer
+ *     scan whose `expect`-token search is LEXER-AWARE (string literals + line/block comments
+ *     are skipped, so a commented/stringified `expect(...)` is never miscounted as a real
+ *     assertion). The pinned assertion + trivial definition is hashed INTO the ground, so producer
  *     and validator can never drift on what "asserted" means.
  *   - The ground is DETERMINISTIC: REQ summaries sorted lexically by `reqId`, each
  *     `testFiles[]` lexically sorted + POSIX-normalized, NO clock / NO random / NO `Date`.
@@ -135,26 +137,82 @@ function isLiteral(s: string): boolean {
 
 /**
  * Find the index of the `(` that opens an `expect` call at or after `from`, ignoring any
- * `expect` that is part of a longer identifier (e.g. `expectThing`). Returns `-1` when none.
+ * `expect` that is part of a longer identifier (e.g. `expectThing`). The search is LEXER-AWARE:
+ * it skips string literals and line/block comments so an `expect(` token that lives INSIDE a
+ * string or comment is NEVER treated as a real assertion (it does not execute). `matchingParen`
+ * only protects the paren scan AFTER an open paren; the token search itself must skip strings/
+ * comments too, else a commented/stringified `expect(x).toBe(y)` would be miscounted as a
+ * non-trivial assertion and let an assertion-free REQ pass the rung. Returns `-1` when none.
  */
 function nextExpectOpenParen(text: string, from: number): number {
   let i = from;
-  for (;;) {
-    const idx = text.indexOf("expect", i);
-    if (idx < 0) return -1;
-    // Reject an `expect` preceded by an identifier char (`fooexpect`) or part of a longer
-    // identifier on the right (`expectThing`) — but a `.` before is fine (`foo.expect` is
-    // still an expect call we count). We only require the next non-space char to be `(`.
-    const before = idx === 0 ? "" : text[idx - 1]!;
-    if (/[A-Za-z0-9_$]/.test(before)) {
-      i = idx + 6;
+  while (i < text.length) {
+    const c = text[i]!;
+    // Skip string literals and comments so a token inside them is never matched.
+    if (c === "'" || c === '"' || c === "`") {
+      i = skipString(text, i, c);
       continue;
     }
-    let j = idx + 6;
-    while (j < text.length && /\s/.test(text[j]!)) j++;
-    if (text[j] === "(") return j;
-    i = idx + 6;
+    if (c === "/" && text[i + 1] === "/") {
+      const nl = text.indexOf("\n", i + 2);
+      i = nl < 0 ? text.length : nl;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 2;
+      continue;
+    }
+    // A `/` that is neither `//` nor `/*` may open a REGEX LITERAL whose body can contain
+    // quotes/backticks (e.g. `/[`'\"]/`). If we did not skip it, the scan would mistake an
+    // embedded quote for a string start and desync over the rest of the file. `skipRegexOrSlash`
+    // is SELF-BOUNDED: it consumes a single-line regex body to its closing `/`, but bails (one
+    // char) at a newline or unbalanced tail, so a real DIVISION `a / b` is harmless.
+    if (c === "/") {
+      i = skipRegexOrSlash(text, i);
+      continue;
+    }
+    // A code-position `expect` token: not preceded/continued by an identifier char (`fooexpect`
+    // / `expectThing`), and the next non-space char is `(` (`foo.expect(` still counts — a `.`
+    // before is fine).
+    if (
+      text.startsWith("expect", i) &&
+      !/[A-Za-z0-9_$]/.test(i === 0 ? "" : text[i - 1]!) &&
+      !/[A-Za-z0-9_$]/.test(text[i + 6] ?? "")
+    ) {
+      let j = i + 6;
+      while (j < text.length && /\s/.test(text[j]!)) j++;
+      if (text[j] === "(") return j;
+    }
+    i++;
   }
+  return -1;
+}
+
+/**
+ * Consume a `/`-led token that is NOT a comment: a regex literal `/…/` (honoring `\` escapes
+ * and `[...]` char classes, inside which `/` does not close) returns the index just past the
+ * closing `/`; a `/` that reaches a newline or EOF without closing (i.e. a DIVISION operator,
+ * not a regex) returns `start + 1` so the caller simply advances one char. Self-bounded — never
+ * skips across a newline, so misclassifying division as a regex can only over-skip within one
+ * line, never desync the whole-file scan (the regression a naive string-skip caused).
+ */
+function skipRegexOrSlash(text: string, start: number): number {
+  let i = start + 1;
+  let inClass = false;
+  while (i < text.length) {
+    const c = text[i]!;
+    if (c === "\\") {
+      i += 2;
+      continue;
+    }
+    if (c === "\n") return start + 1; // unterminated on this line ⇒ a division `/`, not a regex
+    if (c === "[") inClass = true;
+    else if (c === "]") inClass = false;
+    else if (c === "/" && !inClass) return i + 1; // closing regex delimiter
+    i++;
+  }
+  return start + 1; // EOF without close ⇒ treat as a lone `/`
 }
 
 /**

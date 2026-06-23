@@ -22941,19 +22941,51 @@ function isLiteral(s) {
 }
 function nextExpectOpenParen(text, from) {
   let i = from;
-  for (; ; ) {
-    const idx = text.indexOf("expect", i);
-    if (idx < 0) return -1;
-    const before = idx === 0 ? "" : text[idx - 1];
-    if (/[A-Za-z0-9_$]/.test(before)) {
-      i = idx + 6;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "'" || c === '"' || c === "`") {
+      i = skipString(text, i, c);
       continue;
     }
-    let j = idx + 6;
-    while (j < text.length && /\s/.test(text[j])) j++;
-    if (text[j] === "(") return j;
-    i = idx + 6;
+    if (c === "/" && text[i + 1] === "/") {
+      const nl = text.indexOf("\n", i + 2);
+      i = nl < 0 ? text.length : nl;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 2;
+      continue;
+    }
+    if (c === "/") {
+      i = skipRegexOrSlash(text, i);
+      continue;
+    }
+    if (text.startsWith("expect", i) && !/[A-Za-z0-9_$]/.test(i === 0 ? "" : text[i - 1]) && !/[A-Za-z0-9_$]/.test(text[i + 6] ?? "")) {
+      let j = i + 6;
+      while (j < text.length && /\s/.test(text[j])) j++;
+      if (text[j] === "(") return j;
+    }
+    i++;
   }
+  return -1;
+}
+function skipRegexOrSlash(text, start) {
+  let i = start + 1;
+  let inClass = false;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "\\") {
+      i += 2;
+      continue;
+    }
+    if (c === "\n") return start + 1;
+    if (c === "[") inClass = true;
+    else if (c === "]") inClass = false;
+    else if (c === "/" && !inClass) return i + 1;
+    i++;
+  }
+  return start + 1;
 }
 function matchingParen(text, openIdx) {
   let depth = 0;

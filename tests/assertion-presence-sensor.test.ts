@@ -124,6 +124,52 @@ const SINGLE_FILE_CASES: SingleFileCase[] = [
     nonTrivial: 1,
     assertionFree: false,
   },
+  {
+    // EVASION GUARD: an `expect(...)` that lives only in a LINE COMMENT does not execute and
+    // must NOT be counted (lexer-aware token search). Otherwise an empty `it()` + a commented
+    // expect would falsely clear the rung (the exact blind spot this slice closes).
+    name: "line-commented expect(result).toBe(42) only -> not counted -> assertionFree",
+    body: `// ${REQ}\nimport { it, expect } from "vitest";\nit("x", () => {\n  // expect(result).toBe(42)\n  const v = 1;\n});\n`,
+    assertionCount: 0,
+    nonTrivial: 0,
+    assertionFree: true,
+  },
+  {
+    name: "block-commented expect(result).toBe(42) only -> not counted -> assertionFree",
+    body: `// ${REQ}\nimport { it, expect } from "vitest";\nit("x", () => {\n  /* expect(result).toBe(42) */\n  const v = 1;\n});\n`,
+    assertionCount: 0,
+    nonTrivial: 0,
+    assertionFree: true,
+  },
+  {
+    name: "stringified expect(result).toBe(42) inside a string literal -> not counted -> assertionFree",
+    body: `// ${REQ}\nimport { it } from "vitest";\nit("x", () => {\n  const s = "expect(result).toBe(42)";\n  void s;\n});\n`,
+    assertionCount: 0,
+    nonTrivial: 0,
+    assertionFree: true,
+  },
+  {
+    // A real assertion still counts even when a commented expect sits next to it (the comment
+    // is skipped, the real one is counted) -- no spurious skipping of live code.
+    name: "real expect alongside a commented one -> the live assertion counts (NOT assertionFree)",
+    body: `// ${REQ}\nimport { it, expect } from "vitest";\nit("x", () => {\n  const result = compute();\n  // expect(result).toBe(99)\n  expect(result).toBe(42);\n});\n`,
+    assertionCount: 1,
+    nonTrivial: 1,
+    assertionFree: false,
+  },
+  {
+    // REGRESSION GUARD: a regex literal whose body contains quotes/backticks must not desync the
+    // lexer over the rest of the file (the prompt-contract.test.ts shape). The real expect AFTER
+    // the regex must still be found.
+    name: "regex literal with embedded quotes then a real expect -> the live assertion counts",
+    body:
+      `// ${REQ}\nimport { it, expect } from "vitest";\n` +
+      "const strip = (t: string) => t.replace(/[`.,;:'\")\\]]+$/, \"\");\n" +
+      `it("x", () => {\n  const result = strip(compute());\n  expect(result).toBe("ok");\n});\n`,
+    assertionCount: 1,
+    nonTrivial: 1,
+    assertionFree: false,
+  },
 ];
 
 describe("BSC-2 sensor — single-file per-REQ classification (pinned trivial rule)", () => {
