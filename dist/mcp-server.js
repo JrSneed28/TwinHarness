@@ -24655,6 +24655,19 @@ function evaluateGrounding(paths, state) {
     const mismatched = [...threaded].some((d) => d !== manifestDigest);
     if (mismatched) {
       if (!offenders.includes("digest-manifest")) offenders.push("digest-manifest");
+      const entry = validated.byKind.get("digest-manifest");
+      const existing = summary.find((s) => s.groundKind === "digest-manifest");
+      if (existing) {
+        existing.conformance = "chain_mismatch";
+      } else {
+        summary.push({
+          groundKind: "digest-manifest",
+          grounded: true,
+          trustLabel: entry?.trustLabel ?? "valid",
+          conformance: "chain_mismatch",
+          exceptionCovered: false
+        });
+      }
       bump("chain_mismatch");
     }
   }

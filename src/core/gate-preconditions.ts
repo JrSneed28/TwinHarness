@@ -177,10 +177,13 @@ export interface GroundingSummary {
   trustLabel: GroundingTrustLabel;
   /**
    * The conformance status for this ground (`within-budget` / `over-budget` / `unobserved` /
-   * `missing`). `missing` when the required kind has no trusted receipt; otherwise the receipt's
-   * content verdict. The fail-closed axis the gate blocks on under enforce.
+   * `missing` / `chain_mismatch`). `missing` when the required kind has no trusted receipt;
+   * `chain_mismatch` when a `digest-manifest` ground is trusted but a threaded BSC-1/3/7
+   * `manifest_digest` disagrees with it (the evidence-spine offender — observable here even when
+   * `digest-manifest` was not in the required-set); otherwise the receipt's content verdict. The
+   * fail-closed axis the gate blocks on under enforce.
    */
-  conformance: "within-budget" | "over-budget" | "unobserved" | "missing";
+  conformance: "within-budget" | "over-budget" | "unobserved" | "missing" | "chain_mismatch";
   /** True iff a valid signed exception suspends this ground's budget (Slice-B; always false in slice-A). */
   exceptionCovered: boolean;
 }
@@ -1210,6 +1213,16 @@ type GroundingVerdict =
  * verdict precedence (fail-closed, `unobserved` outranks `over-budget`): a trusted receipt whose
  * content is `unobserved` ⇒ `unobserved`; `over-budget`/`stale` ⇒ `over_budget` (a diverged
  * snapshot is treated as a budget failure for the grounding axis); else `within-budget`.
+ *
+ * SIGNED-BUDGET THRESHOLD COMPARISON IS NOT YET CONSUMED (MED-1, deferred to Slice C). The
+ * over-budget verdict here comes from the receipt's OWN externally-signed `conformance[].status`;
+ * the signed budget THRESHOLD (`validGroundingBudgets`) is validated for AUTHENTICITY (3-party
+ * authority, E4) but its `threshold` is NEVER compared against the metric's `observed` value yet.
+ * This is correct sequencing: budgets express TOLERANCES, meaningful only for the runner-sensitive
+ * kinds (visual perceptual-diff, a11y scan-count) that Slice C actually measures. The Slice-B
+ * deterministic kinds (`digest-manifest`, `version-pin`) are binary match/no-match, so the signed
+ * receipt status fully decides them. Observed-vs-threshold evaluation lands in Slice C alongside
+ * the tolerance-based visual/a11y measurement.
  */
 function groundingConformanceOf(
   paths: ProjectPaths,
@@ -1386,6 +1399,24 @@ function evaluateGrounding(paths: ProjectPaths, state: TwinHarnessState): Ground
     const mismatched = [...threaded].some((d) => d !== manifestDigest);
     if (mismatched) {
       if (!offenders.includes("digest-manifest")) offenders.push("digest-manifest");
+      // LOW-1 observability: make the chain_mismatch offender visible in `res.grounding`. The
+      // `digest-manifest` ground IS trusted (manifestDigest !== null), so reflect its trust label.
+      // chain_mismatch can fire even when `digest-manifest` was NOT in the required-set (the summary
+      // loop above only iterates `required`), so UPDATE an existing row if present, else PUSH a new
+      // one — never leave the blocking offender absent from the summary.
+      const entry = validated.byKind.get("digest-manifest");
+      const existing = summary.find((s) => s.groundKind === "digest-manifest");
+      if (existing) {
+        existing.conformance = "chain_mismatch";
+      } else {
+        summary.push({
+          groundKind: "digest-manifest",
+          grounded: true,
+          trustLabel: entry?.trustLabel ?? "valid",
+          conformance: "chain_mismatch",
+          exceptionCovered: false,
+        });
+      }
       bump("chain_mismatch");
     }
   }

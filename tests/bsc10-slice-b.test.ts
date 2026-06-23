@@ -688,6 +688,9 @@ describe("I3 — chain_mismatch: threaded manifest_digest mismatch ⇒ FAIL; abs
     const gate = checkProductionReality(paths, state(paths));
     expect(gate.ok).toBe(true);
     expect(gate.error).toBeUndefined();
+    // Non-vacuous: no chain_mismatch row in the summary (digest-manifest row stays within-budget).
+    const dmRow = (gate.grounding ?? []).find((g) => g.groundKind === "digest-manifest");
+    expect(dmRow?.conformance).not.toBe("chain_mismatch");
   });
 
   it("I3b: BSC-3 driver receipt carrying a DIFFERENT manifest_digest ⇒ chain_mismatch ⇒ FAIL under enforce", () => {
@@ -719,6 +722,59 @@ describe("I3 — chain_mismatch: threaded manifest_digest mismatch ⇒ FAIL; abs
     expect(gate.ok).toBe(false);
     expect(gate.error).toBe("grounding_unverified");
     expect((gate.detail as { reason?: string } | undefined)?.reason).toBe("chain_mismatch");
+    // LOW-1 observability: digest-manifest IS required (integration workClass) → existing summary row
+    // updated in place → single row with conformance:"chain_mismatch".
+    const grounding = gate.grounding ?? [];
+    const dmRows = grounding.filter((g) => g.groundKind === "digest-manifest");
+    expect(dmRows.length).toBe(1);
+    const dmRow = dmRows[0]!;
+    expect(dmRow.grounded).toBe(true); // trusted in-process receipt
+    expect(dmRow.trustLabel).toBe("valid"); // in-process (no external signing)
+    expect(dmRow.conformance).toBe("chain_mismatch");
+    expect(dmRow.exceptionCovered).toBe(false);
+  });
+
+  it("I3d: chain_mismatch when digest-manifest NOT required — row PUSHED into summary", () => {
+    // greenfield+dep only requires version-pin (not digest-manifest). A trusted digest-manifest
+    // receipt exists but digest-manifest is not in the required-set, so the summary loop doesn't
+    // add it. chain_mismatch fires → gate PUSHES a new digest-manifest row into the summary.
+    process.env.TH_BSC10_ENFORCE = "1";
+    const paths = greenProject();
+    setVerifierKey(paths, K1.publicKey);
+
+    const groundingDigest = "sha256:aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899";
+    const differentDigest = "sha256:deadbeef00000000000000000000000000000000000000000000000000000000";
+
+    // version-pin satisfies the only required kind for greenfield+dep.
+    appendGroundingReceipt(paths, {
+      workClass: "greenfield+dep",
+      ground: { groundKind: "version-pin", pkg: "dep", version: "1.0.0" },
+      conformance: [{ metric: "version", observed: "1.0.0", status: "within-budget" }],
+      producerIdentity: "test:runner",
+    });
+    // digest-manifest receipt provides the trusted ground (grounded:true) for the chain_mismatch push.
+    appendGroundingReceipt(paths, {
+      workClass: "greenfield+dep",
+      ground: { groundKind: "digest-manifest", manifestDigest: groundingDigest },
+      conformance: [{ metric: "api", observed: 0, status: "within-budget" }],
+      producerIdentity: "test:runner",
+    });
+
+    // Thread a DIFFERENT digest → chain_mismatch.
+    appendSignedExternalDriver(paths, K1, { manifest_digest: differentDigest });
+
+    const gate = checkProductionReality(paths, state(paths));
+    expect(gate.ok).toBe(false);
+    expect(gate.error).toBe("grounding_unverified");
+    expect((gate.detail as { reason?: string } | undefined)?.reason).toBe("chain_mismatch");
+    // LOW-1 observability: digest-manifest was NOT required → no existing row → gate PUSHes a new one.
+    const grounding = gate.grounding ?? [];
+    const dmRows = grounding.filter((g) => g.groundKind === "digest-manifest");
+    expect(dmRows.length).toBe(1);
+    const dmRow = dmRows[0]!;
+    expect(dmRow.grounded).toBe(true); // trusted in-process receipt exists
+    expect(dmRow.conformance).toBe("chain_mismatch");
+    expect(dmRow.exceptionCovered).toBe(false);
   });
 
   it("I3c: absent manifest_digest on driver receipt (pre-BSC-10) ⇒ no chain_mismatch ⇒ back-compat PASS", () => {
