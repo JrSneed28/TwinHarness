@@ -17,7 +17,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, mintAssertionPresenceForFixture, ASSERTED_COV_TEST, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { evaluateStopGate, runHookStopGate } from "../src/commands/hook";
 import { writeState, readState } from "../src/core/state-store";
@@ -79,7 +79,8 @@ describe("F-2/C-1: final-verification near-misses block premature completion", (
     const paths = tp.paths;
     write(paths, "docs/01-requirements.md", "# Requirements\n\n- REQ-001 the only requirement.\n");
     write(paths, "docs/09-implementation-plan.md", "# Plan\n\nSLICE-1 covers REQ-001.\n");
-    write(paths, "tests/cov.test.ts", "// REQ-001 verified here\n");
+    // BSC-2 slice-6: REQ-001's test file carries a NON-TRIVIAL assertion (was a bare comment).
+    write(paths, "tests/cov.test.ts", ASSERTED_COV_TEST);
     write(paths, "docs/10-verification-report.md", "# Verification Report\n\nREQ-001 verified.\n");
     writeState(paths, {
       ...initialState(),
@@ -97,6 +98,8 @@ describe("F-2/C-1: final-verification near-misses block premature completion", (
     // required-set (the near-miss `10-` spelling canonicalizes, so the set resolves the
     // same as the canonical stage); mint it so the full green ladder actually allows.
     mintRequiredApprovals(paths, readState(paths).state!);
+    // BSC-2 slice-6: mint the F8-bound assertion-presence receipt LAST (after every tests/** write).
+    mintAssertionPresenceForFixture(paths);
 
     expect(evaluateStopGate(paths).block).toBe(false);
   });

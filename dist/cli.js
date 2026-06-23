@@ -72,6 +72,7 @@ const tester_1 = require("./commands/tester");
 const approve_1 = require("./commands/approve");
 const driver_1 = require("./commands/driver");
 const realize_1 = require("./commands/realize");
+const assertion_presence_1 = require("./commands/assertion-presence");
 const manifest_1 = require("./commands/manifest");
 const preview_1 = require("./commands/preview");
 const scorecard_1 = require("./commands/scorecard");
@@ -181,6 +182,8 @@ Usage:
   th approve [<stage>]              Mint the in-process human-approval receipt for a humanGate stage (default: current stage); bound to {stage, snapshot, governing-artifact digest}. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent grounding is the slice-3b external-signed producer)
   th realize <REQ-ID> --artifact <path> [--identity <who>]
                                     Mint the in-process realization receipt binding a REQ-ID to a content digest of the source artifact it is realized in (the production-reality realization rung blocks a done slice whose owned REQ-ID has no fresh, reachable referent). Does NOT set slice status — the done-claim and the referent stay separately authored. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent signature-provenance grounding is the external-signed producer)
+  th assertion-presence record [--identity <who>]
+                                    Mint the in-process assertion-PRESENCE receipt the production-reality assertion rung reads (records, per REQ-ID, whether its recognized test files carry a non-trivial assertion that can fail). Measures PRESENCE / non-triviality, NOT efficacy — it does NOT prove the suite catches regressions. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it, so its status is 'valid' NEVER 'valid-grounded'; the only efficacy/independence grade is the external mutation-kill receipt, 2b)
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
   th delegate pack [--agent A] [--slice ID] [--task T] [--intent I] [--allowed-files <a,b,c>]
@@ -308,7 +311,7 @@ Global flags:
   --provider <p>    (tester record) Provider tier the live run exercised (real | sandbox)
   --evidence-ref <p>  (tester record) Path/URL to the raw live-run output or screenshots
   --dimension <a,b>  (driver record) Comma-separated dimension(s) to record as observed; intersected with what verify-report.json observes (default: every observed seed dimension)
-  --identity <who>  (driver record / realize) Producer identity to record (attribution-only, zero trust weight; default: cli:th driver record / cli:th realize)
+  --identity <who>  (driver record / realize / assertion-presence record) Producer identity to record (attribution-only, zero trust weight; default: cli:th driver record / cli:th realize / cli:th assertion-presence record)
   --artifact <path>  (realize) Source path the REQ-ID is realized in — the referent the realization receipt binds a content digest of; must resolve in source`;
 /** Boolean flags (presence = true). */
 const BOOLEAN_FLAGS = {
@@ -753,6 +756,16 @@ function dispatch(parsed) {
                 artifact: parsed.flags.artifact,
                 producerIdentity: parsed.flags.identity,
             });
+        // Axis-B slice-6 (BSC-2 2a) — mint the in-process assertion-PRESENCE receipt the
+        // production-reality assertion rung reads. Records whether each REQ's recognized test files
+        // carry a non-trivial assertion. Measures PRESENCE not efficacy; attribution-only.
+        case "assertion-presence":
+            switch (sub) {
+                case "record":
+                    return (0, assertion_presence_1.runAssertionPresenceRecord)(paths, { producerIdentity: parsed.flags.identity });
+                default:
+                    return (0, output_1.failure)({ human: `unknown 'assertion-presence' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
         // Axis-B slice-3a (BSC-7) — mint the in-process human-approval receipt the humanGate
         // precondition reads. `<stage>` defaults to the run's current stage. Attribution-only.
         case "approve":

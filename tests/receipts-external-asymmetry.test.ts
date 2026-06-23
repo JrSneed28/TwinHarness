@@ -29,7 +29,7 @@ import {
   sign,
   type KeyObject,
 } from "node:crypto";
-import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, mintAssertionPresenceForFixture, ASSERTED_COV_TEST, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
@@ -146,7 +146,8 @@ function greenWithResolvedDrift(): { paths: ProjectPaths; targetRel: string } {
   const targetRel = "docs/req.md";
   writeFile(paths, "docs/01-requirements.md", "# Requirements\n\n- REQ-001 the only requirement.\n");
   writeFile(paths, "docs/09-implementation-plan.md", "# Plan\n\nSLICE-0 covers REQ-001.\n");
-  writeFile(paths, "tests/cov.test.ts", "// REQ-001 verified here\n");
+  // BSC-2 slice-6: REQ-001's test file carries a NON-TRIVIAL assertion (was a bare comment).
+  writeFile(paths, "tests/cov.test.ts", ASSERTED_COV_TEST);
   writeFile(paths, "docs/10-verification-report.md", "# Verification Report\n\nREQ-001 verified.\n");
   writeFile(paths, targetRel, "REQ body\n");
   // A resolved drift → a drift-resolve terminal entity the gate rung 1b evaluates.
@@ -184,6 +185,11 @@ function greenWithResolvedDrift(): { paths: ProjectPaths; targetRel: string } {
   // coords are null at mint time, so the F8 rule keeps them non-discriminating (`valid`)
   // even after a per-scenario git init/commit — so the gate's PASS arms are reachable.
   mintRequiredApprovals(paths, state(paths));
+  // BSC-2 slice-6: mint the F8-bound assertion-presence receipt LAST (after every tests/** write).
+  // Like the approvals, the snapshot coord is null at mint time on this non-git fixture, so the
+  // F8 rule keeps it non-discriminating even after a per-scenario git init/commit; the
+  // tests/-scoped ground digest is unaffected by the per-scenario docs/dist perturbations.
+  mintAssertionPresenceForFixture(paths);
   return { paths, targetRel };
 }
 

@@ -14,12 +14,13 @@
   {
     "bsc": 2,
     "title": "Assertion-quality / mutation-kill receipt — trusted runner observes test quality",
-    "phase": "todo",
+    "phase": "done-phase",
     "independence": 0,
-    "pr": [],
+    "independenceNote": "2a in-process AssertionPresenceReceipt is attribution-only (agent-mintable ⇒ valid/attested-presence, never valid-grounded); independence flips to >0 in the 2b external Ed25519-signed MutationKillReceipt control-flip PR stacked on this one",
+    "pr": [41],
     "probe": ".omc/audit/probes/bsc2",
-    "anchors": ["core/coverage.ts:117-124,208-218"],
-    "updatedAt": "2026-06-22T13:10:00Z"
+    "anchors": ["core/assertion-presence.ts", "core/bsc2-flag.ts", "commands/assertion-presence.ts", "core/gate-preconditions.ts (checkAssertionPresence rung 8)", "core/receipts.ts (AssertionPresence + MutationKill schemas)"],
+    "updatedAt": "2026-06-23T05:35:00Z"
   },
   {
     "bsc": 3,

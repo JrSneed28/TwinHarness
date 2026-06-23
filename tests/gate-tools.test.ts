@@ -12,7 +12,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, mintAssertionPresenceForFixture, ASSERTED_COV_TEST, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
@@ -143,7 +143,8 @@ describe("th_stage_advance — gated stage advance", () => {
     const paths = tp.paths;
     writeFile(paths, "docs/01-requirements.md", "REQ-001\n");
     writeFile(paths, "docs/09-implementation-plan.md", "SLICE-1 REQ-001\n");
-    writeFile(paths, "tests/cov.test.ts", "// REQ-001\n");
+    // BSC-2 slice-6: REQ-001's test file carries a NON-TRIVIAL assertion (was a bare comment).
+    writeFile(paths, "tests/cov.test.ts", ASSERTED_COV_TEST);
     writeFile(paths, "docs/10-verification-report.md", "# Verification report\nREQ-001 verified.\n");
     // final-verification, no slices (slice-floor inert), no verify commands, coverage clean.
     writeState(paths, { ...initialState(), tier: "T1", current_stage: "final-verification" });
@@ -158,6 +159,10 @@ describe("th_stage_advance — gated stage advance", () => {
     // ladder too, so the closed human-approval required-set must be satisfied to reach the
     // no_next_stage tail (otherwise the advance blocks on human_approval_unverified).
     mintRequiredApprovals(paths, state(paths));
+    // BSC-2 slice-6: the production-reality ladder now composes the assertion-presence rung,
+    // so the terminal state must also carry an F8-bound assertion-presence receipt to reach
+    // the no_next_stage tail. Mint it LAST (after every tests/** write).
+    mintAssertionPresenceForFixture(paths);
     const r = toolRun("th_stage_advance", paths);
     expect(r.ok).toBe(false);
     expect(r.data?.error).toBe("no_next_stage");

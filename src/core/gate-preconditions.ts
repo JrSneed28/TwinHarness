@@ -54,6 +54,18 @@ import {
 import { loadExternalPublicKey, externalKeyId, verifyCanonical } from "./receipt-signing";
 import { bsc3EnforcementEnabled } from "./bsc3-flag";
 import { realizationEnforcementEnabled } from "./bsc1-flag";
+import { bsc2EnforcementEnabled } from "./bsc2-flag";
+import {
+  type AssertionReqSummary,
+  type AssertionContentStatus,
+  computeAssertionPresenceGround,
+  assertionGroundDigest,
+  readAssertionPresenceReceipts,
+  verifyAssertionPresenceChain,
+  validateAssertionPresenceContent,
+  validWaivedReqs,
+  readMutationKillValidated,
+} from "./assertion-presence";
 import {
   type RealizationValidationStatus,
   ownedReqsForDoneSlices,
@@ -95,6 +107,71 @@ export interface GateResult {
    * whether or not enforcement is flag-enabled), so the trust posture is always visible.
    */
   dimensions?: DriverDimensionSummary[];
+  /**
+   * BSC-2 / Axis-B slice-6 — the per-REQ assertion-PRESENCE observability summary the
+   * assertion rung computes for the final-verification run (the I1 hook, mirroring how
+   * `dimensions?` rides on the result). For each `tested` REQ-ID it reports the non-trivial
+   * assertion count, whether it is assertion-free (an offender), its `trustLabel` (derived
+   * from the trust source — see {@link AssertionTrustLabel}), and whether a valid signed
+   * waiver exempts it. Seed-order deterministic (sorted by `reqId`). Attached on PASS, on
+   * BLOCK, and in WARN — so the assertion posture is always visible. Seeds the BSC-5
+   * dimension-set view.
+   */
+  assertionPresence?: AssertionPresenceSummary[];
+  /**
+   * BSC-2 / Axis-B slice-6 (2b) — the module-scoped mutation-kill EFFICACY signal, a DISTINCT
+   * observability axis from the per-REQ presence summary. A signature-verified external
+   * MutationKillReceipt proves a controlled runner's suite KILLS injected faults — but ONLY for
+   * the single source module it names (`scope`). It is NOT REQ-scoped, so it NEVER propagates
+   * onto per-REQ presence `trustLabel`s and NEVER overrides the presence rung (presence ≠
+   * efficacy — the plan treats 2a/2b as COMPLEMENTARY, never substitutes; review HIGH). This
+   * field records the efficacy spike for its `scope` for the I1 hook only. `forged` is NOT
+   * carried here — a forged receipt is a hard `mutation_kill_forged` block on the result.
+   */
+  mutationEfficacy?: MutationEfficacySignal;
+}
+
+/**
+ * BSC-2 trust label for one REQ's assertion-PRESENCE posture, derived PURELY from the presence
+ * TRUST SOURCE (never from a self-asserted field, and never from the module-scoped mutation
+ * receipt — mirrors {@link DriverTrustLabel}):
+ *  - `valid`             — an in-process assertion-presence receipt grounds this REQ. The
+ *                          in-process producer is agent-mintable, so this is ATTRIBUTION-ONLY
+ *                          (presence is sensed, but the producer carries zero trust weight).
+ *  - `attested-presence` — a non-trivial assertion is observed for this REQ from the fresh
+ *                          recompute (the sensed PRESENCE fact). NEVER an efficacy claim.
+ *
+ * There is deliberately NO `valid-grounded` here: efficacy is a MODULE-scoped property carried
+ * SEPARATELY by {@link MutationEfficacySignal}, never a per-REQ presence label (review HIGH/MEDIUM).
+ */
+export type AssertionTrustLabel = "valid" | "attested-presence";
+
+/** One REQ's assertion-presence observation + trust label, for the observability hook (I1). */
+export interface AssertionPresenceSummary {
+  /** The `tested` REQ-ID this summary grounds. */
+  reqId: string;
+  /** Non-trivial (cannot-be-tautological) `expect(...)` assertions observed for this REQ. */
+  nonTrivialAssertions: number;
+  /** True iff `nonTrivialAssertions === 0` — the per-REQ offender predicate. */
+  assertionFree: boolean;
+  /** The presence trust label (see {@link AssertionTrustLabel}) — NEVER an efficacy claim. */
+  trustLabel: AssertionTrustLabel;
+  /** True iff a valid signed waiver exempts this REQ from the offender block. */
+  waived: boolean;
+}
+
+/**
+ * The module-scoped mutation-kill efficacy signal (BSC-2 2b) — a signature-verified external
+ * MutationKillReceipt's proven efficacy for the SINGLE source module it names. A DISTINCT
+ * observability axis (never a per-REQ presence label, never a presence-rung pass-override).
+ */
+export interface MutationEfficacySignal {
+  /** Always `"valid-grounded"` — only a signature-verified receipt produces this signal. */
+  status: "valid-grounded";
+  /** The single source module the controlled runner mutated (e.g. `"src/core/hash.ts"`). */
+  scope: string;
+  /** The receipt's kill score (`mutants_killed / mutants_generated`, 0..1). */
+  score: number;
 }
 
 /**
@@ -801,6 +878,224 @@ function checkRealization(paths: ProjectPaths, state: TwinHarnessState): GateRes
   return { ok: false, error: "realization_unverified", detail };
 }
 
+/**
+ * The verdict of the BSC-2 assertion-presence sub-check, computed ONCE and used for BOTH the
+ * enforcement decision AND the always-attached observability summary. `summary` is the per-REQ
+ * I1 hook (seed-order deterministic). `mutationEfficacy` is the OPTIONAL module-scoped efficacy
+ * signal (2b) — a DISTINCT observability axis that never gates the presence verdict (review
+ * HIGH). When `ok:false` the `reason`/`detail` describe the block.
+ */
+type AssertionVerdict =
+  | { ok: true; summary: AssertionPresenceSummary[]; mutationEfficacy?: MutationEfficacySignal }
+  | {
+      ok: false;
+      reason: "assertion_presence_unverified" | "assertion_unobserved" | "mutation_kill_forged";
+      summary: AssertionPresenceSummary[];
+      detail: Record<string, unknown>;
+      mutationEfficacy?: MutationEfficacySignal;
+    };
+
+/**
+ * Evaluate the BSC-2 assertion-presence grounding for the current run (recompute-don't-trust +
+ * fail-closed + F8 grounding). The verdict drives BOTH enforcement (when the flag is on) AND the
+ * always-computed observability summary; see {@link AssertionVerdict}.
+ *
+ * Order:
+ *   1. The CHECKED `tested` REQ set comes from `computeBreakdown`. No req file ⇒ PASS (the
+ *      coverage rung owns that). No tested REQ ⇒ PASS (nothing to attest).
+ *   2. MutationKill EFFICACY axis (2b) — a DISTINCT observability axis, NEVER a presence
+ *      pass-override (review HIGH; presence ≠ efficacy — the plan treats 2a/2b as
+ *      COMPLEMENTARY, never substitutes): `readMutationKillValidated` → `forged` ⇒ BLOCK
+ *      `mutation_kill_forged` (an unprovable controlled-runner claim blocks — mirrors the
+ *      driver `forged` path); `valid-grounded` ⇒ record the MODULE-scoped {@link
+ *      MutationEfficacySignal} for the receipt's `scope` ONLY (observability) and CONTINUE to
+ *      the presence checks — it does NOT excuse any REQ's presence gap and is NOT propagated
+ *      onto per-REQ trust labels; `absent` ⇒ no-op (the common 2a path).
+ *   3. Receipt correspondence (F8): read the in-process AssertionPresenceReceipt store; a
+ *      tampered chain ⇒ BLOCK `assertion_presence_unverified` (reason `chain`). The LATEST
+ *      receipt is selected. NO receipt at all ⇒ fail-closed `assertion_unobserved` (there ARE
+ *      tested REQs but no recorded correspondence). A receipt's `target_mismatch`/`stale`
+ *      content status ⇒ BLOCK `assertion_presence_unverified`. This runs ALWAYS, regardless of
+ *      any mutation receipt.
+ *   4. Offenders = recompute the ground FRESH; the offenders are the checked-tested REQs whose
+ *      recomputed summary has `assertionFree===true` (recompute — do NOT trust the receipt's
+ *      stored ground for the offender decision: the receipt is the correspondence artifact, the
+ *      live recompute is the verdict). Subtract validly-WAIVED REQs. This runs ALWAYS.
+ *   5. Verdict: no remaining offenders + receipt correspondence OK ⇒ PASS. Else BLOCK
+ *      `assertion_presence_unverified` naming the offenders + content status. The module-scoped
+ *      `mutationEfficacy` signal rides on EVERY outcome for the I1 hook.
+ *
+ * The `summary` is ALWAYS computed (every checked-tested REQ, sorted by reqId) so the I1 hook
+ * fires on PASS / WARN / BLOCK. Trust labeling (honesty): a 2a-only REQ is `valid`
+ * (receipt-grounded) or `attested-presence` (presence sensed) — there is NO `valid-grounded`
+ * per-REQ presence label; module-scoped efficacy is carried separately by `mutationEfficacy`.
+ */
+function evaluateAssertionPresence(paths: ProjectPaths): AssertionVerdict | null {
+  const bd = computeBreakdown(paths.root);
+  if ("error" in bd) return null; // no req file ⇒ the coverage rung owns that; nothing to attest
+  const checkedTested = new Set(bd.rows.filter((r) => r.tested).map((r) => r.req));
+  if (checkedTested.size === 0) return null; // no tested REQ ⇒ nothing to attest
+
+  // The efficacy axis (2b) — a DISTINCT observability axis, NEVER a presence pass-override
+  // (review HIGH; presence ≠ efficacy). A forged controlled-runner claim BLOCKS; a verified one
+  // records a MODULE-scoped efficacy signal for its `scope` only; absence is a no-op.
+  const mutation = readMutationKillValidated(paths);
+  const mutationEfficacy: MutationEfficacySignal | undefined =
+    mutation.status === "valid-grounded" && mutation.receipt
+      ? { status: "valid-grounded", scope: mutation.receipt.ground.scope, score: mutation.receipt.ground.score }
+      : undefined;
+
+  // Recompute the ground FRESH — the verdict is the live recompute, never the receipt's stored
+  // ground (mirrors the BSC-6 recompute-don't-trust lesson). Build a per-REQ lookup for the
+  // checked-tested set so the offender decision + the observability summary share one source.
+  const ground = computeAssertionPresenceGround(paths);
+  const byReq = new Map<string, AssertionReqSummary>(ground.map((s) => [s.reqId, s]));
+  const waived = validWaivedReqs(paths);
+
+  // The always-computed observability summary (seed-order deterministic). A checked-tested REQ
+  // with no recomputed summary (anchored only in a non-test file, etc.) is treated as
+  // assertion-free with zero non-trivial assertions (fail-closed: unobserved ≠ asserted).
+  // PRESENCE trust label ONLY — the module-scoped mutation efficacy NEVER lands on a per-REQ
+  // presence label (review HIGH/MEDIUM): `attested-presence` when a non-trivial assertion is
+  // sensed, else `valid` (in-process receipt attribution only).
+  const summary: AssertionPresenceSummary[] = [...checkedTested]
+    .sort()
+    .map((reqId): AssertionPresenceSummary => {
+      const s = byReq.get(reqId);
+      const nonTrivialAssertions = s ? s.nonTrivialAssertions : 0;
+      const assertionFree = s ? s.assertionFree : true;
+      const isWaived = waived.has(reqId);
+      const trustLabel: AssertionTrustLabel = !assertionFree ? "attested-presence" : "valid";
+      return { reqId, nonTrivialAssertions, assertionFree, trustLabel, waived: isWaived };
+    });
+
+  // 2. Efficacy axis: a forged controlled-runner claim BLOCKS (unprovable independence claim).
+  // A `valid-grounded` receipt does NOT short-circuit — it is recorded as `mutationEfficacy`
+  // (module-scoped observability) and we CONTINUE to the presence checks below (presence ≠
+  // efficacy; the module-scoped efficacy spike cannot excuse an unrelated REQ's presence gap).
+  if (mutation.status === "forged") {
+    return {
+      ok: false,
+      reason: "mutation_kill_forged",
+      summary,
+      detail: { scope: mutation.receipt?.ground.scope ?? null, key_id: mutation.receipt?.key_id ?? null },
+    };
+  }
+
+  // 3. Receipt correspondence (F8). Runs ALWAYS, regardless of any mutation receipt. A tampered
+  // chain is fail-closed.
+  const receipts = readAssertionPresenceReceipts(paths);
+  const chain = verifyAssertionPresenceChain(receipts);
+  if (!chain.ok) {
+    return {
+      ok: false,
+      reason: "assertion_presence_unverified",
+      summary,
+      mutationEfficacy,
+      detail: { contentStatus: "chain", brokenAt: chain.brokenAt, chainReason: chain.reason },
+    };
+  }
+  const latest = receipts.length > 0 ? receipts[receipts.length - 1]! : undefined;
+  if (latest === undefined) {
+    // There ARE tested REQs but NO recorded correspondence ⇒ fail-closed unobserved.
+    return {
+      ok: false,
+      reason: "assertion_unobserved",
+      summary,
+      mutationEfficacy,
+      detail: { contentStatus: "assertion_unobserved" as AssertionContentStatus, tested: checkedTested.size },
+    };
+  }
+  const content = validateAssertionPresenceContent(paths, latest);
+  if (content.status === "target_mismatch" || content.status === "stale") {
+    return {
+      ok: false,
+      reason: "assertion_presence_unverified",
+      summary,
+      mutationEfficacy,
+      detail: {
+        contentStatus: content.status,
+        ...(content.staleReasons ? { staleReasons: content.staleReasons } : {}),
+      },
+    };
+  }
+
+  // 4. Offenders = checked-tested REQs that are assertion-free in the FRESH recompute, minus
+  //    validly-waived REQs. Runs ALWAYS — a module-scoped mutation efficacy spike does NOT
+  //    excuse an unrelated REQ's presence gap (review HIGH; presence ≠ efficacy).
+  const offenders = [...checkedTested]
+    .filter((reqId) => {
+      const s = byReq.get(reqId);
+      const assertionFree = s ? s.assertionFree : true;
+      return assertionFree && !waived.has(reqId);
+    })
+    .sort();
+
+  if (offenders.length === 0) return { ok: true, summary, mutationEfficacy };
+  return {
+    ok: false,
+    reason: "assertion_presence_unverified",
+    summary,
+    mutationEfficacy,
+    detail: { contentStatus: content.status, offenders: offenders.slice(0, 20), total: offenders.length },
+  };
+}
+
+/**
+ * The BSC-2 assertion-presence sub-check (Axis-B slice-6) — the NINTH production-reality
+ * sub-check, composed LAST inside {@link checkProductionReality} (after realization). A run may
+ * not be certified complete while a `tested` REQ-ID lacks a NON-TRIVIAL assertion (the
+ * completion gate counts a REQ "tested" on anchor presence alone; a test file with no
+ * cannot-fail-free assertion clears that bar — BSC-2). It ALWAYS computes the per-REQ
+ * observability summary (the I1 hook), then BLOCKS on a failing verdict ONLY when enforcement
+ * is enabled ({@link bsc2EnforcementEnabled} — WARN-first, defaults OFF in commit 1 / ON in
+ * commit 2).
+ *
+ * When the verdict is null (no req file / no tested REQ) ⇒ bare PASS. When the verdict PASSES
+ * with NO actionable summary anomaly the result still carries `assertionPresence` (the I1 hook
+ * fires for any non-empty summary); a fully-empty summary degrades to a bare PASS to preserve
+ * the `{ ok: true }` contract every downstream rung composes. When enforcement is OFF and the
+ * verdict fails, the would-be block rides up as a non-blocking `notice` (warn posture) WITH the
+ * summary. When ON, a failing verdict returns the stable token (`assertion_presence_unverified`
+ * / `assertion_unobserved` / `mutation_kill_forged`) WITH the summary so the block is diagnosable.
+ */
+function checkAssertionPresence(paths: ProjectPaths): GateResult {
+  const verdict = evaluateAssertionPresence(paths);
+  if (verdict === null) return PASS; // no req file / no tested REQ ⇒ nothing to attest
+  if (verdict.ok) {
+    // Attach observability on PASS only when there is a NOTEWORTHY signal — any offender (an
+    // assertion-free REQ), any validly-waived REQ, or a module-scoped mutation efficacy signal.
+    // A fully-clean, all-`attested-presence` run with no efficacy signal degrades to the shared
+    // bare `PASS` so the `{ ok: true }` contract every downstream rung composes is preserved
+    // (mirrors checkDriverDimensions' empty-summary bare-PASS). On BLOCK/WARN they always ride.
+    const noteworthy =
+      verdict.summary.some((s) => s.assertionFree || s.waived) || verdict.mutationEfficacy !== undefined;
+    if (!noteworthy) return PASS;
+    const res: GateResult = { ok: true, assertionPresence: verdict.summary };
+    if (verdict.mutationEfficacy) res.mutationEfficacy = verdict.mutationEfficacy;
+    return res;
+  }
+  if (!bsc2EnforcementEnabled()) {
+    // Flag OFF (WARN): observe but do not block. Surface the would-be block as a non-blocking
+    // notice + the summary so the warn posture is visible without weakening the gate.
+    const res: GateResult = {
+      ok: true,
+      assertionPresence: verdict.summary,
+      notice: { token: verdict.reason, detail: verdict.detail },
+    };
+    if (verdict.mutationEfficacy) res.mutationEfficacy = verdict.mutationEfficacy;
+    return res;
+  }
+  const res: GateResult = {
+    ok: false,
+    error: verdict.reason,
+    detail: verdict.detail,
+    assertionPresence: verdict.summary,
+  };
+  if (verdict.mutationEfficacy) res.mutationEfficacy = verdict.mutationEfficacy;
+  return res;
+}
+
 export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessState): GateResult {
   // Stage-aware: production reality is a CERTIFY-COMPLETION condition, so it only
   // enforces at the completion boundary (final-verification). Earlier stages have no
@@ -989,10 +1284,42 @@ export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessSt
     // stays visible alongside the realization failure.
     return driver.dimensions ? { ...realization, dimensions: driver.dimensions } : realization;
   }
-  // Both passed: ride the driver result up (it carries `dimensions`/`notice`); fold in any
-  // realization warn-phase notice (flag OFF) without clobbering a driver notice.
-  if (realization.notice && !driver.notice) return { ...driver, notice: realization.notice };
-  return driver;
+
+  // 8. (BSC-2 / Axis-B slice-6) ASSERTION-PRESENCE GROUNDING — composed LAST (after realization).
+  // A run may not be certified complete while a `tested` REQ-ID lacks a NON-TRIVIAL assertion:
+  // the coverage gate counts a REQ "tested" on anchor presence alone, so a test file with no
+  // cannot-fail-free assertion clears that bar (BSC-2). This recomputes the per-REQ
+  // assertion-presence ground FRESH, requires an F8-bound in-process AssertionPresenceReceipt
+  // for correspondence, subtracts validly-WAIVED REQs, and BLOCKS on a forged MutationKillReceipt.
+  // A signature-verified external MutationKillReceipt is recorded as a DISTINCT module-scoped
+  // `mutationEfficacy` observability signal — it does NOT override the presence rung (presence ≠
+  // efficacy; review HIGH). Governed by `bsc2EnforcementEnabled()` (WARN-first): the verdict is
+  // ALWAYS computed (so `assertionPresence` summarizes the per-REQ posture for the I1 hook), but
+  // it BLOCKS with `assertion_presence_unverified` / `assertion_unobserved` / `mutation_kill_forged`
+  // only when enforcement is on. The summary rides on the result whether PASS or BLOCK.
+  const assertion = checkAssertionPresence(paths);
+  if (!assertion.ok) {
+    // Preserve the upstream driver `dimensions` summary on the assertion block so the full trust
+    // posture stays visible alongside the assertion failure (assertion already carries its own
+    // `assertionPresence` + `mutationEfficacy`).
+    return driver.dimensions ? { ...assertion, dimensions: driver.dimensions } : assertion;
+  }
+
+  // All passed: fold the optional observability fields up onto ONE result so a single PASS
+  // carries the driver `dimensions`, the assertion `assertionPresence`, the module-scoped
+  // `mutationEfficacy`, and at most one warn-phase `notice` (driver wins, then realization, then
+  // assertion — first non-empty).
+  const merged: GateResult = { ok: true };
+  const dimensions = driver.dimensions ?? assertion.dimensions;
+  if (dimensions) merged.dimensions = dimensions;
+  if (assertion.assertionPresence) merged.assertionPresence = assertion.assertionPresence;
+  if (assertion.mutationEfficacy) merged.mutationEfficacy = assertion.mutationEfficacy;
+  const notice = driver.notice ?? realization.notice ?? assertion.notice;
+  if (notice) merged.notice = notice;
+  // Degrade to the shared bare PASS when nothing was observed, preserving `{ ok: true }`.
+  return merged.dimensions || merged.assertionPresence || merged.mutationEfficacy || merged.notice
+    ? merged
+    : PASS;
 }
 
 // ---------------------------------------------------------------------------

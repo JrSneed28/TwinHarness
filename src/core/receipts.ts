@@ -249,6 +249,168 @@ export interface DriverDimensionReceipt {
 }
 
 // ---------------------------------------------------------------------------
+// Axis-B slice-6 / BSC-2 — assertion-presence + mutation-kill schemas
+// ---------------------------------------------------------------------------
+
+/**
+ * Axis-B slice-6 / BSC-2 (2a) — the discriminator of an {@link AssertionPresenceReceipt}.
+ * THE BLIND SPOT: the coverage gate counts a REQ as "tested" when its anchor appears in a
+ * RECOGNIZED test file, but a test file that contains NO non-trivial assertion (an empty
+ * `it()`, a smoke test that only constructs a value, or a tautology like
+ * `expect(true).toBe(true)`) clears that bar — "tested" is asserted with no executable
+ * check that can FAIL. This receipt's GROUND is the recomputable per-REQ assertion-presence
+ * summary minted by the regex/lexer-grade sensor in `src/core/assertion-presence.ts`, so a
+ * REQ whose tests carry no non-trivial assertion is mechanically detectable at gate time.
+ */
+export type AssertionPresenceKind = "assertion-presence";
+
+/**
+ * Axis-B slice-6 / BSC-2 (2b) — the discriminator of a {@link MutationKillReceipt}. The
+ * stronger, INDEPENDENTLY-grounded form of 2a: a mutation report from a controlled runner
+ * proves the test suite actually KILLS injected faults (assertion presence is necessary but
+ * not sufficient — a non-trivial assertion can still fail to catch a real mutant). ALWAYS
+ * externally produced + signed (`producer_kind:"controlled-runner"`); a 2b line lacking a
+ * verifying signature is `forged`, never trusted.
+ */
+export type MutationKillKind = "mutation-kill";
+
+/**
+ * One per-REQ assertion-presence summary — the recomputable ground UNIT (BSC-2 2a). Minted
+ * by the sensor `computeAssertionPresenceGround` (regex/lexer-grade, NO AST), so the gate
+ * re-derives it at validation time and a tampered/stale receipt is detectable (the F8
+ * "diffable ground" lesson). Every field is deterministic: `testFiles` is lexically sorted
+ * + POSIX-normalized, the counts come from the pinned `expect(...)` balanced-paren scan, and
+ * `assertionFree` is the gate's offender predicate.
+ */
+export interface AssertionReqSummary {
+  /** The REQ-ID this summary grounds (the enumerator/validator key). */
+  reqId: string;
+  /** The recognized test files anchoring this REQ, lexically sorted + POSIX-normalized. */
+  testFiles: string[];
+  /** Total `expect(...)` chains across `testFiles` (parseable files only). */
+  assertionCount: number;
+  /** `assertionCount` minus the trivial (cannot-fail) assertions. */
+  nonTrivialAssertions: number;
+  /** `true` iff `nonTrivialAssertions === 0` — the gate's per-REQ offender predicate. */
+  assertionFree: boolean;
+}
+
+/**
+ * The recomputable ground of an {@link AssertionPresenceReceipt}: per-REQ summaries, sorted
+ * lexically by `reqId`. Serialized byte-identically regardless of `readdirSync` order so the
+ * receipt's `recordHash` is stable across runners/platforms (BSC-2 Principle 6).
+ */
+export type AssertionPresenceGround = AssertionReqSummary[];
+
+/**
+ * One assertion-presence receipt (BSC-2 2a). Append-only and hash-chained like a
+ * {@link DriverDimensionReceipt}: any single field edit breaks `recordHash`, and an
+ * insert/delete/reorder breaks the next `prevHash`. Minted + validated by
+ * `src/core/assertion-presence.ts` (a dedicated module + store).
+ *
+ * IN-PROCESS-ONLY: this receipt carries NO signing fields. `producer_identity` is a ZERO-
+ * trust audit breadcrumb (mirrors the in-process driver/realization posture); the in-process
+ * pass status is `valid`, NEVER `valid-grounded`. The independently-grounded property for
+ * BSC-2 lives in the SEPARATE {@link MutationKillReceipt} (2b), not here.
+ */
+export interface AssertionPresenceReceipt {
+  /** Fixed discriminator. */
+  kind: AssertionPresenceKind;
+  /**
+   * The run identity this receipt grounds — the snapshot coordinate's `gitHead` (or
+   * `"no-git"` on a non-git checkout), so a re-run at a new HEAD mints a fresh receipt and
+   * the gate finds the LATEST for the current snapshot (mirrors `DriverDimensionReceipt.refId`).
+   */
+  refId: string;
+  /** The recomputable ground: per-REQ assertion-presence summaries, sorted by `reqId`. */
+  ground: AssertionPresenceGround;
+  /** The repository snapshot coordinate at mint time (reuses `git-revision.ts`). */
+  snapshot_coord: SnapshotCoord;
+  /**
+   * The producer's self-asserted identity. ZERO trust weight in-process — an audit
+   * breadcrumb ONLY. This receipt is never signed (the un-forgeable property is 2b's
+   * {@link MutationKillReceipt}). Part of the canonical hash input.
+   */
+  producer_identity: string;
+  /**
+   * `true` ONLY on a one-time backfill stamp (migration). A `legacy` receipt is
+   * grandfathered. Omit-when-absent so a real receipt's canonical text never carries it.
+   */
+  legacy?: boolean;
+  /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
+  prevHash: string;
+  /** SHA-256 hex (64) of THIS receipt's canonical text (computed before set). */
+  recordHash: string;
+}
+
+/**
+ * The mutation-report ground of a {@link MutationKillReceipt} (BSC-2 2b). Produced by a
+ * controlled mutation-testing runner over a SINGLE source module: counts of generated /
+ * killed / survived mutants, the derived kill `score`, and the mutated `scope`. The gate
+ * re-reads these fields; staleness is bounded by the receipt's snapshot coordinate.
+ */
+export interface MutationKillGround {
+  /** Total mutants the runner generated for `scope`. */
+  mutants_generated: number;
+  /** Mutants the test suite KILLED (a test failed under the mutant — the desired signal). */
+  mutants_killed: number;
+  /** Mutants that SURVIVED (no test caught them — the gap the metric exposes). */
+  mutants_survived: number;
+  /** Kill score `mutants_killed / mutants_generated`, in `0..1`. */
+  score: number;
+  /** The single source module that was mutated, e.g. `"src/core/hash.ts"`. */
+  scope: string;
+}
+
+/**
+ * One mutation-kill receipt (BSC-2 2b). Append-only and hash-chained like a
+ * {@link DriverDimensionReceipt}, with the slice-1b/3b/4b signing TRAILER. Minted ONLY by
+ * the external controlled-runner producer (`scripts/th-receipt-producer.mjs --kind
+ * mutation-kill`) and validated by `src/core/assertion-presence.ts`.
+ *
+ * ALWAYS EXTERNALLY PRODUCED + SIGNED: `producer_kind` is the fixed literal
+ * `"controlled-runner"`, and the ONLY valid trust label is `valid-grounded` — a line that
+ * lacks a verifying Ed25519 `signature` is `forged`, never trusted. There is NO in-process
+ * producer for this receipt (unlike 2a's {@link AssertionPresenceReceipt}).
+ */
+export interface MutationKillReceipt {
+  /** Fixed discriminator. */
+  kind: MutationKillKind;
+  /**
+   * The run identity this receipt grounds — the snapshot coordinate's `gitHead` (or
+   * `"no-git"`), mirroring {@link AssertionPresenceReceipt.refId}.
+   */
+  refId: string;
+  /** The controlled-runner mutation-report ground. */
+  ground: MutationKillGround;
+  /** The repository snapshot coordinate at mint time (reuses `git-revision.ts`). */
+  snapshot_coord: SnapshotCoord;
+  /**
+   * ALWAYS `"controlled-runner"` — this receipt has no in-process producer. Part of the
+   * canonical (and therefore signature-bound) hash input, so a producer-kind swap breaks
+   * the signature.
+   */
+  producer_kind: "controlled-runner";
+  /**
+   * The short, NON-secret id of the public key that verifies this receipt
+   * (`receipt-signing.externalKeyId`). Part of the canonical hash input (after
+   * `producer_kind`), so a key_id swap breaks the signature.
+   */
+  key_id: string;
+  /**
+   * The base64 Ed25519 signature over this receipt's canonical text. A TRAILER, EXCLUDED
+   * from `mutationKillCanonicalText` exactly like `recordHash`: both are computed over the
+   * IDENTICAL canonical input, so the signature covers every signed field. A line lacking a
+   * verifying signature is `forged`.
+   */
+  signature?: string;
+  /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
+  prevHash: string;
+  /** SHA-256 hex (64) of THIS receipt's canonical text (computed before set). */
+  recordHash: string;
+}
+
+// ---------------------------------------------------------------------------
 // Canonical text + hashing (mirrors decisions.ts) — the tamper-evidence core
 // ---------------------------------------------------------------------------
 

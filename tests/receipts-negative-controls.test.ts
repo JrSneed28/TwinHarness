@@ -19,7 +19,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, mintRequiredApprovals, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, mintAssertionPresenceForFixture, ASSERTED_COV_TEST, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
@@ -89,7 +89,8 @@ function greenAtFinalVerification(): ProjectPaths {
   const paths = tp.paths;
   writeFile(paths, "docs/01-requirements.md", "# Requirements\n\n- REQ-001 the only requirement.\n");
   writeFile(paths, "docs/09-implementation-plan.md", "# Plan\n\nSLICE-0 covers REQ-001.\n");
-  writeFile(paths, "tests/cov.test.ts", "// REQ-001 verified here\n");
+  // BSC-2 slice-6: REQ-001's test file carries a NON-TRIVIAL assertion (was a bare comment).
+  writeFile(paths, "tests/cov.test.ts", ASSERTED_COV_TEST);
   writeFile(paths, "docs/10-verification-report.md", "# Verification Report\n\nREQ-001 verified.\n");
   writeState(paths, {
     ...initialState(),
@@ -105,6 +106,8 @@ function greenAtFinalVerification(): ProjectPaths {
   // required-set; mint it (coords null on this non-git fixture, so it stays `valid` even
   // after a per-scenario git init) so the terminal-receipt condition stays the only lever.
   mintRequiredApprovals(paths, state(paths));
+  // BSC-2 slice-6: mint the F8-bound assertion-presence receipt LAST (after every tests/** write).
+  mintAssertionPresenceForFixture(paths);
   return paths;
 }
 
