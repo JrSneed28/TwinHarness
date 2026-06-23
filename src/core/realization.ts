@@ -146,6 +146,14 @@ export interface RealizationReceipt {
    * Omit-when-absent so a real receipt's canonical text never carries it.
    */
   legacy?: boolean;
+  /**
+   * Axis-B slice-BSC10a / BSC-10 — the evidence-spine continuity thread (the `manifest_digest`
+   * of the signed EvidenceManifest this realization was grounded against). ADDITIVE-OPTIONAL +
+   * omit-when-absent AND deliberately NOT in {@link CANONICAL_FIELD_ORDER}, so a pre-BSC-10
+   * receipt's canonical text — and `recordHash` — is BYTE-IDENTICAL and shipped BSC-1 probes stay
+   * green. Becomes load-bearing only under the Slice-B cross-receipt chain-mismatch enforce.
+   */
+  manifest_digest?: string;
   /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
   prevHash: string;
   /** SHA-256 hex (64) of THIS receipt's canonical text (computed before set). */
@@ -172,6 +180,10 @@ const CANONICAL_FIELD_ORDER: ReadonlyArray<keyof RealizationReceipt> = [
   "producer_kind",
   "key_id",
   "legacy",
+  // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
+  // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
+  // receipt (the field absent) is byte-identical, so shipped BSC-1 probes + receipts-parity hold.
+  "manifest_digest",
   "prevHash",
 ];
 

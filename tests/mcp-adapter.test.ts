@@ -433,6 +433,8 @@ describe("SLICE-4 / TASK-011 — MCP tool-count 60 + schema/no-exec battery (REQ
     "th_approve",
     "th_realize",
     "th_assertion_presence_record",
+    "th_grounding_record",
+    "th_grounding_check",
   ];
 
   // ---- REQ-RU-094: full registry, in order (originally 23; now 60 with the coordination + interview/init + gate-transition + wired-handler tools) ----

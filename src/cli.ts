@@ -71,6 +71,7 @@ import { runApprove } from "./commands/approve";
 import { runDriverRecord } from "./commands/driver";
 import { runRealize } from "./commands/realize";
 import { runAssertionPresenceRecord } from "./commands/assertion-presence";
+import { runGroundingRecord, runGroundingCheck } from "./commands/grounding";
 import { runManifestExport, runManifestTools } from "./commands/manifest";
 import { runPreview } from "./commands/preview";
 import { runScorecard } from "./commands/scorecard";
@@ -194,6 +195,9 @@ Usage:
                                     Mint the in-process realization receipt binding a REQ-ID to a content digest of the source artifact it is realized in (the production-reality realization rung blocks a done slice whose owned REQ-ID has no fresh, reachable referent). Does NOT set slice status — the done-claim and the referent stay separately authored. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent signature-provenance grounding is the external-signed producer)
   th assertion-presence record [--identity <who>]
                                     Mint the in-process assertion-PRESENCE receipt the production-reality assertion rung reads (records, per REQ-ID, whether its recognized test files carry a non-trivial assertion that can fail). Measures PRESENCE / non-triviality, NOT efficacy — it does NOT prove the suite catches regressions. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it, so its status is 'valid' NEVER 'valid-grounded'; the only efficacy/independence grade is the external mutation-kill receipt, 2b)
+  th grounding record --ground-kind <digest-manifest|version-pin|visual-hash> --work-class <c> [--identity <who>] [--manifest-digest <d>] [--pkg <p>] [--pin-version <v>] [--perceptual-hash <h>] [--renderer <r>]
+                                    Mint the in-process external-reference grounding receipt the production-reality grounding rung reads (<stateDir>/grounding-receipts.jsonl, hash-chained). --work-class is required (drives the required-ground matrix). Supply kind-specific fields: digest-manifest→--manifest-digest; version-pin→--pkg+--pin-version; visual-hash→--perceptual-hash (--renderer optional). ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent grounding requires the Slice-B external Ed25519-signed producer)
+  th grounding check                Read-only: recompute and validate the grounding receipt chain; print summary (total, chainStatus, per-receipt groundKind+status). Appends nothing; leaves no breadcrumb file
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
   th delegate pack [--agent A] [--slice ID] [--task T] [--intent I] [--allowed-files <a,b,c>]
@@ -321,7 +325,7 @@ Global flags:
   --provider <p>    (tester record) Provider tier the live run exercised (real | sandbox)
   --evidence-ref <p>  (tester record) Path/URL to the raw live-run output or screenshots
   --dimension <a,b>  (driver record) Comma-separated dimension(s) to record as observed; intersected with what verify-report.json observes (default: every observed seed dimension)
-  --identity <who>  (driver record / realize / assertion-presence record) Producer identity to record (attribution-only, zero trust weight; default: cli:th driver record / cli:th realize / cli:th assertion-presence record)
+  --identity <who>  (driver record / realize / assertion-presence record / grounding record) Producer identity to record (attribution-only, zero trust weight; default: cli:th driver record / cli:th realize / cli:th assertion-presence record / cli:th grounding record)
   --artifact <path>  (realize) Source path the REQ-ID is realized in — the referent the realization receipt binds a content digest of; must resolve in source`;
 
 export interface ParsedArgs {
@@ -456,6 +460,14 @@ export interface ParsedArgs {
     // Axis-B slice-4a (BSC-3) — driver-dimension receipt flags (`th driver record`).
     dimension?: string;
     identity?: string;
+    // Axis-B slice-A (BSC-10) — external-reference grounding receipt fields (`th grounding record`).
+    groundKind?: string;
+    manifestDigest?: string;
+    pkg?: string;
+    pinVersion?: string;
+    perceptualHash?: string;
+    renderer?: string;
+    workClass?: string;
     // F8/R-31 — the live run's pass verdict (boolean flag).
     passed: boolean;
   };
@@ -582,6 +594,16 @@ const STRING_FLAGS: Record<string, FlagField> = {
   // Axis-B slice-4a (BSC-3) — driver-dimension receipt fields (`th driver record`).
   "--dimension": "dimension",
   "--identity": "identity",
+  // Axis-B slice-A (BSC-10) — external-reference grounding receipt fields (`th grounding record`).
+  // NOTE: `--pin-version` is used instead of `--version` to avoid the existing numeric `--version`
+  // flag (artifact versioning) which maps to `version?: number` in ParsedArgs.
+  "--ground-kind": "groundKind",
+  "--manifest-digest": "manifestDigest",
+  "--pkg": "pkg",
+  "--pin-version": "pinVersion",
+  "--perceptual-hash": "perceptualHash",
+  "--renderer": "renderer",
+  "--work-class": "workClass",
 };
 
 /** Flags that consume a numeric value. */
@@ -919,6 +941,27 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           return runAssertionPresenceRecord(paths, { producerIdentity: parsed.flags.identity });
         default:
           return failure({ human: `unknown 'assertion-presence' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    // Axis-B slice-A (BSC-10) — in-process external-reference grounding producer (record) and
+    // read-only validator (check). `th grounding check` is strictly read-only; it appends
+    // nothing and leaves no breadcrumb file. Registration is ALWAYS-ON (parity with MCP tools).
+    case "grounding":
+      switch (sub) {
+        case "record":
+          return runGroundingRecord(paths, {
+            groundKind: parsed.flags.groundKind,
+            workClass: parsed.flags.workClass,
+            manifestDigest: parsed.flags.manifestDigest,
+            pkg: parsed.flags.pkg,
+            pinVersion: parsed.flags.pinVersion,
+            perceptualHash: parsed.flags.perceptualHash,
+            renderer: parsed.flags.renderer,
+            producerIdentity: parsed.flags.identity,
+          });
+        case "check":
+          return runGroundingCheck(paths, {});
+        default:
+          return failure({ human: `unknown 'grounding' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
     // Axis-B slice-3a (BSC-7) — mint the in-process human-approval receipt the humanGate
     // precondition reads. `<stage>` defaults to the run's current stage. Attribution-only.

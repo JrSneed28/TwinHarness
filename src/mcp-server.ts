@@ -62,6 +62,7 @@ import { runApprove } from "./commands/approve";
 import { runDriverRecord } from "./commands/driver";
 import { runRealize } from "./commands/realize";
 import { runAssertionPresenceRecord } from "./commands/assertion-presence";
+import { runGroundingRecord, runGroundingCheck } from "./commands/grounding";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
 import { runTemplateGet, runTemplateList } from "./commands/template";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
@@ -1792,6 +1793,54 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     run: (paths, args) =>
       runAssertionPresenceRecord(paths, { producerIdentity: optString(args, "identity") }),
   },
+  // Axis-B slice-A (BSC-10) — in-process external-reference grounding producer. The SENSOR
+  // that records a GroundingReceipt (digest-manifest / version-pin / visual-hash) grounding
+  // the BSC-10 rung. Registration is ALWAYS-ON (parity with the CLI `th grounding record`);
+  // the TH_BSC10_ENFORCE flag governs ENFORCEMENT only (default OFF in Slice A / WARN).
+  {
+    name: "th_grounding_record",
+    description:
+      "Axis-B/BSC-10 (Slice A): mint the IN-PROCESS external-reference grounding receipt the production-reality grounding rung reads (<stateDir>/grounding-receipts.jsonl, hash-chained, under the state lock). `groundKind` is required and must be one of `digest-manifest`, `version-pin`, or `visual-hash`; supply the matching kind-specific fields (manifestDigest / pkg+version / perceptualHash+renderer). ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its trust label is `valid` NEVER `valid-grounded` — independent grounding arrives only with the Slice-B external Ed25519-signed producer. Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        groundKind: stringProp("Ground kind discriminant: 'digest-manifest' | 'version-pin' | 'visual-hash'. Required."),
+        workClass: stringProp("Work-class this receipt is minted for (drives the required-ground matrix). Required."),
+        manifestDigest: stringProp("For digest-manifest: the manifest digest string."),
+        pkg: stringProp("For version-pin: the package name."),
+        pinVersion: stringProp("For version-pin: the pinned version string (named pinVersion to avoid collision with the numeric artifact --version flag)."),
+        perceptualHash: stringProp("For visual-hash: the perceptual hash string."),
+        renderer: stringProp("For visual-hash: optional renderer identifier."),
+        identity: stringProp("Producer identity to record (attribution-only, zero trust weight; defaults to cli:th grounding record)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runGroundingRecord(paths, {
+        groundKind: optString(args, "groundKind"),
+        workClass: optString(args, "workClass"),
+        manifestDigest: optString(args, "manifestDigest"),
+        pkg: optString(args, "pkg"),
+        pinVersion: optString(args, "pinVersion"),
+        perceptualHash: optString(args, "perceptualHash"),
+        renderer: optString(args, "renderer"),
+        producerIdentity: optString(args, "identity"),
+      }),
+  },
+  // Axis-B slice-A (BSC-10) — read-only grounding chain validator. Recomputes and validates
+  // the grounding receipt chain; appends NOTHING and leaves NO breadcrumb file. This is a
+  // pure read: the write-surface snapshot must show zero delta for this tool.
+  {
+    name: "th_grounding_check",
+    description:
+      "Axis-B/BSC-10 (Slice A): READ-ONLY validator — recompute and validate the grounding receipt chain (<stateDir>/grounding-receipts.jsonl) and return a summary ({total, chainStatus, receipts[]}). Appends NOTHING; leaves NO breadcrumb file; the write-surface snapshot shows zero delta for this tool. Use `th_grounding_record` to append receipts. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+    run: (paths, _args) => runGroundingCheck(paths, {}),
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -1842,7 +1891,8 @@ export type ToolCategory =
   | "lifecycle"
   | "template"
   | "tester"
-  | "driver";
+  | "driver"
+  | "grounding";
 
 /** The behavior hints + category attached to a tool. */
 export interface ToolAnnotation {
@@ -1997,6 +2047,11 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // Axis-B/BSC-2 (2a) — in-process assertion-presence producer. NOT idempotent: each call appends
   // a fresh hash-chained receipt to assertion-presence-receipts.jsonl under the state dir.
   th_assertion_presence_record: wr("coverage", { idempotent: false }),
+  // Axis-B/BSC-10 (Slice A) — in-process external-reference grounding producer. NOT idempotent:
+  // each call appends a fresh hash-chained grounding receipt to grounding-receipts.jsonl.
+  th_grounding_record: wr("grounding", { idempotent: false }),
+  // Axis-B/BSC-10 (Slice A) — read-only grounding chain validator. Appends nothing; pure read.
+  th_grounding_check: ro("grounding"),
 };
 
 /** The MCP-standard annotation object for a tool (or undefined if unknown). */
@@ -2132,6 +2187,7 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "approve",
   "realize",
   "assertion-presence record",
+  "grounding record", "grounding check",
   "gate production-reality",
   "collab init", "collab fragment", "collab list", "collab merge",
   "debate add", "debate list", "debate resolve",

@@ -242,6 +242,15 @@ export interface DriverDimensionReceipt {
    * Omit-when-absent so a real receipt's canonical text never carries it.
    */
   legacy?: boolean;
+  /**
+   * Axis-B slice-BSC10a / BSC-10 — the evidence-spine continuity thread. The `manifest_digest`
+   * of the signed EvidenceManifest this driver receipt was grounded against, so the SAME digest
+   * can be threaded across BSC-1/3/7 receipts and a cross-receipt mismatch detected. ADDITIVE-
+   * OPTIONAL + omit-when-absent so a pre-BSC-10 receipt's canonical text — and `recordHash` — is
+   * BYTE-IDENTICAL (shipped probes stay green). Becomes load-bearing only under Slice-B enforce
+   * (the chain-mismatch FAIL is wired in Slice B); inert in slice-BSC10a.
+   */
+  manifest_digest?: string;
   /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
   prevHash: string;
   /** SHA-256 hex (64) of THIS receipt's canonical text (computed before set). */
@@ -407,6 +416,160 @@ export interface MutationKillReceipt {
   /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
   prevHash: string;
   /** SHA-256 hex (64) of THIS receipt's canonical text (computed before set). */
+  recordHash: string;
+}
+
+// ---------------------------------------------------------------------------
+// Axis-B slice-BSC10a — external-reference grounding schema (input-grounding spine)
+// ---------------------------------------------------------------------------
+
+/**
+ * Axis-B slice-BSC10a / BSC-10 — the computable-ground discriminator of a
+ * {@link GroundingReceipt}. The UPSTREAM input-grounding counterpart to BSC-1's downstream
+ * realization: it makes "the real external reference was actually checked" a mintable,
+ * recomputable fact. Three discriminated kinds, each a DETERMINISTIC, runner-reproducible
+ * computable ground:
+ *  - `digest-manifest` — a content/symbol manifest digest (exact-equality / symbol-set delta).
+ *  - `version-pin`     — a pinned dependency `pkg@version` (exact-equality).
+ *  - `visual-hash`     — a perceptual hash of a rendered surface under a pinned renderer.
+ *
+ * NOTE (gap 9): the spec writes `digest` as shorthand; the schema token is the literal
+ * `"digest-manifest"`. All gate tokens + tests assert `"digest-manifest"`, never `"digest"`.
+ */
+export type GroundKind = "digest-manifest" | "version-pin" | "visual-hash";
+
+/**
+ * One typed conformance metric on a {@link GroundingReceipt} — the recomputable
+ * correspondence between the recorded ground and a per-metric budget. The four axes mirror
+ * the spec's conformance ontology: `version` = exact-equality, `api` = symbol-set delta,
+ * `visual` = perceptual-diff band, `a11y` = scan-violation count. `observed` is the measured
+ * value, or the fixed literal `"unobserved"` when the metric's MEASUREMENT is a documented
+ * stub (slice-BSC10a defers real visual/a11y measurement to Slice C — NO renderer/axe dep).
+ * `status` is fail-closed: `unobserved` is NEVER a silent `within-budget` (it blocks under
+ * forced enforce), mirroring the Axis-B "unobserved ≠ clean" tenet.
+ */
+export interface ConformanceMetric {
+  /** Which conformance axis this metric measures. */
+  metric: "version" | "api" | "visual" | "a11y";
+  /** The measured value (string/number), or the fixed `"unobserved"` literal for a stubbed metric. */
+  observed: string | number | "unobserved";
+  /** Fail-closed verdict: `within-budget` only on a measured-and-passing metric; `unobserved` never silently passes. */
+  status: "within-budget" | "over-budget" | "unobserved";
+}
+
+/**
+ * The fixed discriminator of the `digest-manifest` ground variant. A content/symbol manifest:
+ * `manifestDigest` is the SHA-256 over the canonical manifest (the binding axis, exact-equality);
+ * `entries` is the optional per-path digest list (omit-when-absent so a digest-only ground stays
+ * byte-stable). The gate re-derives the manifest digest at validation time (recompute-don't-trust).
+ */
+export interface DigestManifestGround {
+  groundKind: "digest-manifest";
+  /** SHA-256 (or other fixed-width) digest of the canonical manifest — the exact-equality axis. */
+  manifestDigest: string;
+  /** Optional per-path digest entries (sorted + POSIX-normalized by the producer). Omit-when-absent. */
+  entries?: { path: string; digest: string }[];
+}
+
+/** The fixed discriminator of the `version-pin` ground variant: a pinned `pkg@version` (exact-eq). */
+export interface VersionPinGround {
+  groundKind: "version-pin";
+  /** The dependency package name (e.g. `"react"`). */
+  pkg: string;
+  /** The exact pinned version (e.g. `"19.0.0"`) — the exact-equality axis. */
+  version: string;
+}
+
+/**
+ * The fixed discriminator of the `visual-hash` ground variant: a perceptual hash of a rendered
+ * surface. `renderer` is the OPTIONAL pinned-renderer identity (engine+version+viewport) the
+ * hash was captured under (omit-when-absent). Slice-BSC10a is schema-complete here but its
+ * MEASUREMENT is a stub (the conformance metric emits `"unobserved"`); real perceptual-diff under
+ * a pinned renderer lands in Slice C.
+ */
+export interface VisualHashGround {
+  groundKind: "visual-hash";
+  /** The perceptual hash of the rendered surface (the visual conformance axis). */
+  perceptualHash: string;
+  /** Optional pinned-renderer identity the hash was captured under (engine+version+viewport). */
+  renderer?: string;
+}
+
+/** The discriminated computable ground of a {@link GroundingReceipt} (one of three kinds). */
+export type GroundingGround = DigestManifestGround | VersionPinGround | VisualHashGround;
+
+/**
+ * One external-reference grounding receipt (Axis-B slice-BSC10a / BSC-10). Append-only and
+ * hash-chained like a {@link DriverDimensionReceipt}: any single field edit breaks `recordHash`,
+ * and an insert/delete/reorder breaks the next `prevHash`. Minted + validated by
+ * `src/core/grounding.ts` (a dedicated module + store).
+ *
+ * The receipt-kind field is the fixed `"grounding"` literal (NOT a `producer_kind`); the
+ * computable ground is discriminated SEPARATELY by {@link GroundingGround.groundKind}. The
+ * in-process receipt carries NO signing fields populated (the optional signing trailer is filled
+ * ONLY by the Slice-B external Ed25519 producer); the in-process pass label is `ungrounded` where
+ * a kind is required (absence ≠ forgery — mirrors BSC-3 `valid` vs `valid-grounded`). The budgets,
+ * SignedExceptions, and PermittedDifferenceCarveouts are NOT receipt fields — they live in sibling
+ * external-signed stores (PCC-4), exactly like assertion-waivers / scan-exceptions.
+ */
+export interface GroundingReceipt {
+  /** Fixed receipt-kind discriminator (NOT `producer_kind`). */
+  kind: "grounding";
+  /**
+   * The run identity this receipt grounds — the snapshot coordinate's `gitHead` (or `"no-git"`),
+   * mirroring {@link AssertionPresenceReceipt.refId}, so a re-run at a new HEAD mints a fresh
+   * receipt and the gate finds the LATEST for the current snapshot.
+   */
+  refId: string;
+  /** The work-class this grounding receipt was minted for (drives the required-ground matrix). */
+  workClass: string;
+  /** The discriminated computable ground (digest-manifest / version-pin / visual-hash). */
+  ground: GroundingGround;
+  /** The typed conformance metrics (version/api/visual/a11y), fail-closed on `unobserved`. */
+  conformance: ConformanceMetric[];
+  /** The repository snapshot coordinate at mint time (reuses `git-revision.ts`). */
+  snapshot_coord: SnapshotCoord;
+  /**
+   * The producer's self-asserted identity. ZERO trust weight in-process — an audit breadcrumb
+   * ONLY. Part of the canonical hash input.
+   */
+  producer_identity: string;
+  /**
+   * The fidelity tier the ground was captured at (`tight`/`medium`/`loose` — the perceptual-diff
+   * band selector). Optional + omit-when-absent so a tier-less ground is byte-stable.
+   */
+  fidelityTier?: string;
+  /** The conformance diff band label (e.g. for a visual ground). Optional + omit-when-absent. */
+  diffBand?: string;
+  /**
+   * `true` ONLY on a one-time backfill stamp (migration). A `legacy` receipt is grandfathered.
+   * Omit-when-absent so a real receipt's canonical text never carries it.
+   */
+  legacy?: boolean;
+  /**
+   * Slice-B — which PRODUCER minted this receipt. `"external"` marks a receipt from the keyed
+   * out-of-process producer (it MUST carry a verifying `signature`); absent (or `"in-process"`)
+   * marks an in-process attested receipt (NEVER signed). Optional + omit-when-absent so a
+   * slice-BSC10a receipt's canonical text — and `recordHash` — is byte-stable. Part of the
+   * canonical hash input (after the honesty fields).
+   */
+  producer_kind?: "external" | "in-process";
+  /**
+   * Slice-B — the short, NON-secret id of the public key that verifies an external receipt
+   * (`receipt-signing.externalKeyId`). Absent on in-process receipts. Part of the canonical hash
+   * input (after `producer_kind`), so a key_id swap breaks the signature.
+   */
+  key_id?: string;
+  /**
+   * Slice-B — the base64 Ed25519 signature over this receipt's canonical text. A TRAILER,
+   * EXCLUDED from the canonical text exactly like `recordHash`: both are computed over the
+   * IDENTICAL canonical input, so the signature covers every signed field. Absent on in-process
+   * receipts.
+   */
+  signature?: string;
+  /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
+  prevHash: string;
+  /** SHA-256 hex (64) of THIS receipt's canonical text (signature + recordHash excluded). */
   recordHash: string;
 }
 

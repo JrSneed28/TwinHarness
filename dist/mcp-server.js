@@ -3230,8 +3230,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path46) {
-      let input = path46;
+    function removeDotSegments(path48) {
+      let input = path48;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3483,8 +3483,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path46, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path46 && path46 !== "/" ? path46 : void 0;
+        const [path48, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path48 && path48 !== "/" ? path48 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -3649,49 +3649,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative23, options, skipNormalization) {
+    function resolveComponent(base, relative24, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative23 = parse3(serialize(relative23, options), options);
+        relative24 = parse3(serialize(relative24, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative23.scheme) {
-        target.scheme = relative23.scheme;
-        target.userinfo = relative23.userinfo;
-        target.host = relative23.host;
-        target.port = relative23.port;
-        target.path = removeDotSegments(relative23.path || "");
-        target.query = relative23.query;
+      if (!options.tolerant && relative24.scheme) {
+        target.scheme = relative24.scheme;
+        target.userinfo = relative24.userinfo;
+        target.host = relative24.host;
+        target.port = relative24.port;
+        target.path = removeDotSegments(relative24.path || "");
+        target.query = relative24.query;
       } else {
-        if (relative23.userinfo !== void 0 || relative23.host !== void 0 || relative23.port !== void 0) {
-          target.userinfo = relative23.userinfo;
-          target.host = relative23.host;
-          target.port = relative23.port;
-          target.path = removeDotSegments(relative23.path || "");
-          target.query = relative23.query;
+        if (relative24.userinfo !== void 0 || relative24.host !== void 0 || relative24.port !== void 0) {
+          target.userinfo = relative24.userinfo;
+          target.host = relative24.host;
+          target.port = relative24.port;
+          target.path = removeDotSegments(relative24.path || "");
+          target.query = relative24.query;
         } else {
-          if (!relative23.path) {
+          if (!relative24.path) {
             target.path = base.path;
-            if (relative23.query !== void 0) {
-              target.query = relative23.query;
+            if (relative24.query !== void 0) {
+              target.query = relative24.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative23.path[0] === "/") {
-              target.path = removeDotSegments(relative23.path);
+            if (relative24.path[0] === "/") {
+              target.path = removeDotSegments(relative24.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative23.path;
+                target.path = "/" + relative24.path;
               } else if (!base.path) {
-                target.path = relative23.path;
+                target.path = relative24.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative23.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative24.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative23.query;
+            target.query = relative24.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3699,7 +3699,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative23.fragment;
+      target.fragment = relative24.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs43, exportName) {
+    function addFormats(ajv, list, fs44, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs43[f]);
+        ajv.addFormat(f, fs44[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -7152,10 +7152,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path46) {
-  if (!path46)
+function getElementAtPath(obj, path48) {
+  if (!path48)
     return obj;
-  return path46.reduce((acc, key) => acc?.[key], obj);
+  return path48.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7564,11 +7564,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path46, issues) {
+function prefixIssues(path48, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path46);
+    iss.path.unshift(path48);
     return iss;
   });
 }
@@ -7715,16 +7715,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path46 = []) => {
+  const processError = (error3, path48 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path46, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path48, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path46, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path48, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path46, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path48, ...issue2.path]);
       } else {
-        const fullpath = [...path46, ...issue2.path];
+        const fullpath = [...path48, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -15473,8 +15473,8 @@ var StdioServerTransport = class {
 };
 
 // src/mcp-server.ts
-var fs42 = __toESM(require("node:fs"));
-var path45 = __toESM(require("node:path"));
+var fs43 = __toESM(require("node:fs"));
+var path47 = __toESM(require("node:path"));
 
 // src/core/paths.ts
 var fs = __toESM(require("node:fs"));
@@ -17582,8 +17582,8 @@ function readDriftLog(paths) {
 function appendDriftLog(paths, block) {
   readDriftLog(paths);
   assertGovernedWriteSurface(paths.root, paths.driftLog);
-  const sep24 = endsWithNewline(paths.driftLog) ? "" : "\n";
-  fs10.appendFileSync(paths.driftLog, `${sep24}${block}`, "utf8");
+  const sep25 = endsWithNewline(paths.driftLog) ? "" : "\n";
+  fs10.appendFileSync(paths.driftLog, `${sep25}${block}`, "utf8");
 }
 function runDriftAdd(paths, opts) {
   return withStateLock(paths, () => runDriftAddLocked(paths, opts));
@@ -18332,8 +18332,8 @@ function ledgerCorruptFailure(e) {
 }
 
 // src/core/gate-preconditions.ts
-var fs26 = __toESM(require("node:fs"));
-var path25 = __toESM(require("node:path"));
+var fs27 = __toESM(require("node:fs"));
+var path26 = __toESM(require("node:path"));
 
 // src/core/health.ts
 var fs13 = __toESM(require("node:fs"));
@@ -22420,6 +22420,10 @@ var APPROVAL_CANONICAL_FIELD_ORDER = [
   "producer_kind",
   "key_id",
   "legacy",
+  // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
+  // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
+  // approval (the field absent) is byte-identical, so shipped BSC-7 probes + receipts-parity hold.
+  "manifest_digest",
   "prevHash"
 ];
 var GROUND_FIELD_ORDER = [
@@ -22702,6 +22706,10 @@ var DRIVER_CANONICAL_FIELD_ORDER = [
   "producer_kind",
   "key_id",
   "legacy",
+  // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
+  // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
+  // receipt (the field absent) is byte-identical, so shipped BSC-3 probes + receipts-parity hold.
+  "manifest_digest",
   "prevHash"
 ];
 var DIMENSION_FIELD_ORDER = ["name", "observed", "evidenceRef"];
@@ -23469,6 +23477,10 @@ var CANONICAL_FIELD_ORDER3 = [
   "producer_kind",
   "key_id",
   "legacy",
+  // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
+  // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
+  // receipt (the field absent) is byte-identical, so shipped BSC-1 probes + receipts-parity hold.
+  "manifest_digest",
   "prevHash"
 ];
 var REFERENT_FIELD_ORDER = ["path", "digest"];
@@ -23798,6 +23810,278 @@ function ensureRealizationMigrationOpportunistic(paths) {
   }
 }
 
+// src/core/grounding.ts
+var fs26 = __toESM(require("node:fs"));
+var path25 = __toESM(require("node:path"));
+var ED25519_SIGNATURE_BASE647 = /^[A-Za-z0-9+/]{86}==$/;
+var WORK_CLASS_GROUND_MATRIX = {
+  redesign: ["digest-manifest", "visual-hash"],
+  recreation: ["digest-manifest", "visual-hash", "version-pin"],
+  integration: ["digest-manifest", "version-pin"],
+  migration: ["version-pin", "digest-manifest"],
+  "greenfield+dep": ["version-pin"],
+  greenfield: []
+};
+var UX_SURFACE_LABELS = /* @__PURE__ */ new Set(["ux", "ui", "tui", "screen", "interactive", "visual"]);
+function hasUxSurface(surfaces) {
+  return surfaces.some((s) => UX_SURFACE_LABELS.has(s.trim().toLowerCase()));
+}
+function requiredGroundKindsForWorkClass(workClass, surfaces = [], derivedClass) {
+  const set = new Set(WORK_CLASS_GROUND_MATRIX[workClass] ?? []);
+  if (hasUxSurface(surfaces)) set.add("visual-hash");
+  let crossCheckFlag;
+  if (derivedClass !== void 0 && derivedClass !== "" && derivedClass !== workClass) {
+    for (const k of WORK_CLASS_GROUND_MATRIX[derivedClass] ?? []) set.add(k);
+    crossCheckFlag = "class-cross-check-mismatch";
+  }
+  const required2 = [...set].sort();
+  return crossCheckFlag ? { required: required2, crossCheckFlag } : { required: required2 };
+}
+var SNAPSHOT_FIELD_ORDER7 = ["gitHead", "treeDigest"];
+function reorder6(obj, order) {
+  const out = {};
+  for (const key of order) out[key] = obj[key];
+  return out;
+}
+function toPosix3(p) {
+  return p.replace(/\\/g, "/");
+}
+function serializeGroundingGround(ground) {
+  switch (ground.groundKind) {
+    case "digest-manifest": {
+      const ordered = {
+        groundKind: ground.groundKind,
+        manifestDigest: ground.manifestDigest
+      };
+      if (ground.entries !== void 0) {
+        ordered.entries = [...ground.entries].map((e) => ({ path: toPosix3(e.path), digest: e.digest })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+      }
+      return JSON.stringify(ordered);
+    }
+    case "version-pin": {
+      return JSON.stringify({ groundKind: ground.groundKind, pkg: ground.pkg, version: ground.version });
+    }
+    case "visual-hash": {
+      const ordered = {
+        groundKind: ground.groundKind,
+        perceptualHash: ground.perceptualHash
+      };
+      if (ground.renderer !== void 0) ordered.renderer = ground.renderer;
+      return JSON.stringify(ordered);
+    }
+  }
+}
+var CONFORMANCE_FIELD_ORDER = ["metric", "observed", "status"];
+function serializeConformance(conformance) {
+  return [...conformance].sort((a, b) => a.metric < b.metric ? -1 : a.metric > b.metric ? 1 : 0).map((m) => reorder6(m, CONFORMANCE_FIELD_ORDER));
+}
+var GROUNDING_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "refId",
+  "workClass",
+  "ground",
+  "conformance",
+  "snapshot_coord",
+  "producer_identity",
+  "fidelityTier",
+  "diffBand",
+  "legacy",
+  "producer_kind",
+  "key_id",
+  "prevHash"
+];
+function groundingCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of GROUNDING_CANONICAL_FIELD_ORDER) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "ground") {
+      ordered[key] = JSON.parse(serializeGroundingGround(val));
+    } else if (key === "conformance") {
+      ordered[key] = serializeConformance(val);
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder6(val, SNAPSHOT_FIELD_ORDER7);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeGroundingRecordHash(receipt) {
+  return hashContent(groundingCanonicalText(receipt));
+}
+function groundingReceiptsPath(paths) {
+  return path25.join(paths.stateDir, "grounding-receipts.jsonl");
+}
+function externalGroundingReceiptsPath(paths) {
+  return path25.join(paths.stateDir, "external-grounding-receipts.jsonl");
+}
+function isValidGround(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const g = parsed;
+  switch (g.groundKind) {
+    case "digest-manifest": {
+      if (typeof g.manifestDigest !== "string" || g.manifestDigest === "") return false;
+      if (g.entries !== void 0) {
+        if (!Array.isArray(g.entries)) return false;
+        for (const e of g.entries) {
+          if (typeof e !== "object" || e === null) return false;
+          const em = e;
+          if (typeof em.path !== "string" || typeof em.digest !== "string") return false;
+        }
+      }
+      return true;
+    }
+    case "version-pin":
+      return typeof g.pkg === "string" && g.pkg !== "" && typeof g.version === "string" && g.version !== "";
+    case "visual-hash":
+      return typeof g.perceptualHash === "string" && g.perceptualHash !== "" && (g.renderer === void 0 || typeof g.renderer === "string");
+    default:
+      return false;
+  }
+}
+function isValidConformanceMetric(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const m = parsed;
+  if (m.metric !== "version" && m.metric !== "api" && m.metric !== "visual" && m.metric !== "a11y") return false;
+  if (!(typeof m.observed === "string" || typeof m.observed === "number")) return false;
+  if (m.status !== "within-budget" && m.status !== "over-budget" && m.status !== "unobserved") return false;
+  return true;
+}
+function isValidGroundingReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "grounding") return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.workClass !== "string" || r.workClass === "") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (!isValidGround(r.ground)) return false;
+  if (!Array.isArray(r.conformance) || !r.conformance.every(isValidConformanceMetric)) return false;
+  if (r.fidelityTier !== void 0 && typeof r.fidelityTier !== "string") return false;
+  if (r.diffBand !== void 0 && typeof r.diffBand !== "string") return false;
+  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
+  if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
+  if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE647.test(r.signature))) {
+    return false;
+  }
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readGroundingReceipts(paths) {
+  return readJsonlValues(groundingReceiptsPath(paths), isValidGroundingReceipt);
+}
+function readExternalGroundingReceipts(paths) {
+  return readJsonlValues(externalGroundingReceiptsPath(paths), isValidGroundingReceipt);
+}
+function readLastGroundingRecordHash(paths) {
+  const last = scanTailValid(groundingReceiptsPath(paths), isValidGroundingReceipt);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function verifyGroundingChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, signature: _sig, ...rest } = r;
+    const recomputed = computeGroundingRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+function appendGroundingReceipt(paths, input) {
+  const receipt = {
+    kind: "grounding",
+    refId: groundingRefId(paths),
+    workClass: input.workClass,
+    ground: input.ground,
+    conformance: input.conformance ?? [],
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: input.producerIdentity,
+    ...input.fidelityTier !== void 0 ? { fidelityTier: input.fidelityTier } : {},
+    ...input.diffBand !== void 0 ? { diffBand: input.diffBand } : {}
+  };
+  assertGovernedWriteSurface(paths.root, groundingReceiptsPath(paths));
+  fs26.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastGroundingRecordHash(paths);
+  const withPrev = { ...receipt, prevHash };
+  const recordHash = computeGroundingRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs26.appendFileSync(groundingReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function groundingRefId(paths) {
+  return currentReceiptSnapshotCoord(paths).gitHead ?? "no-git";
+}
+function snapshotStaleReasons6(recorded, current) {
+  const reasons = [];
+  if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
+    reasons.push("gitHead");
+  }
+  if (recorded.treeDigest !== null && current.treeDigest !== null && recorded.treeDigest !== current.treeDigest) {
+    reasons.push("treeDigest");
+  }
+  return reasons;
+}
+function validateGroundingContent(paths, receipt) {
+  const unobservedMetrics = receipt.conformance.filter((m) => m.status === "unobserved").map((m) => m.metric).sort();
+  const overBudgetMetrics = receipt.conformance.filter((m) => m.status === "over-budget").map((m) => m.metric).sort();
+  if (unobservedMetrics.length > 0) return { status: "unobserved", unobservedMetrics };
+  if (overBudgetMetrics.length > 0) return { status: "over-budget", overBudgetMetrics };
+  const recorded = receipt.snapshot_coord;
+  const hasRecordedCoord = recorded != null && (recorded.gitHead != null || recorded.treeDigest != null);
+  if (hasRecordedCoord) {
+    const staleReasons = snapshotStaleReasons6(recorded, currentReceiptSnapshotCoord(paths));
+    if (staleReasons.length > 0) return { status: "stale", staleReasons };
+  }
+  return { status: "valid" };
+}
+function groundingSignatureVerifies(receipt, publicKey) {
+  if (typeof receipt.signature !== "string") return false;
+  if (receipt.key_id !== externalKeyId(publicKey)) return false;
+  const { recordHash: _rh, signature, ...signedView } = receipt;
+  return verifyCanonical(groundingCanonicalText(signedView), signature, publicKey);
+}
+function readGroundingValidated(paths) {
+  const inProcess = readGroundingReceipts(paths);
+  const inProcessChainOk = verifyGroundingChain(inProcess).ok;
+  const byKind = /* @__PURE__ */ new Map();
+  if (inProcessChainOk) {
+    for (const r of inProcess) {
+      byKind.set(r.ground.groundKind, { receipt: r, trustLabel: "valid" });
+    }
+  }
+  const external = readExternalGroundingReceipts(paths);
+  const publicKey = loadExternalPublicKey();
+  if (publicKey !== null) {
+    for (const r of external) {
+      if (r.producer_kind !== "external") continue;
+      if (!groundingSignatureVerifies(r, publicKey)) continue;
+      byKind.set(r.ground.groundKind, { receipt: r, trustLabel: "valid-grounded" });
+    }
+  }
+  return { byKind, inProcessChainOk };
+}
+
+// src/core/bsc10-flag.ts
+function bsc10EnforcementEnabled() {
+  const raw = process.env.TH_BSC10_ENFORCE;
+  if (raw === void 0) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true";
+}
+
 // src/core/gate-preconditions.ts
 var PASS = { ok: true };
 function checkBlockingDrift(state) {
@@ -23877,7 +24161,7 @@ function checkGoverningArtifact(paths, state) {
     const produced = contract.produces.replace(/\/$/, "");
     const registered = state.approved_artifacts.some((a) => a.file === produced);
     if (!registered) {
-      const exists = fs26.existsSync(path25.resolve(paths.root, produced));
+      const exists = fs27.existsSync(path26.resolve(paths.root, produced));
       if (!exists) {
         return { ok: false, error: "artifact_not_produced", detail: { stage: current, produces: contract.produces } };
       }
@@ -23951,7 +24235,7 @@ function checkFinalVerification(paths, state) {
     const produced = contract.produces.replace(/\/$/, "");
     const registered = state.approved_artifacts.some((a) => a.file === produced);
     if (!registered) {
-      const exists = fs26.existsSync(path25.resolve(paths.root, produced));
+      const exists = fs27.existsSync(path26.resolve(paths.root, produced));
       return exists ? { ok: false, error: "report_not_registered", detail: { file: produced } } : { ok: false, error: "report_not_produced", detail: { produces: produced } };
     }
   }
@@ -24180,6 +24464,86 @@ function checkAssertionPresence(paths) {
   if (verdict.mutationEfficacy) res.mutationEfficacy = verdict.mutationEfficacy;
   return res;
 }
+function groundingConformanceOf(paths, receipt) {
+  const v = validateGroundingContent(paths, receipt);
+  if (v.status === "unobserved") return "unobserved";
+  if (v.status === "over-budget" || v.status === "stale" || v.status === "target_mismatch") return "over-budget";
+  return "within-budget";
+}
+function evaluateGrounding(paths, state) {
+  const validated = readGroundingValidated(paths);
+  const declaredClasses = [
+    ...new Set([...validated.byKind.values()].map((e) => e.receipt.workClass))
+  ].sort();
+  if (declaredClasses.length === 0) return null;
+  const surfaces = state.has_ui !== false ? ["ui"] : [];
+  const requiredSet = /* @__PURE__ */ new Set();
+  let crossCheckFlag;
+  for (const wc of declaredClasses) {
+    const req = requiredGroundKindsForWorkClass(wc, surfaces);
+    for (const k of req.required) requiredSet.add(k);
+    if (req.crossCheckFlag) crossCheckFlag = req.crossCheckFlag;
+  }
+  const required2 = [...requiredSet].sort();
+  if (required2.length === 0) return null;
+  const summary = [];
+  const offenders = [];
+  let worstReason = null;
+  const bump = (r) => {
+    const rank = { missing: 3, unobserved: 2, over_budget: 1 };
+    if (worstReason === null || rank[r] > rank[worstReason]) worstReason = r;
+  };
+  for (const kind of required2) {
+    const entry = validated.byKind.get(kind);
+    if (entry === void 0) {
+      summary.push({ groundKind: kind, grounded: false, trustLabel: "ungrounded", conformance: "missing", exceptionCovered: false });
+      offenders.push(kind);
+      bump("missing");
+      continue;
+    }
+    const conformance = groundingConformanceOf(paths, entry.receipt);
+    summary.push({
+      groundKind: kind,
+      grounded: true,
+      trustLabel: entry.trustLabel,
+      conformance,
+      exceptionCovered: false
+      // Slice-B wires signed-exception coverage; always false in slice-A.
+    });
+    if (conformance === "unobserved") {
+      offenders.push(kind);
+      bump("unobserved");
+    } else if (conformance === "over-budget") {
+      offenders.push(kind);
+      bump("over_budget");
+    }
+  }
+  if (worstReason === null) {
+    return crossCheckFlag ? { ok: true, required: required2, summary, crossCheckFlag } : { ok: true, required: required2, summary };
+  }
+  return crossCheckFlag ? { ok: false, reason: worstReason, required: required2, summary, offenders, crossCheckFlag } : { ok: false, reason: worstReason, required: required2, summary, offenders };
+}
+function groundingDetail(verdict) {
+  const detail = {
+    reason: verdict.reason,
+    offenders: verdict.offenders,
+    required: verdict.required
+  };
+  if (verdict.crossCheckFlag) detail.crossCheck = verdict.crossCheckFlag;
+  return detail;
+}
+function checkGrounding(verdict) {
+  if (verdict === null) return PASS;
+  if (verdict.ok) {
+    if (verdict.summary.length === 0 && verdict.crossCheckFlag === void 0) return PASS;
+    return { ok: true, grounding: verdict.summary };
+  }
+  const detail = groundingDetail(verdict);
+  if (!bsc10EnforcementEnabled()) {
+    return { ok: true, grounding: verdict.summary, notice: { token: "grounding_unverified", detail } };
+  }
+  return { ok: false, error: "grounding_unverified", detail, grounding: verdict.summary };
+}
 function checkProductionReality(paths, state) {
   if (!isFinalVerification(state.current_stage)) return PASS;
   let entries;
@@ -24215,6 +24579,8 @@ function checkProductionReality(paths, state) {
       };
     }
   }
+  const groundingVerdict = evaluateGrounding(paths, state);
+  const groundingBlocksAcceptance = groundingVerdict !== null && groundingVerdict.ok === false && (groundingVerdict.reason === "over_budget" || groundingVerdict.reason === "unobserved") && bsc10EnforcementEnabled();
   for (const stage of requiredHumanGateStages(state)) {
     const a = readApprovalValidated(paths, stage);
     if (a.status !== "valid" && a.status !== "valid-grounded" && a.status !== "legacy") {
@@ -24226,6 +24592,15 @@ function checkProductionReality(paths, state) {
           status: a.status,
           ...a.staleReasons ? { staleReasons: a.staleReasons } : {}
         }
+      };
+    }
+    if (groundingBlocksAcceptance) {
+      const v = groundingVerdict;
+      return {
+        ok: false,
+        error: "grounding_unverified",
+        detail: { stage, ...groundingDetail(v) },
+        grounding: v.summary
       };
     }
   }
@@ -24281,14 +24656,19 @@ function checkProductionReality(paths, state) {
   if (!assertion.ok) {
     return driver.dimensions ? { ...assertion, dimensions: driver.dimensions } : assertion;
   }
+  const grounding = checkGrounding(groundingVerdict);
+  if (!grounding.ok) {
+    return driver.dimensions ? { ...grounding, dimensions: driver.dimensions } : grounding;
+  }
   const merged = { ok: true };
   const dimensions = driver.dimensions ?? assertion.dimensions;
   if (dimensions) merged.dimensions = dimensions;
   if (assertion.assertionPresence) merged.assertionPresence = assertion.assertionPresence;
   if (assertion.mutationEfficacy) merged.mutationEfficacy = assertion.mutationEfficacy;
-  const notice = driver.notice ?? realization.notice ?? assertion.notice;
+  if (grounding.grounding) merged.grounding = grounding.grounding;
+  const notice = driver.notice ?? realization.notice ?? assertion.notice ?? grounding.notice;
   if (notice) merged.notice = notice;
-  return merged.dimensions || merged.assertionPresence || merged.mutationEfficacy || merged.notice ? merged : PASS;
+  return merged.dimensions || merged.assertionPresence || merged.mutationEfficacy || merged.grounding || merged.notice ? merged : PASS;
 }
 function stageOrdinal(stage) {
   const canonical = canonicalizeStage(stage);
@@ -24495,10 +24875,10 @@ function conflictPairs(slices) {
 }
 
 // src/core/leases.ts
-var fs27 = __toESM(require("node:fs"));
-var path26 = __toESM(require("node:path"));
+var fs28 = __toESM(require("node:fs"));
+var path27 = __toESM(require("node:path"));
 function leasesPath(paths) {
-  return path26.join(paths.stateDir, "build-leases.jsonl");
+  return path27.join(paths.stateDir, "build-leases.jsonl");
 }
 var LEASE_FIELD_ORDER = [
   "ts",
@@ -24518,9 +24898,9 @@ function serializeLeaseEvent(event) {
 }
 function readLeaseEvents(paths) {
   const file = leasesPath(paths);
-  if (!fs27.existsSync(file)) return [];
+  if (!fs28.existsSync(file)) return [];
   const out = [];
-  for (const line of fs27.readFileSync(file, "utf8").split(/\r?\n/)) {
+  for (const line of fs28.readFileSync(file, "utf8").split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
@@ -24538,9 +24918,9 @@ function readLeaseEvents(paths) {
 }
 function appendLeaseEvent(paths, event, now = () => /* @__PURE__ */ new Date()) {
   assertGovernedWriteSurface(paths.root, leasesPath(paths));
-  fs27.mkdirSync(paths.stateDir, { recursive: true });
+  fs28.mkdirSync(paths.stateDir, { recursive: true });
   const line = serializeLeaseEvent({ ts: now().toISOString(), ...event }) + "\n";
-  fs27.appendFileSync(leasesPath(paths), line, "utf8");
+  fs28.appendFileSync(leasesPath(paths), line, "utf8");
 }
 function activeLeases(paths) {
   const byOwner = /* @__PURE__ */ new Map();
@@ -24735,7 +25115,7 @@ function computeRoute(input) {
 }
 
 // src/core/brief.ts
-var fs28 = __toESM(require("node:fs"));
+var fs29 = __toESM(require("node:fs"));
 function isPlainObject5(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -24771,12 +25151,12 @@ function validateBrief(value) {
   return { ok: true, issues: [], brief: value };
 }
 function loadBriefFromFile(filePath) {
-  if (!fs28.existsSync(filePath)) {
+  if (!fs29.existsSync(filePath)) {
     return { ok: false, issues: [{ path: "$", message: `brief file not found: ${filePath}` }] };
   }
   let raw;
   try {
-    raw = fs28.readFileSync(filePath, "utf8");
+    raw = fs29.readFileSync(filePath, "utf8");
   } catch (e) {
     return { ok: false, issues: [{ path: "$", message: `could not read brief: ${e.message}` }] };
   }
@@ -25082,7 +25462,7 @@ function readLeaseEventsForParent(paths, parentSlice) {
 }
 
 // src/commands/coverage.ts
-var path27 = __toESM(require("node:path"));
+var path28 = __toESM(require("node:path"));
 function rejectEscapingPath(paths, opts) {
   const fields = [
     ["reqsFile", opts.reqsFile],
@@ -25101,13 +25481,13 @@ function rejectEscapingPath(paths, opts) {
 function runCoverageCheck(paths, opts = {}) {
   const escaped = rejectEscapingPath(paths, opts);
   if (escaped) return escaped;
-  const reqsAbs = path27.resolve(paths.root, opts.reqsFile ?? "docs/01-requirements.md");
-  const planAbs = path27.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
-  const testsAbs = path27.resolve(paths.root, opts.testsDir ?? "tests");
-  const scopeAbs = path27.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
+  const reqsAbs = path28.resolve(paths.root, opts.reqsFile ?? "docs/01-requirements.md");
+  const planAbs = path28.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  const testsAbs = path28.resolve(paths.root, opts.testsDir ?? "tests");
+  const scopeAbs = path28.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
   const reqsContent = readFileOrUndefined(reqsAbs);
   if (reqsContent === void 0) {
-    const rel = path27.relative(paths.root, reqsAbs).split(path27.sep).join("/");
+    const rel = path28.relative(paths.root, reqsAbs).split(path28.sep).join("/");
     return failure({
       human: `Requirements file not found: ${rel}. Run \`th init\` and author requirements first.`,
       data: { error: "reqs_file_not_found", reqsFile: rel }
@@ -25200,19 +25580,19 @@ function runCoverageReport(paths, opts = {}) {
 }
 
 // src/core/telemetry.ts
-var fs29 = __toESM(require("node:fs"));
-var path28 = __toESM(require("node:path"));
+var fs30 = __toESM(require("node:fs"));
+var path29 = __toESM(require("node:path"));
 function telemetryConfigPath(paths) {
-  return path28.join(paths.stateDir, "telemetry.json");
+  return path29.join(paths.stateDir, "telemetry.json");
 }
 function telemetryLogPath(paths) {
-  return path28.join(paths.stateDir, "telemetry.jsonl");
+  return path29.join(paths.stateDir, "telemetry.jsonl");
 }
 function readTelemetryConfig(paths) {
   const file = telemetryConfigPath(paths);
-  if (!fs29.existsSync(file)) return { enabled: false };
+  if (!fs30.existsSync(file)) return { enabled: false };
   try {
-    const parsed = JSON.parse(fs29.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs30.readFileSync(file, "utf8"));
     if (parsed && typeof parsed === "object" && typeof parsed.enabled === "boolean") {
       return { enabled: parsed.enabled };
     }
@@ -25224,8 +25604,8 @@ function appendTelemetry(paths, record2) {
   if (!readTelemetryConfig(paths).enabled) return;
   try {
     assertGovernedWriteSurface(paths.root, telemetryLogPath(paths));
-    fs29.mkdirSync(paths.stateDir, { recursive: true });
-    fs29.appendFileSync(telemetryLogPath(paths), JSON.stringify(record2) + "\n", "utf8");
+    fs30.mkdirSync(paths.stateDir, { recursive: true });
+    fs30.appendFileSync(telemetryLogPath(paths), JSON.stringify(record2) + "\n", "utf8");
   } catch {
   }
 }
@@ -25734,11 +26114,11 @@ why: ${next.why}` : `next: ${next.action}`;
 }
 
 // src/commands/delegate.ts
-var fs31 = __toESM(require("node:fs"));
+var fs32 = __toESM(require("node:fs"));
 
 // src/commands/context.ts
-var fs30 = __toESM(require("node:fs"));
-var path29 = __toESM(require("node:path"));
+var fs31 = __toESM(require("node:fs"));
+var path30 = __toESM(require("node:path"));
 
 // src/core/summary.ts
 var SUMMARY_HEADING_RE = /^(#{1,3})\s+summary\b/i;
@@ -25819,15 +26199,15 @@ function runContextPack(paths, opts = {}) {
   if (!r.state) return failure({ human: "state.json is invalid.", data: { error: "invalid_state", issues: r.issues } });
   const s = r.state;
   const packed = s.approved_artifacts.map((a) => {
-    const abs = path29.resolve(paths.root, a.file);
+    const abs = path30.resolve(paths.root, a.file);
     let exists = false;
     let isDir = false;
     let content = "";
-    if (fs30.existsSync(abs)) {
-      const stat = fs30.statSync(abs);
+    if (fs31.existsSync(abs)) {
+      const stat = fs31.statSync(abs);
       if (stat.isFile()) {
         exists = true;
-        content = fs30.readFileSync(abs, "utf8");
+        content = fs31.readFileSync(abs, "utf8");
       } else if (stat.isDirectory()) {
         exists = true;
         isDir = true;
@@ -25971,15 +26351,15 @@ function runContextRead(paths, opts = {}) {
   let running = 0;
   let budgetExhausted = false;
   for (const f of files) {
-    const relKey = path29.relative(paths.root, path29.resolve(paths.root, f)).split(path29.sep).join("/");
+    const relKey = path30.relative(paths.root, path30.resolve(paths.root, f)).split(path30.sep).join("/");
     const abs = resolveWithinRoot(paths.root, f);
-    if (abs === null || !fs30.existsSync(abs) || !fs30.statSync(abs).isFile()) {
+    if (abs === null || !fs31.existsSync(abs) || !fs31.statSync(abs).isFile()) {
       results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
       continue;
     }
     let content;
     try {
-      content = fs30.readFileSync(abs, "utf8");
+      content = fs31.readFileSync(abs, "utf8");
     } catch {
       results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
       continue;
@@ -26299,13 +26679,13 @@ function runDelegateCheck(paths, opts) {
         data: { error: "path_outside_root", file: opts.file }
       });
     }
-    if (!fs31.existsSync(abs) || !fs31.statSync(abs).isFile()) {
+    if (!fs32.existsSync(abs) || !fs32.statSync(abs).isFile()) {
       return failure({
         human: `Capsule file not found: ${opts.file}`,
         data: { error: "capsule_not_found", file: opts.file }
       });
     }
-    text = fs31.readFileSync(abs, "utf8");
+    text = fs32.readFileSync(abs, "utf8");
   }
   const v = validateCapsule(text);
   structuredLog({ cmd: "delegate check", ok: v.ok, missing: v.missing.length });
@@ -26406,10 +26786,10 @@ function runBudgetCheck(paths, opts = {}) {
 }
 
 // src/commands/handoff.ts
-var fs32 = __toESM(require("node:fs"));
-var path30 = __toESM(require("node:path"));
+var fs33 = __toESM(require("node:fs"));
+var path31 = __toESM(require("node:path"));
 function handoffPath(paths) {
-  return path30.join(paths.stateDir, "HANDOFF.md");
+  return path31.join(paths.stateDir, "HANDOFF.md");
 }
 var HANDOFF_STATE_OPEN = "<!-- TH-HANDOFF-STATE";
 var HANDOFF_STATE_CLOSE = "TH-HANDOFF-STATE -->";
@@ -26477,9 +26857,9 @@ function runHandoffWrite(paths) {
     HANDOFF_STATE_CLOSE,
     ""
   ].join("\n");
-  fs32.mkdirSync(paths.stateDir, { recursive: true });
+  fs33.mkdirSync(paths.stateDir, { recursive: true });
   atomicWriteFile(handoffPath(paths), md, { root: paths.root });
-  const relPath2 = path30.relative(paths.root, handoffPath(paths)).split(path30.sep).join("/");
+  const relPath2 = path31.relative(paths.root, handoffPath(paths)).split(path31.sep).join("/");
   structuredLog({ cmd: "handoff write", path: relPath2, slices: slices.length, artifacts: s.approved_artifacts.length });
   return success({
     data: {
@@ -26501,14 +26881,14 @@ function runHandoffWrite(paths) {
 }
 
 // src/commands/inspector.ts
-var path32 = __toESM(require("node:path"));
+var path33 = __toESM(require("node:path"));
 
 // src/commands/artifact.ts
-var fs33 = __toESM(require("node:fs"));
-var path31 = __toESM(require("node:path"));
+var fs34 = __toESM(require("node:fs"));
+var path32 = __toESM(require("node:path"));
 function toRelKey(root, file) {
-  const abs = path31.resolve(root, file);
-  return path31.relative(root, abs).split(path31.sep).join("/");
+  const abs = path32.resolve(root, file);
+  return path32.relative(root, abs).split(path32.sep).join("/");
 }
 function runArtifactRegister(paths, file, version2) {
   return withStateLock(paths, () => runArtifactRegisterLocked(paths, file, version2));
@@ -26522,10 +26902,10 @@ function runArtifactRegisterLocked(paths, file, version2) {
   if (abs === null) {
     return failure({ human: `Path outside project root: ${file}`, data: { error: "path_outside_root", file } });
   }
-  if (!fs33.existsSync(abs)) {
+  if (!fs34.existsSync(abs)) {
     return failure({ human: `File not found: ${file}`, data: { error: "file_not_found", file } });
   }
-  const stat = fs33.statSync(abs);
+  const stat = fs34.statSync(abs);
   if (!stat.isFile() && !stat.isDirectory()) {
     return failure({ human: `Not a file or directory: ${file}`, data: { error: "not_a_file_or_dir", file } });
   }
@@ -26554,7 +26934,7 @@ ${formatIssues(r.issues)}`,
   let summaryWarning = null;
   if (stat.isFile() && /\.(md|markdown)$/i.test(relKey)) {
     try {
-      const { summary } = extractSummary(fs33.readFileSync(abs, "utf8"));
+      const { summary } = extractSummary(fs34.readFileSync(abs, "utf8"));
       if (summary === null) {
         summaryWarning = `no \`## Summary\` block \u2014 \`th context pack\` will fall back to the file head; add a Summary block to keep the handoff tight.`;
       }
@@ -26640,14 +27020,14 @@ function runArtifactSection(paths, opts = {}) {
     structuredLog({ cmd: "artifact section", error: "path_outside_root", file: opts.file });
     return failure({ human: `Path outside project root: ${opts.file}`, data: { error: "path_outside_root", file: opts.file } });
   }
-  if (!fs33.existsSync(abs) || !fs33.statSync(abs).isFile()) {
+  if (!fs34.existsSync(abs) || !fs34.statSync(abs).isFile()) {
     structuredLog({ cmd: "artifact section", error: "file_not_found", file: opts.file });
     return failure({ human: `File not found: ${opts.file}`, data: { error: "file_not_found", file: opts.file } });
   }
   const relKey = toRelKey(paths.root, opts.file);
   let content;
   try {
-    content = fs33.readFileSync(abs, "utf8");
+    content = fs34.readFileSync(abs, "utf8");
   } catch {
     structuredLog({ cmd: "artifact section", error: "read_failed", file: relKey });
     return failure({ human: `Could not read ${relKey}`, data: { error: "read_failed", file: relKey } });
@@ -26747,7 +27127,7 @@ ${formatIssues(r.issues)}`,
   const guard = guardApprovedArtifactReauthor(r.state.approved_artifacts, INSPECTOR_ANALYSIS_FILE, opts.version, `inspector write ${INSPECTOR_ANALYSIS_FILE}`);
   if (!guard.ok) return guard.result;
   const version2 = guard.version;
-  const abs = path32.resolve(paths.root, INSPECTOR_ANALYSIS_FILE);
+  const abs = path33.resolve(paths.root, INSPECTOR_ANALYSIS_FILE);
   atomicWriteFile(abs, content, { root: paths.root });
   const reg = runArtifactRegister(paths, INSPECTOR_ANALYSIS_FILE, version2);
   if (!reg.ok) {
@@ -26762,11 +27142,11 @@ ${formatIssues(r.issues)}`,
   });
 }
 function normalizeRel(p) {
-  return p.split(path32.sep).join("/").replace(/^\.\//, "");
+  return p.split(path33.sep).join("/").replace(/^\.\//, "");
 }
 
 // src/commands/tester.ts
-var path33 = __toESM(require("node:path"));
+var path34 = __toESM(require("node:path"));
 function runTesterRecord(paths, opts) {
   const driver = (opts.driver ?? "").trim();
   if (driver === "") {
@@ -26801,7 +27181,7 @@ Pass --evidence-ref pointing at the live run's saved output (a readable file und
   const body = JSON.stringify(record2, null, 2) + "\n";
   atomicWriteFile(testerRecordPath(paths), body, { root: paths.root });
   const hash = shortHash(body);
-  const rel = path33.relative(paths.root, testerRecordPath(paths)).split(path33.sep).join("/");
+  const rel = path34.relative(paths.root, testerRecordPath(paths)).split(path34.sep).join("/");
   appendLedger(paths, { event: "tester-record", driver: record2.driver, provider: record2.provider ?? null, passed });
   structuredLog({ cmd: "tester record", driver: record2.driver, provider: record2.provider ?? null, passed });
   const gateNote = passed ? "The production-reality gate's Tester condition is now satisfied." : "NOTE: recorded as NOT passed (`--passed` absent) \u2014 the production-reality gate's Tester condition is NOT satisfied. Re-record with `--passed` once the live run is green.";
@@ -26813,7 +27193,7 @@ Pass --evidence-ref pointing at the live run's saved output (a readable file und
 }
 
 // src/commands/approve.ts
-var path34 = __toESM(require("node:path"));
+var path35 = __toESM(require("node:path"));
 function runApprove(paths, stage, opts = {}) {
   return withStateLock(paths, () => runApproveLocked(paths, stage, opts));
 }
@@ -26856,7 +27236,7 @@ function runApproveLocked(paths, stageArg, opts) {
     }
     throw e;
   }
-  const rel = path34.relative(paths.root, approvalReceiptsPath(paths)).split(path34.sep).join("/");
+  const rel = path35.relative(paths.root, approvalReceiptsPath(paths)).split(path35.sep).join("/");
   appendLedger(paths, { event: "approve", stage, approvalRecordHash: sealed.recordHash });
   structuredLog({ cmd: "approve", stage, approvalRecordHash: sealed.recordHash });
   return success({
@@ -26873,7 +27253,7 @@ function runApproveLocked(paths, stageArg, opts) {
 }
 
 // src/commands/driver.ts
-var path35 = __toESM(require("node:path"));
+var path36 = __toESM(require("node:path"));
 function runDriverRecord(paths, opts = {}) {
   return withStateLock(paths, () => runDriverRecordLocked(paths, opts));
 }
@@ -26907,7 +27287,7 @@ function runDriverRecordLocked(paths, opts) {
     }
     throw e;
   }
-  const rel = path35.relative(paths.root, driverReceiptsPath(paths)).split(path35.sep).join("/");
+  const rel = path36.relative(paths.root, driverReceiptsPath(paths)).split(path36.sep).join("/");
   const recorded = sealed.dimensions.map((d) => d.name);
   appendLedger(paths, { event: "driver-record", dimensions: recorded, driverRecordHash: sealed.recordHash });
   structuredLog({ cmd: "driver record", dimensions: recorded, driverRecordHash: sealed.recordHash });
@@ -26924,7 +27304,7 @@ function runDriverRecordLocked(paths, opts) {
 }
 
 // src/commands/realize.ts
-var path36 = __toESM(require("node:path"));
+var path37 = __toESM(require("node:path"));
 function runRealize(paths, opts = {}) {
   return withStateLock(paths, () => runRealizeLocked(paths, opts));
 }
@@ -26971,7 +27351,7 @@ function runRealizeLocked(paths, opts) {
     }
     throw e;
   }
-  const rel = path36.relative(paths.root, realizationReceiptsPath(paths)).split(path36.sep).join("/");
+  const rel = path37.relative(paths.root, realizationReceiptsPath(paths)).split(path37.sep).join("/");
   appendLedger(paths, {
     event: "realize",
     reqId,
@@ -26997,7 +27377,7 @@ function runRealizeLocked(paths, opts) {
 }
 
 // src/commands/assertion-presence.ts
-var path37 = __toESM(require("node:path"));
+var path38 = __toESM(require("node:path"));
 function runAssertionPresenceRecord(paths, opts = {}) {
   return withStateLock(paths, () => runAssertionPresenceRecordLocked(paths, opts));
 }
@@ -27013,7 +27393,7 @@ function runAssertionPresenceRecordLocked(paths, opts) {
   const sealed = appendAssertionPresenceReceipt(paths, {
     producerIdentity: opts.producerIdentity ?? "cli:th assertion-presence record"
   });
-  const rel = path37.relative(paths.root, assertionPresenceReceiptsPath(paths)).split(path37.sep).join("/");
+  const rel = path38.relative(paths.root, assertionPresenceReceiptsPath(paths)).split(path38.sep).join("/");
   const reqs = sealed.ground.length;
   const assertionFree = sealed.ground.filter((g) => g.assertionFree).length;
   appendLedger(paths, {
@@ -27034,9 +27414,147 @@ function runAssertionPresenceRecordLocked(paths, opts) {
   });
 }
 
+// src/commands/grounding.ts
+var path39 = __toESM(require("node:path"));
+function runGroundingRecord(paths, opts = {}) {
+  return withStateLock(paths, () => runGroundingRecordLocked(paths, opts));
+}
+function runGroundingRecordLocked(paths, opts) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: "state.json is invalid; fix it before recording a grounding receipt.",
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const groundKind = (opts.groundKind ?? "").trim();
+  if (groundKind === "") {
+    return failure({
+      human: "Usage: th grounding record --ground-kind <digest-manifest|version-pin|visual-hash> --work-class <c> [...].\nThe --ground-kind discriminant is required.",
+      data: { error: "grounding_kind_missing" }
+    });
+  }
+  const workClass = (opts.workClass ?? "").trim();
+  if (workClass === "") {
+    return failure({
+      human: "Usage: th grounding record --ground-kind <k> --work-class <c> [...].\nThe --work-class field is required (drives the required-ground matrix).",
+      data: { error: "grounding_work_class_missing" }
+    });
+  }
+  let ground;
+  switch (groundKind) {
+    case "digest-manifest": {
+      const manifestDigest = (opts.manifestDigest ?? "").trim();
+      if (manifestDigest === "") {
+        return failure({
+          human: "Usage: th grounding record --ground-kind digest-manifest --manifest-digest <d> --work-class <c>.\n--manifest-digest is required for ground kind 'digest-manifest'.",
+          data: { error: "grounding_manifest_digest_missing" }
+        });
+      }
+      ground = { groundKind: "digest-manifest", manifestDigest };
+      break;
+    }
+    case "version-pin": {
+      const pkg = (opts.pkg ?? "").trim();
+      const version2 = (opts.pinVersion ?? "").trim();
+      if (pkg === "" || version2 === "") {
+        return failure({
+          human: "Usage: th grounding record --ground-kind version-pin --pkg <p> --pin-version <v> --work-class <c>.\n--pkg and --pin-version are both required for ground kind 'version-pin'.",
+          data: { error: "grounding_version_pin_fields_missing" }
+        });
+      }
+      ground = { groundKind: "version-pin", pkg, version: version2 };
+      break;
+    }
+    case "visual-hash": {
+      const perceptualHash = (opts.perceptualHash ?? "").trim();
+      if (perceptualHash === "") {
+        return failure({
+          human: "Usage: th grounding record --ground-kind visual-hash --perceptual-hash <h> --work-class <c>.\n--perceptual-hash is required for ground kind 'visual-hash'.",
+          data: { error: "grounding_perceptual_hash_missing" }
+        });
+      }
+      const renderer = (opts.renderer ?? "").trim() || void 0;
+      ground = { groundKind: "visual-hash", perceptualHash, ...renderer ? { renderer } : {} };
+      break;
+    }
+    default:
+      return failure({
+        human: `Unknown --ground-kind value: "${groundKind}". Must be one of: digest-manifest, version-pin, visual-hash.`,
+        data: { error: "grounding_kind_unknown", groundKind }
+      });
+  }
+  const sealed = appendGroundingReceipt(paths, {
+    workClass,
+    ground,
+    producerIdentity: opts.producerIdentity ?? "cli:th grounding record"
+  });
+  const rel = path39.relative(paths.root, groundingReceiptsPath(paths)).split(path39.sep).join("/");
+  appendLedger(paths, {
+    event: "grounding-record",
+    groundKind,
+    workClass,
+    groundingRecordHash: sealed.recordHash
+  });
+  structuredLog({ cmd: "grounding record", groundKind, workClass, groundingRecordHash: sealed.recordHash });
+  return success({
+    data: {
+      file: rel,
+      groundKind,
+      workClass,
+      producer_kind: sealed.producer_kind ?? "in-process",
+      recordHash: sealed.recordHash
+    },
+    human: `Recorded an in-process grounding receipt at ${rel} (groundKind: ${groundKind}, workClass: ${workClass}). NOTE: this in-process record is ATTRIBUTION-ONLY (zero trust weight) \u2014 the agent can mint it; independent grounding requires the Slice-B external Ed25519-signed producer.`,
+    receipts: [{ file: rel, hash: sealed.recordHash }]
+  });
+}
+function runGroundingCheck(paths, _opts = {}) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: "state.json is invalid; fix it before checking grounding receipts.",
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const rawReceipts = readGroundingReceipts(paths);
+  const chainResult = verifyGroundingChain(rawReceipts);
+  const validated = readGroundingValidated(paths);
+  const total = rawReceipts.length;
+  const chainOk = chainResult.ok;
+  const byKindSummary = Array.from(validated.byKind.entries()).map(([groundKind, entry]) => ({
+    groundKind,
+    recordHash: entry.receipt.recordHash,
+    trustLabel: entry.trustLabel,
+    workClass: entry.receipt.workClass
+  }));
+  structuredLog({
+    cmd: "grounding check",
+    total,
+    chainOk,
+    inProcessChainOk: validated.inProcessChainOk,
+    byKindCount: validated.byKind.size
+  });
+  return success({
+    data: {
+      total,
+      chainOk,
+      inProcessChainOk: validated.inProcessChainOk,
+      ...!chainOk ? {
+        chainBrokenAt: chainResult.brokenAt,
+        chainBreakReason: chainResult.reason
+      } : {},
+      byKind: byKindSummary
+    },
+    human: `Grounding receipts: ${total} total; chain ${chainOk ? "OK" : "BROKEN"}` + (!chainOk ? ` (broken at index ${chainResult.brokenAt}, reason: ${chainResult.reason})` : "") + `; ${validated.byKind.size} trusted kind(s): ${byKindSummary.map((e) => e.groundKind).join(", ") || "(none)"}. (Read-only \u2014 no state written.)`
+  });
+}
+
 // src/commands/decision.ts
-var fs34 = __toESM(require("node:fs"));
-var path38 = __toESM(require("node:path"));
+var fs35 = __toESM(require("node:fs"));
+var path40 = __toESM(require("node:path"));
 
 // src/core/decision-key.ts
 function resolveDecisionKey() {
@@ -27095,14 +27613,14 @@ function firstHeading(body) {
 }
 function runDecisionDetect(paths, _opts = {}) {
   const candidates = [];
-  const adrDir = path38.join(paths.docsDir, "05-adrs");
+  const adrDir = path40.join(paths.docsDir, "05-adrs");
   try {
-    const entries = fs34.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
+    const entries = fs35.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
     for (const f of entries) {
-      const rel = path38.posix.join("docs/05-adrs", f);
+      const rel = path40.posix.join("docs/05-adrs", f);
       let title = f;
       try {
-        const heading = firstHeading(fs34.readFileSync(path38.join(adrDir, f), "utf8"));
+        const heading = firstHeading(fs35.readFileSync(path40.join(adrDir, f), "utf8"));
         if (heading) title = heading;
       } catch {
       }
@@ -27111,7 +27629,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const driftBody = fs34.readFileSync(paths.driftLog, "utf8");
+    const driftBody = fs35.readFileSync(paths.driftLog, "utf8");
     const seen = /* @__PURE__ */ new Set();
     for (const line of driftBody.split(/\r?\n/)) {
       const m = /^##\s+(DRIFT-\d+)\b(.*)$/.exec(line);
@@ -27130,7 +27648,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const scopeBody = fs34.readFileSync(path38.join(paths.docsDir, "02-scope.md"), "utf8");
+    const scopeBody = fs35.readFileSync(path40.join(paths.docsDir, "02-scope.md"), "utf8");
     if (/(^##\s+Changes\b)|(^\s*(ADDED|CHANGED):)/m.test(scopeBody)) {
       candidates.push({
         title: "Scope signal: a post-requirements scope change is recorded",
@@ -27245,15 +27763,15 @@ function sealWarningData(events) {
 }
 
 // src/commands/template.ts
-var fs35 = __toESM(require("node:fs"));
-var path39 = __toESM(require("node:path"));
+var fs36 = __toESM(require("node:fs"));
+var path41 = __toESM(require("node:path"));
 var TEMPLATE_EXT = ".md";
-var PROJECT_TEMPLATE_REL = path39.join(".twinharness", "templates");
+var PROJECT_TEMPLATE_REL = path41.join(".twinharness", "templates");
 var PLUGIN_TEMPLATE_REL = "templates";
 function pluginRoot() {
   const env = process.env.CLAUDE_PLUGIN_ROOT;
-  if (typeof env === "string" && env.length > 0) return path39.resolve(env);
-  return path39.resolve(__dirname, "..", "..");
+  if (typeof env === "string" && env.length > 0) return path41.resolve(env);
+  return path41.resolve(__dirname, "..", "..");
 }
 function normalizeTemplateName(name) {
   const trimmed = name.trim();
@@ -27264,15 +27782,15 @@ function normalizeTemplateName(name) {
   return trimmed.toLowerCase().endsWith(TEMPLATE_EXT) ? trimmed : trimmed + TEMPLATE_EXT;
 }
 function resolve18(name, projectRoot, plugin) {
-  const projectPath = path39.join(projectRoot, PROJECT_TEMPLATE_REL, name);
-  const pluginPath = path39.join(plugin, PLUGIN_TEMPLATE_REL, name);
+  const projectPath = path41.join(projectRoot, PROJECT_TEMPLATE_REL, name);
+  const pluginPath = path41.join(plugin, PLUGIN_TEMPLATE_REL, name);
   for (const [abs, source] of [
     [projectPath, "project-override"],
     [pluginPath, "plugin-bundled"]
   ]) {
     try {
-      const st = fs35.statSync(abs);
-      if (st.isFile()) return { path: abs, content: fs35.readFileSync(abs, "utf8"), source };
+      const st = fs36.statSync(abs);
+      if (st.isFile()) return { path: abs, content: fs36.readFileSync(abs, "utf8"), source };
     } catch {
     }
   }
@@ -27307,17 +27825,17 @@ function runTemplateGet(paths, name) {
   });
 }
 function listTemplateDir(dir) {
-  if (!fs35.existsSync(dir)) return [];
+  if (!fs36.existsSync(dir)) return [];
   try {
-    if (!fs35.statSync(dir).isDirectory()) return [];
-    return fs35.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(TEMPLATE_EXT)).map((e) => e.name);
+    if (!fs36.statSync(dir).isDirectory()) return [];
+    return fs36.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(TEMPLATE_EXT)).map((e) => e.name);
   } catch {
     return [];
   }
 }
 function runTemplateList(paths) {
-  const projectDir = path39.join(paths.root, PROJECT_TEMPLATE_REL);
-  const pluginDir = path39.join(pluginRoot(), PLUGIN_TEMPLATE_REL);
+  const projectDir = path41.join(paths.root, PROJECT_TEMPLATE_REL);
+  const pluginDir = path41.join(pluginRoot(), PLUGIN_TEMPLATE_REL);
   const projectNames = new Set(listTemplateDir(projectDir));
   const pluginNames = new Set(listTemplateDir(pluginDir));
   const byName = /* @__PURE__ */ new Map();
@@ -27415,10 +27933,10 @@ function runArtifactLeases(paths) {
 }
 
 // src/core/collab.ts
-var fs36 = __toESM(require("node:fs"));
-var path40 = __toESM(require("node:path"));
+var fs37 = __toESM(require("node:fs"));
+var path42 = __toESM(require("node:path"));
 function validatePathSegment(segment, label) {
-  if (path40.isAbsolute(segment)) {
+  if (path42.isAbsolute(segment)) {
     throw new PathContainmentError(`collab: ${label} must not be an absolute path: "${segment}"`, segment);
   }
   if (segment === ".." || segment.includes("/") || segment.includes("\\")) {
@@ -27439,16 +27957,16 @@ var FragmentExistsError = class extends Error {
 function collabDir(paths, stage, round) {
   validatePathSegment(stage, "stage");
   if (round !== void 0) validatePathSegment(round, "round");
-  const base = path40.join(paths.stateDir, "collab", stage);
-  return round === void 0 ? base : path40.join(base, round);
+  const base = path42.join(paths.stateDir, "collab", stage);
+  return round === void 0 ? base : path42.join(base, round);
 }
 function writeFragment(paths, input) {
   validatePathSegment(input.name, "name");
   const dir = collabDir(paths, input.stage, input.round);
-  const file = path40.join(dir, input.name);
-  fs36.mkdirSync(dir, { recursive: true });
+  const file = path42.join(dir, input.name);
+  fs37.mkdirSync(dir, { recursive: true });
   try {
-    fs36.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
+    fs37.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
   } catch (e) {
     if (e.code === "EEXIST") throw new FragmentExistsError(file);
     throw e;
@@ -27459,10 +27977,10 @@ function listFragments(paths, stage, round) {
   const out = [];
   const readRound = (r) => {
     const dir = collabDir(paths, stage, r);
-    if (!fs36.existsSync(dir) || !fs36.statSync(dir).isDirectory()) return;
-    const names = fs36.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
+    if (!fs37.existsSync(dir) || !fs37.statSync(dir).isDirectory()) return;
+    const names = fs37.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
     for (const name of names) {
-      out.push({ stage, round: r, name, path: path40.join(dir, name) });
+      out.push({ stage, round: r, name, path: path42.join(dir, name) });
     }
   };
   if (round !== void 0) {
@@ -27470,8 +27988,8 @@ function listFragments(paths, stage, round) {
     return out;
   }
   const stageDir = collabDir(paths, stage);
-  if (!fs36.existsSync(stageDir) || !fs36.statSync(stageDir).isDirectory()) return out;
-  const rounds = fs36.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  if (!fs37.existsSync(stageDir) || !fs37.statSync(stageDir).isDirectory()) return out;
+  const rounds = fs37.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
   for (const r of rounds) readRound(r);
   return out;
 }
@@ -27480,14 +27998,14 @@ function mergeFragments(paths, stage, round) {
   const fragments = listFragments(paths, stage, round);
   const unanchored = [];
   for (const f of fragments) {
-    const content = fs36.readFileSync(f.path, "utf8");
+    const content = fs37.readFileSync(f.path, "utf8");
     if (extractReqIds(content).length === 0) unanchored.push(f.name);
   }
   if (unanchored.length > 0) {
     return { ok: false, merged: "", fragments, unanchored };
   }
   const parts = fragments.map((f) => {
-    const content = fs36.readFileSync(f.path, "utf8");
+    const content = fs37.readFileSync(f.path, "utf8");
     return content.endsWith("\n") ? content : `${content}
 `;
   });
@@ -27600,8 +28118,8 @@ function runCollabMerge(paths, opts) {
 }
 
 // src/commands/debate.ts
-var fs37 = __toESM(require("node:fs"));
-var path41 = __toESM(require("node:path"));
+var fs38 = __toESM(require("node:fs"));
+var path43 = __toESM(require("node:path"));
 
 // src/core/debate-log.ts
 var DEBATE_LEDGER = {
@@ -27669,22 +28187,22 @@ Links      : ...
 \`\`\`
 `;
 function debateLogPath(paths) {
-  return path41.join(paths.root, "debate-log.md");
+  return path43.join(paths.root, "debate-log.md");
 }
 function readDebateLog(paths) {
   const file = debateLogPath(paths);
-  if (!fs37.existsSync(file)) {
+  if (!fs38.existsSync(file)) {
     atomicWriteFile(file, DEBATE_LOG_HEADER, { root: paths.root });
     return DEBATE_LOG_HEADER;
   }
-  return fs37.readFileSync(file, "utf8");
+  return fs38.readFileSync(file, "utf8");
 }
 function appendDebateLog(paths, block) {
   const file = debateLogPath(paths);
   readDebateLog(paths);
   assertGovernedWriteSurface(paths.root, file);
-  const sep24 = endsWithNewline(file) ? "" : "\n";
-  fs37.appendFileSync(file, `${sep24}${block}`, "utf8");
+  const sep25 = endsWithNewline(file) ? "" : "\n";
+  fs38.appendFileSync(file, `${sep25}${block}`, "utf8");
 }
 function runDebateAdd(paths, opts) {
   const locked = assertFeatureUnlocked(paths, "debate");
@@ -27747,7 +28265,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs37.existsSync(file) ? fs37.readFileSync(file, "utf8") : "";
+  const text = fs38.existsSync(file) ? fs38.readFileSync(file, "utf8") : "";
   const entries = sortById(effectiveEntries(parseDebateEntries(text)));
   const openBlocking = r.state.debate_open_blocking ?? 0;
   const human = entries.length ? entries.map((e) => `${e.id}  (${e.topic})  ${e.status}`).join("\n") : "(no debate entries)";
@@ -27783,7 +28301,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs37.existsSync(file) ? fs37.readFileSync(file, "utf8") : "";
+  const text = fs38.existsSync(file) ? fs38.readFileSync(file, "utf8") : "";
   const entries = parseDebateEntries(text);
   const entry = entries.find((e) => e.id === id);
   if (!entry) {
@@ -27829,7 +28347,7 @@ ${formatIssues(r.issues)}`,
 }
 
 // src/commands/init.ts
-var fs38 = __toESM(require("node:fs"));
+var fs39 = __toESM(require("node:fs"));
 var DRIFT_LOG_HEADER2 = `# Drift Log
 
 Append-only record of implementation discoveries (spec \xA710). Each entry records the
@@ -27864,11 +28382,11 @@ function runInit(paths, opts) {
   const created = [];
   const skipped = [];
   const maxTokens = opts.maxTokens !== void 0 && Number.isFinite(opts.maxTokens) && opts.maxTokens > 0 ? kToTokens(opts.maxTokens) : void 0;
-  if (!fs38.existsSync(paths.docsDir)) {
-    fs38.mkdirSync(paths.docsDir, { recursive: true });
+  if (!fs39.existsSync(paths.docsDir)) {
+    fs39.mkdirSync(paths.docsDir, { recursive: true });
     created.push("docs/");
   }
-  fs38.mkdirSync(paths.stateDir, { recursive: true });
+  fs39.mkdirSync(paths.stateDir, { recursive: true });
   const existing = readState(paths);
   if (existing.exists && !opts.force) {
     if (maxTokens !== void 0 && existing.state) {
@@ -27894,7 +28412,7 @@ ${formatIssues(validation.issues)}`,
     writeState(paths, state);
     created.push(".twinharness/state.json");
   }
-  if (!fs38.existsSync(paths.driftLog)) {
+  if (!fs39.existsSync(paths.driftLog)) {
     atomicWriteFile(paths.driftLog, DRIFT_LOG_HEADER2, { root: paths.root });
     created.push("drift-log.md");
   } else {
@@ -27938,7 +28456,7 @@ function runInitMcp(paths, opts = {}) {
 }
 
 // src/commands/research.ts
-var path42 = __toESM(require("node:path"));
+var path44 = __toESM(require("node:path"));
 var WINDOWS_RESERVED = /* @__PURE__ */ new Set([
   "con",
   "prn",
@@ -27967,7 +28485,7 @@ function sanitizeTopic(topic) {
   const raw = topic.trim();
   if (raw === "") return { error: "empty topic" };
   if (raw.includes("/") || raw.includes("\\")) return { error: "topic must not contain a path separator" };
-  if (path42.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) return { error: "topic must not be an absolute or drive path" };
+  if (path44.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) return { error: "topic must not be an absolute or drive path" };
   if (raw.includes("..")) return { error: "topic must not contain `..`" };
   const stem = raw.replace(/\.(md|markdown)$/i, "");
   if (stem === "") return { error: "empty topic" };
@@ -27993,8 +28511,8 @@ function runResearchWrite(paths, opts) {
     return failure({ human: `Refusing research write: ${sanitized.error}: ${topic}`, data: { error: "invalid_topic", reason: sanitized.error, topic } });
   }
   const relTarget = `${RESEARCH_DIR}/${sanitized.stem}.md`;
-  const absTarget = path42.resolve(paths.root, relTarget);
-  const reRel = path42.relative(paths.root, absTarget).split(path42.sep).join("/");
+  const absTarget = path44.resolve(paths.root, relTarget);
+  const reRel = path44.relative(paths.root, absTarget).split(path44.sep).join("/");
   if (reRel !== relTarget) {
     return failure({ human: `Refusing research write outside ${RESEARCH_DIR}/: ${reRel}`, data: { error: "path_not_pinned", expected: relTarget, got: reRel } });
   }
@@ -28185,11 +28703,11 @@ function runStageCurrent(paths) {
 }
 
 // src/commands/doctor.ts
-var fs39 = __toESM(require("node:fs"));
-var path43 = __toESM(require("node:path"));
+var fs40 = __toESM(require("node:fs"));
+var path45 = __toESM(require("node:path"));
 var DOCTOR_STRICT_KEY_ALLOWLIST = /* @__PURE__ */ new Set([]);
 function pluginRoot2() {
-  return path43.resolve(__dirname, "..", "..");
+  return path45.resolve(__dirname, "..", "..");
 }
 function packagingCheck(root, files) {
   if (files.length === 0) {
@@ -28198,10 +28716,10 @@ function packagingCheck(root, files) {
   const missing = [];
   const counts = [];
   for (const entry of files) {
-    const abs = path43.join(root, entry);
+    const abs = path45.join(root, entry);
     let st;
     try {
-      st = fs39.statSync(abs);
+      st = fs40.statSync(abs);
     } catch {
       missing.push(entry);
       continue;
@@ -28209,7 +28727,7 @@ function packagingCheck(root, files) {
     if (st.isDirectory()) {
       let n = 0;
       try {
-        n = fs39.readdirSync(abs).length;
+        n = fs40.readdirSync(abs).length;
       } catch {
       }
       counts.push(`${entry}/ (${n})`);
@@ -28231,12 +28749,12 @@ function nodeMajor() {
   return m ? Number(m[1]) : 0;
 }
 function templateShadowCheck(root, pluginDir) {
-  const projectDir = path43.join(root, ".twinharness", "templates");
+  const projectDir = path45.join(root, ".twinharness", "templates");
   const mdFiles = (dir) => {
     try {
-      if (!fs39.statSync(dir).isDirectory()) return /* @__PURE__ */ new Set();
+      if (!fs40.statSync(dir).isDirectory()) return /* @__PURE__ */ new Set();
       return new Set(
-        fs39.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => e.name)
+        fs40.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => e.name)
       );
     } catch {
       return /* @__PURE__ */ new Set();
@@ -28258,7 +28776,7 @@ function templateShadowCheck(root, pluginDir) {
   };
 }
 function ledgerChecks(paths, opts) {
-  if (!fs39.existsSync(ledgerPath(paths))) return [];
+  if (!fs40.existsSync(ledgerPath(paths))) return [];
   const ledgerEntries = readLedger(paths);
   const ledgerCount = ledgerEntries.length;
   const anchors = ledgerEntries.filter((e) => e.event === "high-water").length;
@@ -28302,23 +28820,23 @@ function runDoctor(paths, opts = {}) {
     detail: major >= 20 ? `${process.version} (>= 20)` : `${process.version} \u2014 TwinHarness requires Node >= 20`
   });
   const root = pluginRoot2();
-  const distCli = path43.join(root, "dist", "cli.js");
+  const distCli = path45.join(root, "dist", "cli.js");
   checks.push({
     name: "plugin cli",
-    status: fs39.existsSync(distCli) ? "ok" : "warn",
-    detail: fs39.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary"
+    status: fs40.existsSync(distCli) ? "ok" : "warn",
+    detail: fs40.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary"
   });
   let version2 = "unknown";
   let pkgFiles = [];
   try {
-    const pkg = JSON.parse(fs39.readFileSync(path43.join(root, "package.json"), "utf8"));
+    const pkg = JSON.parse(fs40.readFileSync(path45.join(root, "package.json"), "utf8"));
     if (typeof pkg.version === "string") version2 = pkg.version;
     if (Array.isArray(pkg.files)) pkgFiles = pkg.files.filter((f) => typeof f === "string");
   } catch {
   }
   checks.push({ name: "version", status: "ok", detail: version2 });
   checks.push(packagingCheck(root, pkgFiles));
-  checks.push(templateShadowCheck(paths.root, path43.join(root, "templates")));
+  checks.push(templateShadowCheck(paths.root, path45.join(root, "templates")));
   checks.push({
     name: "claude code",
     status: "warn",
@@ -28354,11 +28872,11 @@ function runDoctor(paths, opts = {}) {
       status: "ok",
       detail: `mode: ${writeMode} \u2014 GUARDRAIL for a compliant agent, NOT a security sandbox. The Bash heuristic is conservative and fail-open (unparsed here-docs/subshells/variable indirection and program-mediated writes like \`python -c\`/\`node -e\` bypass it). Do not run TwinHarness against untrusted repos and review \`th verify list\` before \`th verify run\`.`
     });
-    const lockDir = path43.join(paths.stateDir, ".state.lock");
-    if (fs39.existsSync(lockDir)) {
+    const lockDir = path45.join(paths.stateDir, ".state.lock");
+    if (fs40.existsSync(lockDir)) {
       let age = 0;
       try {
-        age = Date.now() - fs39.statSync(lockDir).mtimeMs;
+        age = Date.now() - fs40.statSync(lockDir).mtimeMs;
       } catch {
       }
       checks.push({
@@ -28487,7 +29005,7 @@ function runDoctor(paths, opts = {}) {
 }
 
 // src/commands/scorecard.ts
-var fs40 = __toESM(require("node:fs"));
+var fs41 = __toESM(require("node:fs"));
 function summarizeRouting(paths) {
   const models = {};
   let events = 0;
@@ -28577,8 +29095,8 @@ function runScorecard(paths, opts) {
   const suiteFailures = report ? report.results.filter((x) => !x.ok).length : 0;
   let driftEntries = 0;
   try {
-    if (fs40.existsSync(paths.driftLog)) {
-      driftEntries = parseDriftEntries(fs40.readFileSync(paths.driftLog, "utf8")).length;
+    if (fs41.existsSync(paths.driftLog)) {
+      driftEntries = parseDriftEntries(fs41.readFileSync(paths.driftLog, "utf8")).length;
     }
   } catch {
   }
@@ -28642,8 +29160,8 @@ function renderScorecard(d) {
 }
 
 // src/commands/slices.ts
-var fs41 = __toESM(require("node:fs"));
-var path44 = __toESM(require("node:path"));
+var fs42 = __toESM(require("node:fs"));
+var path46 = __toESM(require("node:path"));
 function parseComponentTokens(raw) {
   const quoted = [];
   for (const m of raw.matchAll(/`([^`]+)`/g)) {
@@ -28694,15 +29212,15 @@ function runSlicesSync(paths, opts = {}) {
   return withStateLock(paths, () => runSlicesSyncLocked(paths, opts));
 }
 function runSlicesSyncLocked(paths, opts = {}) {
-  const planAbs = path44.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
-  if (!fs41.existsSync(planAbs) || !fs41.statSync(planAbs).isFile()) {
-    const rel = path44.relative(paths.root, planAbs).split(path44.sep).join("/");
+  const planAbs = path46.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  if (!fs42.existsSync(planAbs) || !fs42.statSync(planAbs).isFile()) {
+    const rel = path46.relative(paths.root, planAbs).split(path46.sep).join("/");
     return failure({
       human: `Plan file not found: ${rel}. Provide the path with --plan or author the implementation plan first.`,
       data: { error: "plan_file_not_found", planFile: rel }
     });
   }
-  const planContent = fs41.readFileSync(planAbs, "utf8");
+  const planContent = fs42.readFileSync(planAbs, "utf8");
   const planSlices = parsePlanSlices(planContent);
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
@@ -30168,6 +30686,51 @@ var TOOL_DEFS = [
       additionalProperties: false
     },
     run: (paths, args) => runAssertionPresenceRecord(paths, { producerIdentity: optString(args, "identity") })
+  },
+  // Axis-B slice-A (BSC-10) — in-process external-reference grounding producer. The SENSOR
+  // that records a GroundingReceipt (digest-manifest / version-pin / visual-hash) grounding
+  // the BSC-10 rung. Registration is ALWAYS-ON (parity with the CLI `th grounding record`);
+  // the TH_BSC10_ENFORCE flag governs ENFORCEMENT only (default OFF in Slice A / WARN).
+  {
+    name: "th_grounding_record",
+    description: "Axis-B/BSC-10 (Slice A): mint the IN-PROCESS external-reference grounding receipt the production-reality grounding rung reads (<stateDir>/grounding-receipts.jsonl, hash-chained, under the state lock). `groundKind` is required and must be one of `digest-manifest`, `version-pin`, or `visual-hash`; supply the matching kind-specific fields (manifestDigest / pkg+version / perceptualHash+renderer). ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its trust label is `valid` NEVER `valid-grounded` \u2014 independent grounding arrives only with the Slice-B external Ed25519-signed producer. Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        groundKind: stringProp("Ground kind discriminant: 'digest-manifest' | 'version-pin' | 'visual-hash'. Required."),
+        workClass: stringProp("Work-class this receipt is minted for (drives the required-ground matrix). Required."),
+        manifestDigest: stringProp("For digest-manifest: the manifest digest string."),
+        pkg: stringProp("For version-pin: the package name."),
+        pinVersion: stringProp("For version-pin: the pinned version string (named pinVersion to avoid collision with the numeric artifact --version flag)."),
+        perceptualHash: stringProp("For visual-hash: the perceptual hash string."),
+        renderer: stringProp("For visual-hash: optional renderer identifier."),
+        identity: stringProp("Producer identity to record (attribution-only, zero trust weight; defaults to cli:th grounding record).")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runGroundingRecord(paths, {
+      groundKind: optString(args, "groundKind"),
+      workClass: optString(args, "workClass"),
+      manifestDigest: optString(args, "manifestDigest"),
+      pkg: optString(args, "pkg"),
+      pinVersion: optString(args, "pinVersion"),
+      perceptualHash: optString(args, "perceptualHash"),
+      renderer: optString(args, "renderer"),
+      producerIdentity: optString(args, "identity")
+    })
+  },
+  // Axis-B slice-A (BSC-10) — read-only grounding chain validator. Recomputes and validates
+  // the grounding receipt chain; appends NOTHING and leaves NO breadcrumb file. This is a
+  // pure read: the write-surface snapshot must show zero delta for this tool.
+  {
+    name: "th_grounding_check",
+    description: "Axis-B/BSC-10 (Slice A): READ-ONLY validator \u2014 recompute and validate the grounding receipt chain (<stateDir>/grounding-receipts.jsonl) and return a summary ({total, chainStatus, receipts[]}). Appends NOTHING; leaves NO breadcrumb file; the write-surface snapshot shows zero delta for this tool. Use `th_grounding_record` to append receipts. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false
+    },
+    run: (paths, _args) => runGroundingCheck(paths, {})
   }
 ];
 var ro = (category) => ({ category, readOnlyHint: true, destructiveHint: false, idempotentHint: true });
@@ -30302,7 +30865,12 @@ var TOOL_ANNOTATIONS = {
   th_realize: wr("slices", { idempotent: false }),
   // Axis-B/BSC-2 (2a) — in-process assertion-presence producer. NOT idempotent: each call appends
   // a fresh hash-chained receipt to assertion-presence-receipts.jsonl under the state dir.
-  th_assertion_presence_record: wr("coverage", { idempotent: false })
+  th_assertion_presence_record: wr("coverage", { idempotent: false }),
+  // Axis-B/BSC-10 (Slice A) — in-process external-reference grounding producer. NOT idempotent:
+  // each call appends a fresh hash-chained grounding receipt to grounding-receipts.jsonl.
+  th_grounding_record: wr("grounding", { idempotent: false }),
+  // Axis-B/BSC-10 (Slice A) — read-only grounding chain validator. Appends nothing; pure read.
+  th_grounding_check: ro("grounding")
 };
 function toolAnnotations(name) {
   return TOOL_ANNOTATIONS[name];
@@ -30426,6 +30994,8 @@ var CLI_COMMAND_LEAVES = [
   "approve",
   "realize",
   "assertion-presence record",
+  "grounding record",
+  "grounding check",
   "gate production-reality",
   "collab init",
   "collab fragment",
@@ -30506,13 +31076,13 @@ function listTools() {
 var SERVER_NAME = "twinharness-th";
 function readServerVersion() {
   const candidates = [
-    path45.join(__dirname, "..", "package.json"),
-    path45.join(__dirname, "..", "..", "package.json")
+    path47.join(__dirname, "..", "package.json"),
+    path47.join(__dirname, "..", "..", "package.json")
   ];
   for (const candidate of candidates) {
     try {
-      if (fs42.existsSync(candidate)) {
-        const json = JSON.parse(fs42.readFileSync(candidate, "utf8"));
+      if (fs43.existsSync(candidate)) {
+        const json = JSON.parse(fs43.readFileSync(candidate, "utf8"));
         if (typeof json === "object" && json !== null && "version" in json) {
           const v = json.version;
           if (typeof v === "string") return v;
