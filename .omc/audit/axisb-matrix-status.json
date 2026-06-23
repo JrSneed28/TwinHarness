@@ -24,7 +24,7 @@
     "title": "VerificationDriver — trusted runner records which verification dimensions were exercised",
     "phase": "done-phase",
     "independence": ">0",
-    "pr": [38],
+    "pr": [38, 39],
     "probe": ".omc/audit/probes/bsc3",
     "anchors": ["core/verification-driver.ts", "core/receipts.ts", "core/bsc3-flag.ts", "core/gate-preconditions.ts:434+,849", "scripts/th-receipt-producer.mjs"],
     "updatedAt": "2026-06-22T18:00:00Z"
