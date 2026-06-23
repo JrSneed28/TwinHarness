@@ -51,7 +51,7 @@ You don't need to memorize these — but every section below assumes them. Skim 
 |---|---|
 | **Run** | One pass of TwinHarness over one idea, in one project directory. All its state lives in `.twinharness/` and `docs/`. |
 | **Orchestrator** | The lead agent (a Claude Code *skill*) that drives the whole run — it picks stages, spawns the other agents, and calls the `th` CLI. You mostly talk to it. |
-| **Agent** | A specialized, fresh-context sub-Claude with one job (Spec writes requirements, Builder writes code, Critic reviews, etc.). There are **16**. You don't invoke them directly; the Orchestrator does. |
+| **Agent** | A specialized, fresh-context sub-Claude with one job (Spec writes requirements, Builder writes code, Critic reviews, etc.). There are **17**. You don't invoke them directly; the Orchestrator does. |
 | **`th` CLI** | A deterministic TypeScript command-line tool bundled with the plugin. It **records and computes** the mechanical truth (state, hashes, coverage, drift counts) — it never *decides* anything. The agents run it for you. |
 | **Artifact** | A governing document a stage produces (`docs/01-requirements.md`, `docs/04-architecture.md`, …). Artifacts **govern** downstream work — they're checked against, not just written and forgotten. |
 | **Summary block** | The compact header at the top of every artifact. Downstream agents read the Summary, not the whole doc — that's what keeps context small. |
@@ -1669,7 +1669,7 @@ flag applies to. (`--json` and `--cwd` are accepted on every command.)
 ```
 .claude-plugin/   plugin manifest + marketplace.json (installation wiring)
 .github/          CI workflow (ci.yml — typecheck, build, dist-sync, test on every push/PR)
-agents/           16 agent prompt files
+agents/           17 agent prompt files
 commands/         16 Claude Code command files (4 original + 12 curated th-* verbs)
 dist/             compiled CLI — committed on purpose; no build step at install time
 hooks/            Stop hook wiring (hooks.json → th hook stop-gate)
@@ -1710,7 +1710,7 @@ Three invariants are enforced by `tests/plugin-manifest.test.ts` — do not figh
 - **Components never call a bare `th`.** Every skill/command/agent resolves the CLI via
   `${CLAUDE_PLUGIN_ROOT}/dist/cli.js` (substituted by Claude Code at load time), because installed
   users don't have `th` on PATH.
-- **16 agents, 16 commands, 1 skill.** The manifest test verifies these counts automatically via
+- **17 agents, 16 commands, 1 skill.** The manifest test verifies these counts automatically via
   `readdirSync` — adding or removing agents will surface immediately.
 - **Version sync.** `plugin.json` version must equal `package.json` version.
 

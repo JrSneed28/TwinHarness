@@ -78,11 +78,15 @@ import {
 import {
   type GroundKind,
   type GroundingReceipt,
+  type GroundingBudget,
+  type ToleranceMetricVerdict,
   requiredGroundKindsForWorkClass,
   readGroundingValidated,
   validateGroundingContent,
   validGroundingExemptions,
   groundingExemptionKey,
+  validGroundingBudgets,
+  toleranceThresholdVerdicts,
 } from "./grounding";
 import { bsc10EnforcementEnabled, bsc10KindEnforced } from "./bsc10-flag";
 
@@ -186,6 +190,20 @@ export interface GroundingSummary {
   conformance: "within-budget" | "over-budget" | "unobserved" | "missing" | "chain_mismatch";
   /** True iff a valid signed exception suspends this ground's budget (Slice-B; always false in slice-A). */
   exceptionCovered: boolean;
+  /**
+   * BSC-10 / Slice C (C4b/C4c) — the per-tolerance-metric observed-vs-SIGNED-budget diff for a
+   * `visual-hash` ground, so a human sees the threshold breach at the approval. Absent on the
+   * deterministic kinds (`digest-manifest`/`version-pin` are binary exact-equality with no
+   * tolerance band) and on a `visual-hash` ground with no tolerance metric. Each entry carries the
+   * gate's OWN arithmetic verdict (`observed` vs the signed `threshold`), NOT the receipt's
+   * self-reported status. `threshold:null` ⇒ `unobserved` (stubbed) or `unpinned` (no signed budget).
+   */
+  toleranceDiff?: {
+    metric: "version" | "api" | "visual" | "a11y";
+    observed: number | "unobserved";
+    threshold: number | null;
+    status: "within-budget" | "over-budget" | "unobserved" | "unpinned";
+  }[];
 }
 
 /**
@@ -1189,6 +1207,15 @@ function checkAssertionPresence(paths: ProjectPaths): GateResult {
  *                     `offenders` carries `["digest-manifest"]` (the manifest-bearing kind) so the
  *                     per-kind enforce-flip ({@link bsc10KindEnforced}) treats it as a DETERMINISTIC
  *                     block in Slice B.
+ *  - `manifest_digest_absent` — (Slice C / C4a) a governing BSC-1/3/7 receipt OPTED IN to the
+ *                     evidence-spine (`grounding_bound === true`) but carries NO `manifest_digest` —
+ *                     it declared participation yet never bound itself to the signed EvidenceManifest.
+ *                     The per-receipt opt-in is the TRIGGER, so an UNENROLLED receipt (the field
+ *                     absent/false) is byte-identical back-compat PASS (absence ≠ forgery — shipped
+ *                     BSC-1/3/4 probes stay GREEN). Offender `["digest-manifest"]` (the manifest-
+ *                     bearing kind), so {@link bsc10KindEnforced} gates it as DETERMINISTIC. This
+ *                     COMPLEMENTS `chain_mismatch`: that catches a threaded digest that DISAGREES;
+ *                     this catches an enrolled receipt that threaded NOTHING.
  *
  * The `summary` (one entry per REQUIRED ground-kind) is ALWAYS computed so the observability hook
  * fires on PASS / WARN / BLOCK. `crossCheckFlag` carries the `"class-cross-check-mismatch"`
@@ -1196,7 +1223,13 @@ function checkAssertionPresence(paths: ProjectPaths): GateResult {
  * `chain_mismatch` are `detail.reason` VALUES (via the top-level `grounding_unverified` token), NOT
  * new top-level stable tokens — the gate token-count docstrings are unaffected.
  */
-type GroundingReason = "missing" | "over_budget" | "unobserved" | "tampered" | "chain_mismatch";
+type GroundingReason =
+  | "missing"
+  | "over_budget"
+  | "unobserved"
+  | "tampered"
+  | "chain_mismatch"
+  | "manifest_digest_absent";
 type GroundingVerdict =
   | { ok: true; required: GroundKind[]; summary: GroundingSummary[]; crossCheckFlag?: "class-cross-check-mismatch" }
   | {
@@ -1232,6 +1265,34 @@ function groundingConformanceOf(
   if (v.status === "unobserved") return "unobserved";
   if (v.status === "over-budget" || v.status === "stale" || v.status === "target_mismatch") return "over-budget";
   return "within-budget";
+}
+
+/**
+ * Combine the receipt's OWN content verdict (`selfConformance`) with the INDEPENDENT gate-side
+ * tolerance-threshold verdicts (C4c) and return the WORST — fail-closed, NEVER the laxer of the
+ * two, so a generous self-reported `status` cannot mask a breached signed budget. Precedence:
+ * `unobserved` (unmeasured / unpinned-tolerance — cannot be gated as passing) > `over-budget`
+ * (measured but out of tolerance) > `within-budget`. A tolerance `unpinned` (observed but NO signed
+ * budget) collapses to `unobserved` — it is the same "cannot be confirmed within tolerance" fail-
+ * closed class. An EMPTY `tolerance` (deterministic kind, or a visual-hash with no tolerance
+ * metric) leaves `selfConformance` unchanged (the Slice-B posture for the deterministic kinds).
+ */
+function worseGroundingConformance(
+  selfConformance: "within-budget" | "over-budget" | "unobserved",
+  tolerance: ToleranceMetricVerdict[],
+): "within-budget" | "over-budget" | "unobserved" {
+  const rank = { unobserved: 2, "over-budget": 1, "within-budget": 0 } as const;
+  let worst: "within-budget" | "over-budget" | "unobserved" = selfConformance;
+  const consider = (c: "within-budget" | "over-budget" | "unobserved"): void => {
+    if (rank[c] > rank[worst]) worst = c;
+  };
+  for (const t of tolerance) {
+    // `unpinned` (observed but no signed tolerance) and `unobserved` (stub) are BOTH the fail-closed
+    // "cannot be gated as passing" class ⇒ collapse to `unobserved`; `over-budget` stays over-budget.
+    if (t.status === "unobserved" || t.status === "unpinned") consider("unobserved");
+    else if (t.status === "over-budget") consider("over-budget");
+  }
+  return worst;
 }
 
 /**
@@ -1272,6 +1333,31 @@ function threadedManifestDigests(paths: ProjectPaths): Set<string> {
   for (const r of readApprovalReceipts(paths)) add(r.manifest_digest);
   for (const r of readExternalApprovals(paths)) add(r.manifest_digest);
   return digests;
+}
+
+/**
+ * BSC-10 (C4a) — true iff ANY governing BSC-1 realization / BSC-3 driver / BSC-7 approval receipt
+ * (in-process + external stores) is ENROLLED in the evidence-spine (`grounding_bound === true`) yet
+ * carries NO usable `manifest_digest` — the OPT-IN says "I participate in the spine" but the receipt
+ * never bound itself to the signed EvidenceManifest. This is the C4a `manifest_digest_absent` block
+ * condition. The opt-in is the per-receipt TRIGGER (resolving the prior unsatisfiable model): a
+ * receipt that does NOT set `grounding_bound` (the back-compat / grandfathered path) is byte-
+ * identical and NEVER an offender — so shipped BSC-1/3/4 probes + unenrolled fixtures stay green
+ * (absence ≠ forgery). `grounding_bound` is signature/hash-bound on each receipt (it is IN the
+ * canonical field order), so a flipped flag breaks that receipt's OWN `recordHash`/signature; here
+ * the grounding rung just consumes the declared opt-in. Read tolerantly (the readers never throw).
+ */
+function hasUnboundGroundingReceipt(paths: ProjectPaths): boolean {
+  const unbound = (r: { grounding_bound?: boolean; manifest_digest?: string }): boolean =>
+    r.grounding_bound === true && (typeof r.manifest_digest !== "string" || r.manifest_digest === "");
+  return (
+    readRealizationReceipts(paths).some(unbound) ||
+    readExternalRealizationReceipts(paths).some(unbound) ||
+    readDriverReceipts(paths).some(unbound) ||
+    readExternalDriverReceipts(paths).some(unbound) ||
+    readApprovalReceipts(paths).some(unbound) ||
+    readExternalApprovals(paths).some(unbound)
+  );
 }
 
 /**
@@ -1347,15 +1433,31 @@ function evaluateGrounding(paths: ProjectPaths, state: TwinHarnessState): Ground
   const isExempt = (kind: GroundKind): boolean =>
     declaredClasses.some((wc) => exemptions.has(groundingExemptionKey(wc, kind)));
 
+  // C4c — the validly-signed conformance BUDGETS, resolved ONCE per run (3-party authority: an
+  // agent cannot self-issue a passing budget). Drives the INDEPENDENT observed-vs-threshold
+  // comparison for the runner-sensitive TOLERANCE kind (`visual-hash`): the gate computes
+  // `observed > signed_threshold` with its OWN arithmetic rather than trusting the receipt's self-
+  // reported `status` (the deferred MED-1). Empty (no key / no budgets) ⇒ a required tolerance kind
+  // is `unpinned` (fail-closed under enforce); the deterministic kinds are unaffected.
+  const validBudgets = validGroundingBudgets(paths);
+
   const summary: GroundingSummary[] = [];
   const offenders: GroundKind[] = [];
   let worstReason: GroundingReason | null = null;
   // Fail-closed precedence (highest names the block): `chain_mismatch` (the evidence-spine is bound
-  // to a DIFFERENT reference than the one grounded — the most specific spine defect) > `missing`
-  // (the ground was never even checked) > `unobserved` (checked but unmeasured) > `over_budget`
-  // (measured but out of tolerance). `tampered` is handled separately (early fail-closed above).
+  // to a DIFFERENT reference than the one grounded — the most specific spine defect) >
+  // `manifest_digest_absent` (C4a: an ENROLLED receipt bound NOTHING — a less-specific spine defect
+  // than a disagreement) > `missing` (the ground was never even checked) > `unobserved` (checked but
+  // unmeasured) > `over_budget` (measured but out of tolerance). `tampered` is early-handled above.
   const bump = (r: GroundingReason): void => {
-    const rank = { chain_mismatch: 4, missing: 3, unobserved: 2, over_budget: 1, tampered: 0 } as const;
+    const rank = {
+      chain_mismatch: 5,
+      manifest_digest_absent: 4,
+      missing: 3,
+      unobserved: 2,
+      over_budget: 1,
+      tampered: 0,
+    } as const;
     if (worstReason === null || rank[r] > rank[worstReason]) worstReason = r;
   };
 
@@ -1372,14 +1474,26 @@ function evaluateGrounding(paths: ProjectPaths, state: TwinHarnessState): Ground
       }
       continue;
     }
-    const conformance = groundingConformanceOf(paths, entry.receipt);
-    summary.push({
+    // The receipt's OWN content verdict (self-reported conformance status + snapshot staleness).
+    const selfConformance = groundingConformanceOf(paths, entry.receipt);
+    // C4c — the INDEPENDENT gate-side tolerance verdict for a `visual-hash` ground: `observed >
+    // signed_threshold` computed by the gate's OWN arithmetic (recompute-don't-trust), so a generous
+    // self-reported `status` cannot undercut a breached signed budget. Empty for the deterministic
+    // kinds (no tolerance band) and for a visual-hash ground with no tolerance metric. The WORST of
+    // (self-reported, independent-threshold) decides the kind — fail-closed, never the laxer of the two.
+    const tolerance = toleranceThresholdVerdicts(entry.receipt, validBudgets);
+    const conformance = worseGroundingConformance(selfConformance, tolerance);
+    const summaryRow: GroundingSummary = {
       groundKind: kind,
       grounded: true,
       trustLabel: entry.trustLabel,
       conformance,
       exceptionCovered: exemptCovered,
-    });
+    };
+    // C4b — surface the observed-vs-budget diff per tolerance metric so a human sees the breach at
+    // approval (only on a `visual-hash` ground carrying tolerance metrics; absent otherwise).
+    if (tolerance.length > 0) summaryRow.toleranceDiff = tolerance;
+    summary.push(summaryRow);
     // A validly-signed exception suspends this ground's budget ⇒ an over-budget / unobserved kind is
     // no longer an offender (M4: only a SIGNED exception can do this; unsigned exempts NOTHING).
     if (exemptCovered) continue;
@@ -1423,6 +1537,18 @@ function evaluateGrounding(paths: ProjectPaths, state: TwinHarnessState): Ground
       }
       bump("chain_mismatch");
     }
+  }
+
+  // Evidence-spine BINDING OPT-IN (Slice C / C4a): a governing BSC-1/3/7 receipt that ENROLLED in
+  // the spine (`grounding_bound === true`) but bound NO `manifest_digest` is a `manifest_digest_absent`
+  // FAIL. The per-receipt opt-in is the trigger (an unenrolled receipt is byte-identical back-compat
+  // PASS), so this NEVER fires on the shipped probes / unenrolled fixtures. The offender is the
+  // manifest-bearing `digest-manifest` kind so {@link bsc10KindEnforced} gates it as deterministic.
+  // It is computed only after a required-set exists (a `null` no-class run returned earlier), so it
+  // does not fabricate a block on a not-required run.
+  if (hasUnboundGroundingReceipt(paths)) {
+    if (!offenders.includes("digest-manifest")) offenders.push("digest-manifest");
+    bump("manifest_digest_absent");
   }
 
   if (worstReason === null) {

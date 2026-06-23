@@ -22420,6 +22420,10 @@ var APPROVAL_CANONICAL_FIELD_ORDER = [
   "producer_kind",
   "key_id",
   "legacy",
+  // BSC-10 (C4a) evidence-spine BINDING OPT-IN: IN the canonical order just BEFORE `manifest_digest`
+  // so a PRESENT `grounding_bound` is signature/hash-bound. Omit-when-absent ⇒ a pre-BSC-10 / un-
+  // enrolled approval (the field absent) is byte-identical, so shipped BSC-7 probes + parity hold.
+  "grounding_bound",
   // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
   // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
   // approval (the field absent) is byte-identical, so shipped BSC-7 probes + receipts-parity hold.
@@ -22682,6 +22686,10 @@ var CANONICAL_FIELD_ORDER3 = [
   "producer_kind",
   "key_id",
   "legacy",
+  // BSC-10 (C4a) evidence-spine BINDING OPT-IN: IN the canonical order just BEFORE `manifest_digest`
+  // so a PRESENT `grounding_bound` is signature/hash-bound. Omit-when-absent ⇒ a pre-BSC-10 / un-
+  // enrolled receipt (the field absent) is byte-identical, so shipped BSC-1 probes + parity hold.
+  "grounding_bound",
   // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
   // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
   // receipt (the field absent) is byte-identical, so shipped BSC-1 probes + receipts-parity hold.
@@ -23052,6 +23060,10 @@ var DRIVER_CANONICAL_FIELD_ORDER = [
   "producer_kind",
   "key_id",
   "legacy",
+  // BSC-10 (C4a) evidence-spine BINDING OPT-IN: IN the canonical order just BEFORE `manifest_digest`
+  // so a PRESENT `grounding_bound` is signature/hash-bound. Omit-when-absent ⇒ a pre-BSC-10 / un-
+  // enrolled receipt (the field absent) is byte-identical, so shipped BSC-3 probes + parity hold.
+  "grounding_bound",
   // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
   // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
   // receipt (the field absent) is byte-identical, so shipped BSC-3 probes + receipts-parity hold.
@@ -23916,6 +23928,9 @@ function groundingReceiptsPath(paths) {
 function externalGroundingReceiptsPath(paths) {
   return path25.join(paths.stateDir, "external-grounding-receipts.jsonl");
 }
+function groundingBudgetsPath(paths) {
+  return path25.join(paths.stateDir, "grounding-budgets.jsonl");
+}
 function groundingExceptionsPath(paths) {
   return path25.join(paths.stateDir, "grounding-exceptions.jsonl");
 }
@@ -24095,6 +24110,16 @@ function hasValidExternalTrailer(r) {
 function isGroundKindValue(g) {
   return g === "digest-manifest" || g === "version-pin" || g === "visual-hash";
 }
+function isValidGroundingBudget(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "grounding-budget") return false;
+  if (typeof r.workClass !== "string" || r.workClass === "") return false;
+  if (!isGroundKindValue(r.groundKind)) return false;
+  if (r.metric !== "version" && r.metric !== "api" && r.metric !== "visual" && r.metric !== "a11y") return false;
+  if (typeof r.threshold !== "number" || !Number.isFinite(r.threshold)) return false;
+  return hasValidExternalTrailer(r);
+}
 function isValidGroundingException(parsed) {
   if (typeof parsed !== "object" || parsed === null) return false;
   const r = parsed;
@@ -24104,9 +24129,23 @@ function isValidGroundingException(parsed) {
   if (typeof r.reason !== "string") return false;
   return hasValidExternalTrailer(r);
 }
+function readGroundingBudgets(paths) {
+  return readJsonlValues(groundingBudgetsPath(paths), isValidGroundingBudget);
+}
 function readGroundingExceptions(paths) {
   return readJsonlValues(groundingExceptionsPath(paths), isValidGroundingException);
 }
+var GROUNDING_BUDGET_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "workClass",
+  "groundKind",
+  "metric",
+  "threshold",
+  "snapshot_coord",
+  "producer_kind",
+  "key_id",
+  "prevHash"
+];
 var GROUNDING_EXCEPTION_CANONICAL_FIELD_ORDER = [
   "kind",
   "workClass",
@@ -24129,6 +24168,9 @@ function siblingCanonicalText(line, order) {
     }
   }
   return JSON.stringify(ordered);
+}
+function groundingBudgetCanonicalText(budget) {
+  return siblingCanonicalText(budget, GROUNDING_BUDGET_CANONICAL_FIELD_ORDER);
 }
 function groundingExceptionCanonicalText(exception) {
   return siblingCanonicalText(
@@ -24172,6 +24214,44 @@ function validGroundingExemptions(paths) {
 }
 function groundingExemptionKey(workClass, groundKind) {
   return `${workClass}::${groundKind}`;
+}
+function validGroundingBudgets(paths) {
+  const valid = /* @__PURE__ */ new Map();
+  const budgets = readGroundingBudgets(paths);
+  if (budgets.length === 0) return valid;
+  if (!verifySiblingChain(budgets, groundingBudgetCanonicalText).ok) return valid;
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return valid;
+  for (const b of budgets) {
+    if (!siblingSignatureVerifies(b, publicKey, groundingBudgetCanonicalText)) continue;
+    valid.set(`${b.workClass}::${b.groundKind}::${b.metric}`, b);
+  }
+  return valid;
+}
+var TOLERANCE_METRICS = /* @__PURE__ */ new Set(["visual", "a11y"]);
+function toleranceThresholdVerdicts(receipt, validBudgets) {
+  if (receipt.ground.groundKind !== "visual-hash") return [];
+  const verdicts = [];
+  for (const m of receipt.conformance) {
+    if (!TOLERANCE_METRICS.has(m.metric)) continue;
+    if (m.observed === "unobserved" || typeof m.observed !== "number") {
+      verdicts.push({ metric: m.metric, observed: "unobserved", threshold: null, status: "unobserved" });
+      continue;
+    }
+    const observed = m.observed;
+    const budget = validBudgets.get(`${receipt.workClass}::visual-hash::${m.metric}`);
+    if (budget === void 0) {
+      verdicts.push({ metric: m.metric, observed, threshold: null, status: "unpinned" });
+      continue;
+    }
+    verdicts.push({
+      metric: m.metric,
+      observed,
+      threshold: budget.threshold,
+      status: observed > budget.threshold ? "over-budget" : "within-budget"
+    });
+  }
+  return verdicts.sort((a, b) => a.metric.localeCompare(b.metric));
 }
 
 // src/core/bsc10-flag.ts
@@ -24574,6 +24654,18 @@ function groundingConformanceOf(paths, receipt) {
   if (v.status === "over-budget" || v.status === "stale" || v.status === "target_mismatch") return "over-budget";
   return "within-budget";
 }
+function worseGroundingConformance(selfConformance, tolerance) {
+  const rank = { unobserved: 2, "over-budget": 1, "within-budget": 0 };
+  let worst = selfConformance;
+  const consider = (c) => {
+    if (rank[c] > rank[worst]) worst = c;
+  };
+  for (const t of tolerance) {
+    if (t.status === "unobserved" || t.status === "unpinned") consider("unobserved");
+    else if (t.status === "over-budget") consider("over-budget");
+  }
+  return worst;
+}
 function groundingManifestDigest(validated) {
   const entry = validated.byKind.get("digest-manifest");
   if (entry === void 0) return null;
@@ -24592,6 +24684,10 @@ function threadedManifestDigests(paths) {
   for (const r of readApprovalReceipts(paths)) add(r.manifest_digest);
   for (const r of readExternalApprovals(paths)) add(r.manifest_digest);
   return digests;
+}
+function hasUnboundGroundingReceipt(paths) {
+  const unbound = (r) => r.grounding_bound === true && (typeof r.manifest_digest !== "string" || r.manifest_digest === "");
+  return readRealizationReceipts(paths).some(unbound) || readExternalRealizationReceipts(paths).some(unbound) || readDriverReceipts(paths).some(unbound) || readExternalDriverReceipts(paths).some(unbound) || readApprovalReceipts(paths).some(unbound) || readExternalApprovals(paths).some(unbound);
 }
 function evaluateGrounding(paths, state) {
   const validated = readGroundingValidated(paths);
@@ -24614,11 +24710,19 @@ function evaluateGrounding(paths, state) {
   if (required2.length === 0) return null;
   const exemptions = validGroundingExemptions(paths);
   const isExempt = (kind) => declaredClasses.some((wc) => exemptions.has(groundingExemptionKey(wc, kind)));
+  const validBudgets = validGroundingBudgets(paths);
   const summary = [];
   const offenders = [];
   let worstReason = null;
   const bump = (r) => {
-    const rank = { chain_mismatch: 4, missing: 3, unobserved: 2, over_budget: 1, tampered: 0 };
+    const rank = {
+      chain_mismatch: 5,
+      manifest_digest_absent: 4,
+      missing: 3,
+      unobserved: 2,
+      over_budget: 1,
+      tampered: 0
+    };
     if (worstReason === null || rank[r] > rank[worstReason]) worstReason = r;
   };
   for (const kind of required2) {
@@ -24632,14 +24736,18 @@ function evaluateGrounding(paths, state) {
       }
       continue;
     }
-    const conformance = groundingConformanceOf(paths, entry.receipt);
-    summary.push({
+    const selfConformance = groundingConformanceOf(paths, entry.receipt);
+    const tolerance = toleranceThresholdVerdicts(entry.receipt, validBudgets);
+    const conformance = worseGroundingConformance(selfConformance, tolerance);
+    const summaryRow = {
       groundKind: kind,
       grounded: true,
       trustLabel: entry.trustLabel,
       conformance,
       exceptionCovered: exemptCovered
-    });
+    };
+    if (tolerance.length > 0) summaryRow.toleranceDiff = tolerance;
+    summary.push(summaryRow);
     if (exemptCovered) continue;
     if (conformance === "unobserved") {
       offenders.push(kind);
@@ -24670,6 +24778,10 @@ function evaluateGrounding(paths, state) {
       }
       bump("chain_mismatch");
     }
+  }
+  if (hasUnboundGroundingReceipt(paths)) {
+    if (!offenders.includes("digest-manifest")) offenders.push("digest-manifest");
+    bump("manifest_digest_absent");
   }
   if (worstReason === null) {
     return crossCheckFlag ? { ok: true, required: required2, summary, crossCheckFlag } : { ok: true, required: required2, summary };

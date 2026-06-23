@@ -9,7 +9,7 @@
  *   1. PLUGIN MANIFEST — `.claude-plugin/plugin.json` is valid JSON, declares the `th`
  *      MCP server pointing at `dist/mcp-server.js`, and the marketplace manifest parses.
  *   2. AGENT MANIFESTS — every `agents/*.md` exists and carries YAML frontmatter (the
- *      host loads these as agent definitions); the count matches the plugin's claim (16).
+ *      host loads these as agent definitions); the count matches the plugin's claim (17).
  *   3. LIVE MCP HANDSHAKE — spawn the REAL `dist/mcp-server.js`, do a JSON-RPC
  *      `initialize` + `tools/list` over stdio, and assert it responds with a non-empty
  *      tool set. This proves the bundled server starts and speaks the protocol.

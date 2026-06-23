@@ -219,6 +219,45 @@ Critic defect.>
 
 ---
 
+---
+
+## Grounding Manifest Pointer
+
+> **Builder-pause:** if this project's work class requires `visual-hash` ground kinds (redesign,
+> recreation, or any project with an interactive/screen surface) and the signed EvidenceManifest
+> listed below does not yet exist or `th grounding check` is not clean for the `visual-hash` kind,
+> **work pauses here**. No downstream stage (Contracts, Test Strategy, Slice Plan) begins until
+> the required visual grounds are signed and recorded. Surface the gap to the Orchestrator.
+
+<Fill in after the Architect runs the pre-architecture grounding protocol and the design direction
+is approved. Point to the signed manifest — do NOT copy digest values into this document.>
+
+- **Work class:** <redesign | recreation | greenfield — whichever applies>
+- **Required ground kinds:** <visual-hash | a11y — list all that apply for this design>
+- **Signed EvidenceManifest path:** <relative path to the manifest file, e.g., `.twinharness/grounding/manifest-<id>.json`>
+- **Fidelity tier:** <tight | medium | loose — declared here; governs Tester diff tolerance>
+- **Pinned renderer:** <engine name, version, viewport — e.g., "Chromium 124.0.6367.82, 1280×800"; must match the manifest>
+- **Pinned a11y scan-rule version:** <e.g., "axe-core 4.9.1"; must match the manifest — omit if a11y not required>
+- **Grounding check status:** <output of `th grounding check --kind visual-hash` — must be clean>
+
+### Permitted-Difference Carve-outs
+
+<List every screen region permitted to differ from the signed reference, with its reason.
+Unsigned carve-outs mask nothing — each entry here must have a corresponding signed producer
+entry in the external-grounding store before the Tester measures. An empty table means the
+full fidelity-tier diff applies to every screen region.>
+
+| Screen | Region | Reason | Signed? |
+|---|---|---|---|
+| `<ScreenName>` | <CSS selector / bounding box / component name> | <e.g., "live timestamp — updates every second"> | <yes — manifest entry ID / no — pending signing> |
+
+*The Critic (ui-design mode) verifies this section is present; that every carve-out has a stated
+reason; that the manifest path is a real pointer (no inline digests); and that the fidelity tier
+is declared. An absent Grounding Manifest Pointer section is a grounded defect when the work
+class requires visual grounds.*
+
+---
+
 ## Open Design Questions
 
 <Unresolved design choices that could not be determined from upstream artifacts alone. Surface

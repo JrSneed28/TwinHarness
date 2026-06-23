@@ -8,7 +8,7 @@ A Claude Code plugin that runs a vague software idea through requirements, desig
 
 ## What it is
 
-TwinHarness is an agentic SDLC orchestrator. It coordinates 16 specialized agents — a core pipeline (Orchestrator, Spec, Critic, Vertical-Slice, Builder, Test-Author, UX/UI-Designer, Doc-Writer, Merge-Coordinator, Reconciler, Red-Team, Librarian) plus on-demand Researcher, Debugger, Codebase-Inspector, and Tester — behind a zero-dependency `th` CLI that handles every mechanical operation.
+TwinHarness is an agentic SDLC orchestrator. It coordinates 17 specialized agents — a core pipeline (Orchestrator, Spec, Critic, Vertical-Slice, Builder, Test-Author, UX/UI-Designer, Doc-Writer, Merge-Coordinator, Reconciler, Red-Team, Librarian) plus on-demand Researcher, Debugger, Codebase-Inspector, Tester, and Architect — behind a zero-dependency `th` CLI that handles every mechanical operation.
 
 Three things make it different from asking an agent to build something directly:
 
@@ -196,7 +196,7 @@ A deterministic **repo-understanding layer** (`th repo map|relevant|impact|check
 
 **What works today:**
 
-- Full T0\u2013T3 pipeline, all 16 agents, all stages.
+- Full T0\u2013T3 pipeline, all 17 agents, all stages.
 - `th` CLI with **2,000+ tests** covering CLI behavior, plugin-packaging integrity, security containment (path traversal, proto-pollution), the repo-understanding layer, decision governance (hash-chain tamper detection, TTY barrier), brownfield tiering, and the full 81-tool MCP surface.
 - CI runs typecheck, build, a dist-sync assertion, and the full suite on every push/PR across Linux/macOS/Windows \u2014 with 1 POSIX-only permission test in `tests/concurrency.test.ts` intentionally skipped on Windows and covered on Linux/macOS CI.
 - Validated Claude Code plugin packaging (`claude plugin validate` + `--plugin-dir` load).
@@ -214,7 +214,7 @@ A deterministic **repo-understanding layer** (`th repo map|relevant|impact|check
 ```
 .claude-plugin/   plugin manifest and marketplace.json
 .github/          CI (typecheck, build, dist-sync assertion, full test suite)
-agents/           16 agent prompt files (lean cores; detail in skills/twinharness/reference/)
+agents/           17 agent prompt files (lean cores; detail in skills/twinharness/reference/)
 commands/         16 slash command definitions (4 run commands + 12 th-* verb wrappers)
 dist/             compiled CLI — ships in git (no build step at install time)
 hooks/            hook wiring (hooks.json → th hook stop-gate / pretool-gate)

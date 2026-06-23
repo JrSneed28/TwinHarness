@@ -149,8 +149,8 @@ describe("REQ-PLUGIN-003: every component resolves `th` without relying on PATH"
     .filter((f) => f.endsWith(".md"))
     .map((f) => `agents/${f}`);
 
-  it("expected component counts (16 agents, 16 commands, 1 skill)", () => {
-    expect(agentFiles).toHaveLength(16);
+  it("expected component counts (17 agents, 16 commands, 1 skill)", () => {
+    expect(agentFiles).toHaveLength(17);
     // 4 original (th-run/status/drift/escalate)
     // + 12 curated human-facing verbs (th-init/doctor/next/scorecard/stage/verify/coverage/
     //   decision-approve/tier/route/repo/test).

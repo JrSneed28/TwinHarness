@@ -254,6 +254,17 @@ export interface DriverDimensionReceipt {
    * and the cross-receipt chain-mismatch FAIL fires) under Slice-B enforce.
    */
   manifest_digest?: string;
+  /**
+   * Axis-B slice-BSC10c / BSC-10 (C4a) — the evidence-spine BINDING OPT-IN. `true` declares this
+   * driver receipt PARTICIPATES in the BSC-10 evidence-spine and is therefore REQUIRED to carry a
+   * `manifest_digest` binding it to the signed EvidenceManifest. The gate (`evaluateGrounding`)
+   * blocks under enforce with reason `manifest_digest_absent` when `grounding_bound === true` AND
+   * `manifest_digest` is absent. ADDITIVE-OPTIONAL + omit-when-absent, AND IN
+   * `DRIVER_CANONICAL_FIELD_ORDER` (just before `manifest_digest`) so a PRESENT value is signature/
+   * hash-bound. Absent OR `false` ⇒ NOT bound ⇒ back-compat PASS (a pre-BSC-10 / unenrolled receipt
+   * is byte-identical — keeps shipped BSC-1/3/4 probes + receipts-parity green; absence ≠ forgery).
+   */
+  grounding_bound?: boolean;
   /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
   prevHash: string;
   /** SHA-256 hex (64) of THIS receipt's canonical text (computed before set). */

@@ -96,6 +96,59 @@ real/sandbox run, attach it (MCP: `th_tester_record { driver, provider, evidence
 `th tester record --driver <d> [--provider real|sandbox] [--evidence-ref <p>]`). This records
 that a live run **exists** — it does not self-certify PASS; findings still go to drift/blackboard.
 
+## Visual and a11y grounding obligation (BSC-10)
+
+For projects with a `redesign`, `recreation`, or any work class that requires `visual-hash` or
+`a11y` ground kinds, you carry a measurement obligation that feeds the external-grounding gate.
+This is distinct from your general QA protocol — it is a signed-evidence production step.
+
+### Pinned-renderer capture
+
+Visual measurements run against the **real built app** under the **pinned renderer** declared in
+the signed EvidenceManifest (engine + version + viewport). Read the manifest pointer from
+`docs/04b-ui-design.md` → **Grounding Manifest Pointer** before capturing any screenshot.
+
+Obligations:
+
+1. **Confirm the renderer pin.** Read the pinned renderer fields (engine, version, viewport
+   dimensions) from the signed EvidenceManifest before launching the browser. Do not substitute
+   a locally available renderer version — the pin is the gate contract.
+2. **Capture at the declared sizes.** For every screen in the Screen Inventory
+   (`docs/04b-ui-design.md`), capture at each viewport declared in the manifest. A capture at
+   an undeclared viewport size is not a grounded measurement.
+3. **Apply the fidelity tier.** The fidelity tier (`tight` / `medium` / `loose`) declared in
+   the design artifact governs the acceptable diff band. Measure perceptual diff against the
+   signed reference screenshot stored in the EvidenceManifest. Report the diff value alongside
+   the tier threshold; do not suppress values that are within-band.
+4. **Respect signed carve-outs only.** Permitted-difference regions declared in the design
+   artifact and signed by the external producer are excluded from the diff measurement. Unsigned
+   carve-outs are ignored — the full diff applies.
+5. **Capture the a11y scan under the pinned scan-rule version.** Run the accessibility scan
+   (axe or equivalent) at the version recorded in the EvidenceManifest. A scan under an
+   unpinned version is not a grounded measurement. Report violation counts by rule category
+   against the signed budget.
+
+### Recording the grounded measurement
+
+After capturing, record the evidence reference so the gate can consume it:
+
+```
+th tester record --driver <d> --provider real \
+  --evidence-ref <path-to-captured-screenshots-and-scan-output>
+```
+
+The external producer then signs the existence + conformance bundle. You supply the captured
+evidence; you do not self-certify the conformance value. An in-process-only measurement
+classifies as `ungrounded` — it does not satisfy a required `visual-hash` or `a11y` ground kind.
+
+### Unpinned or unmeasurable surfaces
+
+If the renderer pin specified in the EvidenceManifest is unavailable in this environment, do NOT
+substitute a different renderer and proceed silently. Instead:
+- Record the environment gap as a finding (drift layer: `derived`).
+- Surface it to the Orchestrator so a `SignedException("reference-unreachable")` can be minted.
+  An unmeasured required ground kind is a blocking gap under enforce — it does not silently pass.
+
 ## What you do NOT do
 
 - Re-run the unit suite (vitest) as your primary QA — that is the Verifier's lane (`th verify run` only
@@ -105,3 +158,5 @@ that a live run **exists** — it does not self-certify PASS; findings still go 
 - Mutate `state.json` gate-owned fields.
 - Require tmux — select a tmux-free driver first.
 - Self-certify QA pass — findings go to drift/blackboard; the Orchestrator reviews.
+- Self-certify visual/a11y conformance — the external producer signs the conformance bundle;
+  you supply the captured evidence.

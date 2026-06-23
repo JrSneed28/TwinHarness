@@ -123,6 +123,10 @@ const APPROVAL_CANONICAL_FIELD_ORDER = [
     "producer_kind",
     "key_id",
     "legacy",
+    // BSC-10 (C4a) evidence-spine BINDING OPT-IN: IN the canonical order just BEFORE `manifest_digest`
+    // so a PRESENT `grounding_bound` is signature/hash-bound. Omit-when-absent ⇒ a pre-BSC-10 / un-
+    // enrolled approval (the field absent) is byte-identical, so shipped BSC-7 probes + parity hold.
+    "grounding_bound",
     // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
     // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
     // approval (the field absent) is byte-identical, so shipped BSC-7 probes + receipts-parity hold.
