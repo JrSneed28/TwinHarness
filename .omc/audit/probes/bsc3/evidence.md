@@ -114,3 +114,87 @@ is proven at the gate in `tests/bsc3-driver-gate.test.ts` (an external Ed25519-s
 `DriverDimensionReceipt` ⇒ `valid-grounded` / accepted; the same bytes with a broken
 or wrong-key signature, still claiming external ⇒ `forged` / BLOCK). The end-to-end
 out-of-process producer is Lane C (4b), deferred this run.
+
+---
+
+# Independence control (slice-4b) — REAL producer ↔ in-process forgery
+
+Slice-4b adds the missing piece: a REAL out-of-process signed producer
+(`scripts/th-receipt-producer.mjs --kind driver`) and an end-to-end probe driving it
+against the REAL gate. This honestly flips the BSC-3 ledger `independence` from `0`
+to `>0`: a producer-signed external receipt is ACCEPTED (`valid-grounded`) while the
+SAME receipt forged on the in-process surface (a different key, the closest the
+in-process agent can get without the private key) is REJECTED (`forged`).
+
+Reproducible probe spec: [`independence.test.ts`](./independence.test.ts) (runs
+against `src/` via vitest; the producer it spawns imports committed `dist/`). It is
+self-verifying: the `console.log` lines below are captured verbatim, and the `expect`s
+make it an ACCEPT↔REJECT pair.
+
+## Scenario
+
+The SAME GREEN-at-final-verification fixture as the 4a negative control (slices
+settled, coverage clean, report registered, Tester record attached, the closed
+human-approval required-set satisfied, `verify-report.json` observing all three seed
+dimensions). The ONLY lever is the BSC-3 driver rung's TRUST label.
+
+| Leg | How the external line is signed | Gate verdict |
+|-----|---------------------------------|--------------|
+| **ACCEPT** | the REAL producer holds the Ed25519 PRIVATE key (K1) and signs out-of-process | `valid-grounded` ⇒ `checkProductionReality` **PASSES** |
+| **REJECT** | the same bytes forged in-process with a DIFFERENT key (K2) — no access to K1's private key | `forged` ⇒ `checkProductionReality` **BLOCKS** (`driver_dimension_unverified` / reason `forged`) |
+
+## Decisive accept → reject (captured verbatim)
+
+Run at HEAD `105fbaa` on branch `dev`:
+
+```
+[ACCEPT real] {"producer.status":0,"gate.ok":true,"gate.error":null,"trustLabels":["valid-grounded","valid-grounded","valid-grounded"]}
+[REJECT forged] {"gate.ok":false,"gate.error":"driver_dimension_unverified","gate.detail.reason":"forged","trustLabels":["forged","forged","forged"]}
+```
+
+Reading the delta:
+
+- **ACCEPT (real):** the out-of-process producer (exit `0`) signed the receipt with
+  the private key; `checkProductionReality` re-derives the ground, VERIFIES the
+  signature against the loaded public key, and returns `ok:true` with every dimension
+  `trustLabel:"valid-grounded"`. **The grounded label is reachable ONLY via a
+  signature the in-process surface cannot mint.**
+- **REJECT (forged):** the SAME bytes, same fixture, signed with a key the verifier
+  does not hold — `checkProductionReality` returns `ok:false` with the stable token
+  `driver_dimension_unverified` and `detail.reason:"forged"`; every dimension
+  `trustLabel:"forged"`. **A forgery the in-process agent CAN produce is blocked.**
+
+That delta — accepted ↔ rejected, gated solely on a key the in-process surface does
+not hold — IS independence property `>0`.
+
+## Reproduction Result
+
+```
+$ cat > vitest.bsc3indep.config.ts <<'EOF'
+import { defineConfig } from "vitest/config";
+export default defineConfig({
+  test: {
+    include: [".omc/audit/probes/bsc3/independence.test.ts"],
+    environment: "node",
+    globalSetup: ["tests/global-setup.ts"],
+    pool: "threads",
+    testTimeout: 30000,
+  },
+});
+EOF
+$ npx vitest run --config vitest.bsc3indep.config.ts --reporter=verbose
+
+ ✓ .omc/audit/probes/bsc3/independence.test.ts > ... > ACCEPT: the REAL producer's external-signed receipt ⇒ valid-grounded ⇒ gate PASSES
+ ✓ .omc/audit/probes/bsc3/independence.test.ts > ... > REJECT: the SAME bytes forged in-process with a DIFFERENT key ⇒ forged ⇒ gate BLOCKS
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+```
+
+(The ephemeral config lives at the repo root so `vitest/config` resolves against
+`node_modules`; it is NOT committed and is removed after the run. The probe spec lives
+under gitignored `.omc/`, which the repo `vitest.config.ts` does not include.)
+
+The same accept↔reject is asserted in the committed suite
+(`tests/bsc3-independence-control-flip.test.ts`) and the producer's signature/hash
+binding is proven byte-for-byte in `tests/driver-producer.test.ts`.
