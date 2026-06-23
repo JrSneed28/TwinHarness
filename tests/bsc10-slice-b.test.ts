@@ -77,7 +77,7 @@ import {
   driverCanonicalText,
 } from "../src/core/verification-driver";
 import { currentReceiptSnapshotCoord } from "../src/core/receipts";
-import { bsc10EnforcementEnabled } from "../src/core/bsc10-flag";
+import { bsc10EnforcementEnabled, bsc10KindEnforced } from "../src/core/bsc10-flag";
 import { hashContent } from "../src/core/hash";
 import type { GroundingGround, GroundingReceipt, GroundingBudget } from "../src/core/grounding";
 import type { DriverDimensionReceipt } from "../src/core/receipts";
@@ -892,7 +892,7 @@ describe("I6 — per-kind enforce: deterministic kinds BLOCK; visual-hash stays 
     expect((gate.detail as { reason?: string } | undefined)?.reason).toBe("missing");
   });
 
-  it("I6c: visual-hash missing under ENFORCE ⇒ ok:true + non-blocking notice (per-kind WARN, M2)", () => {
+  it("I6c (C4d flag-aware): visual-hash missing under ENFORCE ⇒ WARN-only pre-flip (ok:true) / BLOCK post-flip (reason missing)", () => {
     // Set up a project where visual-hash is the only offender (has_ui:true forces it for integration).
     process.env.TH_BSC10_ENFORCE = "1";
     tp = makeTempProject();
@@ -944,10 +944,17 @@ describe("I6 — per-kind enforce: deterministic kinds BLOCK; visual-hash stays 
 
     const st = readState(paths).state!;
     const gate = checkProductionReality(paths, st);
-    // visual-hash is NOT in ENFORCED_GROUND_KINDS (Slice B per-kind WARN, M2) → non-blocking.
-    expect(gate.ok).toBe(true);
-    expect(gate.error).toBeUndefined();
-    // Summary must expose the missing visual-hash as a non-blocking advisory.
+    // C4d flag-aware: pre-flip visual-hash is WARN-only (non-blocking); post-flip it is in
+    // ENFORCED_GROUND_KINDS so a missing required visual-hash BLOCKS (reason "missing").
+    const vhEnforced = bsc10KindEnforced("visual-hash");
+    expect(gate.ok).toBe(!vhEnforced);
+    if (vhEnforced) {
+      expect(gate.error).toBe("grounding_unverified");
+      expect((gate.detail as { reason?: string } | undefined)?.reason).toBe("missing");
+    } else {
+      expect(gate.error).toBeUndefined();
+    }
+    // Either way the summary exposes the missing visual-hash kind (observability advisory).
     expect(Array.isArray(gate.grounding)).toBe(true);
     const vhEntry = (gate.grounding ?? []).find((g) => g.groundKind === "visual-hash");
     expect(vhEntry).toBeDefined();

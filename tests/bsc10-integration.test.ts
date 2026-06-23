@@ -43,6 +43,7 @@ import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
 import { runTesterRecord } from "../src/commands/tester";
 import { checkProductionReality } from "../src/core/gate-preconditions";
+import { bsc10KindEnforced } from "../src/core/bsc10-flag";
 import { writeVerifyReport } from "../src/core/verify";
 import {
   appendDriverReceipt,
@@ -570,8 +571,8 @@ describe("M-1 — tamper-block: broken in-process chain blocks under enforce, WA
 // all kinds blocked). Slice B LOCKS the per-kind WARN. This test is the ground truth.
 // ---------------------------------------------------------------------------
 
-describe("L-1 — Slice-B per-kind WARN: visual-hash-only missing under ENFORCE ⇒ ok:true + notice", () => {
-  it("has_ui:undefined + receipt declaring 'greenfield' + ENFORCE ⇒ visual-hash forced required BUT is WARN-only ⇒ ok:true + non-blocking summary", () => {
+describe("L-1 — per-kind visual-hash (C4d flag-aware): WARN-only pre-flip ⇒ ok:true+notice / ENFORCED post-flip ⇒ BLOCK", () => {
+  it("has_ui:undefined + receipt declaring 'greenfield' + ENFORCE ⇒ visual-hash forced required: WARN-only pre-flip (ok:true) / BLOCK post-flip (reason missing)", () => {
     process.env.TH_BSC10_ENFORCE = "1";
     tp = makeTempProject();
     const paths = tp.paths;
@@ -617,10 +618,16 @@ describe("L-1 — Slice-B per-kind WARN: visual-hash-only missing under ENFORCE 
 
     const st = readState(paths).state!;
     const res = checkProductionReality(paths, st);
-    // Slice B per-kind WARN: visual-hash is NOT in ENFORCED_GROUND_KINDS → groundingVerdictBlocks
-    // returns false for a visual-hash-only offender set → ok:true (non-blocking advisory).
-    expect(res.ok).toBe(true);
-    expect(res.error).toBeUndefined();
+    // C4d flag-aware: pre-flip visual-hash is WARN-only (non-blocking advisory); post-flip it is in
+    // ENFORCED_GROUND_KINDS so a forced-required missing visual-hash BLOCKS (reason "missing").
+    const vhEnforced = bsc10KindEnforced("visual-hash");
+    expect(res.ok).toBe(!vhEnforced);
+    if (vhEnforced) {
+      expect(res.error).toBe("grounding_unverified");
+      expect((res.detail as { reason?: string } | undefined)?.reason).toBe("missing");
+    } else {
+      expect(res.error).toBeUndefined();
+    }
     // The grounding summary exposes the missing visual-hash kind (observability O1).
     expect(Array.isArray(res.grounding)).toBe(true);
     const vhSummary = (res.grounding ?? []).find((g) => g.groundKind === "visual-hash");

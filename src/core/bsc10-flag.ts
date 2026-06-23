@@ -36,13 +36,17 @@
 import type { GroundKind } from "./receipts";
 
 /**
- * The DETERMINISTIC ground-kinds that flip to ENFORCE in Slice B (M2). These reproduce
- * identically on any runner (no renderer/scan-rule pinning needed): `digest-manifest`
- * (exact content/symbol-set equality) and `version-pin` (exact version equality). The
- * runner-sensitive `visual-hash` (perceptual-diff / a11y scan) is DELIBERATELY EXCLUDED —
- * it stays WARN until Slice C's pinned-renderer measurement + the second one-commit flip.
+ * The ground-kinds that ENFORCE (block). `digest-manifest` (exact content/symbol-set equality)
+ * and `version-pin` (exact version equality) flipped in Slice B (M2) — deterministic, runner-stable.
+ * Slice C (C4d) ADDS `visual-hash`: its conformance is gated by the C4c observed-vs-signed-budget
+ * threshold — DETERMINISTIC arithmetic over the externally-signed receipt's `observed` value and the
+ * signed budget threshold, with NO in-process renderer/axe (the perceptual-diff / a11y-scan
+ * measurement runs in the producer/CI and is signed into the receipt). `a11y` rides as a tolerance
+ * metric WITHIN visual-hash grounds, so it enforces via this same kind. Enforce-sim: the real
+ * TwinHarness project declares no grounding receipts ⇒ 0 unwaived offenders; blast radius bounded
+ * (CI does not dogfood `th gate`). Revertable: `git revert` of the C4d commit restores the WARN set.
  */
-const ENFORCED_GROUND_KINDS: ReadonlySet<GroundKind> = new Set<GroundKind>(["digest-manifest", "version-pin"]);
+const ENFORCED_GROUND_KINDS: ReadonlySet<GroundKind> = new Set<GroundKind>(["digest-manifest", "version-pin", "visual-hash"]);
 
 /**
  * Whether the BSC-10 external-reference grounding rung ENFORCES (blocks) this run — the MASTER
@@ -67,11 +71,11 @@ export function bsc10EnforcementEnabled(): boolean {
 
 /**
  * Whether enforcement BLOCKS for a SPECIFIC ground-kind this run (M2 per-kind flip). True ONLY
- * when the master switch {@link bsc10EnforcementEnabled} is ON AND `kind` is a DETERMINISTIC kind
- * promoted in Slice B (`digest-manifest`, `version-pin`). A `visual-hash` kind is ALWAYS WARN here
- * in Slice B (returns `false` even under the master switch) — its enforce-flip is Slice C. The
- * gate consults this per offending kind so a deterministic failure BLOCKS while a runner-sensitive
- * one rides as a non-blocking `notice` in the SAME run.
+ * when the master switch {@link bsc10EnforcementEnabled} is ON AND `kind` is in
+ * {@link ENFORCED_GROUND_KINDS}: `digest-manifest` + `version-pin` (Slice B, deterministic) and
+ * `visual-hash` (Slice C / C4d, gated by the C4c observed-vs-signed-budget tolerance threshold; a11y
+ * rides within visual-hash grounds). The gate consults this per offending kind so an enforced failure
+ * BLOCKS while any not-yet-promoted kind would ride as a non-blocking `notice` in the SAME run.
  */
 export function bsc10KindEnforced(kind: GroundKind): boolean {
   return bsc10EnforcementEnabled() && ENFORCED_GROUND_KINDS.has(kind);

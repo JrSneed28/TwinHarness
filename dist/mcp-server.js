@@ -24255,7 +24255,7 @@ function toleranceThresholdVerdicts(receipt, validBudgets) {
 }
 
 // src/core/bsc10-flag.ts
-var ENFORCED_GROUND_KINDS = /* @__PURE__ */ new Set(["digest-manifest", "version-pin"]);
+var ENFORCED_GROUND_KINDS = /* @__PURE__ */ new Set(["digest-manifest", "version-pin", "visual-hash"]);
 function bsc10EnforcementEnabled() {
   const raw = process.env.TH_BSC10_ENFORCE;
   if (raw === void 0) return true;
