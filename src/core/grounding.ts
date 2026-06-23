@@ -632,6 +632,16 @@ function groundingSignatureVerifies(receipt: GroundingReceipt, publicKey: KeyObj
  * chain trusts NOTHING from the in-process store (`inProcessChainOk:false`). For each kind, a
  * signature-verified EXTERNAL receipt (`valid-grounded`) supersedes an in-process one (`valid`);
  * an external receipt that does NOT verify is simply ignored (ungrounded — absence ≠ forgery).
+ *
+ * EXTERNAL CHAIN-INTEGRITY ASYMMETRY (Slice A, disclosed): the EXTERNAL store's hash chain is NOT
+ * walked here — each external receipt is verified INDEPENDENTLY by its own Ed25519 signature, and
+ * while `prevHash` IS inside the signed canonical input, this reader never asserts that a line's
+ * `prevHash` links to the prior line's `recordHash`. So a party with file-write (but not the key)
+ * can REORDER or DUPLICATE validly-signed external lines to resurface a stale signed grounding as
+ * the "latest per kind" without detection. The IN-PROCESS path fails closed on tamper (M-1 via
+ * {@link verifyGroundingChain}); the EXTERNAL path has no equivalent in Slice A. Walking + enforcing
+ * the external chain (and the `manifest_digest` cross-receipt mismatch) is owned by Slice B, where
+ * the external producer ships; until then this asymmetry is documented, not silently absent.
  */
 export function readGroundingValidated(paths: ProjectPaths): ValidatedGrounding {
   const inProcess = readGroundingReceipts(paths);

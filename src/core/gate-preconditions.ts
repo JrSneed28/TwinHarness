@@ -1246,6 +1246,14 @@ function evaluateGrounding(paths: ProjectPaths, state: TwinHarnessState): Ground
   const requiredSet = new Set<GroundKind>();
   let crossCheckFlag: "class-cross-check-mismatch" | undefined;
   for (const wc of declaredClasses) {
+    // GATE-LEVEL CROSS-CHECK IS DEFERRED TO SLICE B (intentionally inert here, like the sibling
+    // budget/exception/carve-out stores). `requiredGroundKindsForWorkClass` is called WITHOUT a
+    // third `derivedClass` argument, so `req.crossCheckFlag` is structurally always `undefined` on
+    // this path — the declared-vs-derived (BSC-8-style) cross-check has no input source in Slice A
+    // (no receipt carries an evidence-derived class yet). This loop is therefore a UNION over the
+    // DECLARED classes, NOT the declared-vs-derived cross-check; the `crossCheckFlag`/`detail.crossCheck`
+    // plumbing below is reserved-but-unreachable until Slice B wires the derived class. The
+    // classifier's cross-check rule itself is exercised directly by the unit suite (U6).
     const req = requiredGroundKindsForWorkClass(wc, surfaces);
     for (const k of req.required) requiredSet.add(k);
     if (req.crossCheckFlag) crossCheckFlag = req.crossCheckFlag;
