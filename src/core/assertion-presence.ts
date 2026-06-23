@@ -49,6 +49,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { KeyObject } from "node:crypto";
 import type { ProjectPaths } from "./paths";
 import { assertGovernedWriteSurface, resolveWithinRoot } from "./paths";
 import { hashContent, GENESIS_PREV_HASH, HEX64 } from "./hash";
@@ -883,4 +884,212 @@ export function readMutationKillValidated(paths: ProjectPaths): ValidatedMutatio
   }
   // Present claim(s) but none verified (key absent, chain broken, or all signatures bad) → forged.
   return { status: "forged", receipt: candidates[candidates.length - 1] };
+}
+
+// ---------------------------------------------------------------------------
+// AssertionWaiver — the signed, path/digest-scoped escape valve (BSC-2 Lane C, D3)
+// ---------------------------------------------------------------------------
+
+/**
+ * An external-signed, per-REQ, digest-scoped waiver that exonerates a SINGLE assertion-free
+ * REQ-ID from the assertion-presence rung (the escape valve for an honestly assertion-free
+ * REQ — e.g. a pure type-level or generated-code REQ). It is NOT agent-self-issuable: the
+ * SECURITY boundary is the Ed25519 PRIVATE key held only by the external producer (the
+ * in-process surface holds the verify-only public key and provably cannot forge one —
+ * mirrors the scan-exception ack + the slice-1b grounded/forged asymmetry).
+ *
+ * SCOPED BY GROUND DIGEST (re-derivable, path-bound): `groundDigest` is
+ * `assertionGroundDigest([thatReqsSummary])` — the digest of the SINGLE REQ's RECOMPUTED
+ * {@link AssertionReqSummary} at waive time. The summary embeds the REQ's sorted `testFiles`
+ * + assertion counts, so editing the REQ's test files (or its assertion shape) changes the
+ * digest and INVALIDATES the waiver. A waiver therefore covers EXACTLY the assertion shape
+ * it was signed against, never a later-edited one. `signature` and `recordHash` are TRAILERS
+ * excluded from the canonical text (computed over the IDENTICAL canonical input), exactly
+ * like a scan-exception ack / terminal receipt.
+ */
+export interface AssertionWaiver {
+  kind: "assertion-waiver";
+  /** The REQ-ID this waiver exonerates (must be non-empty — an empty reqId exempts NOTHING). */
+  reqId: string;
+  /** `assertionGroundDigest([summary])` of the REQ's recomputed summary at waive time (64 hex). */
+  groundDigest: string;
+  /** The repository snapshot coordinate at sign time (audit context; not the binding axis). */
+  snapshot_coord: SnapshotCoord;
+  /** ALWAYS `"external"` — there is no in-process producer. Part of the signed canonical input. */
+  producer_kind: "external";
+  /** Short, non-secret id of the public key that verifies this waiver (`externalKeyId`). */
+  key_id: string;
+  /** Ed25519 signature over the canonical text (excluded trailer). Absent ⇒ exempts NOTHING. */
+  signature?: string;
+  /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
+  prevHash: string;
+  /** SHA-256 hex (64) of THIS waiver's canonical text (signature excluded). */
+  recordHash: string;
+}
+
+/**
+ * `<stateDir>/assertion-waivers.jsonl` — the EXTERNAL-signed waiver store. A SEPARATE file
+ * for LOCK-ISOLATION (parallel to `external-mutation-receipts.jsonl` / `scan-exceptions.jsonl`):
+ * the out-of-process producer appends here without taking the in-process `withStateLock` span.
+ * The SECURITY boundary is NOT this path — it is the private key; a forged line written here is
+ * rejected by {@link validWaivedReqs} (no verifying signature ⇒ exempts NOTHING).
+ */
+export function assertionWaiversPath(paths: ProjectPaths): string {
+  return path.join(paths.stateDir, "assertion-waivers.jsonl");
+}
+
+/**
+ * Canonical field order for a waiver (signature + recordHash excluded — they are trailers).
+ * The SINGLE formula the external producer (at sign time) and the in-process validator (at
+ * gate time) both use, so they can never diverge on the binding.
+ */
+const ASSERTION_WAIVER_CANONICAL_FIELD_ORDER: ReadonlyArray<keyof AssertionWaiver> = [
+  "kind",
+  "reqId",
+  "groundDigest",
+  "snapshot_coord",
+  "producer_kind",
+  "key_id",
+  "prevHash",
+];
+
+/**
+ * Deterministic canonical text of a waiver for signing + hashing: fixed field order, the
+ * nested `snapshot_coord` re-emitted in its fixed key order, `signature`/`recordHash` dropped;
+ * `JSON.stringify` with no indentation. `hashContent` then CRLF→LF normalizes (harmless).
+ */
+export function assertionWaiverCanonicalText(
+  waiver: Omit<AssertionWaiver, "signature" | "recordHash">,
+): string {
+  const ordered: Record<string, unknown> = {};
+  for (const key of ASSERTION_WAIVER_CANONICAL_FIELD_ORDER) {
+    const val = (waiver as Record<string, unknown>)[key];
+    if (val === undefined) continue;
+    if (key === "snapshot_coord") {
+      ordered[key] = reorder(val as SnapshotCoord, SNAPSHOT_FIELD_ORDER);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+
+/** `recordHash` for a waiver = SHA-256 of its canonical text. */
+export function computeAssertionWaiverRecordHash(
+  waiver: Omit<AssertionWaiver, "signature" | "recordHash">,
+): string {
+  return hashContent(assertionWaiverCanonicalText(waiver));
+}
+
+/** Tolerant shape check for a waiver line (a malformed line is skipped, never trusted). */
+export function isValidAssertionWaiver(parsed: unknown): parsed is AssertionWaiver {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed as Record<string, unknown>;
+  if (r.kind !== "assertion-waiver") return false;
+  if (typeof r.reqId !== "string" || r.reqId === "") return false;
+  if (typeof r.groundDigest !== "string" || !HEX64.test(r.groundDigest)) return false;
+  if (r.producer_kind !== "external") return false;
+  if (typeof r.key_id !== "string" || r.key_id === "") return false;
+  if (
+    r.signature !== undefined &&
+    (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE64.test(r.signature))
+  ) {
+    return false;
+  }
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap as Record<string, unknown>;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+
+/** Read every (well-shaped) waiver, file order. Signatures verified at gate time, NOT here. */
+export function readAssertionWaivers(paths: ProjectPaths): AssertionWaiver[] {
+  return readJsonlValues(assertionWaiversPath(paths), isValidAssertionWaiver);
+}
+
+/** The `recordHash` of the waiver store's last valid line — the producer's `prevHash` seed. */
+export function readLastExternalAssertionWaiverRecordHash(paths: ProjectPaths): string {
+  const last = scanTailValid(assertionWaiversPath(paths), isValidAssertionWaiver);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+
+/**
+ * Walk waivers in file order with a running `expectedPrev = GENESIS`. For each: recompute
+ * `recordHash` from its canonical text — a mismatch means the record was edited; if
+ * `prevHash !== expectedPrev` the line was inserted/deleted/reordered. Return
+ * `{ ok:false, brokenAt:N }` at the FIRST break; else advance.
+ */
+export function verifyAssertionWaiverChain(waivers: AssertionWaiver[]): VerifyChainResult {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < waivers.length; i++) {
+    const w = waivers[i]!;
+    const { recordHash, signature: _sig, ...rest } = w;
+    const recomputed = computeAssertionWaiverRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (w.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = w.recordHash;
+  }
+  return { ok: true };
+}
+
+/** Verify a waiver's Ed25519 signature against the loaded external public key. */
+function waiverSignatureVerifies(waiver: AssertionWaiver, publicKey: KeyObject): boolean {
+  if (typeof waiver.signature !== "string") return false;
+  if (waiver.key_id !== externalKeyId(publicKey)) return false;
+  const { recordHash: _rh, signature, ...signedView } = waiver;
+  return verifyCanonical(assertionWaiverCanonicalText(signedView), signature, publicKey);
+}
+
+/**
+ * The CURRENT ground digest of a single REQ — `assertionGroundDigest([summary])` of the REQ's
+ * RECOMPUTED summary. Returns `null` when the REQ has no summary in the fresh recompute (so a
+ * waiver for a non-existent / no-longer-tested REQ can never match a digest and exempts NOTHING).
+ */
+function currentReqGroundDigest(paths: ProjectPaths, reqId: string): string | null {
+  const ground = computeAssertionPresenceGround(paths);
+  const summary = ground.find((s) => s.reqId === reqId);
+  if (summary === undefined) return null;
+  return assertionGroundDigest([summary]);
+}
+
+/**
+ * The set of REQ-IDs validly WAIVED for the current run (BSC-2 Lane C, D3 — the gate subtracts
+ * these from the offender set). A waiver exempts its `reqId` ONLY when ALL of:
+ *   1. The waiver chain verifies (a tampered chain exempts NOTHING — fail-closed).
+ *   2. An external public key is loaded AND the waiver's Ed25519 signature verifies under it
+ *      with a matching `key_id` (an unsigned / wrong-key / self-signed line exempts NOTHING —
+ *      the in-process surface holds no private key, so it cannot mint one).
+ *   3. The waiver's `groundDigest` equals the digest of the REQ's CURRENT recomputed summary
+ *      (editing the REQ's test files changes the digest → the waiver no longer matches →
+ *      exempts NOTHING; path/digest-scoped, re-derivable).
+ *   4. `reqId` is non-empty (an over-broad empty/missing reqId is rejected by the shape check).
+ *
+ * This is negative-control (d): an over-broad, unsigned, wrong-key, or digest-mismatched
+ * waiver exempts NOTHING. With no key loaded (the default fork/local/test path) NO waiver can
+ * verify, so the set is empty and the gate enforces fully.
+ */
+export function validWaivedReqs(paths: ProjectPaths): Set<string> {
+  const waivers = readAssertionWaivers(paths);
+  if (waivers.length === 0) return new Set();
+  // Fail-closed: a tampered chain exempts NOTHING (no line from a tampered store is trusted).
+  if (!verifyAssertionWaiverChain(waivers).ok) return new Set();
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return new Set(); // no key ⇒ nothing verifies ⇒ exempt NOTHING
+
+  const exempt = new Set<string>();
+  for (const w of waivers) {
+    if (!waiverSignatureVerifies(w, publicKey)) continue;
+    const current = currentReqGroundDigest(paths, w.reqId);
+    if (current === null || current !== w.groundDigest) continue; // digest-scoped (re-derivable)
+    exempt.add(w.reqId);
+  }
+  return exempt;
 }

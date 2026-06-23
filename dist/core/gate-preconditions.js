@@ -96,6 +96,8 @@ const verification_driver_1 = require("./verification-driver");
 const receipt_signing_1 = require("./receipt-signing");
 const bsc3_flag_1 = require("./bsc3-flag");
 const bsc1_flag_1 = require("./bsc1-flag");
+const bsc2_flag_1 = require("./bsc2-flag");
+const assertion_presence_1 = require("./assertion-presence");
 const realization_1 = require("./realization");
 const PASS = { ok: true };
 // ---------------------------------------------------------------------------
@@ -693,6 +695,191 @@ function checkRealization(paths, state) {
     }
     return { ok: false, error: "realization_unverified", detail };
 }
+/**
+ * Evaluate the BSC-2 assertion-presence grounding for the current run (recompute-don't-trust +
+ * fail-closed + F8 grounding). The verdict drives BOTH enforcement (when the flag is on) AND the
+ * always-computed observability summary; see {@link AssertionVerdict}.
+ *
+ * Order:
+ *   1. The CHECKED `tested` REQ set comes from `computeBreakdown`. No req file ⇒ PASS (the
+ *      coverage rung owns that). No tested REQ ⇒ PASS (nothing to attest).
+ *   2. MutationKill efficacy axis (the 2b independence hook, dormant in 2a):
+ *      `readMutationKillValidated` → `forged` ⇒ BLOCK `mutation_kill_forged` (an unprovable
+ *      controlled-runner claim blocks — mirrors the driver `forged` path); `valid-grounded` ⇒
+ *      the suite's efficacy is grounded ⇒ PASS (it is the STRONGER independently-grounded anchor
+ *      that subsumes the in-process 2a presence correspondence; every observed REQ summarizes as
+ *      `valid-grounded`); `absent` ⇒ no-op (the common 2a path, fall through to step 3).
+ *   3. Receipt correspondence (F8): read the in-process AssertionPresenceReceipt store; a
+ *      tampered chain ⇒ BLOCK `assertion_presence_unverified` (reason `chain`). The LATEST
+ *      receipt is selected. NO receipt at all ⇒ fail-closed `assertion_unobserved` (there ARE
+ *      tested REQs but no recorded correspondence). A receipt's `target_mismatch`/`stale`
+ *      content status ⇒ BLOCK `assertion_presence_unverified`.
+ *   4. Offenders = recompute the ground FRESH; the offenders are the checked-tested REQs whose
+ *      recomputed summary has `assertionFree===true` (recompute — do NOT trust the receipt's
+ *      stored ground for the offender decision: the receipt is the correspondence artifact, the
+ *      live recompute is the verdict). Subtract validly-WAIVED REQs.
+ *   5. Verdict: no remaining offenders + receipt correspondence OK ⇒ PASS. Else BLOCK
+ *      `assertion_presence_unverified` naming the offenders + content status.
+ *
+ * The `summary` is ALWAYS computed (every checked-tested REQ, sorted by reqId) so the I1 hook
+ * fires on PASS / WARN / BLOCK. Trust labeling (honesty): a 2a-only REQ is `valid`
+ * (receipt-grounded) or `attested-presence` (presence sensed, no receipt) — NEVER
+ * `valid-grounded`, which is reserved for a signature-verified MutationKillReceipt.
+ */
+function evaluateAssertionPresence(paths) {
+    const bd = (0, coverage_1.computeBreakdown)(paths.root);
+    if ("error" in bd)
+        return null; // no req file ⇒ the coverage rung owns that; nothing to attest
+    const checkedTested = new Set(bd.rows.filter((r) => r.tested).map((r) => r.req));
+    if (checkedTested.size === 0)
+        return null; // no tested REQ ⇒ nothing to attest
+    // The efficacy axis (2b). A forged controlled-runner claim blocks; a verified one grounds
+    // efficacy; absence is a no-op (the common 2a path).
+    const mutation = (0, assertion_presence_1.readMutationKillValidated)(paths);
+    const efficacyGrounded = mutation.status === "valid-grounded";
+    // Recompute the ground FRESH — the verdict is the live recompute, never the receipt's stored
+    // ground (mirrors the BSC-6 recompute-don't-trust lesson). Build a per-REQ lookup for the
+    // checked-tested set so the offender decision + the observability summary share one source.
+    const ground = (0, assertion_presence_1.computeAssertionPresenceGround)(paths);
+    const byReq = new Map(ground.map((s) => [s.reqId, s]));
+    const waived = (0, assertion_presence_1.validWaivedReqs)(paths);
+    // The always-computed observability summary (seed-order deterministic). A checked-tested REQ
+    // with no recomputed summary (anchored only in a non-test file, etc.) is treated as
+    // assertion-free with zero non-trivial assertions (fail-closed: unobserved ≠ asserted).
+    const summary = [...checkedTested]
+        .sort()
+        .map((reqId) => {
+        const s = byReq.get(reqId);
+        const nonTrivialAssertions = s ? s.nonTrivialAssertions : 0;
+        const assertionFree = s ? s.assertionFree : true;
+        const isWaived = waived.has(reqId);
+        // Trust label: a verified MutationKillReceipt grounds efficacy for every observed REQ
+        // (`valid-grounded`). Otherwise a 2a presence observation is `attested-presence` (the
+        // sensed presence fact) for a REQ that carries a non-trivial assertion, else `valid`
+        // (in-process receipt attribution only). NEVER `valid-grounded` from the 2a path.
+        const trustLabel = efficacyGrounded
+            ? "valid-grounded"
+            : !assertionFree
+                ? "attested-presence"
+                : "valid";
+        return { reqId, nonTrivialAssertions, assertionFree, trustLabel, waived: isWaived };
+    });
+    // 2. Efficacy axis: a forged controlled-runner claim BLOCKS (unprovable independence claim).
+    if (mutation.status === "forged") {
+        return {
+            ok: false,
+            reason: "mutation_kill_forged",
+            summary,
+            detail: { scope: mutation.receipt?.ground.scope ?? null, key_id: mutation.receipt?.key_id ?? null },
+        };
+    }
+    // A signature-verified external MutationKillReceipt is the STRONGER, independently-grounded
+    // anchor: a controlled runner proved the suite KILLS injected faults, which strictly subsumes
+    // the weaker in-process 2a presence correspondence (the assertion-presence receipt is an
+    // attribution-only artifact the agent can mint). So efficacy-grounded ⇒ PASS — the 2a
+    // presence-receipt requirement AND the per-REQ offender check are both moot (the summary
+    // already labels every REQ `valid-grounded`). This is the 2b independence increment landing.
+    if (efficacyGrounded)
+        return { ok: true, summary };
+    // 3. Receipt correspondence (F8). A tampered chain is fail-closed.
+    const receipts = (0, assertion_presence_1.readAssertionPresenceReceipts)(paths);
+    const chain = (0, assertion_presence_1.verifyAssertionPresenceChain)(receipts);
+    if (!chain.ok) {
+        return {
+            ok: false,
+            reason: "assertion_presence_unverified",
+            summary,
+            detail: { contentStatus: "chain", brokenAt: chain.brokenAt, chainReason: chain.reason },
+        };
+    }
+    const latest = receipts.length > 0 ? receipts[receipts.length - 1] : undefined;
+    if (latest === undefined) {
+        // There ARE tested REQs but NO recorded correspondence ⇒ fail-closed unobserved.
+        return {
+            ok: false,
+            reason: "assertion_unobserved",
+            summary,
+            detail: { contentStatus: "assertion_unobserved", tested: checkedTested.size },
+        };
+    }
+    const content = (0, assertion_presence_1.validateAssertionPresenceContent)(paths, latest);
+    if (content.status === "target_mismatch" || content.status === "stale") {
+        return {
+            ok: false,
+            reason: "assertion_presence_unverified",
+            summary,
+            detail: {
+                contentStatus: content.status,
+                ...(content.staleReasons ? { staleReasons: content.staleReasons } : {}),
+            },
+        };
+    }
+    // 4. Offenders = checked-tested REQs that are assertion-free in the FRESH recompute, minus
+    //    validly-waived REQs. (The efficacy-grounded case short-circuited to PASS above, so this
+    //    is the 2a-only path where presence is the bar.)
+    const offenders = [...checkedTested]
+        .filter((reqId) => {
+        const s = byReq.get(reqId);
+        const assertionFree = s ? s.assertionFree : true;
+        return assertionFree && !waived.has(reqId);
+    })
+        .sort();
+    if (offenders.length === 0)
+        return { ok: true, summary };
+    return {
+        ok: false,
+        reason: "assertion_presence_unverified",
+        summary,
+        detail: { contentStatus: content.status, offenders: offenders.slice(0, 20), total: offenders.length },
+    };
+}
+/**
+ * The BSC-2 assertion-presence sub-check (Axis-B slice-6) — the NINTH production-reality
+ * sub-check, composed LAST inside {@link checkProductionReality} (after realization). A run may
+ * not be certified complete while a `tested` REQ-ID lacks a NON-TRIVIAL assertion (the
+ * completion gate counts a REQ "tested" on anchor presence alone; a test file with no
+ * cannot-fail-free assertion clears that bar — BSC-2). It ALWAYS computes the per-REQ
+ * observability summary (the I1 hook), then BLOCKS on a failing verdict ONLY when enforcement
+ * is enabled ({@link bsc2EnforcementEnabled} — WARN-first, defaults OFF in commit 1 / ON in
+ * commit 2).
+ *
+ * When the verdict is null (no req file / no tested REQ) ⇒ bare PASS. When the verdict PASSES
+ * with NO actionable summary anomaly the result still carries `assertionPresence` (the I1 hook
+ * fires for any non-empty summary); a fully-empty summary degrades to a bare PASS to preserve
+ * the `{ ok: true }` contract every downstream rung composes. When enforcement is OFF and the
+ * verdict fails, the would-be block rides up as a non-blocking `notice` (warn posture) WITH the
+ * summary. When ON, a failing verdict returns the stable token (`assertion_presence_unverified`
+ * / `assertion_unobserved` / `mutation_kill_forged`) WITH the summary so the block is diagnosable.
+ */
+function checkAssertionPresence(paths) {
+    const verdict = evaluateAssertionPresence(paths);
+    if (verdict === null)
+        return PASS; // no req file / no tested REQ ⇒ nothing to attest
+    if (verdict.ok) {
+        // Attach the summary on PASS only when it carries a NOTEWORTHY signal — any offender (an
+        // assertion-free REQ), any validly-waived REQ, or any efficacy-grounded (`valid-grounded`)
+        // REQ. A fully-clean, all-`attested-presence` run degrades to the shared bare `PASS` so the
+        // `{ ok: true }` contract every downstream rung composes is preserved (mirrors
+        // checkDriverDimensions' empty-summary bare-PASS). On BLOCK/WARN the summary always rides.
+        const noteworthy = verdict.summary.some((s) => s.assertionFree || s.waived || s.trustLabel === "valid-grounded");
+        return noteworthy ? { ok: true, assertionPresence: verdict.summary } : PASS;
+    }
+    if (!(0, bsc2_flag_1.bsc2EnforcementEnabled)()) {
+        // Flag OFF (WARN): observe but do not block. Surface the would-be block as a non-blocking
+        // notice + the summary so the warn posture is visible without weakening the gate.
+        return {
+            ok: true,
+            assertionPresence: verdict.summary,
+            notice: { token: verdict.reason, detail: verdict.detail },
+        };
+    }
+    return {
+        ok: false,
+        error: verdict.reason,
+        detail: verdict.detail,
+        assertionPresence: verdict.summary,
+    };
+}
 function checkProductionReality(paths, state) {
     // Stage-aware: production reality is a CERTIFY-COMPLETION condition, so it only
     // enforces at the completion boundary (final-verification). Earlier stages have no
@@ -876,11 +1063,37 @@ function checkProductionReality(paths, state) {
         // stays visible alongside the realization failure.
         return driver.dimensions ? { ...realization, dimensions: driver.dimensions } : realization;
     }
-    // Both passed: ride the driver result up (it carries `dimensions`/`notice`); fold in any
-    // realization warn-phase notice (flag OFF) without clobbering a driver notice.
-    if (realization.notice && !driver.notice)
-        return { ...driver, notice: realization.notice };
-    return driver;
+    // 8. (BSC-2 / Axis-B slice-6) ASSERTION-PRESENCE GROUNDING — composed LAST (after realization).
+    // A run may not be certified complete while a `tested` REQ-ID lacks a NON-TRIVIAL assertion:
+    // the coverage gate counts a REQ "tested" on anchor presence alone, so a test file with no
+    // cannot-fail-free assertion clears that bar (BSC-2). This recomputes the per-REQ
+    // assertion-presence ground FRESH, requires an F8-bound in-process AssertionPresenceReceipt
+    // for correspondence, subtracts validly-WAIVED REQs, and accepts a signature-verified external
+    // MutationKillReceipt as efficacy-grounded (a forged one BLOCKS). Governed by
+    // `bsc2EnforcementEnabled()` (WARN-first): the verdict is ALWAYS computed (so
+    // `assertionPresence` summarizes the per-REQ posture for the I1 hook), but it BLOCKS with
+    // `assertion_presence_unverified` / `assertion_unobserved` / `mutation_kill_forged` only when
+    // enforcement is on. The `assertionPresence` summary rides on the result whether PASS or BLOCK.
+    const assertion = checkAssertionPresence(paths);
+    if (!assertion.ok) {
+        // Preserve the upstream driver `dimensions` summary on the assertion block so the full trust
+        // posture stays visible alongside the assertion failure.
+        return driver.dimensions ? { ...assertion, dimensions: driver.dimensions } : assertion;
+    }
+    // All passed: fold the optional observability fields up onto ONE result so a single PASS
+    // carries the driver `dimensions`, the assertion `assertionPresence`, and at most one
+    // warn-phase `notice` (driver wins, then realization, then assertion — first non-empty).
+    const merged = { ok: true };
+    const dimensions = driver.dimensions ?? assertion.dimensions;
+    if (dimensions)
+        merged.dimensions = dimensions;
+    if (assertion.assertionPresence)
+        merged.assertionPresence = assertion.assertionPresence;
+    const notice = driver.notice ?? realization.notice ?? assertion.notice;
+    if (notice)
+        merged.notice = notice;
+    // Degrade to the shared bare PASS when nothing was observed, preserving `{ ok: true }`.
+    return merged.dimensions || merged.assertionPresence || merged.notice ? merged : PASS;
 }
 // ---------------------------------------------------------------------------
 // Composed gate predicates — consumed by both `th next` and the typed MCP tools.

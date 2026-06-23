@@ -18332,8 +18332,8 @@ function ledgerCorruptFailure(e) {
 }
 
 // src/core/gate-preconditions.ts
-var fs25 = __toESM(require("node:fs"));
-var path24 = __toESM(require("node:path"));
+var fs26 = __toESM(require("node:fs"));
+var path25 = __toESM(require("node:path"));
 
 // src/core/health.ts
 var fs13 = __toESM(require("node:fs"));
@@ -22904,9 +22904,529 @@ function realizationEnforcementEnabled() {
   return !(normalized === "0" || normalized === "false");
 }
 
-// src/core/realization.ts
+// src/core/bsc2-flag.ts
+function bsc2EnforcementEnabled() {
+  const raw = process.env.TH_BSC2_ENFORCE;
+  if (raw === void 0) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true";
+}
+
+// src/core/assertion-presence.ts
 var fs24 = __toESM(require("node:fs"));
 var path23 = __toESM(require("node:path"));
+var PARSEABLE_TEST_EXTENSIONS = /* @__PURE__ */ new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mts",
+  ".cts",
+  ".mjs",
+  ".cjs"
+]);
+function isParseableTestFile(relPosix2) {
+  const lower = relPosix2.toLowerCase();
+  const dot = lower.lastIndexOf(".");
+  if (dot < 0) return false;
+  return PARSEABLE_TEST_EXTENSIONS.has(lower.slice(dot));
+}
+function isLiteral(s) {
+  const t = s.trim();
+  if (t === "") return false;
+  if (/^-?\d+(?:\.\d+)?$/.test(t)) return true;
+  if (/^(['"`]).*\1$/.test(t)) return true;
+  if (/^(true|false|null|undefined|NaN)$/.test(t)) return true;
+  return false;
+}
+function nextExpectOpenParen(text, from) {
+  let i = from;
+  for (; ; ) {
+    const idx = text.indexOf("expect", i);
+    if (idx < 0) return -1;
+    const before = idx === 0 ? "" : text[idx - 1];
+    if (/[A-Za-z0-9_$]/.test(before)) {
+      i = idx + 6;
+      continue;
+    }
+    let j = idx + 6;
+    while (j < text.length && /\s/.test(text[j])) j++;
+    if (text[j] === "(") return j;
+    i = idx + 6;
+  }
+}
+function matchingParen(text, openIdx) {
+  let depth = 0;
+  let i = openIdx;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "'" || c === '"' || c === "`") {
+      i = skipString(text, i, c);
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "/") {
+      const nl = text.indexOf("\n", i + 2);
+      i = nl < 0 ? text.length : nl;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 2;
+      continue;
+    }
+    if (c === "(") depth++;
+    else if (c === ")") {
+      depth--;
+      if (depth === 0) return i;
+    }
+    i++;
+  }
+  return -1;
+}
+function skipString(text, start, quote) {
+  let i = start + 1;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "\\") {
+      i += 2;
+      continue;
+    }
+    if (c === quote) return i + 1;
+    i++;
+  }
+  return text.length;
+}
+var MATCHER_MODIFIERS = /* @__PURE__ */ new Set(["not", "resolves", "rejects"]);
+function firstMatcherArg(text, afterExpect) {
+  let i = afterExpect;
+  for (; ; ) {
+    while (i < text.length && /\s/.test(text[i])) i++;
+    if (text[i] !== ".") return void 0;
+    i++;
+    while (i < text.length && /\s/.test(text[i])) i++;
+    const nameStart = i;
+    while (i < text.length && /[A-Za-z0-9_$]/.test(text[i])) i++;
+    const name = text.slice(nameStart, i).toLowerCase();
+    if (name === "") return void 0;
+    while (i < text.length && /\s/.test(text[i])) i++;
+    if (MATCHER_MODIFIERS.has(name) && text[i] !== "(") {
+      continue;
+    }
+    if (text[i] === "(") {
+      const close = matchingParen(text, i);
+      if (close < 0) return void 0;
+      return text.slice(i + 1, close);
+    }
+    return void 0;
+  }
+}
+function countAssertionsInText(text) {
+  let total = 0;
+  let trivial = 0;
+  let cursor = 0;
+  for (; ; ) {
+    const open = nextExpectOpenParen(text, cursor);
+    if (open < 0) break;
+    const close = matchingParen(text, open);
+    if (close < 0) break;
+    total++;
+    const argA = text.slice(open + 1, close).trim();
+    const argBraw = firstMatcherArg(text, close + 1);
+    const argB = argBraw === void 0 ? void 0 : argBraw.trim();
+    const literalCase = isLiteral(argA) && (argB === void 0 || isLiteral(argB));
+    const tautologyCase = argA !== "" && argB !== void 0 && argA === argB;
+    if (literalCase || tautologyCase) trivial++;
+    cursor = close + 1;
+  }
+  return { total, trivial };
+}
+function computeAssertionPresenceGround(paths, opts = {}) {
+  const testsDir = opts.testsDir ?? path23.resolve(paths.root, "tests");
+  const anchors = scanDirForReqIds(testsDir);
+  const summaries = [];
+  for (const [reqId, files] of anchors) {
+    const testFiles = files.filter((f) => isRecognizedTestFile(f)).sort();
+    if (testFiles.length === 0) continue;
+    let assertionCount = 0;
+    let trivial = 0;
+    for (const rel of testFiles) {
+      if (!isParseableTestFile(rel)) continue;
+      const abs = resolveWithinRoot(testsDir, rel);
+      if (abs === null) continue;
+      let content;
+      try {
+        if (!fs24.existsSync(abs) || !fs24.statSync(abs).isFile()) continue;
+        content = fs24.readFileSync(abs, "utf8");
+      } catch {
+        continue;
+      }
+      const counts = countAssertionsInText(content);
+      assertionCount += counts.total;
+      trivial += counts.trivial;
+    }
+    const nonTrivialAssertions = assertionCount - trivial;
+    summaries.push({
+      reqId,
+      testFiles,
+      assertionCount,
+      nonTrivialAssertions,
+      assertionFree: nonTrivialAssertions === 0
+    });
+  }
+  summaries.sort((a, b) => a.reqId < b.reqId ? -1 : a.reqId > b.reqId ? 1 : 0);
+  return summaries;
+}
+var SUMMARY_FIELD_ORDER = [
+  "reqId",
+  "testFiles",
+  "assertionCount",
+  "nonTrivialAssertions",
+  "assertionFree"
+];
+var MUTATION_GROUND_FIELD_ORDER = [
+  "mutants_generated",
+  "mutants_killed",
+  "mutants_survived",
+  "score",
+  "scope"
+];
+var SNAPSHOT_FIELD_ORDER5 = ["gitHead", "treeDigest"];
+function reorder4(obj, order) {
+  const out = {};
+  for (const key of order) out[key] = obj[key];
+  return out;
+}
+function reorderSummary(summary) {
+  return reorder4(summary, SUMMARY_FIELD_ORDER);
+}
+function serializeAssertionGround(ground) {
+  return JSON.stringify(ground.map(reorderSummary));
+}
+function assertionGroundDigest(ground) {
+  return hashContent(serializeAssertionGround(ground));
+}
+var ASSERTION_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "refId",
+  "ground",
+  "snapshot_coord",
+  "producer_identity",
+  "legacy",
+  "prevHash"
+];
+function assertionPresenceCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of ASSERTION_CANONICAL_FIELD_ORDER) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "ground") {
+      ordered[key] = val.map(reorderSummary);
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder4(val, SNAPSHOT_FIELD_ORDER5);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeAssertionPresenceRecordHash(receipt) {
+  return hashContent(assertionPresenceCanonicalText(receipt));
+}
+function assertionPresenceReceiptsPath(paths) {
+  return path23.join(paths.stateDir, "assertion-presence-receipts.jsonl");
+}
+function isValidAssertionPresenceReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "assertion-presence") return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
+  if (!Array.isArray(r.ground)) return false;
+  for (const s2 of r.ground) {
+    if (typeof s2 !== "object" || s2 === null) return false;
+    const sm = s2;
+    if (typeof sm.reqId !== "string" || sm.reqId === "") return false;
+    if (!Array.isArray(sm.testFiles) || !sm.testFiles.every((f) => typeof f === "string")) return false;
+    if (typeof sm.assertionCount !== "number" || !Number.isFinite(sm.assertionCount)) return false;
+    if (typeof sm.nonTrivialAssertions !== "number" || !Number.isFinite(sm.nonTrivialAssertions)) return false;
+    if (typeof sm.assertionFree !== "boolean") return false;
+  }
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readAssertionPresenceReceipts(paths) {
+  return readJsonlValues(assertionPresenceReceiptsPath(paths), isValidAssertionPresenceReceipt);
+}
+function readLastAssertionPresenceRecordHash(paths) {
+  const last = scanTailValid(assertionPresenceReceiptsPath(paths), isValidAssertionPresenceReceipt);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function verifyAssertionPresenceChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeAssertionPresenceRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+function appendAssertionPresenceReceipt(paths, input) {
+  const ground = computeAssertionPresenceGround(paths, { testsDir: input.testsDir });
+  return sealAndAppendAssertion(paths, {
+    kind: "assertion-presence",
+    refId: assertionRefId(paths),
+    ground,
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: input.producerIdentity
+  });
+}
+function assertionRefId(paths) {
+  return currentReceiptSnapshotCoord(paths).gitHead ?? "no-git";
+}
+function sealAndAppendAssertion(paths, receipt) {
+  assertGovernedWriteSurface(paths.root, assertionPresenceReceiptsPath(paths));
+  fs24.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastAssertionPresenceRecordHash(paths);
+  const withPrev = { ...receipt, prevHash };
+  const recordHash = computeAssertionPresenceRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs24.appendFileSync(assertionPresenceReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function snapshotStaleReasons4(recorded, current) {
+  const reasons = [];
+  if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
+    reasons.push("gitHead");
+  }
+  if (recorded.treeDigest !== null && current.treeDigest !== null && recorded.treeDigest !== current.treeDigest) {
+    reasons.push("treeDigest");
+  }
+  return reasons;
+}
+function assertionFreeOffenders(ground) {
+  return ground.filter((s) => s.assertionFree).map((s) => s.reqId).sort();
+}
+function validateAssertionPresenceContent(paths, receipt) {
+  const recomputed = computeAssertionPresenceGround(paths);
+  const offenders = assertionFreeOffenders(recomputed);
+  if (assertionGroundDigest(recomputed) !== assertionGroundDigest(receipt.ground)) {
+    return { status: "target_mismatch", offenders };
+  }
+  const staleReasons = snapshotStaleReasons4(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
+  if (staleReasons.length > 0) return { status: "stale", staleReasons, offenders };
+  return { status: "valid", offenders };
+}
+var MUTATION_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "refId",
+  "ground",
+  "snapshot_coord",
+  "producer_kind",
+  "key_id",
+  "prevHash"
+];
+function mutationKillCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of MUTATION_CANONICAL_FIELD_ORDER) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "ground") {
+      ordered[key] = reorder4(val, MUTATION_GROUND_FIELD_ORDER);
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder4(val, SNAPSHOT_FIELD_ORDER5);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeMutationKillRecordHash(receipt) {
+  return hashContent(mutationKillCanonicalText(receipt));
+}
+function externalMutationReceiptsPath(paths) {
+  return path23.join(paths.stateDir, "external-mutation-receipts.jsonl");
+}
+var ED25519_SIGNATURE_BASE645 = /^[A-Za-z0-9+/]{86}==$/;
+function isValidMutationKillReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "mutation-kill") return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (r.producer_kind !== "controlled-runner") return false;
+  if (typeof r.key_id !== "string" || r.key_id === "") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE645.test(r.signature))) {
+    return false;
+  }
+  const g = r.ground;
+  if (typeof g !== "object" || g === null) return false;
+  const gm = g;
+  for (const k of ["mutants_generated", "mutants_killed", "mutants_survived", "score"]) {
+    if (typeof gm[k] !== "number" || !Number.isFinite(gm[k])) return false;
+  }
+  if (typeof gm.scope !== "string") return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readExternalMutationReceipts(paths) {
+  return readJsonlValues(externalMutationReceiptsPath(paths), isValidMutationKillReceipt);
+}
+function verifyMutationChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeMutationKillRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+function signatureVerifies(receipt) {
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return false;
+  if (typeof receipt.signature !== "string") return false;
+  if (receipt.key_id !== externalKeyId(publicKey)) return false;
+  const { recordHash: _rh, signature: _sig, ...signedView } = receipt;
+  return verifyCanonical(mutationKillCanonicalText(signedView), receipt.signature, publicKey);
+}
+function readMutationKillValidated(paths) {
+  const receipts = readExternalMutationReceipts(paths);
+  const candidates = receipts.filter((r) => r.producer_kind === "controlled-runner");
+  if (candidates.length === 0) return { status: "absent" };
+  const chainOk = verifyMutationChain(receipts).ok;
+  const publicKey = loadExternalPublicKey();
+  if (publicKey !== null && chainOk) {
+    let verified;
+    for (const cand of candidates) {
+      if (signatureVerifies(cand)) verified = cand;
+    }
+    if (verified) return { status: "valid-grounded", receipt: verified };
+  }
+  return { status: "forged", receipt: candidates[candidates.length - 1] };
+}
+function assertionWaiversPath(paths) {
+  return path23.join(paths.stateDir, "assertion-waivers.jsonl");
+}
+var ASSERTION_WAIVER_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "reqId",
+  "groundDigest",
+  "snapshot_coord",
+  "producer_kind",
+  "key_id",
+  "prevHash"
+];
+function assertionWaiverCanonicalText(waiver) {
+  const ordered = {};
+  for (const key of ASSERTION_WAIVER_CANONICAL_FIELD_ORDER) {
+    const val = waiver[key];
+    if (val === void 0) continue;
+    if (key === "snapshot_coord") {
+      ordered[key] = reorder4(val, SNAPSHOT_FIELD_ORDER5);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeAssertionWaiverRecordHash(waiver) {
+  return hashContent(assertionWaiverCanonicalText(waiver));
+}
+function isValidAssertionWaiver(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "assertion-waiver") return false;
+  if (typeof r.reqId !== "string" || r.reqId === "") return false;
+  if (typeof r.groundDigest !== "string" || !HEX64.test(r.groundDigest)) return false;
+  if (r.producer_kind !== "external") return false;
+  if (typeof r.key_id !== "string" || r.key_id === "") return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE645.test(r.signature))) {
+    return false;
+  }
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readAssertionWaivers(paths) {
+  return readJsonlValues(assertionWaiversPath(paths), isValidAssertionWaiver);
+}
+function verifyAssertionWaiverChain(waivers) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < waivers.length; i++) {
+    const w = waivers[i];
+    const { recordHash, signature: _sig, ...rest } = w;
+    const recomputed = computeAssertionWaiverRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (w.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = w.recordHash;
+  }
+  return { ok: true };
+}
+function waiverSignatureVerifies(waiver, publicKey) {
+  if (typeof waiver.signature !== "string") return false;
+  if (waiver.key_id !== externalKeyId(publicKey)) return false;
+  const { recordHash: _rh, signature, ...signedView } = waiver;
+  return verifyCanonical(assertionWaiverCanonicalText(signedView), signature, publicKey);
+}
+function currentReqGroundDigest(paths, reqId) {
+  const ground = computeAssertionPresenceGround(paths);
+  const summary = ground.find((s) => s.reqId === reqId);
+  if (summary === void 0) return null;
+  return assertionGroundDigest([summary]);
+}
+function validWaivedReqs(paths) {
+  const waivers = readAssertionWaivers(paths);
+  if (waivers.length === 0) return /* @__PURE__ */ new Set();
+  if (!verifyAssertionWaiverChain(waivers).ok) return /* @__PURE__ */ new Set();
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return /* @__PURE__ */ new Set();
+  const exempt = /* @__PURE__ */ new Set();
+  for (const w of waivers) {
+    if (!waiverSignatureVerifies(w, publicKey)) continue;
+    const current = currentReqGroundDigest(paths, w.reqId);
+    if (current === null || current !== w.groundDigest) continue;
+    exempt.add(w.reqId);
+  }
+  return exempt;
+}
+
+// src/core/realization.ts
+var fs25 = __toESM(require("node:fs"));
+var path24 = __toESM(require("node:path"));
 var CANONICAL_FIELD_ORDER3 = [
   "kind",
   "req_id",
@@ -22920,8 +23440,8 @@ var CANONICAL_FIELD_ORDER3 = [
   "prevHash"
 ];
 var REFERENT_FIELD_ORDER = ["path", "digest"];
-var SNAPSHOT_FIELD_ORDER5 = ["gitHead", "treeDigest"];
-function reorder4(obj, order) {
+var SNAPSHOT_FIELD_ORDER6 = ["gitHead", "treeDigest"];
+function reorder5(obj, order) {
   const out = {};
   for (const key of order) out[key] = obj[key];
   return out;
@@ -22932,9 +23452,9 @@ function realizationCanonicalText(receipt) {
     const val = receipt[key];
     if (val === void 0) continue;
     if (key === "referent") {
-      ordered[key] = reorder4(val, REFERENT_FIELD_ORDER);
+      ordered[key] = reorder5(val, REFERENT_FIELD_ORDER);
     } else if (key === "snapshot_coord") {
-      ordered[key] = reorder4(val, SNAPSHOT_FIELD_ORDER5);
+      ordered[key] = reorder5(val, SNAPSHOT_FIELD_ORDER6);
     } else {
       ordered[key] = val;
     }
@@ -22945,12 +23465,12 @@ function computeRealizationRecordHash(receipt) {
   return hashContent(realizationCanonicalText(receipt));
 }
 function realizationReceiptsPath(paths) {
-  return path23.join(paths.stateDir, "realization-receipts.jsonl");
+  return path24.join(paths.stateDir, "realization-receipts.jsonl");
 }
 function externalRealizationReceiptsPath(paths) {
-  return path23.join(paths.stateDir, "external-realization-receipts.jsonl");
+  return path24.join(paths.stateDir, "external-realization-receipts.jsonl");
 }
-var ED25519_SIGNATURE_BASE645 = /^[A-Za-z0-9+/]{86}==$/;
+var ED25519_SIGNATURE_BASE646 = /^[A-Za-z0-9+/]{86}==$/;
 function isValidRealizationReceipt(parsed) {
   if (typeof parsed !== "object" || parsed === null) return false;
   const r = parsed;
@@ -22963,7 +23483,7 @@ function isValidRealizationReceipt(parsed) {
   if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
   if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
   if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
-  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE645.test(r.signature))) {
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE646.test(r.signature))) {
     return false;
   }
   const ref = r.referent;
@@ -23063,10 +23583,10 @@ function unresolvedDoneSliceReqs(map, state) {
   return [...unresolved].sort();
 }
 function loadRepoMapForRealization(paths) {
-  const mapJsonPath = path23.join(paths.stateDir, "repo-map.json");
+  const mapJsonPath = path24.join(paths.stateDir, "repo-map.json");
   let raw = null;
   try {
-    raw = fs24.readFileSync(mapJsonPath, "utf8");
+    raw = fs25.readFileSync(mapJsonPath, "utf8");
   } catch {
     return null;
   }
@@ -23114,15 +23634,15 @@ function appendLegacyRealizationReceipt(paths, reqId, owningSlice) {
 }
 function sealAndAppend4(paths, receipt) {
   assertGovernedWriteSurface(paths.root, realizationReceiptsPath(paths));
-  fs24.mkdirSync(paths.stateDir, { recursive: true });
+  fs25.mkdirSync(paths.stateDir, { recursive: true });
   const prevHash = readLastRealizationRecordHash(paths);
   const withPrev = { ...receipt, prevHash };
   const recordHash = computeRealizationRecordHash(withPrev);
   const sealed = { ...withPrev, recordHash };
-  fs24.appendFileSync(realizationReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  fs25.appendFileSync(realizationReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   return sealed;
 }
-function snapshotStaleReasons4(recorded, current) {
+function snapshotStaleReasons5(recorded, current) {
   const reasons = [];
   if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
     reasons.push("gitHead");
@@ -23138,14 +23658,14 @@ function classifyRealizationContent(paths, receipt, passStatus) {
   const currentDigest = computeTargetDigest(paths.root, recordedPath);
   if (currentDigest === null) return { status: "target_missing", receipt };
   if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt };
-  const staleReasons = snapshotStaleReasons4(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
+  const staleReasons = snapshotStaleReasons5(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
   if (staleReasons.length > 0) return { status: "stale", receipt, staleReasons };
   return { status: passStatus, receipt };
 }
 function claimsExternal(r) {
   return typeof r.signature === "string" || typeof r.key_id === "string";
 }
-function signatureVerifies(receipt) {
+function signatureVerifies2(receipt) {
   const publicKey = loadExternalPublicKey();
   if (publicKey === null) return false;
   if (typeof receipt.signature !== "string") return false;
@@ -23169,7 +23689,7 @@ function readRealizationReceiptValidated(paths, reqId) {
     if (publicKey !== null && externalChainOk) {
       let verified;
       for (const cand of externalCandidates) {
-        if (signatureVerifies(cand)) verified = cand;
+        if (signatureVerifies2(cand)) verified = cand;
       }
       if (verified) {
         if (verified.legacy === true) return { status: "legacy", receipt: verified };
@@ -23187,14 +23707,14 @@ function readRealizationReceiptValidated(paths, reqId) {
   return classifyRealizationContent(paths, inProcess, "valid");
 }
 function migrationMarkerPath3(paths) {
-  return path23.join(paths.stateDir, ".realization-receipts-migration");
+  return path24.join(paths.stateDir, ".realization-receipts-migration");
 }
 function readMigrationMarker3(paths) {
   const file = migrationMarkerPath3(paths);
-  if (!fs24.existsSync(file)) return void 0;
+  if (!fs25.existsSync(file)) return void 0;
   let raw;
   try {
-    raw = fs24.readFileSync(file, "utf8");
+    raw = fs25.readFileSync(file, "utf8");
   } catch {
     return void 0;
   }
@@ -23225,8 +23745,8 @@ function ensureRealizationMigration(paths, state, map) {
   const baseline = owned.map((o) => o.reqId);
   const marker = { migratedAt: (/* @__PURE__ */ new Date()).toISOString(), baseline };
   assertGovernedWriteSurface(paths.root, migrationMarkerPath3(paths));
-  fs24.mkdirSync(paths.stateDir, { recursive: true });
-  fs24.writeFileSync(migrationMarkerPath3(paths), JSON.stringify(marker), "utf8");
+  fs25.mkdirSync(paths.stateDir, { recursive: true });
+  fs25.writeFileSync(migrationMarkerPath3(paths), JSON.stringify(marker), "utf8");
 }
 function ensureRealizationMigrationOpportunistic(paths) {
   if (realizationMigrationDone(paths)) return;
@@ -23325,7 +23845,7 @@ function checkGoverningArtifact(paths, state) {
     const produced = contract.produces.replace(/\/$/, "");
     const registered = state.approved_artifacts.some((a) => a.file === produced);
     if (!registered) {
-      const exists = fs25.existsSync(path24.resolve(paths.root, produced));
+      const exists = fs26.existsSync(path25.resolve(paths.root, produced));
       if (!exists) {
         return { ok: false, error: "artifact_not_produced", detail: { stage: current, produces: contract.produces } };
       }
@@ -23399,7 +23919,7 @@ function checkFinalVerification(paths, state) {
     const produced = contract.produces.replace(/\/$/, "");
     const registered = state.approved_artifacts.some((a) => a.file === produced);
     if (!registered) {
-      const exists = fs25.existsSync(path24.resolve(paths.root, produced));
+      const exists = fs26.existsSync(path25.resolve(paths.root, produced));
       return exists ? { ok: false, error: "report_not_registered", detail: { file: produced } } : { ok: false, error: "report_not_produced", detail: { produces: produced } };
     }
   }
@@ -23526,6 +24046,100 @@ function checkRealization(paths, state) {
   }
   return { ok: false, error: "realization_unverified", detail };
 }
+function evaluateAssertionPresence(paths) {
+  const bd = computeBreakdown(paths.root);
+  if ("error" in bd) return null;
+  const checkedTested = new Set(bd.rows.filter((r) => r.tested).map((r) => r.req));
+  if (checkedTested.size === 0) return null;
+  const mutation = readMutationKillValidated(paths);
+  const efficacyGrounded = mutation.status === "valid-grounded";
+  const ground = computeAssertionPresenceGround(paths);
+  const byReq = new Map(ground.map((s) => [s.reqId, s]));
+  const waived = validWaivedReqs(paths);
+  const summary = [...checkedTested].sort().map((reqId) => {
+    const s = byReq.get(reqId);
+    const nonTrivialAssertions = s ? s.nonTrivialAssertions : 0;
+    const assertionFree = s ? s.assertionFree : true;
+    const isWaived = waived.has(reqId);
+    const trustLabel = efficacyGrounded ? "valid-grounded" : !assertionFree ? "attested-presence" : "valid";
+    return { reqId, nonTrivialAssertions, assertionFree, trustLabel, waived: isWaived };
+  });
+  if (mutation.status === "forged") {
+    return {
+      ok: false,
+      reason: "mutation_kill_forged",
+      summary,
+      detail: { scope: mutation.receipt?.ground.scope ?? null, key_id: mutation.receipt?.key_id ?? null }
+    };
+  }
+  if (efficacyGrounded) return { ok: true, summary };
+  const receipts = readAssertionPresenceReceipts(paths);
+  const chain = verifyAssertionPresenceChain(receipts);
+  if (!chain.ok) {
+    return {
+      ok: false,
+      reason: "assertion_presence_unverified",
+      summary,
+      detail: { contentStatus: "chain", brokenAt: chain.brokenAt, chainReason: chain.reason }
+    };
+  }
+  const latest = receipts.length > 0 ? receipts[receipts.length - 1] : void 0;
+  if (latest === void 0) {
+    return {
+      ok: false,
+      reason: "assertion_unobserved",
+      summary,
+      detail: { contentStatus: "assertion_unobserved", tested: checkedTested.size }
+    };
+  }
+  const content = validateAssertionPresenceContent(paths, latest);
+  if (content.status === "target_mismatch" || content.status === "stale") {
+    return {
+      ok: false,
+      reason: "assertion_presence_unverified",
+      summary,
+      detail: {
+        contentStatus: content.status,
+        ...content.staleReasons ? { staleReasons: content.staleReasons } : {}
+      }
+    };
+  }
+  const offenders = [...checkedTested].filter((reqId) => {
+    const s = byReq.get(reqId);
+    const assertionFree = s ? s.assertionFree : true;
+    return assertionFree && !waived.has(reqId);
+  }).sort();
+  if (offenders.length === 0) return { ok: true, summary };
+  return {
+    ok: false,
+    reason: "assertion_presence_unverified",
+    summary,
+    detail: { contentStatus: content.status, offenders: offenders.slice(0, 20), total: offenders.length }
+  };
+}
+function checkAssertionPresence(paths) {
+  const verdict = evaluateAssertionPresence(paths);
+  if (verdict === null) return PASS;
+  if (verdict.ok) {
+    const noteworthy = verdict.summary.some(
+      (s) => s.assertionFree || s.waived || s.trustLabel === "valid-grounded"
+    );
+    return noteworthy ? { ok: true, assertionPresence: verdict.summary } : PASS;
+  }
+  if (!bsc2EnforcementEnabled()) {
+    return {
+      ok: true,
+      assertionPresence: verdict.summary,
+      notice: { token: verdict.reason, detail: verdict.detail }
+    };
+  }
+  return {
+    ok: false,
+    error: verdict.reason,
+    detail: verdict.detail,
+    assertionPresence: verdict.summary
+  };
+}
 function checkProductionReality(paths, state) {
   if (!isFinalVerification(state.current_stage)) return PASS;
   let entries;
@@ -23623,8 +24237,17 @@ function checkProductionReality(paths, state) {
   if (!realization.ok) {
     return driver.dimensions ? { ...realization, dimensions: driver.dimensions } : realization;
   }
-  if (realization.notice && !driver.notice) return { ...driver, notice: realization.notice };
-  return driver;
+  const assertion = checkAssertionPresence(paths);
+  if (!assertion.ok) {
+    return driver.dimensions ? { ...assertion, dimensions: driver.dimensions } : assertion;
+  }
+  const merged = { ok: true };
+  const dimensions = driver.dimensions ?? assertion.dimensions;
+  if (dimensions) merged.dimensions = dimensions;
+  if (assertion.assertionPresence) merged.assertionPresence = assertion.assertionPresence;
+  const notice = driver.notice ?? realization.notice ?? assertion.notice;
+  if (notice) merged.notice = notice;
+  return merged.dimensions || merged.assertionPresence || merged.notice ? merged : PASS;
 }
 function stageOrdinal(stage) {
   const canonical = canonicalizeStage(stage);
@@ -23831,10 +24454,10 @@ function conflictPairs(slices) {
 }
 
 // src/core/leases.ts
-var fs26 = __toESM(require("node:fs"));
-var path25 = __toESM(require("node:path"));
+var fs27 = __toESM(require("node:fs"));
+var path26 = __toESM(require("node:path"));
 function leasesPath(paths) {
-  return path25.join(paths.stateDir, "build-leases.jsonl");
+  return path26.join(paths.stateDir, "build-leases.jsonl");
 }
 var LEASE_FIELD_ORDER = [
   "ts",
@@ -23854,9 +24477,9 @@ function serializeLeaseEvent(event) {
 }
 function readLeaseEvents(paths) {
   const file = leasesPath(paths);
-  if (!fs26.existsSync(file)) return [];
+  if (!fs27.existsSync(file)) return [];
   const out = [];
-  for (const line of fs26.readFileSync(file, "utf8").split(/\r?\n/)) {
+  for (const line of fs27.readFileSync(file, "utf8").split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
@@ -23874,9 +24497,9 @@ function readLeaseEvents(paths) {
 }
 function appendLeaseEvent(paths, event, now = () => /* @__PURE__ */ new Date()) {
   assertGovernedWriteSurface(paths.root, leasesPath(paths));
-  fs26.mkdirSync(paths.stateDir, { recursive: true });
+  fs27.mkdirSync(paths.stateDir, { recursive: true });
   const line = serializeLeaseEvent({ ts: now().toISOString(), ...event }) + "\n";
-  fs26.appendFileSync(leasesPath(paths), line, "utf8");
+  fs27.appendFileSync(leasesPath(paths), line, "utf8");
 }
 function activeLeases(paths) {
   const byOwner = /* @__PURE__ */ new Map();
@@ -24071,7 +24694,7 @@ function computeRoute(input) {
 }
 
 // src/core/brief.ts
-var fs27 = __toESM(require("node:fs"));
+var fs28 = __toESM(require("node:fs"));
 function isPlainObject5(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -24107,12 +24730,12 @@ function validateBrief(value) {
   return { ok: true, issues: [], brief: value };
 }
 function loadBriefFromFile(filePath) {
-  if (!fs27.existsSync(filePath)) {
+  if (!fs28.existsSync(filePath)) {
     return { ok: false, issues: [{ path: "$", message: `brief file not found: ${filePath}` }] };
   }
   let raw;
   try {
-    raw = fs27.readFileSync(filePath, "utf8");
+    raw = fs28.readFileSync(filePath, "utf8");
   } catch (e) {
     return { ok: false, issues: [{ path: "$", message: `could not read brief: ${e.message}` }] };
   }
@@ -24418,7 +25041,7 @@ function readLeaseEventsForParent(paths, parentSlice) {
 }
 
 // src/commands/coverage.ts
-var path26 = __toESM(require("node:path"));
+var path27 = __toESM(require("node:path"));
 function rejectEscapingPath(paths, opts) {
   const fields = [
     ["reqsFile", opts.reqsFile],
@@ -24437,13 +25060,13 @@ function rejectEscapingPath(paths, opts) {
 function runCoverageCheck(paths, opts = {}) {
   const escaped = rejectEscapingPath(paths, opts);
   if (escaped) return escaped;
-  const reqsAbs = path26.resolve(paths.root, opts.reqsFile ?? "docs/01-requirements.md");
-  const planAbs = path26.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
-  const testsAbs = path26.resolve(paths.root, opts.testsDir ?? "tests");
-  const scopeAbs = path26.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
+  const reqsAbs = path27.resolve(paths.root, opts.reqsFile ?? "docs/01-requirements.md");
+  const planAbs = path27.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  const testsAbs = path27.resolve(paths.root, opts.testsDir ?? "tests");
+  const scopeAbs = path27.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
   const reqsContent = readFileOrUndefined(reqsAbs);
   if (reqsContent === void 0) {
-    const rel = path26.relative(paths.root, reqsAbs).split(path26.sep).join("/");
+    const rel = path27.relative(paths.root, reqsAbs).split(path27.sep).join("/");
     return failure({
       human: `Requirements file not found: ${rel}. Run \`th init\` and author requirements first.`,
       data: { error: "reqs_file_not_found", reqsFile: rel }
@@ -24536,19 +25159,19 @@ function runCoverageReport(paths, opts = {}) {
 }
 
 // src/core/telemetry.ts
-var fs28 = __toESM(require("node:fs"));
-var path27 = __toESM(require("node:path"));
+var fs29 = __toESM(require("node:fs"));
+var path28 = __toESM(require("node:path"));
 function telemetryConfigPath(paths) {
-  return path27.join(paths.stateDir, "telemetry.json");
+  return path28.join(paths.stateDir, "telemetry.json");
 }
 function telemetryLogPath(paths) {
-  return path27.join(paths.stateDir, "telemetry.jsonl");
+  return path28.join(paths.stateDir, "telemetry.jsonl");
 }
 function readTelemetryConfig(paths) {
   const file = telemetryConfigPath(paths);
-  if (!fs28.existsSync(file)) return { enabled: false };
+  if (!fs29.existsSync(file)) return { enabled: false };
   try {
-    const parsed = JSON.parse(fs28.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs29.readFileSync(file, "utf8"));
     if (parsed && typeof parsed === "object" && typeof parsed.enabled === "boolean") {
       return { enabled: parsed.enabled };
     }
@@ -24560,8 +25183,8 @@ function appendTelemetry(paths, record2) {
   if (!readTelemetryConfig(paths).enabled) return;
   try {
     assertGovernedWriteSurface(paths.root, telemetryLogPath(paths));
-    fs28.mkdirSync(paths.stateDir, { recursive: true });
-    fs28.appendFileSync(telemetryLogPath(paths), JSON.stringify(record2) + "\n", "utf8");
+    fs29.mkdirSync(paths.stateDir, { recursive: true });
+    fs29.appendFileSync(telemetryLogPath(paths), JSON.stringify(record2) + "\n", "utf8");
   } catch {
   }
 }
@@ -25070,11 +25693,11 @@ why: ${next.why}` : `next: ${next.action}`;
 }
 
 // src/commands/delegate.ts
-var fs30 = __toESM(require("node:fs"));
+var fs31 = __toESM(require("node:fs"));
 
 // src/commands/context.ts
-var fs29 = __toESM(require("node:fs"));
-var path28 = __toESM(require("node:path"));
+var fs30 = __toESM(require("node:fs"));
+var path29 = __toESM(require("node:path"));
 
 // src/core/summary.ts
 var SUMMARY_HEADING_RE = /^(#{1,3})\s+summary\b/i;
@@ -25155,15 +25778,15 @@ function runContextPack(paths, opts = {}) {
   if (!r.state) return failure({ human: "state.json is invalid.", data: { error: "invalid_state", issues: r.issues } });
   const s = r.state;
   const packed = s.approved_artifacts.map((a) => {
-    const abs = path28.resolve(paths.root, a.file);
+    const abs = path29.resolve(paths.root, a.file);
     let exists = false;
     let isDir = false;
     let content = "";
-    if (fs29.existsSync(abs)) {
-      const stat = fs29.statSync(abs);
+    if (fs30.existsSync(abs)) {
+      const stat = fs30.statSync(abs);
       if (stat.isFile()) {
         exists = true;
-        content = fs29.readFileSync(abs, "utf8");
+        content = fs30.readFileSync(abs, "utf8");
       } else if (stat.isDirectory()) {
         exists = true;
         isDir = true;
@@ -25307,15 +25930,15 @@ function runContextRead(paths, opts = {}) {
   let running = 0;
   let budgetExhausted = false;
   for (const f of files) {
-    const relKey = path28.relative(paths.root, path28.resolve(paths.root, f)).split(path28.sep).join("/");
+    const relKey = path29.relative(paths.root, path29.resolve(paths.root, f)).split(path29.sep).join("/");
     const abs = resolveWithinRoot(paths.root, f);
-    if (abs === null || !fs29.existsSync(abs) || !fs29.statSync(abs).isFile()) {
+    if (abs === null || !fs30.existsSync(abs) || !fs30.statSync(abs).isFile()) {
       results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
       continue;
     }
     let content;
     try {
-      content = fs29.readFileSync(abs, "utf8");
+      content = fs30.readFileSync(abs, "utf8");
     } catch {
       results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
       continue;
@@ -25635,13 +26258,13 @@ function runDelegateCheck(paths, opts) {
         data: { error: "path_outside_root", file: opts.file }
       });
     }
-    if (!fs30.existsSync(abs) || !fs30.statSync(abs).isFile()) {
+    if (!fs31.existsSync(abs) || !fs31.statSync(abs).isFile()) {
       return failure({
         human: `Capsule file not found: ${opts.file}`,
         data: { error: "capsule_not_found", file: opts.file }
       });
     }
-    text = fs30.readFileSync(abs, "utf8");
+    text = fs31.readFileSync(abs, "utf8");
   }
   const v = validateCapsule(text);
   structuredLog({ cmd: "delegate check", ok: v.ok, missing: v.missing.length });
@@ -25742,10 +26365,10 @@ function runBudgetCheck(paths, opts = {}) {
 }
 
 // src/commands/handoff.ts
-var fs31 = __toESM(require("node:fs"));
-var path29 = __toESM(require("node:path"));
+var fs32 = __toESM(require("node:fs"));
+var path30 = __toESM(require("node:path"));
 function handoffPath(paths) {
-  return path29.join(paths.stateDir, "HANDOFF.md");
+  return path30.join(paths.stateDir, "HANDOFF.md");
 }
 var HANDOFF_STATE_OPEN = "<!-- TH-HANDOFF-STATE";
 var HANDOFF_STATE_CLOSE = "TH-HANDOFF-STATE -->";
@@ -25813,9 +26436,9 @@ function runHandoffWrite(paths) {
     HANDOFF_STATE_CLOSE,
     ""
   ].join("\n");
-  fs31.mkdirSync(paths.stateDir, { recursive: true });
+  fs32.mkdirSync(paths.stateDir, { recursive: true });
   atomicWriteFile(handoffPath(paths), md, { root: paths.root });
-  const relPath2 = path29.relative(paths.root, handoffPath(paths)).split(path29.sep).join("/");
+  const relPath2 = path30.relative(paths.root, handoffPath(paths)).split(path30.sep).join("/");
   structuredLog({ cmd: "handoff write", path: relPath2, slices: slices.length, artifacts: s.approved_artifacts.length });
   return success({
     data: {
@@ -25837,14 +26460,14 @@ function runHandoffWrite(paths) {
 }
 
 // src/commands/inspector.ts
-var path31 = __toESM(require("node:path"));
+var path32 = __toESM(require("node:path"));
 
 // src/commands/artifact.ts
-var fs32 = __toESM(require("node:fs"));
-var path30 = __toESM(require("node:path"));
+var fs33 = __toESM(require("node:fs"));
+var path31 = __toESM(require("node:path"));
 function toRelKey(root, file) {
-  const abs = path30.resolve(root, file);
-  return path30.relative(root, abs).split(path30.sep).join("/");
+  const abs = path31.resolve(root, file);
+  return path31.relative(root, abs).split(path31.sep).join("/");
 }
 function runArtifactRegister(paths, file, version2) {
   return withStateLock(paths, () => runArtifactRegisterLocked(paths, file, version2));
@@ -25858,10 +26481,10 @@ function runArtifactRegisterLocked(paths, file, version2) {
   if (abs === null) {
     return failure({ human: `Path outside project root: ${file}`, data: { error: "path_outside_root", file } });
   }
-  if (!fs32.existsSync(abs)) {
+  if (!fs33.existsSync(abs)) {
     return failure({ human: `File not found: ${file}`, data: { error: "file_not_found", file } });
   }
-  const stat = fs32.statSync(abs);
+  const stat = fs33.statSync(abs);
   if (!stat.isFile() && !stat.isDirectory()) {
     return failure({ human: `Not a file or directory: ${file}`, data: { error: "not_a_file_or_dir", file } });
   }
@@ -25890,7 +26513,7 @@ ${formatIssues(r.issues)}`,
   let summaryWarning = null;
   if (stat.isFile() && /\.(md|markdown)$/i.test(relKey)) {
     try {
-      const { summary } = extractSummary(fs32.readFileSync(abs, "utf8"));
+      const { summary } = extractSummary(fs33.readFileSync(abs, "utf8"));
       if (summary === null) {
         summaryWarning = `no \`## Summary\` block \u2014 \`th context pack\` will fall back to the file head; add a Summary block to keep the handoff tight.`;
       }
@@ -25976,14 +26599,14 @@ function runArtifactSection(paths, opts = {}) {
     structuredLog({ cmd: "artifact section", error: "path_outside_root", file: opts.file });
     return failure({ human: `Path outside project root: ${opts.file}`, data: { error: "path_outside_root", file: opts.file } });
   }
-  if (!fs32.existsSync(abs) || !fs32.statSync(abs).isFile()) {
+  if (!fs33.existsSync(abs) || !fs33.statSync(abs).isFile()) {
     structuredLog({ cmd: "artifact section", error: "file_not_found", file: opts.file });
     return failure({ human: `File not found: ${opts.file}`, data: { error: "file_not_found", file: opts.file } });
   }
   const relKey = toRelKey(paths.root, opts.file);
   let content;
   try {
-    content = fs32.readFileSync(abs, "utf8");
+    content = fs33.readFileSync(abs, "utf8");
   } catch {
     structuredLog({ cmd: "artifact section", error: "read_failed", file: relKey });
     return failure({ human: `Could not read ${relKey}`, data: { error: "read_failed", file: relKey } });
@@ -26083,7 +26706,7 @@ ${formatIssues(r.issues)}`,
   const guard = guardApprovedArtifactReauthor(r.state.approved_artifacts, INSPECTOR_ANALYSIS_FILE, opts.version, `inspector write ${INSPECTOR_ANALYSIS_FILE}`);
   if (!guard.ok) return guard.result;
   const version2 = guard.version;
-  const abs = path31.resolve(paths.root, INSPECTOR_ANALYSIS_FILE);
+  const abs = path32.resolve(paths.root, INSPECTOR_ANALYSIS_FILE);
   atomicWriteFile(abs, content, { root: paths.root });
   const reg = runArtifactRegister(paths, INSPECTOR_ANALYSIS_FILE, version2);
   if (!reg.ok) {
@@ -26098,11 +26721,11 @@ ${formatIssues(r.issues)}`,
   });
 }
 function normalizeRel(p) {
-  return p.split(path31.sep).join("/").replace(/^\.\//, "");
+  return p.split(path32.sep).join("/").replace(/^\.\//, "");
 }
 
 // src/commands/tester.ts
-var path32 = __toESM(require("node:path"));
+var path33 = __toESM(require("node:path"));
 function runTesterRecord(paths, opts) {
   const driver = (opts.driver ?? "").trim();
   if (driver === "") {
@@ -26137,7 +26760,7 @@ Pass --evidence-ref pointing at the live run's saved output (a readable file und
   const body = JSON.stringify(record2, null, 2) + "\n";
   atomicWriteFile(testerRecordPath(paths), body, { root: paths.root });
   const hash = shortHash(body);
-  const rel = path32.relative(paths.root, testerRecordPath(paths)).split(path32.sep).join("/");
+  const rel = path33.relative(paths.root, testerRecordPath(paths)).split(path33.sep).join("/");
   appendLedger(paths, { event: "tester-record", driver: record2.driver, provider: record2.provider ?? null, passed });
   structuredLog({ cmd: "tester record", driver: record2.driver, provider: record2.provider ?? null, passed });
   const gateNote = passed ? "The production-reality gate's Tester condition is now satisfied." : "NOTE: recorded as NOT passed (`--passed` absent) \u2014 the production-reality gate's Tester condition is NOT satisfied. Re-record with `--passed` once the live run is green.";
@@ -26149,7 +26772,7 @@ Pass --evidence-ref pointing at the live run's saved output (a readable file und
 }
 
 // src/commands/approve.ts
-var path33 = __toESM(require("node:path"));
+var path34 = __toESM(require("node:path"));
 function runApprove(paths, stage, opts = {}) {
   return withStateLock(paths, () => runApproveLocked(paths, stage, opts));
 }
@@ -26192,7 +26815,7 @@ function runApproveLocked(paths, stageArg, opts) {
     }
     throw e;
   }
-  const rel = path33.relative(paths.root, approvalReceiptsPath(paths)).split(path33.sep).join("/");
+  const rel = path34.relative(paths.root, approvalReceiptsPath(paths)).split(path34.sep).join("/");
   appendLedger(paths, { event: "approve", stage, approvalRecordHash: sealed.recordHash });
   structuredLog({ cmd: "approve", stage, approvalRecordHash: sealed.recordHash });
   return success({
@@ -26209,7 +26832,7 @@ function runApproveLocked(paths, stageArg, opts) {
 }
 
 // src/commands/driver.ts
-var path34 = __toESM(require("node:path"));
+var path35 = __toESM(require("node:path"));
 function runDriverRecord(paths, opts = {}) {
   return withStateLock(paths, () => runDriverRecordLocked(paths, opts));
 }
@@ -26243,7 +26866,7 @@ function runDriverRecordLocked(paths, opts) {
     }
     throw e;
   }
-  const rel = path34.relative(paths.root, driverReceiptsPath(paths)).split(path34.sep).join("/");
+  const rel = path35.relative(paths.root, driverReceiptsPath(paths)).split(path35.sep).join("/");
   const recorded = sealed.dimensions.map((d) => d.name);
   appendLedger(paths, { event: "driver-record", dimensions: recorded, driverRecordHash: sealed.recordHash });
   structuredLog({ cmd: "driver record", dimensions: recorded, driverRecordHash: sealed.recordHash });
@@ -26260,7 +26883,7 @@ function runDriverRecordLocked(paths, opts) {
 }
 
 // src/commands/realize.ts
-var path35 = __toESM(require("node:path"));
+var path36 = __toESM(require("node:path"));
 function runRealize(paths, opts = {}) {
   return withStateLock(paths, () => runRealizeLocked(paths, opts));
 }
@@ -26307,7 +26930,7 @@ function runRealizeLocked(paths, opts) {
     }
     throw e;
   }
-  const rel = path35.relative(paths.root, realizationReceiptsPath(paths)).split(path35.sep).join("/");
+  const rel = path36.relative(paths.root, realizationReceiptsPath(paths)).split(path36.sep).join("/");
   appendLedger(paths, {
     event: "realize",
     reqId,
@@ -26334,272 +26957,6 @@ function runRealizeLocked(paths, opts) {
 
 // src/commands/assertion-presence.ts
 var path37 = __toESM(require("node:path"));
-
-// src/core/assertion-presence.ts
-var fs33 = __toESM(require("node:fs"));
-var path36 = __toESM(require("node:path"));
-var PARSEABLE_TEST_EXTENSIONS = /* @__PURE__ */ new Set([
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mts",
-  ".cts",
-  ".mjs",
-  ".cjs"
-]);
-function isParseableTestFile(relPosix2) {
-  const lower = relPosix2.toLowerCase();
-  const dot = lower.lastIndexOf(".");
-  if (dot < 0) return false;
-  return PARSEABLE_TEST_EXTENSIONS.has(lower.slice(dot));
-}
-function isLiteral(s) {
-  const t = s.trim();
-  if (t === "") return false;
-  if (/^-?\d+(?:\.\d+)?$/.test(t)) return true;
-  if (/^(['"`]).*\1$/.test(t)) return true;
-  if (/^(true|false|null|undefined|NaN)$/.test(t)) return true;
-  return false;
-}
-function nextExpectOpenParen(text, from) {
-  let i = from;
-  for (; ; ) {
-    const idx = text.indexOf("expect", i);
-    if (idx < 0) return -1;
-    const before = idx === 0 ? "" : text[idx - 1];
-    if (/[A-Za-z0-9_$]/.test(before)) {
-      i = idx + 6;
-      continue;
-    }
-    let j = idx + 6;
-    while (j < text.length && /\s/.test(text[j])) j++;
-    if (text[j] === "(") return j;
-    i = idx + 6;
-  }
-}
-function matchingParen(text, openIdx) {
-  let depth = 0;
-  let i = openIdx;
-  while (i < text.length) {
-    const c = text[i];
-    if (c === "'" || c === '"' || c === "`") {
-      i = skipString(text, i, c);
-      continue;
-    }
-    if (c === "/" && text[i + 1] === "/") {
-      const nl = text.indexOf("\n", i + 2);
-      i = nl < 0 ? text.length : nl;
-      continue;
-    }
-    if (c === "/" && text[i + 1] === "*") {
-      const end = text.indexOf("*/", i + 2);
-      i = end < 0 ? text.length : end + 2;
-      continue;
-    }
-    if (c === "(") depth++;
-    else if (c === ")") {
-      depth--;
-      if (depth === 0) return i;
-    }
-    i++;
-  }
-  return -1;
-}
-function skipString(text, start, quote) {
-  let i = start + 1;
-  while (i < text.length) {
-    const c = text[i];
-    if (c === "\\") {
-      i += 2;
-      continue;
-    }
-    if (c === quote) return i + 1;
-    i++;
-  }
-  return text.length;
-}
-var MATCHER_MODIFIERS = /* @__PURE__ */ new Set(["not", "resolves", "rejects"]);
-function firstMatcherArg(text, afterExpect) {
-  let i = afterExpect;
-  for (; ; ) {
-    while (i < text.length && /\s/.test(text[i])) i++;
-    if (text[i] !== ".") return void 0;
-    i++;
-    while (i < text.length && /\s/.test(text[i])) i++;
-    const nameStart = i;
-    while (i < text.length && /[A-Za-z0-9_$]/.test(text[i])) i++;
-    const name = text.slice(nameStart, i).toLowerCase();
-    if (name === "") return void 0;
-    while (i < text.length && /\s/.test(text[i])) i++;
-    if (MATCHER_MODIFIERS.has(name) && text[i] !== "(") {
-      continue;
-    }
-    if (text[i] === "(") {
-      const close = matchingParen(text, i);
-      if (close < 0) return void 0;
-      return text.slice(i + 1, close);
-    }
-    return void 0;
-  }
-}
-function countAssertionsInText(text) {
-  let total = 0;
-  let trivial = 0;
-  let cursor = 0;
-  for (; ; ) {
-    const open = nextExpectOpenParen(text, cursor);
-    if (open < 0) break;
-    const close = matchingParen(text, open);
-    if (close < 0) break;
-    total++;
-    const argA = text.slice(open + 1, close).trim();
-    const argBraw = firstMatcherArg(text, close + 1);
-    const argB = argBraw === void 0 ? void 0 : argBraw.trim();
-    const literalCase = isLiteral(argA) && (argB === void 0 || isLiteral(argB));
-    const tautologyCase = argA !== "" && argB !== void 0 && argA === argB;
-    if (literalCase || tautologyCase) trivial++;
-    cursor = close + 1;
-  }
-  return { total, trivial };
-}
-function computeAssertionPresenceGround(paths, opts = {}) {
-  const testsDir = opts.testsDir ?? path36.resolve(paths.root, "tests");
-  const anchors = scanDirForReqIds(testsDir);
-  const summaries = [];
-  for (const [reqId, files] of anchors) {
-    const testFiles = files.filter((f) => isRecognizedTestFile(f)).sort();
-    if (testFiles.length === 0) continue;
-    let assertionCount = 0;
-    let trivial = 0;
-    for (const rel of testFiles) {
-      if (!isParseableTestFile(rel)) continue;
-      const abs = resolveWithinRoot(testsDir, rel);
-      if (abs === null) continue;
-      let content;
-      try {
-        if (!fs33.existsSync(abs) || !fs33.statSync(abs).isFile()) continue;
-        content = fs33.readFileSync(abs, "utf8");
-      } catch {
-        continue;
-      }
-      const counts = countAssertionsInText(content);
-      assertionCount += counts.total;
-      trivial += counts.trivial;
-    }
-    const nonTrivialAssertions = assertionCount - trivial;
-    summaries.push({
-      reqId,
-      testFiles,
-      assertionCount,
-      nonTrivialAssertions,
-      assertionFree: nonTrivialAssertions === 0
-    });
-  }
-  summaries.sort((a, b) => a.reqId < b.reqId ? -1 : a.reqId > b.reqId ? 1 : 0);
-  return summaries;
-}
-var SUMMARY_FIELD_ORDER = [
-  "reqId",
-  "testFiles",
-  "assertionCount",
-  "nonTrivialAssertions",
-  "assertionFree"
-];
-var SNAPSHOT_FIELD_ORDER6 = ["gitHead", "treeDigest"];
-function reorder5(obj, order) {
-  const out = {};
-  for (const key of order) out[key] = obj[key];
-  return out;
-}
-function reorderSummary(summary) {
-  return reorder5(summary, SUMMARY_FIELD_ORDER);
-}
-var ASSERTION_CANONICAL_FIELD_ORDER = [
-  "kind",
-  "refId",
-  "ground",
-  "snapshot_coord",
-  "producer_identity",
-  "legacy",
-  "prevHash"
-];
-function assertionPresenceCanonicalText(receipt) {
-  const ordered = {};
-  for (const key of ASSERTION_CANONICAL_FIELD_ORDER) {
-    const val = receipt[key];
-    if (val === void 0) continue;
-    if (key === "ground") {
-      ordered[key] = val.map(reorderSummary);
-    } else if (key === "snapshot_coord") {
-      ordered[key] = reorder5(val, SNAPSHOT_FIELD_ORDER6);
-    } else {
-      ordered[key] = val;
-    }
-  }
-  return JSON.stringify(ordered);
-}
-function computeAssertionPresenceRecordHash(receipt) {
-  return hashContent(assertionPresenceCanonicalText(receipt));
-}
-function assertionPresenceReceiptsPath(paths) {
-  return path36.join(paths.stateDir, "assertion-presence-receipts.jsonl");
-}
-function isValidAssertionPresenceReceipt(parsed) {
-  if (typeof parsed !== "object" || parsed === null) return false;
-  const r = parsed;
-  if (r.kind !== "assertion-presence") return false;
-  if (typeof r.refId !== "string" || r.refId === "") return false;
-  if (typeof r.producer_identity !== "string") return false;
-  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
-  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
-  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
-  if (!Array.isArray(r.ground)) return false;
-  for (const s2 of r.ground) {
-    if (typeof s2 !== "object" || s2 === null) return false;
-    const sm = s2;
-    if (typeof sm.reqId !== "string" || sm.reqId === "") return false;
-    if (!Array.isArray(sm.testFiles) || !sm.testFiles.every((f) => typeof f === "string")) return false;
-    if (typeof sm.assertionCount !== "number" || !Number.isFinite(sm.assertionCount)) return false;
-    if (typeof sm.nonTrivialAssertions !== "number" || !Number.isFinite(sm.nonTrivialAssertions)) return false;
-    if (typeof sm.assertionFree !== "boolean") return false;
-  }
-  const snap = r.snapshot_coord;
-  if (typeof snap !== "object" || snap === null) return false;
-  const s = snap;
-  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
-  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
-  return true;
-}
-function readLastAssertionPresenceRecordHash(paths) {
-  const last = scanTailValid(assertionPresenceReceiptsPath(paths), isValidAssertionPresenceReceipt);
-  return last ? last.recordHash : GENESIS_PREV_HASH;
-}
-function appendAssertionPresenceReceipt(paths, input) {
-  const ground = computeAssertionPresenceGround(paths, { testsDir: input.testsDir });
-  return sealAndAppendAssertion(paths, {
-    kind: "assertion-presence",
-    refId: assertionRefId(paths),
-    ground,
-    snapshot_coord: currentReceiptSnapshotCoord(paths),
-    producer_identity: input.producerIdentity
-  });
-}
-function assertionRefId(paths) {
-  return currentReceiptSnapshotCoord(paths).gitHead ?? "no-git";
-}
-function sealAndAppendAssertion(paths, receipt) {
-  assertGovernedWriteSurface(paths.root, assertionPresenceReceiptsPath(paths));
-  fs33.mkdirSync(paths.stateDir, { recursive: true });
-  const prevHash = readLastAssertionPresenceRecordHash(paths);
-  const withPrev = { ...receipt, prevHash };
-  const recordHash = computeAssertionPresenceRecordHash(withPrev);
-  const sealed = { ...withPrev, recordHash };
-  fs33.appendFileSync(assertionPresenceReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
-  return sealed;
-}
-
-// src/commands/assertion-presence.ts
 function runAssertionPresenceRecord(paths, opts = {}) {
   return withStateLock(paths, () => runAssertionPresenceRecordLocked(paths, opts));
 }
