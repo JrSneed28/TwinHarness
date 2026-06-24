@@ -74,8 +74,10 @@ export function bsc10EnforcementEnabled(): boolean {
  * when the master switch {@link bsc10EnforcementEnabled} is ON AND `kind` is in
  * {@link ENFORCED_GROUND_KINDS}: `digest-manifest` + `version-pin` (Slice B, deterministic) and
  * `visual-hash` (Slice C / C4d, gated by the C4c observed-vs-signed-budget tolerance threshold; a11y
- * rides within visual-hash grounds). The gate consults this per offending kind so an enforced failure
- * BLOCKS while any not-yet-promoted kind would ride as a non-blocking `notice` in the SAME run.
+ * rides within visual-hash grounds). After C4d ALL three `GroundKind`s enforce - there is no longer a
+ * not-yet-promoted (WARN-only) kind; the per-kind WARN ride-along is now historical (pre-C4d). The
+ * gate still consults this per offending kind, so a reverted C4d flip cleanly drops `visual-hash`
+ * back to a non-blocking `notice` while the deterministic kinds keep blocking.
  */
 export function bsc10KindEnforced(kind: GroundKind): boolean {
   return bsc10EnforcementEnabled() && ENFORCED_GROUND_KINDS.has(kind);

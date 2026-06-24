@@ -357,7 +357,11 @@ function isValidConformanceMetric(parsed: unknown): parsed is ConformanceMetric 
   if (typeof parsed !== "object" || parsed === null) return false;
   const m = parsed as Record<string, unknown>;
   if (m.metric !== "version" && m.metric !== "api" && m.metric !== "visual" && m.metric !== "a11y") return false;
-  if (!(typeof m.observed === "string" || typeof m.observed === "number")) return false;
+  // A numeric `observed` must be FINITE (mirrors the `isValidGroundingBudget` threshold guard) so a
+  // non-finite value can never reach the C4c `observed > threshold` arithmetic as a numeric input.
+  if (typeof m.observed === "number") {
+    if (!Number.isFinite(m.observed)) return false;
+  } else if (typeof m.observed !== "string") return false;
   if (m.status !== "within-budget" && m.status !== "over-budget" && m.status !== "unobserved") return false;
   return true;
 }
@@ -1133,7 +1137,9 @@ export interface ToleranceMetricVerdict {
  * consulted here). `validBudgets` is the caller-resolved `validGroundingBudgets(paths)` map (passed
  * in so the gate resolves it ONCE per run, not per receipt). A non-`visual-hash` ground ⇒ `[]`
  * (deterministic kinds are not tolerance-gated). A `visual-hash` ground with NO tolerance metric on
- * its conformance list ⇒ `[]` (the caller's required/missing logic owns that case).
+ * its conformance list ⇒ `[]`. The CALLER (`evaluateGrounding`) fail-closes that case: a required
+ * `visual-hash` ground with no `visual`/`a11y` tolerance verdict is forced to `unobserved` (a
+ * producer that OMITS the measurement must not slip through as `within-budget`).
  *
  * Fail-closed precedence within a metric: `unobserved` (the stub) and `unpinned` (no signed
  * tolerance) are BOTH soft-fails the gate blocks under enforce; a numeric `observed` over its

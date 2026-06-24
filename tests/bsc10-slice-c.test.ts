@@ -990,6 +990,45 @@ describe("I8 — determinism self-test (same fixture → same verdict twice) + f
 // Negative controls — forged-budget / over-threshold / unobserved / grandfathered
 // ---------------------------------------------------------------------------
 
+describe("C4c fail-closed — a required visual-hash ground carrying NO tolerance metric", () => {
+  // REVIEW FIND (HIGH, fail-open): `toleranceThresholdVerdicts` returns [] for a visual-hash ground
+  // whose conformance list carries NO tolerance metric (`visual`/`a11y`), and `validateGroundingContent`
+  // classifies an empty/tolerance-free conformance as `valid` ⇒ `within-budget`. So a producer that
+  // simply OMITS the perceptual/a11y measurement slips a visual-hash claim through as conformant even
+  // under the C4d enforce-flip — the exact "unobserved ≠ clean" tenet C4c/C4d exist to enforce. The
+  // gate MUST fail-closed: a required visual-hash ground with no measured tolerance metric is `unobserved`.
+  it("C4c-empty: visual-hash with EMPTY conformance ⇒ unobserved ⇒ BLOCK under enforce", () => {
+    process.env.TH_BSC10_ENFORCE = "1";
+    expect(bsc10KindEnforced("visual-hash")).toBe(true);
+    const paths = greenProjectWithUi();
+    appendGroundingReceipt(paths, {
+      workClass: "redesign",
+      ground: DIGEST_MANIFEST_GROUND,
+      conformance: [{ metric: "api", observed: 0, status: "within-budget" }],
+      producerIdentity: "test:runner",
+    });
+    // Visual-hash ground with NO visual/a11y tolerance metric at all (the omit-the-measurement evasion).
+    appendGroundingReceipt(paths, {
+      workClass: "redesign",
+      ground: VISUAL_HASH_GROUND,
+      conformance: [],
+      producerIdentity: "test:runner",
+    });
+    const st = readState(paths).state!;
+    const res1 = checkProductionReality(paths, st);
+    const res2 = checkProductionReality(paths, st);
+    // Deterministic.
+    expect(res1.ok).toBe(res2.ok);
+    expect(res1.error).toBe(res2.error);
+    // Fail-closed block — an unmeasured visual-hash claim cannot be gated as passing.
+    expect(res1.ok).toBe(false);
+    expect(res1.error).toBe("grounding_unverified");
+    expect((res1.detail as { reason?: string } | undefined)?.reason).toBe("unobserved");
+    const vhSummary = (res1.grounding ?? []).find((g) => g.groundKind === "visual-hash");
+    expect(vhSummary?.conformance).toBe("unobserved");
+  });
+});
+
 describe("Negative controls — forged-budget / over-threshold / unobserved / grandfathered", () => {
   it("neg-1a: forged budget (wrong-key signature) ⇒ validGroundingBudgets empty (exempts NOTHING)", () => {
     const tp2 = makeTempProject();

@@ -23965,7 +23965,9 @@ function isValidConformanceMetric(parsed) {
   if (typeof parsed !== "object" || parsed === null) return false;
   const m = parsed;
   if (m.metric !== "version" && m.metric !== "api" && m.metric !== "visual" && m.metric !== "a11y") return false;
-  if (!(typeof m.observed === "string" || typeof m.observed === "number")) return false;
+  if (typeof m.observed === "number") {
+    if (!Number.isFinite(m.observed)) return false;
+  } else if (typeof m.observed !== "string") return false;
   if (m.status !== "within-budget" && m.status !== "over-budget" && m.status !== "unobserved") return false;
   return true;
 }
@@ -24741,7 +24743,8 @@ function evaluateGrounding(paths, state) {
     }
     const selfConformance = groundingConformanceOf(paths, entry.receipt);
     const tolerance = toleranceThresholdVerdicts(entry.receipt, validBudgets);
-    const conformance = worseGroundingConformance(selfConformance, tolerance);
+    let conformance = worseGroundingConformance(selfConformance, tolerance);
+    if (kind === "visual-hash" && tolerance.length === 0) conformance = "unobserved";
     const summaryRow = {
       groundKind: kind,
       grounded: true,

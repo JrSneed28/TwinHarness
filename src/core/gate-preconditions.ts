@@ -1489,7 +1489,14 @@ function evaluateGrounding(paths: ProjectPaths, state: TwinHarnessState): Ground
     // kinds (no tolerance band) and for a visual-hash ground with no tolerance metric. The WORST of
     // (self-reported, independent-threshold) decides the kind — fail-closed, never the laxer of the two.
     const tolerance = toleranceThresholdVerdicts(entry.receipt, validBudgets);
-    const conformance = worseGroundingConformance(selfConformance, tolerance);
+    let conformance = worseGroundingConformance(selfConformance, tolerance);
+    // C4c fail-closed (review-fix, sec HIGH): a required `visual-hash` ground MUST carry a measured
+    // tolerance metric. An empty / tolerance-free conformance list classifies `valid` in
+    // `validateGroundingContent` and yields an EMPTY `tolerance`, so a producer that simply OMITS the
+    // perceptual-diff / a11y measurement would otherwise slip through as `within-budget` even under the
+    // C4d enforce-flip. Recompute-don't-trust: no `visual`/`a11y` tolerance verdict for a visual-hash
+    // ground ⇒ `unobserved` (never a silent pass — "unobserved ≠ clean").
+    if (kind === "visual-hash" && tolerance.length === 0) conformance = "unobserved";
     const summaryRow: GroundingSummary = {
       groundKind: kind,
       grounded: true,
