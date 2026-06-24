@@ -5,10 +5,19 @@
     "phase": "done-phase",
     "independence": ">0",
     "independenceNote": "signature-provenance only; referent agent-authored (the external producer proves the receipt was not forged in-process, NOT that the referent is independent)",
-    "pr": [40],
+    "pr": [
+      40
+    ],
     "branch": "feat/axisb-slice5-bsc1-realization",
     "probe": ".omc/audit/probes/bsc1",
-    "anchors": ["core/realization.ts", "core/bsc1-flag.ts", "commands/realize.ts", "core/gate-preconditions.ts (checkRealization + checkProductionReality rung 7 + gate-time opportunistic migration stamp)", "commands/slices.ts (slice->done migration trigger)", "scripts/th-receipt-producer.mjs (--kind realization)"],
+    "anchors": [
+      "core/realization.ts",
+      "core/bsc1-flag.ts",
+      "commands/realize.ts",
+      "core/gate-preconditions.ts (checkRealization + checkProductionReality rung 7 + gate-time opportunistic migration stamp)",
+      "commands/slices.ts (slice->done migration trigger)",
+      "scripts/th-receipt-producer.mjs (--kind realization)"
+    ],
     "updatedAt": "2026-06-23T07:30:00Z"
   },
   {
@@ -17,9 +26,19 @@
     "phase": "done-phase",
     "independence": ">0",
     "independenceNote": "signature-provenance only, over a bounded single-module mutation scope: the 2b external Ed25519-signed MutationKillReceipt control-flip proves the receipt was not forged in-process (the in-process surface holds no key ⇒ a wrong-key/unsigned line classifies forged and BLOCKs mutation_kill_forged; a producer-signed line classifies valid-grounded). The module-scoped efficacy signal is a DISTINCT observability axis that NEVER overrides the per-REQ assertion-presence rung (presence ≠ efficacy, review HIGH). The 2a in-process AssertionPresenceReceipt remains attribution-only (agent-mintable ⇒ valid/attested-presence, never valid-grounded)",
-    "pr": [41, 42],
+    "pr": [
+      41,
+      42
+    ],
     "probe": ".omc/audit/probes/bsc2",
-    "anchors": ["core/assertion-presence.ts", "core/bsc2-flag.ts", "commands/assertion-presence.ts", "core/gate-preconditions.ts (checkAssertionPresence rung 8)", "core/receipts.ts (AssertionPresence + MutationKill schemas)", "scripts/th-receipt-producer.mjs (--kind mutation-kill)"],
+    "anchors": [
+      "core/assertion-presence.ts",
+      "core/bsc2-flag.ts",
+      "commands/assertion-presence.ts",
+      "core/gate-preconditions.ts (checkAssertionPresence rung 8)",
+      "core/receipts.ts (AssertionPresence + MutationKill schemas)",
+      "scripts/th-receipt-producer.mjs (--kind mutation-kill)"
+    ],
     "updatedAt": "2026-06-23T06:10:00Z"
   },
   {
@@ -27,9 +46,18 @@
     "title": "VerificationDriver — trusted runner records which verification dimensions were exercised",
     "phase": "done-phase",
     "independence": ">0",
-    "pr": [38, 39],
+    "pr": [
+      38,
+      39
+    ],
     "probe": ".omc/audit/probes/bsc3",
-    "anchors": ["core/verification-driver.ts", "core/receipts.ts", "core/bsc3-flag.ts", "core/gate-preconditions.ts:434+,849", "scripts/th-receipt-producer.mjs"],
+    "anchors": [
+      "core/verification-driver.ts",
+      "core/receipts.ts",
+      "core/bsc3-flag.ts",
+      "core/gate-preconditions.ts:434+,849",
+      "scripts/th-receipt-producer.mjs"
+    ],
     "updatedAt": "2026-06-22T18:00:00Z"
   },
   {
@@ -37,9 +65,16 @@
     "title": "Terminal-transition receipt — self-attested state flip bound to re-checkable source+snapshot",
     "phase": "done-phase",
     "independence": ">0",
-    "pr": [32, 33],
+    "pr": [
+      32,
+      33
+    ],
     "probe": ".omc/audit/probes/bsc4",
-    "anchors": ["commands/drift.ts:185-234", "commands/sim.ts:255-289,461-463", "core/decisions.ts:550-567"],
+    "anchors": [
+      "commands/drift.ts:185-234",
+      "commands/sim.ts:255-289,461-463",
+      "core/decisions.ts:550-567"
+    ],
     "updatedAt": "2026-06-22T13:10:00Z"
   },
   {
@@ -49,7 +84,9 @@
     "independence": 0,
     "pr": [],
     "probe": null,
-    "anchors": ["core/gate-preconditions.ts:521-557,635-648"],
+    "anchors": [
+      "core/gate-preconditions.ts:521-557,635-648"
+    ],
     "updatedAt": "2026-06-22T13:10:00Z"
   },
   {
@@ -57,9 +94,15 @@
     "title": "Scan-completeness receipt — fail-closed; files scanned/skipped/cap",
     "phase": "done-phase",
     "independence": ">0",
-    "pr": [34, 35],
+    "pr": [
+      34,
+      35
+    ],
     "probe": ".omc/audit/probes/new-a-scancap",
-    "anchors": ["commands/sim.ts:419-422,430", "core/gate-preconditions.ts:411-413"],
+    "anchors": [
+      "commands/sim.ts:419-422,430",
+      "core/gate-preconditions.ts:411-413"
+    ],
     "updatedAt": "2026-06-22T13:10:00Z"
   },
   {
@@ -67,20 +110,34 @@
     "title": "Human-approval rung — external-signed approval over the closed required set",
     "phase": "done-phase",
     "independence": ">0",
-    "pr": [36, 37],
+    "pr": [
+      36,
+      37
+    ],
     "probe": null,
-    "anchors": ["core/approvals.ts", "core/gate-preconditions.ts"],
+    "anchors": [
+      "core/approvals.ts",
+      "core/gate-preconditions.ts"
+    ],
     "updatedAt": "2026-06-22T13:10:00Z"
   },
   {
     "bsc": 8,
     "title": "Tier↔complexity correspondence receipt + stage-invalidation",
-    "phase": "todo",
+    "phase": "done-phase",
     "independence": 0,
     "pr": [],
-    "probe": null,
-    "anchors": ["core/tier.ts:324-348", "commands/state.ts:331-358,160-173"],
-    "updatedAt": "2026-06-22T13:10:00Z"
+    "probe": ".omc/audit/probes/bsc8",
+    "anchors": [
+      "core/receipts.ts (TierCorrespondenceReceipt store: schema + canonicalText + append/read/verifyChain + computeBriefDigest)",
+      "core/gate-preconditions.ts (evaluateTierCorrespondence + checkTierCorrespondence + PRODUCTION_REALITY_RUNGS id:tier-correspondence)",
+      "core/bsc8-flag.ts (TH_BSC8_ENFORCE)",
+      "core/tier-classify.ts:classifyBrief (min-tier sensor, lifted in step-0)",
+      "commands/state.ts (applyGateMutation mints TierCorrespondenceReceipt; raw state set tier reject preserved)",
+      "core/state-fields.ts (tier GATE_OWNED)"
+    ],
+    "updatedAt": "2026-06-24",
+    "independenceNote": "Done-phase only; producer_identity carries zero in-process trust weight (agent-mintable). The gate RE-DERIVES min-tier from classifyBrief(docs/00-task-brief.md) and the brief digest at gate time (recompute-don't-trust); the receipt is the F8 correspondence artifact, not an independence anchor. The independent (un-forgeable) producer is the P4-5 trust-boundary extraction milestone."
   },
   {
     "bsc": 9,
@@ -89,7 +146,10 @@
     "independence": 0,
     "pr": [],
     "probe": null,
-    "anchors": ["tests/mcp-cli-parity.test.ts", "commands/interview.ts:185-188"],
+    "anchors": [
+      "tests/mcp-cli-parity.test.ts",
+      "commands/interview.ts:185-188"
+    ],
     "updatedAt": "2026-06-22T13:10:00Z"
   },
   {
@@ -98,7 +158,11 @@
     "phase": "done-phase",
     "independence": ">0",
     "independenceNote": "signature-provenance only; external Ed25519-signed grounding control-flip proves the receipt was not forged in-process (producer-signed ⇒ valid-grounded/PASS; wrong-key/unsigned ⇒ forged+BLOCK). Honest scope: single-axis at the Ed25519 boundary; budgets 3-party-signed (agent cannot self-sign its own budget). Slice C (C4a/b/c/d): per-receipt grounding_bound opt-in ⇒ manifest_digest_absent block; BSC-7 β-acceptance leg consumes the grounding verdict; visual/a11y observed-vs-signed-budget tolerance threshold (recompute-don't-trust — a generous self-reported status cannot mask a breached signed budget; CAVEAT (sec-review HIGH): the THRESHOLD is 3-party-signed, but OBSERVED is producer-measured/3-party only for EXTERNAL valid-grounded receipts — for in-process receipts observed is agent-authored/attribution-trust, so the recompute catches a lying status, NOT a lying observed; require-external for tolerance kinds is the P4 require-grounded tightening); visual-hash flipped to ENFORCE so all ground-kinds now enforce. Renderer/axe MEASUREMENT deferred to producer/CI (producer signs a report, never measures).",
-    "pr": [43, 44, 45],
+    "pr": [
+      43,
+      44,
+      45
+    ],
     "probe": ".omc/audit/probes/bsc10",
     "anchors": [
       "core/grounding.ts",

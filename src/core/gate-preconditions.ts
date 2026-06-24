@@ -40,7 +40,18 @@ import { runRepoCheckCached, repoMapPartialMarker, REPO_NO_MAP_EXIT } from "../c
 import { interviewReady } from "../commands/interview";
 import { readSimulationLedger, scanForSimulationHits, simEntryBlocksProductionReality, computeUnledgeredDistHitsReceiptAware, uncoveredAfterExceptions, SimulationLedgerCorruptError } from "../commands/sim";
 import { testerRecordPresent } from "./tester";
-import { collectTerminalEntities, readReceiptValidated } from "./receipts";
+import {
+  collectTerminalEntities,
+  readReceiptValidated,
+  readTierCorrespondenceReceipts,
+  verifyTierCorrespondenceChain,
+  computeBriefDigest,
+  TASK_BRIEF_RELPATH,
+  type TierCorrespondenceReceipt,
+} from "./receipts";
+import { loadBriefFromFile } from "./brief";
+import { classifyBrief } from "./tier-classify";
+import { bsc8EnforcementEnabled } from "./bsc8-flag";
 import { readApprovalValidated, readApprovalReceipts, readExternalApprovals, isHumanGateStage } from "./approvals";
 import { readRealizationReceipts, readExternalRealizationReceipts } from "./realization";
 import {
@@ -1640,6 +1651,236 @@ function checkGrounding(verdict: GroundingVerdict | null): GateResult {
   return { ok: false, error: "grounding_unverified", detail, grounding: verdict.summary };
 }
 
+// ---------------------------------------------------------------------------
+// BSC-8 / Axis-B slice-7 — tier-correspondence + stage-invalidation enforcement
+// ---------------------------------------------------------------------------
+
+/**
+ * The minimum tier the brief mechanically requires, derived PURELY from `classifyBrief`
+ * (the lifted `core/tier-classify.ts` sensor both `th tier classify` and the gate share):
+ *  - `T0` when the brief is T0-eligible (every T0 condition holds AND no blast-radius veto).
+ *  - `T1` otherwise — a single failed T0 condition, OR any blast-radius flag (the §5 veto),
+ *    forces ≥T1. The gate never asserts a min ABOVE T1 (T2/T3 are advisory human calls, not
+ *    a mechanical floor), so the floor is exactly the T0-eligibility boundary.
+ *
+ * This is the SAME classifier the producer used at mint, so the recomputed min-tier is
+ * identical at mint + gate (the F8 correspondence lesson).
+ */
+function computeMinTierFromBrief(root: string): { minTier: Tier; briefPresent: boolean } {
+  const briefFile = path.resolve(root, TASK_BRIEF_RELPATH);
+  const loaded = loadBriefFromFile(briefFile);
+  // No brief / invalid brief is NON-DISCRIMINATING: there is no mechanical floor to enforce,
+  // so the min-tier is the permissive `T0` (a run with no brief cannot be under-declared).
+  if (!loaded.ok || !loaded.brief) return { minTier: "T0", briefPresent: false };
+  const { tier0_eligible } = classifyBrief(loaded.brief);
+  return { minTier: tier0_eligible ? "T0" : "T1", briefPresent: true };
+}
+
+/**
+ * The stage-invalidation ground (BSC-8 negative-control b): for the CURRENT claimed tier,
+ * every engaged stage with an artifact (`produces !== ""`) that sits at-or-before the
+ * current stage in the pipeline MUST have its governing artifact REGISTERED. A tier upgrade
+ * that was NOT rewound (`tierUpgradeBackfillStage` is the producer-side rewind; this is the
+ * gate-enforcement side) silently SKIPS every newly-engaged stage — so that stage's artifact
+ * is absent/unregistered. Returns the FIRST such un-rewound (newly-engaged-but-skipped)
+ * stage id, or `null` when every engaged-and-passed artifact stage is satisfied.
+ *
+ * This is self-contained + recomputable from `state` alone (no receipt history): the
+ * signature of an un-rewound upgrade is exactly a passed engaged stage whose artifact was
+ * never produced. `final-verification` itself is excluded (its report is owned by
+ * `checkFinalVerification`); the implementation/documentation stages carry no artifact.
+ */
+function unrewoundUpgradeStage(state: TwinHarnessState): string | null {
+  const currentOrdinal = STAGE_PIPELINE.findIndex(
+    (s) => s.stage === canonicalizeStage(state.current_stage),
+  );
+  if (currentOrdinal < 0) return null; // pre-pipeline ⇒ nothing passed ⇒ nothing skipped
+  const engaged = new Set(engagedStagesFor(state).map((s) => s.stage));
+  for (let i = 0; i < currentOrdinal; i++) {
+    const contract = STAGE_PIPELINE[i]!;
+    if (!engaged.has(contract.stage)) continue; // not engaged by this tier — N/A
+    if (contract.produces === "") continue; // no governing artifact (implementation/docs)
+    const produced = contract.produces.replace(/\/$/, "");
+    const registered = state.approved_artifacts.some((a) => a.file === produced);
+    if (!registered) return contract.stage;
+  }
+  return null;
+}
+
+/**
+ * The BSC-8 tier-correspondence verdict for the current run. The receipt is the F8
+ * correspondence artifact; the LIVE recompute is the verdict (recompute-don't-trust). The
+ * order is fail-closed, mirroring the sibling receipt rungs:
+ *
+ *   1. Tamper walk the chain (`verifyTierCorrespondenceChain`) — a broken chain ⇒
+ *      `blocked:"tampered"` (no line from a tampered store can be trusted).
+ *   2. Under-declared tier: `claimedTier < computedMinTier` (by `TIERS` ordinal) ⇒
+ *      `blocked:"under_declared"`. The claimed tier is `state.tier`; the min-tier is
+ *      re-derived FRESH from the brief, NOT trusted from the receipt's stored value.
+ *   3. Un-rewound upgrade: a newly-engaged-but-skipped artifact stage ⇒
+ *      `blocked:"stage_unrewound"` (the gate-enforcement side of `tierUpgradeBackfillStage`).
+ *   4. Stale brief: the run carries a tier-correspondence receipt whose recorded
+ *      `brief_digest` no longer matches the recomputed digest ⇒ `blocked:"stale_brief"`
+ *      (the brief was edited after attestation). A run with NO receipt is NOT stale-blocked
+ *      here (absence is the no-receipt case, grandfathered like the sibling rungs); a null
+ *      digest on either side is non-discriminating.
+ *   5. Else ⇒ `ok:true`.
+ *
+ * `state.tier === null` is NOT this rung's concern (the `tier_unclassified` rung owns it);
+ * a null tier returns `ok:true` here so the dedicated rung remains the single owner.
+ */
+type TierCorrespondenceVerdict =
+  | { ok: true; claimedTier: string | null; computedMinTier: Tier }
+  | {
+      ok: false;
+      reason: "tampered" | "under_declared" | "stage_unrewound" | "stale_brief";
+      claimedTier: string | null;
+      computedMinTier: Tier;
+      detail: Record<string, unknown>;
+    };
+
+function evaluateTierCorrespondence(
+  paths: ProjectPaths,
+  state: TwinHarnessState,
+): TierCorrespondenceVerdict {
+  const { minTier } = computeMinTierFromBrief(paths.root);
+  const claimedTier = state.tier;
+
+  // 0. Tamper walk the chain before trusting any line from it.
+  const receipts = readTierCorrespondenceReceipts(paths);
+  if (!verifyTierCorrespondenceChain(receipts).ok) {
+    return {
+      ok: false,
+      reason: "tampered",
+      claimedTier,
+      computedMinTier: minTier,
+      detail: {},
+    };
+  }
+
+  // tier === null is the tier_unclassified rung's concern, not this one.
+  if (claimedTier === null) {
+    return { ok: true, claimedTier, computedMinTier: minTier };
+  }
+
+  // The LATEST non-legacy receipt is the run's correspondence artifact (the upgrade witness
+  // for the stage-invalidation check + the stale-brief artifact). A legacy backfill stamp is
+  // grandfathered (no witness).
+  const latest: TierCorrespondenceReceipt | undefined =
+    receipts.length > 0 ? receipts[receipts.length - 1] : undefined;
+  const witness = latest && latest.legacy !== true ? latest : undefined;
+
+  // 1. Under-declared tier: claimed < computed-min (by TIERS ordinal). Negative-control (a):
+  //    a `--emergency tier:T0` over a brief whose signals force ≥T1 blocks here.
+  const claimedIdx = TIERS.indexOf(claimedTier);
+  const minIdx = TIERS.indexOf(minTier);
+  if (claimedIdx >= 0 && minIdx >= 0 && claimedIdx < minIdx) {
+    return {
+      ok: false,
+      reason: "under_declared",
+      claimedTier,
+      computedMinTier: minTier,
+      detail: { claimedTier, computedMinTier: minTier },
+    };
+  }
+
+  // 2. Un-rewound tier upgrade: a newly-engaged-but-skipped artifact stage WITH a receipt-
+  //    derived upgrade WITNESS. Negative-control (b): a T0→T2 upgrade that did not rewind
+  //    current_stage blocks until rewound. The live recompute (`unrewoundUpgradeStage`) finds a
+  //    passed engaged artifact stage that is not registered; the WITNESS distinguishes an
+  //    un-rewound bypass from (i) a legitimate upgrade whose rewind backfilled it — the gate must
+  //    NOT re-block the legitimate post-upgrade registration window, `checkGoverningArtifact`
+  //    owns that as the run re-advances — and (ii) a grandfathered run that minted no receipt at
+  //    all (ABSENCE ≠ BYPASS, mirroring the sibling rungs' legacy/absent handling, so an existing
+  //    green fixture / pre-BSC-8 run is never reded). Block ONLY when a witness receipt EXISTS and
+  //    proves no rewind covered the skip:
+  //      - the witness's `claimed_tier` is BELOW the live tier (an upgrade happened AFTER the last
+  //        recorded tier without a fresh re-mint — the raw `state set tier --emergency` jump that
+  //        skips both the rewind and the mint), OR
+  //      - the witness's mint stage sits AT-OR-AFTER the skip (the recorded tier IS the live tier
+  //        but its rewind never moved the pointer back to the newly-engaged stage).
+  //    A complete absence of receipts (`witness === undefined`) is grandfathered ⇒ no block.
+  const skipped = unrewoundUpgradeStage(state);
+  if (skipped !== null && witness !== undefined) {
+    const skippedOrdinal = STAGE_PIPELINE.findIndex((s) => s.stage === skipped);
+    const witnessTierIdx = TIERS.indexOf(witness.claimed_tier as Tier);
+    // An upgrade reached the live tier without a fresh receipt for it (witness tier < live tier).
+    const upgradeWithoutRemint = witnessTierIdx >= 0 && claimedIdx >= 0 && witnessTierIdx < claimedIdx;
+    const mintOrdinal =
+      witness.current_stage_at_mint !== undefined
+        ? STAGE_PIPELINE.findIndex((s) => s.stage === canonicalizeStage(witness.current_stage_at_mint!))
+        : -1;
+    // The recorded tier IS the live tier but its rewind never covered the skip.
+    const rewindAbsent = witness.claimed_tier === claimedTier && mintOrdinal >= skippedOrdinal;
+    if (upgradeWithoutRemint || rewindAbsent) {
+      return {
+        ok: false,
+        reason: "stage_unrewound",
+        claimedTier,
+        computedMinTier: minTier,
+        detail: {
+          stage: skipped,
+          claimedTier,
+          witness: upgradeWithoutRemint ? "upgrade_without_remint" : "rewind_absent",
+        },
+      };
+    }
+  }
+
+  // 3. Stale brief: a recorded receipt whose brief_digest diverged from the recompute.
+  //    Negative-control (c): the brief changed after attestation. A null digest on either
+  //    side is non-discriminating.
+  if (witness) {
+    const currentDigest = computeBriefDigest(paths.root);
+    if (
+      witness.brief_digest !== null &&
+      currentDigest !== null &&
+      witness.brief_digest !== currentDigest
+    ) {
+      return {
+        ok: false,
+        reason: "stale_brief",
+        claimedTier,
+        computedMinTier: minTier,
+        detail: { recordedDigest: witness.brief_digest, currentDigest },
+      };
+    }
+  }
+
+  return { ok: true, claimedTier, computedMinTier: minTier };
+}
+
+/**
+ * The BSC-8 tier-correspondence sub-check (Axis-B slice-7) — a production-reality rung
+ * composed among the gating tail (before the BSC-10 grounding summary/fold). It ALWAYS
+ * computes the verdict (so the claimed/computed-min correspondence is observable), then
+ * BLOCKS on a failing verdict ONLY when enforcement is enabled ({@link bsc8EnforcementEnabled},
+ * defaults ON). When enforcement is OFF a failing verdict rides as a non-blocking `notice`
+ * (the ship-dark WARN posture), never weakening the gate. Emits the stable token
+ * `tier_correspondence_unverified` with the verdict's `reason`
+ * (`tampered`/`under_declared`/`stage_unrewound`/`stale_brief`) + detail.
+ */
+function checkTierCorrespondence(paths: ProjectPaths, state: TwinHarnessState): GateResult {
+  const verdict = evaluateTierCorrespondence(paths, state);
+  if (verdict.ok) return PASS;
+  if (!bsc8EnforcementEnabled()) {
+    // Flag OFF (ship-dark): observe but do not block. Surface the would-be block as a
+    // non-blocking notice so the warn posture is visible without weakening the gate.
+    return {
+      ok: true,
+      notice: {
+        token: "tier_correspondence_unverified",
+        detail: { reason: verdict.reason, ...verdict.detail },
+      },
+    };
+  }
+  return {
+    ok: false,
+    error: "tier_correspondence_unverified",
+    detail: { reason: verdict.reason, ...verdict.detail },
+  };
+}
+
 /**
  * The shared context threaded through every {@link ProductionRealityRung}. It carries
  * the cross-rung state the old monolithic body held in function-local `const`s, so the
@@ -1668,6 +1909,8 @@ interface ProductionRealityCtx {
     realization?: GateResult;
     assertion?: GateResult;
     grounding?: GateResult;
+    /** BSC-8 — the tier-correspondence rung result, so its WARN-phase `notice` rides the fold. */
+    tierCorrespondence?: GateResult;
   };
 }
 
@@ -2001,6 +2244,27 @@ export const PRODUCTION_REALITY_RUNGS: readonly ProductionRealityRung[] = [
     },
   },
   {
+    // 8b. (BSC-8 / Axis-B slice-7) TIER-CORRESPONDENCE + STAGE-INVALIDATION — composed among the
+    // gating tail, before the BSC-10 grounding summary/fold (merge-order discipline). A run may not
+    // be certified complete while its declared `tier` does not correspond to the work: the claimed
+    // tier is UNDER-DECLARED vs the brief's mechanically-computed min-tier (`classifyBrief`), a tier
+    // upgrade left a newly-engaged stage un-rewound (skipped artifact), or the brief was edited after
+    // attestation (stale digest). `tier` stays GATE_OWNED (raw `state set tier` reject preserved in
+    // commands/state.ts); the rewind logic (`tierUpgradeBackfillStage`) already FIRES on the producer
+    // side — this is the GATE-ENFORCEMENT side only. Governed by `bsc8EnforcementEnabled()` (defaults
+    // ON): the verdict is ALWAYS computed, but it BLOCKS with `tier_correspondence_unverified` only
+    // when enforcement is on; OFF ⇒ a non-blocking `notice` (ship-dark WARN). The result is captured
+    // on `ctx.captured.tierCorrespondence` so the WARN-phase `notice` rides the post-loop fold (the
+    // last in the notice-precedence chain), mirroring the sibling gating rungs.
+    id: "tier-correspondence",
+    check: (paths, state, ctx) => {
+      const tierCorr = checkTierCorrespondence(paths, state);
+      ctx.captured.tierCorrespondence = tierCorr;
+      if (!tierCorr.ok) return tierCorr;
+      return null;
+    },
+  },
+  {
     // 9. (BSC-10 / Axis-B slice-BSC10a) EXTERNAL-REFERENCE GROUNDING — a THIN summary rung composed
     // among the reality rungs. It does NOT recompute: it CONSUMES the `groundingVerdict` already
     // HOISTED before the 1c approval leg (Principle 1 — single live recompute), folding `grounding?`
@@ -2069,13 +2333,19 @@ export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessSt
   const realization = ctx.captured.realization;
   const assertion = ctx.captured.assertion;
   const grounding = ctx.captured.grounding;
+  const tierCorrespondence = ctx.captured.tierCorrespondence;
   const merged: GateResult = { ok: true };
   const dimensions = driver?.dimensions ?? assertion?.dimensions;
   if (dimensions) merged.dimensions = dimensions;
   if (assertion?.assertionPresence) merged.assertionPresence = assertion.assertionPresence;
   if (assertion?.mutationEfficacy) merged.mutationEfficacy = assertion.mutationEfficacy;
   if (grounding?.grounding) merged.grounding = grounding.grounding;
-  const notice = driver?.notice ?? realization?.notice ?? assertion?.notice ?? grounding?.notice;
+  const notice =
+    driver?.notice ??
+    realization?.notice ??
+    assertion?.notice ??
+    grounding?.notice ??
+    tierCorrespondence?.notice;
   if (notice) merged.notice = notice;
   // Degrade to the shared bare PASS when nothing was observed, preserving `{ ok: true }`.
   return merged.dimensions ||
