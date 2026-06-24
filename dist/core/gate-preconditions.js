@@ -99,6 +99,8 @@ const bsc1_flag_1 = require("./bsc1-flag");
 const bsc2_flag_1 = require("./bsc2-flag");
 const assertion_presence_1 = require("./assertion-presence");
 const realization_1 = require("./realization");
+const grounding_1 = require("./grounding");
+const bsc10_flag_1 = require("./bsc10-flag");
 const PASS = { ok: true };
 // ---------------------------------------------------------------------------
 // Global rungs (stage-independent) — checked before any stage-specific work, in
@@ -398,7 +400,7 @@ function checkFinalVerification(paths, state) {
 /**
  * Rung m (NEW — SG3 P2-C, audit C-05..C-08) — the PRODUCTION-REALITY rung. A run may
  * not be certified complete while its user-visible production path still depends on
- * unresolved simulated behavior. SIX sub-checks, each a DISTINCT stable error token
+ * unresolved simulated behavior. SEVEN sub-checks, each a DISTINCT stable error token
  * (the order is the short-circuit order; the first failing one is returned):
  *
  *   1. `simulation_unretired`         — a non-retired simulation ledger entry maps to
@@ -426,12 +428,21 @@ function checkFinalVerification(paths, state) {
  *                                       the `--emergency`/`state set` jump cannot route
  *                                       around (the jumped-over gate is engaged-and-not-
  *                                       future ⇒ required).
+ *   7. `grounding_unverified`         — (BSC-10 / Axis-B slice-BSC10a) a REQUIRED external-
+ *                                       reference ground-kind (per the work-class matrix +
+ *                                       the UX-surface force-rule) is `missing` /
+ *                                       `over_budget` / `unobserved` and not exonerated.
+ *                                       WARN-first (`bsc10EnforcementEnabled()`, default OFF
+ *                                       in slice-BSC10a): the verdict is hoisted once before
+ *                                       the BSC-7 approval leg (a present-but-unconformant
+ *                                       ground also blocks approval ACCEPTANCE, PCC-1) and
+ *                                       re-used by a thin summary rung — never recomputed.
  *
  * Two further fail-closed tokens are NOT sub-checks of the production path but guard the
  * rung's own inputs: `terminal_receipt_unverified` (BSC-4 terminal-flip grounding — every
  * in-force drift-resolution/decision-approval must carry a valid/legacy receipt) and
  * `simulation_ledger_corrupt` (an unreadable ledger fails closed). Together the rung can
- * emit EIGHT distinct stable tokens; the six above are the production-reality sub-checks.
+ * emit NINE distinct stable tokens; the seven above are the production-reality sub-checks.
  *
  * This is the mechanical form of the audit's required invariant — a COMPLETION gate.
  * It is now COMPOSED into `checkFinalVerification` (and, via it, `canAdvanceStage`'s
@@ -893,6 +904,161 @@ function checkAssertionPresence(paths) {
         res.mutationEfficacy = verdict.mutationEfficacy;
     return res;
 }
+/**
+ * Map a grounding receipt's content-validation status to the per-kind conformance + offender
+ * verdict precedence (fail-closed, `unobserved` outranks `over-budget`): a trusted receipt whose
+ * content is `unobserved` ⇒ `unobserved`; `over-budget`/`stale` ⇒ `over_budget` (a diverged
+ * snapshot is treated as a budget failure for the grounding axis); else `within-budget`.
+ */
+function groundingConformanceOf(paths, receipt) {
+    const v = (0, grounding_1.validateGroundingContent)(paths, receipt);
+    if (v.status === "unobserved")
+        return "unobserved";
+    if (v.status === "over-budget" || v.status === "stale" || v.status === "target_mismatch")
+        return "over-budget";
+    return "within-budget";
+}
+/**
+ * Evaluate the BSC-10 external-reference grounding for the current run (recompute-don't-trust +
+ * fail-closed). The DECLARED work-class is read FRESH from the in-process grounding receipts (each
+ * receipt declares the `workClass` it was minted for); the required ground-kinds are recomputed
+ * from the fixed matrix + the `has_ui` UX-surface force-rule (a `has_ui` run forces `visual-hash`).
+ * For each required kind the LATEST trusted receipt (in-process `valid` / external `valid-grounded`)
+ * is resolved via {@link readGroundingValidated} and its conformance re-derived. A required kind
+ * with no trusted receipt ⇒ `missing`; an over-budget/stale one ⇒ `over_budget`; an unobserved one
+ * ⇒ `unobserved`. Returns `null` when there is no declared work-class at all (nothing to ground).
+ */
+function evaluateGrounding(paths, state) {
+    const validated = (0, grounding_1.readGroundingValidated)(paths);
+    // M-1 fail-CLOSED on tamper (BEFORE deriving the declared classes). A tampered in-process chain
+    // makes `readGroundingValidated` drop ALL in-process receipts ("a tampered chain trusts NOTHING
+    // from it"), which would otherwise empty `byKind`, yield no declared class, and slip a
+    // required-and-missing run from FAIL to inert PASS — a fail-OPEN. Detection MUST have a gate
+    // consequence: block with the top-level `grounding_unverified` token + `detail.reason:"tampered"`.
+    // An EMPTY store verifies (`verifyGroundingChain([])` ⇒ `{ok:true}` ⇒ `inProcessChainOk:true`),
+    // so absence is NEVER blocked here (absence ≠ forgery); only a NON-EMPTY broken chain blocks.
+    // Under WARN (flag default-OFF) `checkGrounding` downgrades this to a non-blocking notice.
+    if (validated.inProcessChainOk === false) {
+        return { ok: false, reason: "tampered", required: [], summary: [], offenders: [] };
+    }
+    // The DECLARED work-classes across the trusted receipts (recompute-don't-trust: the receipt is
+    // the work-class CLAIM, the matrix is the verdict). No receipt ⇒ no declared class ⇒ nothing to
+    // ground (the not-required inert path — absence ≠ forgery).
+    const declaredClasses = [
+        ...new Set([...validated.byKind.values()].map((e) => e.receipt.workClass)),
+    ].sort();
+    if (declaredClasses.length === 0)
+        return null;
+    // `has_ui` is the observable UX-surface signal; `has_ui !== false` (default true) forces a
+    // visual-hash ground per the force-rule (a screen surface is grounded visually). The union of
+    // the required-sets across every declared class is the closed required-set for the run.
+    const surfaces = state.has_ui !== false ? ["ui"] : [];
+    const requiredSet = new Set();
+    let crossCheckFlag;
+    for (const wc of declaredClasses) {
+        // GATE-LEVEL CROSS-CHECK IS DEFERRED TO SLICE B (intentionally inert here, like the sibling
+        // budget/exception/carve-out stores). `requiredGroundKindsForWorkClass` is called WITHOUT a
+        // third `derivedClass` argument, so `req.crossCheckFlag` is structurally always `undefined` on
+        // this path — the declared-vs-derived (BSC-8-style) cross-check has no input source in Slice A
+        // (no receipt carries an evidence-derived class yet). This loop is therefore a UNION over the
+        // DECLARED classes, NOT the declared-vs-derived cross-check; the `crossCheckFlag`/`detail.crossCheck`
+        // plumbing below is reserved-but-unreachable until Slice B wires the derived class. The
+        // classifier's cross-check rule itself is exercised directly by the unit suite (U6).
+        const req = (0, grounding_1.requiredGroundKindsForWorkClass)(wc, surfaces);
+        for (const k of req.required)
+            requiredSet.add(k);
+        if (req.crossCheckFlag)
+            crossCheckFlag = req.crossCheckFlag;
+    }
+    const required = [...requiredSet].sort();
+    if (required.length === 0)
+        return null; // pure-greenfield-only declared ⇒ inert
+    const summary = [];
+    const offenders = [];
+    let worstReason = null;
+    // Fail-closed precedence: unobserved > over_budget > missing? No — `missing` is the hardest
+    // (the ground was never even checked). Precedence: missing > unobserved > over_budget, so the
+    // block names the most fundamental gap first.
+    const bump = (r) => {
+        const rank = { missing: 3, unobserved: 2, over_budget: 1 };
+        if (worstReason === null || rank[r] > rank[worstReason])
+            worstReason = r;
+    };
+    for (const kind of required) {
+        const entry = validated.byKind.get(kind);
+        if (entry === undefined) {
+            summary.push({ groundKind: kind, grounded: false, trustLabel: "ungrounded", conformance: "missing", exceptionCovered: false });
+            offenders.push(kind);
+            bump("missing");
+            continue;
+        }
+        const conformance = groundingConformanceOf(paths, entry.receipt);
+        summary.push({
+            groundKind: kind,
+            grounded: true,
+            trustLabel: entry.trustLabel,
+            conformance,
+            exceptionCovered: false, // Slice-B wires signed-exception coverage; always false in slice-A.
+        });
+        if (conformance === "unobserved") {
+            offenders.push(kind);
+            bump("unobserved");
+        }
+        else if (conformance === "over-budget") {
+            offenders.push(kind);
+            bump("over_budget");
+        }
+    }
+    if (worstReason === null) {
+        return crossCheckFlag ? { ok: true, required, summary, crossCheckFlag } : { ok: true, required, summary };
+    }
+    return crossCheckFlag
+        ? { ok: false, reason: worstReason, required, summary, offenders, crossCheckFlag }
+        : { ok: false, reason: worstReason, required, summary, offenders };
+}
+/**
+ * Build the gate detail for a failing grounding verdict (the stable `grounding_unverified` block):
+ * the worst reason, the offending kinds, and the cross-check-mismatch flag when present.
+ */
+function groundingDetail(verdict) {
+    const detail = {
+        reason: verdict.reason,
+        offenders: verdict.offenders,
+        required: verdict.required,
+    };
+    if (verdict.crossCheckFlag)
+        detail.crossCheck = verdict.crossCheckFlag;
+    return detail;
+}
+/**
+ * The BSC-10 external-reference grounding sub-check (Axis-B slice-BSC10a) — the NINTH production-
+ * reality sub-check, a THIN summary rung composed among the reality rungs (after assertion-
+ * presence). It does NOT recompute: it CONSUMES the verdict already hoisted before the human-
+ * approval leg (Principle 1), folding `grounding?` onto the result exactly like `dimensions?`/
+ * `assertionPresence?`. It ALWAYS attaches the per-required-kind summary, then BLOCKS on a failing
+ * verdict ONLY when enforcement is enabled ({@link bsc10EnforcementEnabled} — slice-BSC10a is the
+ * WARN commit, default OFF). When OFF (WARN) a failing verdict rides as a non-blocking `notice`
+ * with the same `grounding_unverified` token + the summary; when ON it returns the stable token.
+ * A `null` verdict (no declared work-class / empty required-set) ⇒ bare PASS (not-required inert).
+ */
+function checkGrounding(verdict) {
+    if (verdict === null)
+        return PASS; // not-required ⇒ inert (absence ≠ forgery)
+    if (verdict.ok) {
+        // Attach the summary on PASS only when there is a noteworthy signal (any required kind, or a
+        // surfaced cross-check mismatch); otherwise degrade to the bare PASS the gate contract expects.
+        if (verdict.summary.length === 0 && verdict.crossCheckFlag === undefined)
+            return PASS;
+        return { ok: true, grounding: verdict.summary };
+    }
+    const detail = groundingDetail(verdict);
+    if (!(0, bsc10_flag_1.bsc10EnforcementEnabled)()) {
+        // Flag OFF (WARN, slice-BSC10a default): observe but do not block. Surface the would-be block
+        // as a non-blocking notice + the summary so the warn posture is visible without weakening the gate.
+        return { ok: true, grounding: verdict.summary, notice: { token: "grounding_unverified", detail } };
+    }
+    return { ok: false, error: "grounding_unverified", detail, grounding: verdict.summary };
+}
 function checkProductionReality(paths, state) {
     // Stage-aware: production reality is a CERTIFY-COMPLETION condition, so it only
     // enforces at the completion boundary (final-verification). Earlier stages have no
@@ -951,6 +1117,25 @@ function checkProductionReality(paths, state) {
             };
         }
     }
+    // 1b-grounding. HOIST the BSC-10 external-reference grounding verdict (Axis-B slice-BSC10a,
+    // C1/PCC-1). It is computed ONCE here — BEFORE the human-approval leg — because it depends ONLY
+    // on the grounding receipts + sibling stores + the matrix (NO dependency on verify/tester/dist/
+    // scan/driver/realization/assertion), so it can be resolved first with no ordering hazard. The
+    // SAME verdict is consumed by (i) the SPLIT approval-ACCEPTANCE leg just below and (ii) the thin
+    // grounding summary rung among the reality rungs — a single live recompute, never attached-but-
+    // stale (Principle 1). A late standalone rung after the reality rungs could never inform the 1c
+    // approval leg, which early-`return`s on the happy path — so hoist-evaluate-once is the only
+    // sound control flow.
+    const groundingVerdict = evaluateGrounding(paths, state);
+    // A PRESENT-but-UNCONFORMANT ground (grounded, but `over_budget`/`unobserved` — NOT a `missing`
+    // ground) is the conformance precondition the BSC-7 approval ACCEPTANCE leg consumes: an approval
+    // cannot be ACCEPTED while the reference it was supposed to be approved against is itself
+    // unconformant. `missing` is excluded here (it is the grounding rung's own `missing` block, not
+    // an approval-acceptance failure) so the tokens stay disjoint.
+    const groundingBlocksAcceptance = groundingVerdict !== null &&
+        groundingVerdict.ok === false &&
+        (groundingVerdict.reason === "over_budget" || groundingVerdict.reason === "unobserved") &&
+        (0, bsc10_flag_1.bsc10EnforcementEnabled)();
     // 1c. Human-approval grounding over the CLOSED required-set (BSC-7 / Axis-B slice-3a,
     // R1) — the COMPLETION rung, the L1 backstop. `humanGate` was a declarative-only flag
     // with ZERO predicate consumers (pure gate theater); this re-validates that EVERY
@@ -968,8 +1153,15 @@ function checkProductionReality(paths, state) {
     // jumping `current_stage` to `final-verification` makes every engaged gate ordinal-≤-
     // current ⇒ required, so the jumped-over stage is re-checked here. The block names the
     // offending `{stage, status}` (a bounded list — the FIRST failing required stage).
+    //
+    // PCC-1 SPLIT (slice-BSC10a): leg (α) approval-EXISTENCE is the unchanged status check below;
+    // leg (β) approval-ACCEPTANCE additionally refuses to ACCEPT an otherwise-present approval while
+    // `groundingBlocksAcceptance` (a present-but-unconformant BSC-10 ground under enforce). So an
+    // approval that EXISTS but whose reference is unconformant blocks with `grounding_unverified`,
+    // the conformance precondition consumed INSIDE the 1c leg — never bypassed.
     for (const stage of requiredHumanGateStages(state)) {
         const a = (0, approvals_1.readApprovalValidated)(paths, stage);
+        // Leg (α) — approval EXISTENCE: an absent/stale/forged/tampered approval blocks as before.
         if (a.status !== "valid" && a.status !== "valid-grounded" && a.status !== "legacy") {
             return {
                 ok: false,
@@ -979,6 +1171,19 @@ function checkProductionReality(paths, state) {
                     status: a.status,
                     ...(a.staleReasons ? { staleReasons: a.staleReasons } : {}),
                 },
+            };
+        }
+        // Leg (β) — approval ACCEPTANCE: the approval EXISTS, but a present-but-unconformant BSC-10
+        // ground means the reference it authorizes is itself unconformant ⇒ the approval cannot be
+        // ACCEPTED (the conformance precondition is consumed here, not bypassed). Slice-BSC10a only:
+        // gated on the enforce flag (default OFF ⇒ this leg is inert in the WARN commit).
+        if (groundingBlocksAcceptance) {
+            const v = groundingVerdict;
+            return {
+                ok: false,
+                error: "grounding_unverified",
+                detail: { stage, ...groundingDetail(v) },
+                grounding: v.summary,
             };
         }
     }
@@ -1095,10 +1300,25 @@ function checkProductionReality(paths, state) {
         // `assertionPresence` + `mutationEfficacy`).
         return driver.dimensions ? { ...assertion, dimensions: driver.dimensions } : assertion;
     }
+    // 9. (BSC-10 / Axis-B slice-BSC10a) EXTERNAL-REFERENCE GROUNDING — a THIN summary rung composed
+    // among the reality rungs. It does NOT recompute: it CONSUMES the `groundingVerdict` already
+    // HOISTED before the 1c approval leg (Principle 1 — single live recompute), folding `grounding?`
+    // onto the result exactly like `dimensions?`/`assertionPresence?`. The `missing` reason blocks
+    // HERE (a required input-ground never checked); the present-but-unconformant (`over_budget`/
+    // `unobserved`) reasons already gated the approval-ACCEPTANCE leg above. Governed by
+    // `bsc10EnforcementEnabled()` (slice-BSC10a is the WARN commit, default OFF): the verdict is
+    // ALWAYS computed (so `grounding` summarizes the posture for the I1 hook), but it BLOCKS with
+    // `grounding_unverified` only when enforcement is on; OFF ⇒ a non-blocking `notice` + summary.
+    const grounding = checkGrounding(groundingVerdict);
+    if (!grounding.ok) {
+        // Preserve the upstream driver `dimensions` summary on the grounding block so the full trust
+        // posture stays visible (grounding already carries its own `grounding` summary).
+        return driver.dimensions ? { ...grounding, dimensions: driver.dimensions } : grounding;
+    }
     // All passed: fold the optional observability fields up onto ONE result so a single PASS
     // carries the driver `dimensions`, the assertion `assertionPresence`, the module-scoped
-    // `mutationEfficacy`, and at most one warn-phase `notice` (driver wins, then realization, then
-    // assertion — first non-empty).
+    // `mutationEfficacy`, the BSC-10 `grounding`, and at most one warn-phase `notice` (driver wins,
+    // then realization, then assertion, then grounding — first non-empty).
     const merged = { ok: true };
     const dimensions = driver.dimensions ?? assertion.dimensions;
     if (dimensions)
@@ -1107,11 +1327,17 @@ function checkProductionReality(paths, state) {
         merged.assertionPresence = assertion.assertionPresence;
     if (assertion.mutationEfficacy)
         merged.mutationEfficacy = assertion.mutationEfficacy;
-    const notice = driver.notice ?? realization.notice ?? assertion.notice;
+    if (grounding.grounding)
+        merged.grounding = grounding.grounding;
+    const notice = driver.notice ?? realization.notice ?? assertion.notice ?? grounding.notice;
     if (notice)
         merged.notice = notice;
     // Degrade to the shared bare PASS when nothing was observed, preserving `{ ok: true }`.
-    return merged.dimensions || merged.assertionPresence || merged.mutationEfficacy || merged.notice
+    return merged.dimensions ||
+        merged.assertionPresence ||
+        merged.mutationEfficacy ||
+        merged.grounding ||
+        merged.notice
         ? merged
         : PASS;
 }

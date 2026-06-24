@@ -202,6 +202,12 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   // .twinharness/assertion-presence-receipts.jsonl (governed state dir); not path-taking.
   // The sensor computes its ground from the temp project's tests/ dir; no args needed.
   th_assertion_presence_record: {},
+  // Axis-B/BSC-10 (Slice A) — in-process external-reference grounding producer; writes only
+  // .twinharness/grounding-receipts.jsonl (governed state dir); not path-taking. Args are a
+  // minimal valid digest-manifest probe (groundKind + workClass + manifestDigest all supplied);
+  // either the receipt is written to the governed dir, or a refuse-at-creation early-returns
+  // (e.g. invalid state.json in the temp project) — either way nothing escapes the surface.
+  th_grounding_record: { groundKind: "digest-manifest", workClass: "integration", manifestDigest: "sha256:probe" },
 };
 
 describe("MCP write-surface audit — no mutating tool escapes the governed surface (AC#1)", () => {

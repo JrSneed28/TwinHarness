@@ -138,6 +138,17 @@ export interface HumanApprovalReceipt {
    * Omit-when-absent so a real approval's canonical text never carries it.
    */
   legacy?: boolean;
+  /**
+   * Axis-B slice-BSC10a / BSC-10 — the evidence-spine continuity thread (the `manifest_digest`
+   * of the signed EvidenceManifest this approval was grounded against). ADDITIVE-OPTIONAL +
+   * omit-when-absent, AND IN {@link APPROVAL_CANONICAL_FIELD_ORDER} (just before `prevHash`) so a
+   * PRESENT value is signature/hash-bound (tamper-evident — a swapped digest breaks `recordHash`
+   * and the signature). Omit-when-absent keeps a pre-BSC-10 approval's canonical text — and
+   * `recordHash` — BYTE-IDENTICAL, so shipped BSC-7 probes + receipts-parity stay green. Becomes
+   * load-bearing (a producer actually sets it) under the Slice-B/C cross-receipt chain-mismatch +
+   * BSC-7 conformance-precondition enforce.
+   */
+  manifest_digest?: string;
   /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
   prevHash: string;
   /** SHA-256 hex (64) of THIS approval's canonical text (computed before set). */
@@ -165,6 +176,10 @@ const APPROVAL_CANONICAL_FIELD_ORDER: ReadonlyArray<keyof HumanApprovalReceipt> 
   "producer_kind",
   "key_id",
   "legacy",
+  // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
+  // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
+  // approval (the field absent) is byte-identical, so shipped BSC-7 probes + receipts-parity hold.
+  "manifest_digest",
   "prevHash",
 ];
 

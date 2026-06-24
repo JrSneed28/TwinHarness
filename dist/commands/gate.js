@@ -7,7 +7,7 @@
  * the predicate is the seam both this reader and the typed MCP gate tools consume,
  * so they can never disagree about what "ready" means).
  *
- *   runGateProductionReality — reports `checkProductionReality` (6 stable tokens).
+ *   runGateProductionReality — reports `checkProductionReality` (7 stable tokens).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runGateProductionReality = runGateProductionReality;

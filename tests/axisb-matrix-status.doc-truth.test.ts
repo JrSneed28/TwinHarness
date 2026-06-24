@@ -59,11 +59,12 @@ function readLedger(): MatrixRow[] {
 }
 
 describe("axisb-matrix-status.json — doc-truth ledger guard (fail-closed)", () => {
-  it("parses to an array of exactly the 9 BSC rows (bsc 1..9, each once)", () => {
+  // NOTE: widened 9→10 rows (BSC-10 source-of-truth add, not test silencing — see §A0 in bsc10a-EXECUTION-PROGRESS.md)
+  it("parses to an array of exactly the 10 BSC rows (bsc 1..10, each once)", () => {
     const rows = readLedger();
-    expect(rows).toHaveLength(9);
+    expect(rows).toHaveLength(10);
     const bscs = rows.map((r) => r.bsc).sort((a, b) => a - b);
-    expect(bscs).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(bscs).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
   it("every row carries the required keys with the right shapes", () => {

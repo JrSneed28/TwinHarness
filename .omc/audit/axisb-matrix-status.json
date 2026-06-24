@@ -91,5 +91,20 @@
     "probe": null,
     "anchors": ["tests/mcp-cli-parity.test.ts", "commands/interview.ts:185-188"],
     "updatedAt": "2026-06-22T13:10:00Z"
+  },
+  {
+    "bsc": 10,
+    "title": "External-Reference Grounding — computable ground that the real external reference was checked",
+    "phase": "done-phase",
+    "independence": 0,
+    "pr": [],
+    "probe": ".omc/audit/probes/bsc10",
+    "anchors": [
+      "core/grounding.ts",
+      "core/bsc10-flag.ts",
+      "commands/grounding.ts",
+      "core/gate-preconditions.ts (evaluateGrounding + checkGrounding + hoisted-verdict split rung)"
+    ],
+    "updatedAt": "2026-06-23T12:00:00Z"
   }
 ]
