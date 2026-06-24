@@ -14,9 +14,12 @@
  *                         — serializeGroundingGround(ground: GroundingGround) → string
  *                         — groundingGroundDigest(ground: GroundingGround) → string
  *                         — computeGroundingRecordHash(receipt: Omit<GroundingReceipt,"recordHash">) → string
- *   src/core/bsc10-flag.ts — bsc10EnforcementEnabled(): Slice A default OFF (undefined → false);
- *                            only explicit "1"/"true" (case-insensitive, trimmed) → true;
- *                            everything else including unrecognized values → false.
+ *   src/core/bsc10-flag.ts — bsc10EnforcementEnabled(): byte-mirror of bsc2-flag.ts polarity
+ *                            (bsc2-flag.ts:34-39): unset → compiled default (two-commit toggle);
+ *                            "0"/"false" (case-insensitive, trimmed) → false; ANY OTHER value
+ *                            (including "yes", "on", "banana") → true (fail-closed polarity).
+ *                            Slice-B compiled default: `return true` (ENFORCE dist — the
+ *                            818a956 enforce-flip; the Slice-A WARN dist shipped `return false`).
  *
  * GroundingReceipt schema: receipt has a NESTED `ground: GroundingGround` field (NOT inline
  * groundKind/manifestDigest). appendGroundingReceipt takes MintGroundingInput:
@@ -573,12 +576,13 @@ describe("U8 — carve-out: signed masks region, unsigned masks nothing (M4)", (
 });
 
 // ---------------------------------------------------------------------------
-// U9 — bsc10EnforcementEnabled() both legs
-// Slice A default: undefined → false (WARN commit). Only "1"/"true" (trimmed, case-insensitive) → true.
-// Everything else including "yes", "TRUE"→true only via normalized === "true" check.
+// U9 — bsc10EnforcementEnabled() both legs (Slice B: bsc2-mirror fail-closed polarity)
+// bsc2-flag.ts polarity (plan §U9 LOCKED decision): "0"/"false" → false; ANY OTHER value
+// (including "yes", "on", "banana") → true. Compiled default is the two-commit toggle:
+// Slice-A WARN dist shipped `return false`; the Slice-B ENFORCE dist (818a956) ships `return true`.
 // ---------------------------------------------------------------------------
 
-describe("U9 — bsc10EnforcementEnabled() — both legs (Slice A: default OFF)", () => {
+describe("U9 — bsc10EnforcementEnabled() — bsc2-mirror polarity (Slice B: default ON / ENFORCE compiled)", () => {
   const SAVED = process.env.TH_BSC10_ENFORCE;
 
   afterEach(() => {
@@ -586,9 +590,9 @@ describe("U9 — bsc10EnforcementEnabled() — both legs (Slice A: default OFF)"
     else process.env.TH_BSC10_ENFORCE = SAVED;
   });
 
-  it("env unset ⇒ false (Slice A WARN commit — compiled default OFF)", () => {
+  it("env unset ⇒ true (Slice-B ENFORCE compiled default — two-commit toggle at `return true`)", () => {
     delete process.env.TH_BSC10_ENFORCE;
-    expect(bsc10EnforcementEnabled()).toBe(false);
+    expect(bsc10EnforcementEnabled()).toBe(true);
   });
 
   it("explicit '1' ⇒ true (force enforce ON)", () => {
@@ -611,7 +615,7 @@ describe("U9 — bsc10EnforcementEnabled() — both legs (Slice A: default OFF)"
     expect(bsc10EnforcementEnabled()).toBe(true);
   });
 
-  it("explicit '0' ⇒ false (only '1'/'true' enable; everything else is false)", () => {
+  it("explicit '0' ⇒ false (bsc2-mirror: only '0'/'false' disable; everything else enables)", () => {
     process.env.TH_BSC10_ENFORCE = "0";
     expect(bsc10EnforcementEnabled()).toBe(false);
   });
@@ -626,16 +630,21 @@ describe("U9 — bsc10EnforcementEnabled() — both legs (Slice A: default OFF)"
     expect(bsc10EnforcementEnabled()).toBe(false);
   });
 
-  it("unrecognized 'yes' ⇒ false (Slice A: only '1'/'true' enables — fail-safe posture)", () => {
-    // Slice A default OFF: unrecognized value ≠ "1"/"true" → false.
-    // This is the INVERSE of bsc2-flag.ts (which is default ON, fail-closed).
-    // Slice A is fail-safe (WARN): unrecognized → non-blocking.
+  it("unrecognized 'yes' ⇒ TRUE (bsc2-mirror fail-closed: any-other-value ⇒ enforce ON — plan §U9 LOCKED)", () => {
+    // bsc2-flag.ts polarity: !(normalized === "0" || normalized === "false") → true for "yes".
+    // This was the INVERSE of Slice-A semantics which treated unrecognized as false.
+    // Slice-B LOCKS to the bsc2-mirror fail-closed polarity (plan §U9 LOCKED decision).
     process.env.TH_BSC10_ENFORCE = "yes";
-    expect(bsc10EnforcementEnabled()).toBe(false);
+    expect(bsc10EnforcementEnabled()).toBe(true);
   });
 
-  it("unrecognized 'on' ⇒ false", () => {
+  it("unrecognized 'on' ⇒ TRUE (any-other-value ⇒ enforce ON — bsc2-mirror fail-closed)", () => {
     process.env.TH_BSC10_ENFORCE = "on";
-    expect(bsc10EnforcementEnabled()).toBe(false);
+    expect(bsc10EnforcementEnabled()).toBe(true);
+  });
+
+  it("unrecognized 'banana' ⇒ TRUE (any-other-value ⇒ enforce ON)", () => {
+    process.env.TH_BSC10_ENFORCE = "banana";
+    expect(bsc10EnforcementEnabled()).toBe(true);
   });
 });

@@ -41,7 +41,8 @@ import { interviewReady } from "../commands/interview";
 import { readSimulationLedger, scanForSimulationHits, simEntryBlocksProductionReality, computeUnledgeredDistHitsReceiptAware, uncoveredAfterExceptions, SimulationLedgerCorruptError } from "../commands/sim";
 import { testerRecordPresent } from "./tester";
 import { collectTerminalEntities, readReceiptValidated } from "./receipts";
-import { readApprovalValidated, isHumanGateStage } from "./approvals";
+import { readApprovalValidated, readApprovalReceipts, readExternalApprovals, isHumanGateStage } from "./approvals";
+import { readRealizationReceipts, readExternalRealizationReceipts } from "./realization";
 import {
   type DriverDimensionReceipt,
   readDriverReceipts,
@@ -80,8 +81,10 @@ import {
   requiredGroundKindsForWorkClass,
   readGroundingValidated,
   validateGroundingContent,
+  validGroundingExemptions,
+  groundingExemptionKey,
 } from "./grounding";
-import { bsc10EnforcementEnabled } from "./bsc10-flag";
+import { bsc10EnforcementEnabled, bsc10KindEnforced } from "./bsc10-flag";
 
 /**
  * Result of a precondition check. `ok:true` ⇒ the rung passes. `ok:false` carries
@@ -174,10 +177,13 @@ export interface GroundingSummary {
   trustLabel: GroundingTrustLabel;
   /**
    * The conformance status for this ground (`within-budget` / `over-budget` / `unobserved` /
-   * `missing`). `missing` when the required kind has no trusted receipt; otherwise the receipt's
-   * content verdict. The fail-closed axis the gate blocks on under enforce.
+   * `missing` / `chain_mismatch`). `missing` when the required kind has no trusted receipt;
+   * `chain_mismatch` when a `digest-manifest` ground is trusted but a threaded BSC-1/3/7
+   * `manifest_digest` disagrees with it (the evidence-spine offender — observable here even when
+   * `digest-manifest` was not in the required-set); otherwise the receipt's content verdict. The
+   * fail-closed axis the gate blocks on under enforce.
    */
-  conformance: "within-budget" | "over-budget" | "unobserved" | "missing";
+  conformance: "within-budget" | "over-budget" | "unobserved" | "missing" | "chain_mismatch";
   /** True iff a valid signed exception suspends this ground's budget (Slice-B; always false in slice-A). */
   exceptionCovered: boolean;
 }
@@ -1172,18 +1178,30 @@ function checkAssertionPresence(paths: ProjectPaths): GateResult {
  *                     consequence). An EMPTY store verifies (`{ok:true}`) so absence stays inert
  *                     (absence ≠ forgery). This reason carries NO `offenders`/`required` (the
  *                     required-set can't be trusted from a tampered store).
+ *  - `chain_mismatch` — (Slice B, SEPARATE from `tampered`) a `manifest_digest` threaded through a
+ *                     shipped BSC-1 realization / BSC-3 driver / BSC-7 approval receipt DISAGREES
+ *                     with the grounding receipt's own `digest-manifest` manifest digest. The
+ *                     evidence-spine is supposed to thread the SAME signed-manifest digest end to
+ *                     end (input-grounding ⇄ downstream realization/verification/approval); a
+ *                     divergence means the approval/realization was bound to a DIFFERENT reference
+ *                     than the one that was grounded ⇒ FAIL. Absent threading (additive-optional,
+ *                     omit-when-absent) ⇒ NO mismatch (back-compat PASS — pre-BSC-10 receipts).
+ *                     `offenders` carries `["digest-manifest"]` (the manifest-bearing kind) so the
+ *                     per-kind enforce-flip ({@link bsc10KindEnforced}) treats it as a DETERMINISTIC
+ *                     block in Slice B.
  *
  * The `summary` (one entry per REQUIRED ground-kind) is ALWAYS computed so the observability hook
  * fires on PASS / WARN / BLOCK. `crossCheckFlag` carries the `"class-cross-check-mismatch"`
- * literal up to the gate detail when a declared≠derived class conflict was surfaced. `tampered` is
- * a `detail.reason` VALUE (via the top-level `grounding_unverified` token), NOT a new top-level
- * stable token — the gate token-count docstrings are unaffected.
+ * literal up to the gate detail when a declared≠derived class conflict was surfaced. `tampered` /
+ * `chain_mismatch` are `detail.reason` VALUES (via the top-level `grounding_unverified` token), NOT
+ * new top-level stable tokens — the gate token-count docstrings are unaffected.
  */
+type GroundingReason = "missing" | "over_budget" | "unobserved" | "tampered" | "chain_mismatch";
 type GroundingVerdict =
   | { ok: true; required: GroundKind[]; summary: GroundingSummary[]; crossCheckFlag?: "class-cross-check-mismatch" }
   | {
       ok: false;
-      reason: "missing" | "over_budget" | "unobserved" | "tampered";
+      reason: GroundingReason;
       required: GroundKind[];
       summary: GroundingSummary[];
       offenders: GroundKind[];
@@ -1195,6 +1213,16 @@ type GroundingVerdict =
  * verdict precedence (fail-closed, `unobserved` outranks `over-budget`): a trusted receipt whose
  * content is `unobserved` ⇒ `unobserved`; `over-budget`/`stale` ⇒ `over_budget` (a diverged
  * snapshot is treated as a budget failure for the grounding axis); else `within-budget`.
+ *
+ * SIGNED-BUDGET THRESHOLD COMPARISON IS NOT YET CONSUMED (MED-1, deferred to Slice C). The
+ * over-budget verdict here comes from the receipt's OWN externally-signed `conformance[].status`;
+ * the signed budget THRESHOLD (`validGroundingBudgets`) is validated for AUTHENTICITY (3-party
+ * authority, E4) but its `threshold` is NEVER compared against the metric's `observed` value yet.
+ * This is correct sequencing: budgets express TOLERANCES, meaningful only for the runner-sensitive
+ * kinds (visual perceptual-diff, a11y scan-count) that Slice C actually measures. The Slice-B
+ * deterministic kinds (`digest-manifest`, `version-pin`) are binary match/no-match, so the signed
+ * receipt status fully decides them. Observed-vs-threshold evaluation lands in Slice C alongside
+ * the tolerance-based visual/a11y measurement.
  */
 function groundingConformanceOf(
   paths: ProjectPaths,
@@ -1207,6 +1235,46 @@ function groundingConformanceOf(
 }
 
 /**
+ * The grounding-side manifest digest the evidence-spine threads — the `manifestDigest` of the
+ * trusted `digest-manifest` ground (in-process `valid` or external `valid-grounded`). `null` when
+ * no `digest-manifest` ground is trusted (nothing to thread against ⇒ no `chain_mismatch` is
+ * possible). This is the AUTHORITATIVE digest the BSC-1/3/7 threaded `manifest_digest` must match.
+ */
+function groundingManifestDigest(validated: ReturnType<typeof readGroundingValidated>): string | null {
+  const entry = validated.byKind.get("digest-manifest");
+  if (entry === undefined) return null;
+  const ground = entry.receipt.ground;
+  return ground.groundKind === "digest-manifest" ? ground.manifestDigest : null;
+}
+
+/**
+ * Every `manifest_digest` threaded through the shipped BSC-1 realization / BSC-3 driver / BSC-7
+ * approval receipts (in-process + external stores), de-duplicated. `manifest_digest` is ADDITIVE-
+ * OPTIONAL (omit-when-absent), so a pre-BSC-10 receipt contributes NOTHING and the set is empty ⇒
+ * back-compat (no `chain_mismatch`). The field is signature/hash-bound on each receipt (a swapped
+ * digest breaks that receipt's own `recordHash`/signature — but this reader does NOT itself verify
+ * those chains/signatures (and the contributing rungs may be in WARN), so a threaded value is NOT
+ * proven authentic here. That is SAFE because the cross-check is FAIL-CLOSED-ONLY: a disagreeing
+ * digest can only force a `chain_mismatch` BLOCK, never a pass. The deliberate trade-off is that a
+ * file-writer without the key can inject a bogus external `manifest_digest` to provoke a spurious
+ * block (a denial-of-completion, consistent with the system's block-on-suspicion posture) — it can
+ * NEVER suppress a real mismatch. Read tolerantly (the readers never throw).
+ */
+function threadedManifestDigests(paths: ProjectPaths): Set<string> {
+  const digests = new Set<string>();
+  const add = (d: string | undefined): void => {
+    if (typeof d === "string" && d !== "") digests.add(d);
+  };
+  for (const r of readRealizationReceipts(paths)) add(r.manifest_digest);
+  for (const r of readExternalRealizationReceipts(paths)) add(r.manifest_digest);
+  for (const r of readDriverReceipts(paths)) add(r.manifest_digest);
+  for (const r of readExternalDriverReceipts(paths)) add(r.manifest_digest);
+  for (const r of readApprovalReceipts(paths)) add(r.manifest_digest);
+  for (const r of readExternalApprovals(paths)) add(r.manifest_digest);
+  return digests;
+}
+
+/**
  * Evaluate the BSC-10 external-reference grounding for the current run (recompute-don't-trust +
  * fail-closed). The DECLARED work-class is read FRESH from the in-process grounding receipts (each
  * receipt declares the `workClass` it was minted for); the required ground-kinds are recomputed
@@ -1214,20 +1282,27 @@ function groundingConformanceOf(
  * For each required kind the LATEST trusted receipt (in-process `valid` / external `valid-grounded`)
  * is resolved via {@link readGroundingValidated} and its conformance re-derived. A required kind
  * with no trusted receipt ⇒ `missing`; an over-budget/stale one ⇒ `over_budget`; an unobserved one
- * ⇒ `unobserved`. Returns `null` when there is no declared work-class at all (nothing to ground).
+ * ⇒ `unobserved`; a threaded BSC-1/3/7 `manifest_digest` that disagrees ⇒ `chain_mismatch`
+ * (Slice B). A required kind whose `(workClass, groundKind)` axis is covered by a validly-Ed25519-
+ * signed exception is EXEMPTED (not an offender; `exceptionCovered:true`) — M4 fail-closed: an
+ * unsigned/wrong-key/tampered exception exempts NOTHING. Returns `null` when there is no declared
+ * work-class at all (nothing to ground).
  */
 function evaluateGrounding(paths: ProjectPaths, state: TwinHarnessState): GroundingVerdict | null {
   const validated = readGroundingValidated(paths);
 
-  // M-1 fail-CLOSED on tamper (BEFORE deriving the declared classes). A tampered in-process chain
-  // makes `readGroundingValidated` drop ALL in-process receipts ("a tampered chain trusts NOTHING
+  // M-1 fail-CLOSED on tamper (BEFORE deriving the declared classes). A tampered chain makes
+  // `readGroundingValidated` drop ALL receipts from that store ("a tampered chain trusts NOTHING
   // from it"), which would otherwise empty `byKind`, yield no declared class, and slip a
   // required-and-missing run from FAIL to inert PASS — a fail-OPEN. Detection MUST have a gate
   // consequence: block with the top-level `grounding_unverified` token + `detail.reason:"tampered"`.
-  // An EMPTY store verifies (`verifyGroundingChain([])` ⇒ `{ok:true}` ⇒ `inProcessChainOk:true`),
-  // so absence is NEVER blocked here (absence ≠ forgery); only a NON-EMPTY broken chain blocks.
-  // Under WARN (flag default-OFF) `checkGrounding` downgrades this to a non-blocking notice.
-  if (validated.inProcessChainOk === false) {
+  // BOTH chains are covered symmetrically (Slice B closed the external-chain asymmetry): a
+  // broken/reordered/duplicated EXTERNAL chain blocks here too, so a file-writer cannot silently
+  // drop a stale-resurfaced external grounding down to an undetected `missing`. An EMPTY store
+  // verifies (`verifyGroundingChain([])` ⇒ `{ok:true}`), so absence is NEVER blocked here (absence ≠
+  // forgery); only a NON-EMPTY broken chain blocks. Under WARN (flag default-OFF) `checkGrounding`
+  // downgrades this to a non-blocking notice (flag-gated, like the in-process M-1 posture).
+  if (validated.inProcessChainOk === false || validated.externalChainOk === false) {
     return { ok: false, reason: "tampered", required: [], summary: [], offenders: [] };
   }
 
@@ -1246,14 +1321,16 @@ function evaluateGrounding(paths: ProjectPaths, state: TwinHarnessState): Ground
   const requiredSet = new Set<GroundKind>();
   let crossCheckFlag: "class-cross-check-mismatch" | undefined;
   for (const wc of declaredClasses) {
-    // GATE-LEVEL CROSS-CHECK IS DEFERRED TO SLICE B (intentionally inert here, like the sibling
-    // budget/exception/carve-out stores). `requiredGroundKindsForWorkClass` is called WITHOUT a
-    // third `derivedClass` argument, so `req.crossCheckFlag` is structurally always `undefined` on
-    // this path — the declared-vs-derived (BSC-8-style) cross-check has no input source in Slice A
-    // (no receipt carries an evidence-derived class yet). This loop is therefore a UNION over the
-    // DECLARED classes, NOT the declared-vs-derived cross-check; the `crossCheckFlag`/`detail.crossCheck`
-    // plumbing below is reserved-but-unreachable until Slice B wires the derived class. The
-    // classifier's cross-check rule itself is exercised directly by the unit suite (U6).
+    // GATE-LEVEL DECLARED-vs-DERIVED CROSS-CHECK IS NOT YET WIRED (still inert after Slice B, like
+    // the carve-out store). `requiredGroundKindsForWorkClass` is called WITHOUT a third
+    // `derivedClass` argument, so `req.crossCheckFlag` is structurally always `undefined` on this
+    // path — the declared-vs-derived (BSC-8-style) cross-check has NO input source yet (no receipt
+    // carries an evidence-derived class; Slice B added the producer + chain enforcement + sibling-
+    // store consumption, NOT a derived-class field — that adoption lands later, with the Slice-C
+    // stage-obligation prompts). This loop is therefore a UNION over the DECLARED classes, NOT the
+    // declared-vs-derived cross-check; the `crossCheckFlag`/`detail.crossCheck` plumbing below stays
+    // reserved-but-unreachable until a derived class is threaded in. The classifier's cross-check
+    // rule itself is exercised directly by the unit suite (U6).
     const req = requiredGroundKindsForWorkClass(wc, surfaces);
     for (const k of req.required) requiredSet.add(k);
     if (req.crossCheckFlag) crossCheckFlag = req.crossCheckFlag;
@@ -1261,23 +1338,38 @@ function evaluateGrounding(paths: ProjectPaths, state: TwinHarnessState): Ground
   const required = [...requiredSet].sort();
   if (required.length === 0) return null; // pure-greenfield-only declared ⇒ inert
 
+  // Signed exemptions (Slice B / M4): the validly-Ed25519-signed `(workClass, groundKind)` axes the
+  // external producer suspended (the I5 SignedException path). An UNSIGNED / wrong-key / tampered
+  // exception exempts NOTHING (fail-closed — verified inside `validGroundingExemptions`); with no
+  // public key loaded (default fork/local/test) the map is empty and the gate enforces fully. A
+  // required kind is `exceptionCovered` iff ANY declared class has a matching signed exemption.
+  const exemptions = validGroundingExemptions(paths);
+  const isExempt = (kind: GroundKind): boolean =>
+    declaredClasses.some((wc) => exemptions.has(groundingExemptionKey(wc, kind)));
+
   const summary: GroundingSummary[] = [];
   const offenders: GroundKind[] = [];
-  let worstReason: "missing" | "over_budget" | "unobserved" | null = null;
-  // Fail-closed precedence: unobserved > over_budget > missing? No — `missing` is the hardest
-  // (the ground was never even checked). Precedence: missing > unobserved > over_budget, so the
-  // block names the most fundamental gap first.
-  const bump = (r: "missing" | "over_budget" | "unobserved"): void => {
-    const rank = { missing: 3, unobserved: 2, over_budget: 1 } as const;
+  let worstReason: GroundingReason | null = null;
+  // Fail-closed precedence (highest names the block): `chain_mismatch` (the evidence-spine is bound
+  // to a DIFFERENT reference than the one grounded — the most specific spine defect) > `missing`
+  // (the ground was never even checked) > `unobserved` (checked but unmeasured) > `over_budget`
+  // (measured but out of tolerance). `tampered` is handled separately (early fail-closed above).
+  const bump = (r: GroundingReason): void => {
+    const rank = { chain_mismatch: 4, missing: 3, unobserved: 2, over_budget: 1, tampered: 0 } as const;
     if (worstReason === null || rank[r] > rank[worstReason]) worstReason = r;
   };
 
   for (const kind of required) {
+    const exemptCovered = isExempt(kind);
     const entry = validated.byKind.get(kind);
     if (entry === undefined) {
-      summary.push({ groundKind: kind, grounded: false, trustLabel: "ungrounded", conformance: "missing", exceptionCovered: false });
-      offenders.push(kind);
-      bump("missing");
+      // A missing ground is exempted ONLY by a validly-signed exception for its axis (e.g.
+      // `reference-unreachable`); otherwise it is the hardest offender.
+      summary.push({ groundKind: kind, grounded: false, trustLabel: "ungrounded", conformance: "missing", exceptionCovered: exemptCovered });
+      if (!exemptCovered) {
+        offenders.push(kind);
+        bump("missing");
+      }
       continue;
     }
     const conformance = groundingConformanceOf(paths, entry.receipt);
@@ -1286,14 +1378,50 @@ function evaluateGrounding(paths: ProjectPaths, state: TwinHarnessState): Ground
       grounded: true,
       trustLabel: entry.trustLabel,
       conformance,
-      exceptionCovered: false, // Slice-B wires signed-exception coverage; always false in slice-A.
+      exceptionCovered: exemptCovered,
     });
+    // A validly-signed exception suspends this ground's budget ⇒ an over-budget / unobserved kind is
+    // no longer an offender (M4: only a SIGNED exception can do this; unsigned exempts NOTHING).
+    if (exemptCovered) continue;
     if (conformance === "unobserved") {
       offenders.push(kind);
       bump("unobserved");
     } else if (conformance === "over-budget") {
       offenders.push(kind);
       bump("over_budget");
+    }
+  }
+
+  // Evidence-spine continuity (Slice B / I3): a `manifest_digest` threaded through a BSC-1/3/7
+  // receipt that DISAGREES with the input-grounding manifest digest is a `chain_mismatch` FAIL. Only
+  // computable when a `digest-manifest` ground is trusted (the authoritative digest) AND at least
+  // one receipt threads a value (absent ⇒ additive-optional back-compat PASS). The offender is the
+  // manifest-bearing `digest-manifest` kind, so the per-kind enforce-flip treats it as deterministic.
+  const manifestDigest = groundingManifestDigest(validated);
+  if (manifestDigest !== null) {
+    const threaded = threadedManifestDigests(paths);
+    const mismatched = [...threaded].some((d) => d !== manifestDigest);
+    if (mismatched) {
+      if (!offenders.includes("digest-manifest")) offenders.push("digest-manifest");
+      // LOW-1 observability: make the chain_mismatch offender visible in `res.grounding`. The
+      // `digest-manifest` ground IS trusted (manifestDigest !== null), so reflect its trust label.
+      // chain_mismatch can fire even when `digest-manifest` was NOT in the required-set (the summary
+      // loop above only iterates `required`), so UPDATE an existing row if present, else PUSH a new
+      // one — never leave the blocking offender absent from the summary.
+      const entry = validated.byKind.get("digest-manifest");
+      const existing = summary.find((s) => s.groundKind === "digest-manifest");
+      if (existing) {
+        existing.conformance = "chain_mismatch";
+      } else {
+        summary.push({
+          groundKind: "digest-manifest",
+          grounded: true,
+          trustLabel: entry?.trustLabel ?? "valid",
+          conformance: "chain_mismatch",
+          exceptionCovered: false,
+        });
+      }
+      bump("chain_mismatch");
     }
   }
 
@@ -1320,15 +1448,39 @@ function groundingDetail(verdict: Extract<GroundingVerdict, { ok: false }>): Rec
 }
 
 /**
+ * Whether a FAILING grounding verdict actually BLOCKS this run. A failing verdict blocks iff:
+ *  - `tampered` — the NON-EMPTY in-process grounding chain does not verify (M-1 fail-closed). This is
+ *    FLAG-GATED on the MASTER switch ({@link bsc10EnforcementEnabled}), NOT per-kind: it is a
+ *    structural integrity violation with no per-kind attribution, so the deterministic/runner-
+ *    sensitive split does not apply. This MATCHES the shipped Slice-A M-1 posture — Slice A
+ *    deliberately blocks tamper ONLY under enforce and emits a non-blocking notice under WARN (the
+ *    M-1 fix was silent-inert-PASS → visible, not WARN-blocking; under WARN the grounding rung
+ *    blocks nothing anyway, so flag-gated tampered is not a hole). An EMPTY store verifies upstream,
+ *    so absence stays inert (absence ≠ forgery) and never reaches here; OR
+ *  - ANY offending ground-kind is enforce-PROMOTED for the slice ({@link bsc10KindEnforced} — the
+ *    deterministic `digest-manifest`/`version-pin` in Slice B; this also gates the new Slice-B
+ *    `chain_mismatch` reason, whose offender is `digest-manifest`, per plan I3). A `visual-hash`-ONLY
+ *    offender set stays WARN even under the master switch (its enforce-flip is Slice C), so a
+ *    deterministic failure BLOCKS while a runner-sensitive one rides as a non-blocking `notice` in
+ *    the SAME run.
+ */
+function groundingVerdictBlocks(verdict: Extract<GroundingVerdict, { ok: false }>): boolean {
+  if (verdict.reason === "tampered") return bsc10EnforcementEnabled(); // M-1: flag-gated (Slice-A posture)
+  return verdict.offenders.some((kind) => bsc10KindEnforced(kind));
+}
+
+/**
  * The BSC-10 external-reference grounding sub-check (Axis-B slice-BSC10a) — the NINTH production-
  * reality sub-check, a THIN summary rung composed among the reality rungs (after assertion-
  * presence). It does NOT recompute: it CONSUMES the verdict already hoisted before the human-
  * approval leg (Principle 1), folding `grounding?` onto the result exactly like `dimensions?`/
  * `assertionPresence?`. It ALWAYS attaches the per-required-kind summary, then BLOCKS on a failing
- * verdict ONLY when enforcement is enabled ({@link bsc10EnforcementEnabled} — slice-BSC10a is the
- * WARN commit, default OFF). When OFF (WARN) a failing verdict rides as a non-blocking `notice`
- * with the same `grounding_unverified` token + the summary; when ON it returns the stable token.
- * A `null` verdict (no declared work-class / empty required-set) ⇒ bare PASS (not-required inert).
+ * verdict ONLY when the PER-KIND enforce-flip promotes it ({@link groundingVerdictBlocks} — Slice B
+ * promotes the DETERMINISTIC `digest-manifest`/`version-pin` kinds while `visual-hash` stays WARN).
+ * When the verdict does NOT block (WARN — master switch off, or a `visual-hash`-only offender set in
+ * Slice B) it rides as a non-blocking `notice` with the same `grounding_unverified` token + the
+ * summary; when it blocks it returns the stable token. A `null` verdict (no declared work-class /
+ * empty required-set) ⇒ bare PASS (not-required inert).
  */
 function checkGrounding(verdict: GroundingVerdict | null): GateResult {
   if (verdict === null) return PASS; // not-required ⇒ inert (absence ≠ forgery)
@@ -1339,9 +1491,10 @@ function checkGrounding(verdict: GroundingVerdict | null): GateResult {
     return { ok: true, grounding: verdict.summary };
   }
   const detail = groundingDetail(verdict);
-  if (!bsc10EnforcementEnabled()) {
-    // Flag OFF (WARN, slice-BSC10a default): observe but do not block. Surface the would-be block
-    // as a non-blocking notice + the summary so the warn posture is visible without weakening the gate.
+  if (!groundingVerdictBlocks(verdict)) {
+    // Per-kind WARN (master switch off, OR a runner-sensitive `visual-hash`-only offender set in
+    // Slice B): observe but do not block. Surface the would-be block as a non-blocking notice + the
+    // summary so the warn posture is visible without weakening the gate.
     return { ok: true, grounding: verdict.summary, notice: { token: "grounding_unverified", detail } };
   }
   return { ok: false, error: "grounding_unverified", detail, grounding: verdict.summary };
@@ -1416,15 +1569,18 @@ export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessSt
   // sound control flow.
   const groundingVerdict = evaluateGrounding(paths, state);
   // A PRESENT-but-UNCONFORMANT ground (grounded, but `over_budget`/`unobserved` — NOT a `missing`
-  // ground) is the conformance precondition the BSC-7 approval ACCEPTANCE leg consumes: an approval
-  // cannot be ACCEPTED while the reference it was supposed to be approved against is itself
-  // unconformant. `missing` is excluded here (it is the grounding rung's own `missing` block, not
-  // an approval-acceptance failure) so the tokens stay disjoint.
+  // ground, NOT a cross-receipt `chain_mismatch`) is the conformance precondition the BSC-7 approval
+  // ACCEPTANCE leg consumes: an approval cannot be ACCEPTED while the reference it was supposed to be
+  // approved against is itself unconformant. `missing`/`chain_mismatch`/`tampered` are excluded here
+  // (each is the grounding rung's OWN block, not an approval-acceptance failure) so the tokens stay
+  // disjoint. Gated on the PER-KIND enforce-flip ({@link groundingVerdictBlocks}): a deterministic
+  // `digest-manifest`/`version-pin` unconformance blocks acceptance in Slice B, while a runner-
+  // sensitive `visual-hash`-only unconformance stays WARN (does not block) until Slice C.
   const groundingBlocksAcceptance =
     groundingVerdict !== null &&
     groundingVerdict.ok === false &&
     (groundingVerdict.reason === "over_budget" || groundingVerdict.reason === "unobserved") &&
-    bsc10EnforcementEnabled();
+    groundingVerdictBlocks(groundingVerdict);
 
   // 1c. Human-approval grounding over the CLOSED required-set (BSC-7 / Axis-B slice-3a,
   // R1) — the COMPLETION rung, the L1 backstop. `humanGate` was a declarative-only flag
