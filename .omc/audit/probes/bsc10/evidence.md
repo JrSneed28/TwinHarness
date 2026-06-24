@@ -111,6 +111,10 @@ file is the force-tracked record). Coverage in `tests/bsc10-slice-c.test.ts` (27
   RECOMPUTES `observed > signed_threshold` (C4c-c: a receipt self-reporting `within-budget` at
   observed=200 > threshold=100 is overridden to over-budget by the gate's own arithmetic);
   unobserved/unpinned under enforce fail-closed (I8b). Deterministic — no renderer/axe.
+  TRUST SCOPE (sec-review HIGH, disclosed): the threshold is 3-party-signed; `observed` is
+  producer-measured/3-party only for EXTERNAL valid-grounded receipts — for in-process receipts
+  `observed` is agent-authored (attribution-trust), so the recompute catches a lying *status*, not a
+  lying *observed*. Require-external for tolerance kinds is the P4 require-grounded tightening.
 - **C4d — visual-hash enforce-flip.** `ENFORCED_GROUND_KINDS` gains `visual-hash` (a11y rides within
   it). Flag-aware tests (`bsc10KindEnforced("visual-hash")`) are green in BOTH flag states; the flip
   is a revertable unit. Enforce-sim: the real project declares no grounding receipts ⇒ 0 unwaived

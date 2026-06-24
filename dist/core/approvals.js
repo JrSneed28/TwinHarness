@@ -213,6 +213,8 @@ function isValidApproval(parsed) {
         return false;
     if (typeof r.producer_identity !== "string")
         return false;
+    if (r.grounding_bound !== undefined && typeof r.grounding_bound !== "boolean")
+        return false;
     if (typeof r.prevHash !== "string" || !hash_1.HEX64.test(r.prevHash))
         return false;
     if (typeof r.recordHash !== "string" || !hash_1.HEX64.test(r.recordHash))

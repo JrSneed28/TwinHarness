@@ -1346,10 +1346,17 @@ function threadedManifestDigests(paths: ProjectPaths): Set<string> {
  * (absence ≠ forgery). `grounding_bound` is signature/hash-bound on each receipt (it is IN the
  * canonical field order), so a flipped flag breaks that receipt's OWN `recordHash`/signature; here
  * the grounding rung just consumes the declared opt-in. Read tolerantly (the readers never throw).
+ *
+ * SCOPE (review-fix): this is consumed inside `evaluateGrounding`, which returns null (fully inert)
+ * BEFORE this check when NO grounding work-class is declared. So an enrolled-but-unbound receipt is
+ * only caught when the run ALSO declares a grounding work-class — C4a enforces CONSISTENCY (you may
+ * not claim `grounding_bound` and bind no digest), NOT COVERAGE (nothing forces a receipt to opt in;
+ * only the external producer sets `grounding_bound`). An empty OR whitespace-only `manifest_digest`
+ * counts as unbound — a junk digest must not satisfy the binding.
  */
 function hasUnboundGroundingReceipt(paths: ProjectPaths): boolean {
   const unbound = (r: { grounding_bound?: boolean; manifest_digest?: string }): boolean =>
-    r.grounding_bound === true && (typeof r.manifest_digest !== "string" || r.manifest_digest === "");
+    r.grounding_bound === true && (typeof r.manifest_digest !== "string" || r.manifest_digest.trim() === "");
   return (
     readRealizationReceipts(paths).some(unbound) ||
     readExternalRealizationReceipts(paths).some(unbound) ||

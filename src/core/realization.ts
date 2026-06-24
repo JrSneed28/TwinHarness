@@ -274,6 +274,7 @@ export function isValidRealizationReceipt(parsed: unknown): parsed is Realizatio
   if (typeof r.req_id !== "string" || r.req_id === "") return false;
   if (typeof r.owning_slice !== "string") return false;
   if (typeof r.producer_identity !== "string") return false;
+  if (r.grounding_bound !== undefined && typeof r.grounding_bound !== "boolean") return false;
   if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
   if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
   if (r.legacy !== undefined && typeof r.legacy !== "boolean") return false;

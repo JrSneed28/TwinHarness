@@ -217,6 +217,7 @@ export function isValidDriverReceipt(parsed: unknown): parsed is DriverDimension
   if (r.kind !== "driver-dimension") return false;
   if (typeof r.refId !== "string" || r.refId === "") return false;
   if (typeof r.producer_identity !== "string") return false;
+  if (r.grounding_bound !== undefined && typeof r.grounding_bound !== "boolean") return false;
   if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
   if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
   if (r.legacy !== undefined && typeof r.legacy !== "boolean") return false;

@@ -22474,6 +22474,7 @@ function isValidApproval(parsed) {
   if (r.kind !== "human-approval") return false;
   if (typeof r.stage !== "string" || r.stage === "") return false;
   if (typeof r.producer_identity !== "string") return false;
+  if (r.grounding_bound !== void 0 && typeof r.grounding_bound !== "boolean") return false;
   if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
   if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
   if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
@@ -22735,6 +22736,7 @@ function isValidRealizationReceipt(parsed) {
   if (typeof r.req_id !== "string" || r.req_id === "") return false;
   if (typeof r.owning_slice !== "string") return false;
   if (typeof r.producer_identity !== "string") return false;
+  if (r.grounding_bound !== void 0 && typeof r.grounding_bound !== "boolean") return false;
   if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
   if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
   if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
@@ -23108,6 +23110,7 @@ function isValidDriverReceipt(parsed) {
   if (r.kind !== "driver-dimension") return false;
   if (typeof r.refId !== "string" || r.refId === "") return false;
   if (typeof r.producer_identity !== "string") return false;
+  if (r.grounding_bound !== void 0 && typeof r.grounding_bound !== "boolean") return false;
   if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
   if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
   if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
@@ -24686,7 +24689,7 @@ function threadedManifestDigests(paths) {
   return digests;
 }
 function hasUnboundGroundingReceipt(paths) {
-  const unbound = (r) => r.grounding_bound === true && (typeof r.manifest_digest !== "string" || r.manifest_digest === "");
+  const unbound = (r) => r.grounding_bound === true && (typeof r.manifest_digest !== "string" || r.manifest_digest.trim() === "");
   return readRealizationReceipts(paths).some(unbound) || readExternalRealizationReceipts(paths).some(unbound) || readDriverReceipts(paths).some(unbound) || readExternalDriverReceipts(paths).some(unbound) || readApprovalReceipts(paths).some(unbound) || readExternalApprovals(paths).some(unbound);
 }
 function evaluateGrounding(paths, state) {

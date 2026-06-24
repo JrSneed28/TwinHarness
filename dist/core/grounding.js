@@ -949,6 +949,15 @@ const TOLERANCE_METRICS = new Set(["visual", "a11y"]);
  * tolerance) are BOTH soft-fails the gate blocks under enforce; a numeric `observed` over its
  * signed `threshold` is `over-budget`. Only a numeric `observed` at-or-under a SIGNED threshold is
  * `within-budget`. The verdicts are emitted in `metric` order for determinism.
+ *
+ * TRUST SCOPE (review-fix, sec HIGH): the THRESHOLD is externally-signed / 3-party
+ * (`validGroundingBudgets`), but `observed` comes from the trusted receipt. For an EXTERNAL
+ * (`valid-grounded`) visual-hash receipt `observed` is producer-measured (renderer/axe in CI) and
+ * 3-party. For an IN-PROCESS (`valid`) receipt `observed` is AGENT-AUTHORED — so this recompute
+ * defends against a lying `status` given an honest `observed`, NOT against a lying `observed`.
+ * In-process tolerance conformance is therefore ATTRIBUTION-TRUST ONLY (mirrors realization.ts:47-52).
+ * Requiring tolerance grounds to be external (`valid-grounded`) to count under enforce is the P4
+ * `require-grounded` tightening, deferred uniformly with the other Axis-B rows.
  */
 function toleranceThresholdVerdicts(receipt, validBudgets) {
     if (receipt.ground.groundKind !== "visual-hash")

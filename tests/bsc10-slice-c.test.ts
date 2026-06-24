@@ -27,15 +27,15 @@
  *           BLOCK when kind is enforced (C4d); unobserved under enforce ⇒ FAIL; grandfathered
  *           (no ground required) ⇒ manifest_digest absent PASS.
  *
- * Current gate implementation status (re-grepped on branch HEAD):
- *   C4b: FULLY IMPLEMENTED — β leg (gate-preconditions.ts:1622) fires for over_budget/unobserved
- *        on enforced kinds; `groundingBlocksAcceptance` gates it on `groundingVerdictBlocks`.
- *   C4c: FULLY IMPLEMENTED — `toleranceThresholdVerdicts` + `worseGroundingConformance` in gate.
+ * Gate implementation status (Slice C SHIPPED — d5d4fcb C4a/b/c + 7e4ef9c C4d):
+ *   C4a: IMPLEMENTED — gate bumps `manifest_digest_absent` when grounding_bound===true &&
+ *        manifest_digest absent on a BSC-1/3/7 receipt (hasUnboundGroundingReceipt). I7b is the TP.
+ *   C4b: IMPLEMENTED — β leg fires for over_budget/unobserved on enforced kinds;
+ *        `groundingBlocksAcceptance` gates it on `groundingVerdictBlocks`.
+ *   C4c: IMPLEMENTED — `toleranceThresholdVerdicts` + `worseGroundingConformance` in gate.
  *        `unpinned` (no signed budget) collapses to `unobserved` (fail-closed).
- *   C4a: NOT YET IMPLEMENTED — gate must bump("manifest_digest_absent") when grounding_bound===true
- *        && manifest_digest absent on a BSC-1/3/7 receipt. I7b awaits gate + schema landing.
- *   C4d: NOT YET IMPLEMENTED — `visual-hash` not yet in ENFORCED_GROUND_KINDS (bsc10-flag.ts).
- *        Tests exercising visual-hash under enforce fail until the C4d flip.
+ *   C4d: IMPLEMENTED — `visual-hash` IS in ENFORCED_GROUND_KINDS (bsc10-flag.ts). The visual-hash
+ *        tests are flag-aware (green in both flag states); C4d-canary below LOCKS the flip.
  *
  * C4a field contract (pinned by team-lead):
  *   FIELD: `grounding_bound?: boolean` on DriverDimensionReceipt / RealizationReceipt /
@@ -563,13 +563,10 @@ describe("I7 — C4a opt-in: grounding_bound:true + no manifest_digest ⇒ BLOCK
     expect(res.error).not.toBe("grounding_unverified");
   });
 
-  it("I7b (awaits C4a gate+schema landing): grounding_bound:true + manifest_digest ABSENT on BSC-3 driver receipt ⇒ BLOCK (manifest_digest_absent)", () => {
-    // C4a CONTRACT: a BSC-3 driver receipt with grounding_bound:true declares it is bound to
+  it("I7b: grounding_bound:true + manifest_digest ABSENT on BSC-3 driver receipt ⇒ BLOCK (manifest_digest_absent)", () => {
+    // C4a TRUE POSITIVE: a BSC-3 driver receipt with grounding_bound:true declares it is bound to
     // a grounding manifest. If manifest_digest is ABSENT under enforce ⇒ BLOCK (manifest_digest_absent).
-    // This is the TRUE POSITIVE: the opt-in field makes the blocking condition unambiguous.
-    //
-    // STATUS: grounding_bound not yet in schema/DRIVER_CANONICAL_FIELD_ORDER; gate bump not wired.
-    // This test FAILS until worker-gate lands both changes. Written to contracted post-C4a behavior.
+    // The opt-in field makes the blocking condition unambiguous (hasUnboundGroundingReceipt).
     process.env.TH_BSC10_ENFORCE = "1";
     const paths = greenProject();
     setVerifierKey(paths, K1.publicKey);
@@ -593,7 +590,7 @@ describe("I7 — C4a opt-in: grounding_bound:true + no manifest_digest ⇒ BLOCK
     appendSignedExternalDriver(paths, K1, { grounding_bound: true });
 
     const res = checkProductionReality(paths, state(paths));
-    // Contracted POST-C4A assertion (fails until gate+schema land):
+    // C4a true positive — grounding_bound + absent manifest_digest ⇒ BLOCK:
     expect(res.ok).toBe(false);
     expect(res.error).toBe("grounding_unverified");
     expect((res.detail as { reason?: string } | undefined)?.reason).toBe("manifest_digest_absent");
@@ -694,7 +691,7 @@ describe("I7 — C4a opt-in: grounding_bound:true + no manifest_digest ⇒ BLOCK
     expect(res.error).toBeUndefined();
   });
 
-  it("I7f (awaits C4a gate+schema landing): grounding_bound:true + manifest_digest PRESENT (matching) ⇒ PASS (positive control)", () => {
+  it("I7f: grounding_bound:true + manifest_digest PRESENT (matching) ⇒ PASS (positive control)", () => {
     // C4a POSITIVE CONTROL: grounding_bound:true with a PRESENT manifest_digest satisfying the
     // grounding ground digest ⇒ PASS. The block fires ONLY when manifest_digest is ABSENT.
     // Pre-C4a: passes (grounding_bound ignored). Post-C4a: also PASS (digest present).
@@ -959,6 +956,33 @@ describe("I8 — determinism self-test (same fixture → same verdict twice) + f
     // The summary exposes unobserved in BOTH states (C4c — unpinned collapses to unobserved).
     const vhSummary = (res1.grounding ?? []).find((g) => g.groundKind === "visual-hash");
     expect(vhSummary?.conformance).toBe("unobserved");
+  });
+
+  // CANARY (review-fix, code MED): LOCKS the C4d enforce-flip. Unlike the flag-aware tests above,
+  // this asserts the flip is ACTIVE — `bsc10KindEnforced("visual-hash")` MUST be true and a
+  // visual-hash offender MUST block ABSOLUTELY (no `!vhEnforced` indirection). If the C4d flip is
+  // reverted (visual-hash removed from ENFORCED_GROUND_KINDS), this FAILS loudly — so reverting the
+  // "revertable flip" is a DELIBERATE act (revert this canary too), not a silent regression.
+  it("C4d-canary: visual-hash IS enforced — bsc10KindEnforced true + a visual-hash offender blocks absolutely", () => {
+    process.env.TH_BSC10_ENFORCE = "1";
+    expect(bsc10KindEnforced("visual-hash")).toBe(true);
+    const paths = greenProjectWithUi();
+    appendGroundingReceipt(paths, {
+      workClass: "redesign",
+      ground: DIGEST_MANIFEST_GROUND,
+      conformance: [{ metric: "api", observed: 0, status: "within-budget" }],
+      producerIdentity: "test:runner",
+    });
+    appendGroundingReceipt(paths, {
+      workClass: "redesign",
+      ground: VISUAL_HASH_GROUND,
+      conformance: [{ metric: "visual", observed: "unobserved", status: "unobserved" }],
+      producerIdentity: "test:runner",
+    });
+    const st = readState(paths).state!;
+    const res = checkProductionReality(paths, st);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("grounding_unverified");
   });
 });
 

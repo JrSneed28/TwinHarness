@@ -279,6 +279,7 @@ function isValidApproval(parsed: unknown): parsed is HumanApprovalReceipt {
   if (r.kind !== "human-approval") return false;
   if (typeof r.stage !== "string" || r.stage === "") return false;
   if (typeof r.producer_identity !== "string") return false;
+  if (r.grounding_bound !== undefined && typeof r.grounding_bound !== "boolean") return false;
   if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
   if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
   if (r.legacy !== undefined && typeof r.legacy !== "boolean") return false;
