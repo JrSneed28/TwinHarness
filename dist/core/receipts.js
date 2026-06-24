@@ -91,6 +91,15 @@ exports.readTierCorrespondenceReceipts = readTierCorrespondenceReceipts;
 exports.readLastTierCorrespondenceRecordHash = readLastTierCorrespondenceRecordHash;
 exports.verifyTierCorrespondenceChain = verifyTierCorrespondenceChain;
 exports.appendTierCorrespondenceReceipt = appendTierCorrespondenceReceipt;
+exports.coverageCanonicalText = coverageCanonicalText;
+exports.computeCoverageRecordHash = computeCoverageRecordHash;
+exports.coverageReceiptsPath = coverageReceiptsPath;
+exports.isValidCoverageReceipt = isValidCoverageReceipt;
+exports.readCoverageReceipts = readCoverageReceipts;
+exports.readLastCoverageRecordHash = readLastCoverageRecordHash;
+exports.verifyCoverageChain = verifyCoverageChain;
+exports.appendCoverageReceipt = appendCoverageReceipt;
+exports.validateCoverageContent = validateCoverageContent;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const paths_1 = require("./paths");
@@ -907,4 +916,170 @@ function appendTierCorrespondenceReceipt(paths, input) {
     const sealed = { ...withPrev, recordHash };
     fs.appendFileSync(tierCorrespondenceReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
     return sealed;
+}
+/**
+ * The fixed canonical field order for hashing a {@link DimensionSetCoverageReceipt}. Mirrors
+ * the driver/terminal canonical technique: copy fields into a fresh object in THIS order, drop
+ * `undefined` keys + the `recordHash` trailer; the two array fields and the snapshot object are
+ * re-emitted in a fixed key/element order so the canonical text is byte-stable.
+ */
+const COVERAGE_CANONICAL_FIELD_ORDER = [
+    "kind",
+    "refId",
+    "declared_set_digest",
+    "declared_set",
+    "observed_set",
+    "covered",
+    "snapshot_coord",
+    "producer_identity",
+    "prevHash",
+];
+/** Canonical key order for {@link SnapshotCoord} on a coverage receipt (byte-stable nested JSON). */
+const COVERAGE_SNAPSHOT_FIELD_ORDER = ["gitHead", "treeDigest"];
+/**
+ * Deterministic canonical text of a coverage receipt for hashing. Field order is fixed;
+ * `undefined` keys and `recordHash` are dropped; the `declared_set`/`observed_set` arrays are
+ * re-emitted sorted+deduped (so a reorder/dupe that does not change the SET is byte-stable),
+ * the snapshot object is re-emitted in its fixed key order; `JSON.stringify` with no indent.
+ */
+function coverageCanonicalText(receipt) {
+    const ordered = {};
+    for (const key of COVERAGE_CANONICAL_FIELD_ORDER) {
+        const val = receipt[key];
+        if (val === undefined)
+            continue;
+        if (key === "declared_set" || key === "observed_set") {
+            ordered[key] = [...new Set(val)].sort();
+        }
+        else if (key === "snapshot_coord") {
+            ordered[key] = reorder(val, COVERAGE_SNAPSHOT_FIELD_ORDER);
+        }
+        else {
+            ordered[key] = val;
+        }
+    }
+    return JSON.stringify(ordered);
+}
+/** `recordHash` for a coverage receipt = SHA-256 of its canonical text (recordHash omitted). */
+function computeCoverageRecordHash(receipt) {
+    return (0, hash_1.hashContent)(coverageCanonicalText(receipt));
+}
+/** `<stateDir>/dimension-coverage-receipts.jsonl` — the in-process coverage-receipt ledger. */
+function coverageReceiptsPath(paths) {
+    return path.join(paths.stateDir, "dimension-coverage-receipts.jsonl");
+}
+/** Validate the shape of a parsed coverage line; malformed lines are skipped (tolerant). */
+function isValidCoverageReceipt(parsed) {
+    if (typeof parsed !== "object" || parsed === null)
+        return false;
+    const r = parsed;
+    if (r.kind !== "dimension-set-coverage")
+        return false;
+    if (typeof r.refId !== "string" || r.refId === "")
+        return false;
+    if (typeof r.declared_set_digest !== "string" || !hash_1.HEX64.test(r.declared_set_digest))
+        return false;
+    if (!Array.isArray(r.declared_set) || !r.declared_set.every((d) => typeof d === "string"))
+        return false;
+    if (!Array.isArray(r.observed_set) || !r.observed_set.every((d) => typeof d === "string"))
+        return false;
+    if (typeof r.covered !== "boolean")
+        return false;
+    if (typeof r.producer_identity !== "string")
+        return false;
+    if (typeof r.prevHash !== "string" || !hash_1.HEX64.test(r.prevHash))
+        return false;
+    if (typeof r.recordHash !== "string" || !hash_1.HEX64.test(r.recordHash))
+        return false;
+    const snap = r.snapshot_coord;
+    if (typeof snap !== "object" || snap === null)
+        return false;
+    const s = snap;
+    if (!(s.gitHead === null || typeof s.gitHead === "string"))
+        return false;
+    if (!(s.treeDigest === null || typeof s.treeDigest === "string"))
+        return false;
+    return true;
+}
+/** Tolerant reader: every well-shaped coverage receipt line, in file order (never throws). */
+function readCoverageReceipts(paths) {
+    return (0, jsonl_1.readJsonlValues)(coverageReceiptsPath(paths), isValidCoverageReceipt);
+}
+/**
+ * The next `prevHash` for an appended coverage receipt: the LAST well-shaped line's
+ * `recordHash`, or GENESIS when the store is empty. Tail-scan mirrors
+ * {@link readLastReceiptRecordHash}.
+ */
+function readLastCoverageRecordHash(paths) {
+    const all = readCoverageReceipts(paths);
+    return all.length > 0 ? all[all.length - 1].recordHash : hash_1.GENESIS_PREV_HASH;
+}
+/** Tamper-walk a coverage chain: recompute each `recordHash` + verify the `prevHash` link. */
+function verifyCoverageChain(receipts) {
+    let expectedPrev = hash_1.GENESIS_PREV_HASH;
+    for (let i = 0; i < receipts.length; i++) {
+        const { recordHash, ...rest } = receipts[i];
+        const recomputed = computeCoverageRecordHash(rest);
+        if (recomputed !== recordHash)
+            return { ok: false, brokenAt: i, reason: "edited" };
+        if (rest.prevHash !== expectedPrev)
+            return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+        expectedPrev = recordHash;
+    }
+    return { ok: true };
+}
+/**
+ * Append one in-process coverage receipt, sealing the hash chain. The caller MUST already hold
+ * the `withStateLock` span (read-modify-append is serialized there), exactly like
+ * {@link appendDriverReceipt}.
+ *
+ * Refuse-at-creation (BSC-5 negative-control c): the receipt is minted with `covered` computed
+ * HERE as `declaredSet ⊆ observedSet` over the caller-supplied sets — a producer cannot stamp a
+ * `covered:true` claim that the supplied observed set does not support. The gate independently
+ * recomputes both sets + the verdict, so even a forged line written around this writer is caught.
+ */
+function appendCoverageReceipt(paths, input) {
+    const declaredSet = [...new Set(input.declaredSet)].sort();
+    const observedSet = [...new Set(input.observedSet)].sort();
+    const observed = new Set(observedSet);
+    const covered = declaredSet.every((d) => observed.has(d));
+    const coord = currentReceiptSnapshotCoord(paths);
+    const receipt = {
+        kind: "dimension-set-coverage",
+        refId: coord.gitHead ?? "no-git",
+        declared_set_digest: input.declaredSetDigest,
+        declared_set: declaredSet,
+        observed_set: observedSet,
+        covered,
+        snapshot_coord: coord,
+        producer_identity: input.producerIdentity,
+    };
+    (0, paths_1.assertGovernedWriteSurface)(paths.root, coverageReceiptsPath(paths));
+    fs.mkdirSync(paths.stateDir, { recursive: true });
+    const prevHash = readLastCoverageRecordHash(paths);
+    const withPrev = { ...receipt, prevHash };
+    const recordHash = computeCoverageRecordHash(withPrev);
+    const sealed = { ...withPrev, recordHash };
+    fs.appendFileSync(coverageReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+    return sealed;
+}
+/**
+ * Re-derive a coverage receipt's ground at gate time. `liveDeclaredDigest` + `liveDeclaredSet`
+ * come from the COMMITTED `DECLARED_DIMENSION_SET` (computed by the caller — the gate — to keep
+ * this module acyclic); `liveObservedSet` is re-derived from `verify-report.json`. The receipt's
+ * own stored sets/verdict are ignored except to surface the digest divergence.
+ *
+ * Order (fail-closed): the LATEST in-process coverage receipt is selected by the caller; this
+ * pure function classifies it. A tampered chain is the caller's `chain` block (it tamper-walks
+ * before selecting); this function assumes a single selected receipt + the live inputs.
+ */
+function validateCoverageContent(receipt, liveDeclaredDigest, liveDeclaredSet, liveObservedSet) {
+    if (receipt.declared_set_digest !== liveDeclaredDigest) {
+        return { status: "declared_set_diverged", digests: { stored: receipt.declared_set_digest, live: liveDeclaredDigest } };
+    }
+    const observed = new Set(liveObservedSet);
+    const missing = [...new Set(liveDeclaredSet)].sort().filter((d) => !observed.has(d));
+    if (missing.length > 0)
+        return { status: "uncovered", missing };
+    return { status: "covered" };
 }

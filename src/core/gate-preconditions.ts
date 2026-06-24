@@ -48,10 +48,16 @@ import {
   computeBriefDigest,
   TASK_BRIEF_RELPATH,
   type TierCorrespondenceReceipt,
+  type CoverageValidationStatus,
+  readCoverageReceipts,
+  verifyCoverageChain,
+  validateCoverageContent,
 } from "./receipts";
 import { loadBriefFromFile } from "./brief";
 import { classifyBrief } from "./tier-classify";
 import { bsc8EnforcementEnabled } from "./bsc8-flag";
+import { declaredDimensionSet, declaredDimensionSetDigest } from "./declared-dimensions";
+import { bsc5EnforcementEnabled } from "./bsc5-flag";
 import { readApprovalValidated, readApprovalReceipts, readExternalApprovals, isHumanGateStage } from "./approvals";
 import { readRealizationReceipts, readExternalRealizationReceipts } from "./realization";
 import {
@@ -62,6 +68,7 @@ import {
   validateDriverReceiptContent,
   driverCanonicalText,
   SEED_DIMENSION_NAMES,
+  observedDimensionsFromReport,
 } from "./verification-driver";
 import { loadExternalPublicKey, externalKeyId, verifyCanonical } from "./receipt-signing";
 import { bsc3EnforcementEnabled } from "./bsc3-flag";
@@ -174,6 +181,29 @@ export interface GateResult {
    * recompute (Principle 1: single live recompute, consumed — never attached-but-stale).
    */
   grounding?: GroundingSummary[];
+  /**
+   * BSC-5 / Axis-B slice-7 — the dimension-SET-coverage summary the coverage rung computes for the
+   * final-verification run (the observability hook, mirroring how `dimensions?`/`grounding?` ride on
+   * the result). Reports the LIVE committed `declared` set + its digest, the LIVE re-derived
+   * `observed` set, and the recomputed `status` (`covered` / `uncovered` / `declared_set_diverged` /
+   * `chain`). Attached on PASS, on BLOCK, and in WARN — so the coverage posture is always visible.
+   * The verdict is recomputed PURELY from live inputs (the committed declared constant + the live
+   * verify-report); the receipt's stored set/verdict are never trusted.
+   */
+  coverage?: DimensionSetCoverageSummary;
+}
+
+/**
+ * BSC-5 / Axis-B slice-7 — the dimension-SET-coverage observability summary (rides on the
+ * production-reality result). `declared` is the LIVE committed required set, `observed` the LIVE
+ * re-derived set, `declaredSetDigest` the committed set's identity, and `status` the recomputed
+ * verdict — all computed from live inputs, never the stored receipt.
+ */
+export interface DimensionSetCoverageSummary {
+  declared: string[];
+  observed: string[];
+  declaredSetDigest: string;
+  status: CoverageValidationStatus;
 }
 
 /**
@@ -895,6 +925,93 @@ function checkDriverDimensions(paths: ProjectPaths): GateResult {
     detail: { reason: verdict.reason, ...verdict.detail },
     dimensions: verdict.dimensions,
   };
+}
+
+/**
+ * The BSC-5 dimension-SET-coverage sub-check (Axis-B slice-7) — composed among the gating tail of
+ * {@link checkProductionReality}, after assertion-presence and before the BSC-10 grounding summary.
+ * A run may not be certified complete while a DECLARED required dimension is not OBSERVED.
+ *
+ * GROUND (`declared ⊆ observed`), recomputed ENTIRELY from live inputs (Principle 1 — the receipt
+ * is never trusted):
+ *   - DECLARED = the COMMITTED `DECLARED_DIMENSION_SET` constant ({@link declaredDimensionSet} /
+ *     {@link declaredDimensionSetDigest}). Interp A: narrowing it is a reviewable code + `dist/`
+ *     diff, never a runtime self-attest.
+ *   - OBSERVED = re-derived from `verify-report.json` via {@link observedDimensionsFromReport} — the
+ *     SAME shared derivation the BSC-3 sensor uses (a dimension is observed iff a matching command
+ *     exists AND `ok===true`). So a stored "all observed" claim cannot survive evidence being
+ *     stripped from the report after mint (negative-control b).
+ *
+ * Fail-closed posture (on a PRESENT coverage receipt — the claim under test):
+ *   - The coverage chain is tamper-walked first ({@link verifyCoverageChain}); a broken chain BLOCKS
+ *     with reason `chain` (no line from a tampered store is trusted).
+ *   - The receipt's `declared_set_digest` is compared to the LIVE committed digest; a mismatch
+ *     BLOCKS with reason `declared_set_diverged` (the committed set was narrowed/changed after mint
+ *     — negative-control d's runtime tripwire, complementing the reviewable-diff guard).
+ *   - `declared ⊄ observed` (a live-declared dimension absent from the live-observed set, recomputed
+ *     — the receipt's stored `covered`/`observed` are NEVER trusted) BLOCKS with reason `uncovered`
+ *     (negative-controls a/b/c). So a receipt that SELF-ATTESTS `covered:true` over a stripped report
+ *     is recomputed and blocked — the claim is grounded in the live re-derivation, not the receipt.
+ *
+ * ABSENCE ≠ FORGERY (the BSC-1/2/3 grandfather posture, so this rung is ADDITIVE — it never reds an
+ * in-flight run that simply has not minted a coverage claim yet): NO coverage receipt ⇒ PASS. The
+ * coverage requirement bites on a PRESENT claim (the F8 correspondence artifact) recomputed against
+ * the live committed set + live observed set; a run that never asserts coverage is not blocked here.
+ *
+ * Governed by `bsc5EnforcementEnabled()` (defaults ON): the verdict is ALWAYS computed (so the
+ * `coverage` summary is available for observability), but it BLOCKS with `dimension_set_uncovered`
+ * only when enforcement is on; OFF ⇒ the would-be block is surfaced as a non-blocking `notice`.
+ */
+function checkDimensionSetCoverage(paths: ProjectPaths): GateResult {
+  const liveDeclaredDigest = declaredDimensionSetDigest();
+  const liveDeclaredSet = declaredDimensionSet();
+  // OBSERVED re-derived from the LIVE verify-report (never the receipt's stored set).
+  const liveObservedSet = [...observedDimensionsFromReport(readVerifyReport(paths))].sort();
+
+  const receipts = readCoverageReceipts(paths);
+
+  // ABSENCE ≠ FORGERY: no coverage claim ⇒ grandfathered PASS (mirrors the BSC-1/2/3 driver/
+  // realization/assertion grandfather, so adding this rung is ADDITIVE and never reds an in-flight
+  // run that has not minted a coverage receipt). The requirement bites on a PRESENT claim below.
+  if (receipts.length === 0) return PASS;
+
+  // The verdict + its observability summary, computed regardless of enforcement.
+  let status: CoverageValidationStatus;
+  let detail: Record<string, unknown>;
+
+  const chain = verifyCoverageChain(receipts);
+  if (!chain.ok) {
+    status = "chain";
+    detail = { reason: "chain", brokenAt: chain.brokenAt, chainReason: chain.reason };
+  } else {
+    // The LATEST in-process receipt is the coverage CLAIM under test. Its ground is RE-DERIVED
+    // (live declared digest + live observed set) — the stored `covered`/`observed` are never trusted.
+    const latest = receipts[receipts.length - 1]!;
+    const content = validateCoverageContent(latest, liveDeclaredDigest, liveDeclaredSet, liveObservedSet);
+    status = content.status;
+    detail = {
+      reason: content.status,
+      ...(content.missing ? { missing: content.missing } : {}),
+      ...(content.digests ? { digests: content.digests } : {}),
+    };
+  }
+
+  const coverage = {
+    declared: liveDeclaredSet,
+    observed: liveObservedSet,
+    declaredSetDigest: liveDeclaredDigest,
+    status,
+  };
+
+  if (status === "covered") {
+    // Clean PASS: attach the coverage summary for the I1 observability hook.
+    return { ok: true, coverage };
+  }
+  if (!bsc5EnforcementEnabled()) {
+    // Flag OFF: observe but do not block. Surface the would-be block as a non-blocking notice.
+    return { ok: true, coverage, notice: { token: "dimension_set_uncovered", detail } };
+  }
+  return { ok: false, error: "dimension_set_uncovered", detail, coverage };
 }
 
 /**
@@ -1973,6 +2090,7 @@ interface ProductionRealityCtx {
     /** BSC-8 — the tier-correspondence rung result, so its WARN-phase `notice` rides the fold. */
     tierCorrespondence?: GateResult;
     bsc9?: GateResult;
+    coverage?: GateResult;
   };
 }
 
@@ -2327,6 +2445,32 @@ export const PRODUCTION_REALITY_RUNGS: readonly ProductionRealityRung[] = [
     },
   },
   {
+    // 8c. (BSC-5 / Axis-B slice-7) DIMENSION-SET-COVERAGE GROUNDING — composed among the gating
+    // tail, AFTER assertion-presence and BEFORE the thin BSC-10 grounding summary. A run may not be
+    // certified complete while a DECLARED required dimension is not OBSERVED. DECLARED is the
+    // COMMITTED `DECLARED_DIMENSION_SET` constant (`core/declared-dimensions.ts`, Interp A —
+    // narrowing it is a reviewable code + `dist/` diff, never a runtime self-attest); OBSERVED is
+    // re-derived from `verify-report.json` at gate time (the SAME `observedDimensionsFromReport` the
+    // BSC-3 sensor uses). The receipt's stored sets/verdict are NEVER trusted — the gate recomputes
+    // declared (live constant) + observed (live report) + the `declared ⊆ observed` verdict, so a
+    // forged "all covered" claim, a stripped report dimension, or a post-mint narrowing of the
+    // committed set is mechanically detectable. Governed by `bsc5EnforcementEnabled()` (defaults ON):
+    // the verdict is ALWAYS computed (so `coverage` summarizes the posture for the I1 hook), but it
+    // BLOCKS with `dimension_set_uncovered` only when enforcement is on; OFF ⇒ a non-blocking notice.
+    id: "dimension-set-coverage",
+    check: (paths, _state, ctx) => {
+      const coverage = checkDimensionSetCoverage(paths);
+      ctx.captured.coverage = coverage;
+      if (!coverage.ok) {
+        // Preserve the upstream driver `dimensions` summary on the coverage block so the full trust
+        // posture stays visible alongside the coverage failure.
+        const driver = ctx.captured.driver;
+        return driver?.dimensions ? { ...coverage, dimensions: driver.dimensions } : coverage;
+      }
+      return null;
+    },
+  },
+  {
     // 9. (BSC-10 / Axis-B slice-BSC10a) EXTERNAL-REFERENCE GROUNDING — a THIN summary rung composed
     // among the reality rungs. It does NOT recompute: it CONSUMES the `groundingVerdict` already
     // HOISTED before the 1c approval leg (Principle 1 — single live recompute), folding `grounding?`
@@ -2416,12 +2560,14 @@ export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessSt
   const assertion = ctx.captured.assertion;
   const grounding = ctx.captured.grounding;
   const tierCorrespondence = ctx.captured.tierCorrespondence;
+  const coverage = ctx.captured.coverage;
   const merged: GateResult = { ok: true };
   const dimensions = driver?.dimensions ?? assertion?.dimensions;
   if (dimensions) merged.dimensions = dimensions;
   if (assertion?.assertionPresence) merged.assertionPresence = assertion.assertionPresence;
   if (assertion?.mutationEfficacy) merged.mutationEfficacy = assertion.mutationEfficacy;
   if (grounding?.grounding) merged.grounding = grounding.grounding;
+  if (coverage?.coverage) merged.coverage = coverage.coverage;
   // BSC-9 (slice-7): the bsc9 rung's WARN `notice` (enforcement off) folds in LAST in the
   // precedence chain, so a would-be projection/readiness block stays visible without blocking.
   const bsc9 = ctx.captured.bsc9;
@@ -2431,6 +2577,7 @@ export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessSt
     assertion?.notice ??
     grounding?.notice ??
     tierCorrespondence?.notice ??
+    coverage?.notice ??
     bsc9?.notice;
   if (notice) merged.notice = notice;
   // Degrade to the shared bare PASS when nothing was observed, preserving `{ ok: true }`.
@@ -2438,6 +2585,7 @@ export function checkProductionReality(paths: ProjectPaths, state: TwinHarnessSt
     merged.assertionPresence ||
     merged.mutationEfficacy ||
     merged.grounding ||
+    merged.coverage ||
     merged.notice
     ? merged
     : PASS;

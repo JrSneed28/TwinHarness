@@ -1625,3 +1625,286 @@ export function appendTierCorrespondenceReceipt(
   fs.appendFileSync(tierCorrespondenceReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   return sealed;
 }
+
+// ===========================================================================
+// Axis-B slice-7 / BSC-5 — dimension-SET-coverage receipt
+// ===========================================================================
+//
+// THE BLIND SPOT (BSC-5): BSC-3 records WHICH dimensions a trusted runner observed, but
+// completion never asserts that the DECLARED required set is fully covered. A run that
+// observes `tests-executed` but silently never builds clears the gate. This receipt's
+// GROUND is `declared ⊆ observed`, where DECLARED is the COMMITTED `DECLARED_DIMENSION_SET`
+// constant (`core/declared-dimensions.ts`, Interp A — narrowing it is a reviewable code +
+// `dist/` diff, never a runtime self-attest) and OBSERVED is re-derived from
+// `verify-report.json` at gate time (the shared `observedDimensionsFromReport`). The receipt
+// records the declared-set DIGEST so a stored claim is bound to the EXACT committed set it was
+// minted against; the gate RECOMPUTES the digest from the live constant and never trusts the
+// stored one, so a post-mint narrowing is a detectable divergence.
+//
+// NO IMPORT of `declared-dimensions.ts` / `verification-driver.ts` here: this module stays a
+// leaf the driver/declared modules import FROM (they import `computeTargetDigest` /
+// `currentReceiptSnapshotCoord` / the shared shape). The declared-set digest + the observed
+// set are PASSED IN by the caller (producer at mint, gate at validation), keeping the module
+// graph acyclic and the receipt a pure record of a ground recomputed OUTSIDE it.
+
+/** Fixed discriminator for a {@link DimensionSetCoverageReceipt}. */
+export type DimensionSetCoverageKind = "dimension-set-coverage";
+
+/**
+ * One dimension-SET-coverage receipt (Axis-B slice-7 / BSC-5). Append-only and hash-chained
+ * like a {@link DriverDimensionReceipt}: any single field edit breaks `recordHash`, an
+ * insert/delete/reorder breaks the next `prevHash`. IN-PROCESS-ONLY in this slice (no signing
+ * fields); `producer_identity` is a ZERO-trust audit breadcrumb (Done-phase, not Done-final).
+ *
+ * The receipt is keyed to the COMMITTED declared set (via `declared_set_digest`), NOT to a
+ * static matrix and NOT to a self-minted set: the gate recomputes the digest from the live
+ * `DECLARED_DIMENSION_SET` and the observed set from `verify-report.json`, then re-derives the
+ * `declared ⊆ observed` verdict — the stored `covered` verdict is observability only, never
+ * trusted (BSC-5 negative-control b/c).
+ */
+export interface DimensionSetCoverageReceipt {
+  /** Fixed discriminator. */
+  kind: DimensionSetCoverageKind;
+  /**
+   * The run/verification identity this receipt grounds — the snapshot `gitHead` (or
+   * `"no-git"`), so a re-run at a new HEAD mints a fresh receipt and the gate finds the LATEST
+   * for the current snapshot (mirrors {@link DriverDimensionReceipt.refId}).
+   */
+  refId: string;
+  /**
+   * SHA-256 of the canonical form of the COMMITTED declared dimension set
+   * (`declared-dimensions.declaredDimensionSetDigest`), recorded so the stored coverage claim
+   * is bound to the EXACT committed set it was minted against. The gate RECOMPUTES this from
+   * the live constant and treats a mismatch as a divergence (never trusts the stored value).
+   */
+  declared_set_digest: string;
+  /**
+   * The sorted, de-duplicated DECLARED dimension names at mint time (the human-readable
+   * companion to `declared_set_digest`). Observability only — the gate re-reads the live
+   * constant, never the stored list.
+   */
+  declared_set: string[];
+  /**
+   * The sorted, de-duplicated OBSERVED dimension names at mint time (re-derived from
+   * `verify-report.json`). Observability only — the gate RE-DERIVES observed at validation, so
+   * a stored "all observed" claim cannot survive evidence being stripped from the report
+   * afterward (BSC-5 negative-control b).
+   */
+  observed_set: string[];
+  /**
+   * The producer's self-asserted coverage verdict (`true` ⇒ declared ⊆ observed at mint).
+   * Observability only — the gate recomputes the verdict and NEVER trusts this field.
+   */
+  covered: boolean;
+  /** The repository snapshot coordinate at mint time (reuses `currentReceiptSnapshotCoord`). */
+  snapshot_coord: SnapshotCoord;
+  /**
+   * The producer's self-asserted identity. ZERO trust weight in-process — an audit breadcrumb
+   * only (consensus §3). Part of the canonical hash input.
+   */
+  producer_identity: string;
+  /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
+  prevHash: string;
+  /** SHA-256 hex (64) of THIS receipt's canonical text (computed before set). */
+  recordHash: string;
+}
+
+/**
+ * The fixed canonical field order for hashing a {@link DimensionSetCoverageReceipt}. Mirrors
+ * the driver/terminal canonical technique: copy fields into a fresh object in THIS order, drop
+ * `undefined` keys + the `recordHash` trailer; the two array fields and the snapshot object are
+ * re-emitted in a fixed key/element order so the canonical text is byte-stable.
+ */
+const COVERAGE_CANONICAL_FIELD_ORDER: ReadonlyArray<keyof DimensionSetCoverageReceipt> = [
+  "kind",
+  "refId",
+  "declared_set_digest",
+  "declared_set",
+  "observed_set",
+  "covered",
+  "snapshot_coord",
+  "producer_identity",
+  "prevHash",
+];
+
+/** Canonical key order for {@link SnapshotCoord} on a coverage receipt (byte-stable nested JSON). */
+const COVERAGE_SNAPSHOT_FIELD_ORDER: ReadonlyArray<keyof SnapshotCoord> = ["gitHead", "treeDigest"];
+
+/**
+ * Deterministic canonical text of a coverage receipt for hashing. Field order is fixed;
+ * `undefined` keys and `recordHash` are dropped; the `declared_set`/`observed_set` arrays are
+ * re-emitted sorted+deduped (so a reorder/dupe that does not change the SET is byte-stable),
+ * the snapshot object is re-emitted in its fixed key order; `JSON.stringify` with no indent.
+ */
+export function coverageCanonicalText(receipt: Omit<DimensionSetCoverageReceipt, "recordHash">): string {
+  const ordered: Record<string, unknown> = {};
+  for (const key of COVERAGE_CANONICAL_FIELD_ORDER) {
+    const val = (receipt as Record<string, unknown>)[key];
+    if (val === undefined) continue;
+    if (key === "declared_set" || key === "observed_set") {
+      ordered[key] = [...new Set(val as string[])].sort();
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder(val as SnapshotCoord, COVERAGE_SNAPSHOT_FIELD_ORDER);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+
+/** `recordHash` for a coverage receipt = SHA-256 of its canonical text (recordHash omitted). */
+export function computeCoverageRecordHash(receipt: Omit<DimensionSetCoverageReceipt, "recordHash">): string {
+  return hashContent(coverageCanonicalText(receipt));
+}
+
+/** `<stateDir>/dimension-coverage-receipts.jsonl` — the in-process coverage-receipt ledger. */
+export function coverageReceiptsPath(paths: ProjectPaths): string {
+  return path.join(paths.stateDir, "dimension-coverage-receipts.jsonl");
+}
+
+/** Validate the shape of a parsed coverage line; malformed lines are skipped (tolerant). */
+export function isValidCoverageReceipt(parsed: unknown): parsed is DimensionSetCoverageReceipt {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed as Record<string, unknown>;
+  if (r.kind !== "dimension-set-coverage") return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.declared_set_digest !== "string" || !HEX64.test(r.declared_set_digest)) return false;
+  if (!Array.isArray(r.declared_set) || !r.declared_set.every((d) => typeof d === "string")) return false;
+  if (!Array.isArray(r.observed_set) || !r.observed_set.every((d) => typeof d === "string")) return false;
+  if (typeof r.covered !== "boolean") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap as Record<string, unknown>;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+
+/** Tolerant reader: every well-shaped coverage receipt line, in file order (never throws). */
+export function readCoverageReceipts(paths: ProjectPaths): DimensionSetCoverageReceipt[] {
+  return readJsonlValues(coverageReceiptsPath(paths), isValidCoverageReceipt);
+}
+
+/**
+ * The next `prevHash` for an appended coverage receipt: the LAST well-shaped line's
+ * `recordHash`, or GENESIS when the store is empty. Tail-scan mirrors
+ * {@link readLastReceiptRecordHash}.
+ */
+export function readLastCoverageRecordHash(paths: ProjectPaths): string {
+  const all = readCoverageReceipts(paths);
+  return all.length > 0 ? all[all.length - 1]!.recordHash : GENESIS_PREV_HASH;
+}
+
+/** Tamper-walk a coverage chain: recompute each `recordHash` + verify the `prevHash` link. */
+export function verifyCoverageChain(receipts: DimensionSetCoverageReceipt[]): VerifyChainResult {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const { recordHash, ...rest } = receipts[i]!;
+    const recomputed = computeCoverageRecordHash(rest);
+    if (recomputed !== recordHash) return { ok: false, brokenAt: i, reason: "edited" };
+    if (rest.prevHash !== expectedPrev) return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    expectedPrev = recordHash;
+  }
+  return { ok: true };
+}
+
+/** Input to {@link appendCoverageReceipt}. The caller supplies the OUTSIDE-computed ground. */
+export interface MintCoverageReceiptInput {
+  /** The producer's self-asserted identity (zero-trust audit breadcrumb). */
+  producerIdentity: string;
+  /** The committed declared-set digest (`declaredDimensionSetDigest()`), computed by the caller. */
+  declaredSetDigest: string;
+  /** The committed declared-set names (`declaredDimensionSet()`), computed by the caller. */
+  declaredSet: string[];
+  /** The OBSERVED dimension names re-derived from `verify-report.json`, computed by the caller. */
+  observedSet: string[];
+}
+
+/**
+ * Append one in-process coverage receipt, sealing the hash chain. The caller MUST already hold
+ * the `withStateLock` span (read-modify-append is serialized there), exactly like
+ * {@link appendDriverReceipt}.
+ *
+ * Refuse-at-creation (BSC-5 negative-control c): the receipt is minted with `covered` computed
+ * HERE as `declaredSet ⊆ observedSet` over the caller-supplied sets — a producer cannot stamp a
+ * `covered:true` claim that the supplied observed set does not support. The gate independently
+ * recomputes both sets + the verdict, so even a forged line written around this writer is caught.
+ */
+export function appendCoverageReceipt(
+  paths: ProjectPaths,
+  input: MintCoverageReceiptInput,
+): DimensionSetCoverageReceipt {
+  const declaredSet = [...new Set(input.declaredSet)].sort();
+  const observedSet = [...new Set(input.observedSet)].sort();
+  const observed = new Set(observedSet);
+  const covered = declaredSet.every((d) => observed.has(d));
+  const coord = currentReceiptSnapshotCoord(paths);
+  const receipt: Omit<DimensionSetCoverageReceipt, "prevHash" | "recordHash"> = {
+    kind: "dimension-set-coverage",
+    refId: coord.gitHead ?? "no-git",
+    declared_set_digest: input.declaredSetDigest,
+    declared_set: declaredSet,
+    observed_set: observedSet,
+    covered,
+    snapshot_coord: coord,
+    producer_identity: input.producerIdentity,
+  };
+  assertGovernedWriteSurface(paths.root, coverageReceiptsPath(paths));
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastCoverageRecordHash(paths);
+  const withPrev: Omit<DimensionSetCoverageReceipt, "recordHash"> = { ...receipt, prevHash };
+  const recordHash = computeCoverageRecordHash(withPrev);
+  const sealed: DimensionSetCoverageReceipt = { ...withPrev, recordHash };
+  fs.appendFileSync(coverageReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+
+/**
+ * The content-validation status of a coverage receipt's GROUND, re-derived at gate time. The
+ * verdict keys ENTIRELY on recomputed inputs (the live declared set + the live observed set) —
+ * the stored `covered`/`declared_set`/`observed_set` fields are NEVER trusted:
+ *  - `chain`        — the coverage chain is tampered (no line from it can be trusted).
+ *  - `declared_set_diverged` — the receipt's `declared_set_digest` ≠ the live committed digest
+ *                     (the committed set was narrowed/changed after mint).
+ *  - `uncovered`    — a live-declared dimension is absent from the live-observed set
+ *                     (`declared ⊄ observed`): the negative-control block.
+ *  - `covered`      — declared ⊆ observed against the LIVE declared + observed sets.
+ */
+export type CoverageValidationStatus = "chain" | "declared_set_diverged" | "uncovered" | "covered";
+
+/** The coverage-validation outcome + diagnostics (re-derived from live inputs). */
+export interface CoverageValidation {
+  status: CoverageValidationStatus;
+  /** On `uncovered`: the live-declared dimensions absent from the live-observed set. */
+  missing?: string[];
+  /** On `declared_set_diverged`: the receipt's stored digest vs the live committed digest. */
+  digests?: { stored: string; live: string };
+}
+
+/**
+ * Re-derive a coverage receipt's ground at gate time. `liveDeclaredDigest` + `liveDeclaredSet`
+ * come from the COMMITTED `DECLARED_DIMENSION_SET` (computed by the caller — the gate — to keep
+ * this module acyclic); `liveObservedSet` is re-derived from `verify-report.json`. The receipt's
+ * own stored sets/verdict are ignored except to surface the digest divergence.
+ *
+ * Order (fail-closed): the LATEST in-process coverage receipt is selected by the caller; this
+ * pure function classifies it. A tampered chain is the caller's `chain` block (it tamper-walks
+ * before selecting); this function assumes a single selected receipt + the live inputs.
+ */
+export function validateCoverageContent(
+  receipt: DimensionSetCoverageReceipt,
+  liveDeclaredDigest: string,
+  liveDeclaredSet: string[],
+  liveObservedSet: string[],
+): CoverageValidation {
+  if (receipt.declared_set_digest !== liveDeclaredDigest) {
+    return { status: "declared_set_diverged", digests: { stored: receipt.declared_set_digest, live: liveDeclaredDigest } };
+  }
+  const observed = new Set(liveObservedSet);
+  const missing = [...new Set(liveDeclaredSet)].sort().filter((d) => !observed.has(d));
+  if (missing.length > 0) return { status: "uncovered", missing };
+  return { status: "covered" };
+}

@@ -94,6 +94,8 @@ const receipts_1 = require("./receipts");
 const brief_1 = require("./brief");
 const tier_classify_1 = require("./tier-classify");
 const bsc8_flag_1 = require("./bsc8-flag");
+const declared_dimensions_1 = require("./declared-dimensions");
+const bsc5_flag_1 = require("./bsc5-flag");
 const approvals_1 = require("./approvals");
 const realization_1 = require("./realization");
 const verification_driver_1 = require("./verification-driver");
@@ -652,6 +654,88 @@ function checkDriverDimensions(paths) {
         detail: { reason: verdict.reason, ...verdict.detail },
         dimensions: verdict.dimensions,
     };
+}
+/**
+ * The BSC-5 dimension-SET-coverage sub-check (Axis-B slice-7) — composed among the gating tail of
+ * {@link checkProductionReality}, after assertion-presence and before the BSC-10 grounding summary.
+ * A run may not be certified complete while a DECLARED required dimension is not OBSERVED.
+ *
+ * GROUND (`declared ⊆ observed`), recomputed ENTIRELY from live inputs (Principle 1 — the receipt
+ * is never trusted):
+ *   - DECLARED = the COMMITTED `DECLARED_DIMENSION_SET` constant ({@link declaredDimensionSet} /
+ *     {@link declaredDimensionSetDigest}). Interp A: narrowing it is a reviewable code + `dist/`
+ *     diff, never a runtime self-attest.
+ *   - OBSERVED = re-derived from `verify-report.json` via {@link observedDimensionsFromReport} — the
+ *     SAME shared derivation the BSC-3 sensor uses (a dimension is observed iff a matching command
+ *     exists AND `ok===true`). So a stored "all observed" claim cannot survive evidence being
+ *     stripped from the report after mint (negative-control b).
+ *
+ * Fail-closed posture (on a PRESENT coverage receipt — the claim under test):
+ *   - The coverage chain is tamper-walked first ({@link verifyCoverageChain}); a broken chain BLOCKS
+ *     with reason `chain` (no line from a tampered store is trusted).
+ *   - The receipt's `declared_set_digest` is compared to the LIVE committed digest; a mismatch
+ *     BLOCKS with reason `declared_set_diverged` (the committed set was narrowed/changed after mint
+ *     — negative-control d's runtime tripwire, complementing the reviewable-diff guard).
+ *   - `declared ⊄ observed` (a live-declared dimension absent from the live-observed set, recomputed
+ *     — the receipt's stored `covered`/`observed` are NEVER trusted) BLOCKS with reason `uncovered`
+ *     (negative-controls a/b/c). So a receipt that SELF-ATTESTS `covered:true` over a stripped report
+ *     is recomputed and blocked — the claim is grounded in the live re-derivation, not the receipt.
+ *
+ * ABSENCE ≠ FORGERY (the BSC-1/2/3 grandfather posture, so this rung is ADDITIVE — it never reds an
+ * in-flight run that simply has not minted a coverage claim yet): NO coverage receipt ⇒ PASS. The
+ * coverage requirement bites on a PRESENT claim (the F8 correspondence artifact) recomputed against
+ * the live committed set + live observed set; a run that never asserts coverage is not blocked here.
+ *
+ * Governed by `bsc5EnforcementEnabled()` (defaults ON): the verdict is ALWAYS computed (so the
+ * `coverage` summary is available for observability), but it BLOCKS with `dimension_set_uncovered`
+ * only when enforcement is on; OFF ⇒ the would-be block is surfaced as a non-blocking `notice`.
+ */
+function checkDimensionSetCoverage(paths) {
+    const liveDeclaredDigest = (0, declared_dimensions_1.declaredDimensionSetDigest)();
+    const liveDeclaredSet = (0, declared_dimensions_1.declaredDimensionSet)();
+    // OBSERVED re-derived from the LIVE verify-report (never the receipt's stored set).
+    const liveObservedSet = [...(0, verification_driver_1.observedDimensionsFromReport)((0, verify_1.readVerifyReport)(paths))].sort();
+    const receipts = (0, receipts_1.readCoverageReceipts)(paths);
+    // ABSENCE ≠ FORGERY: no coverage claim ⇒ grandfathered PASS (mirrors the BSC-1/2/3 driver/
+    // realization/assertion grandfather, so adding this rung is ADDITIVE and never reds an in-flight
+    // run that has not minted a coverage receipt). The requirement bites on a PRESENT claim below.
+    if (receipts.length === 0)
+        return PASS;
+    // The verdict + its observability summary, computed regardless of enforcement.
+    let status;
+    let detail;
+    const chain = (0, receipts_1.verifyCoverageChain)(receipts);
+    if (!chain.ok) {
+        status = "chain";
+        detail = { reason: "chain", brokenAt: chain.brokenAt, chainReason: chain.reason };
+    }
+    else {
+        // The LATEST in-process receipt is the coverage CLAIM under test. Its ground is RE-DERIVED
+        // (live declared digest + live observed set) — the stored `covered`/`observed` are never trusted.
+        const latest = receipts[receipts.length - 1];
+        const content = (0, receipts_1.validateCoverageContent)(latest, liveDeclaredDigest, liveDeclaredSet, liveObservedSet);
+        status = content.status;
+        detail = {
+            reason: content.status,
+            ...(content.missing ? { missing: content.missing } : {}),
+            ...(content.digests ? { digests: content.digests } : {}),
+        };
+    }
+    const coverage = {
+        declared: liveDeclaredSet,
+        observed: liveObservedSet,
+        declaredSetDigest: liveDeclaredDigest,
+        status,
+    };
+    if (status === "covered") {
+        // Clean PASS: attach the coverage summary for the I1 observability hook.
+        return { ok: true, coverage };
+    }
+    if (!(0, bsc5_flag_1.bsc5EnforcementEnabled)()) {
+        // Flag OFF: observe but do not block. Surface the would-be block as a non-blocking notice.
+        return { ok: true, coverage, notice: { token: "dimension_set_uncovered", detail } };
+    }
+    return { ok: false, error: "dimension_set_uncovered", detail, coverage };
 }
 /**
  * The BSC-1 realization sub-check (Axis-B slice-5) — the EIGHTH production-reality
@@ -1879,6 +1963,32 @@ exports.PRODUCTION_REALITY_RUNGS = [
         },
     },
     {
+        // 8c. (BSC-5 / Axis-B slice-7) DIMENSION-SET-COVERAGE GROUNDING — composed among the gating
+        // tail, AFTER assertion-presence and BEFORE the thin BSC-10 grounding summary. A run may not be
+        // certified complete while a DECLARED required dimension is not OBSERVED. DECLARED is the
+        // COMMITTED `DECLARED_DIMENSION_SET` constant (`core/declared-dimensions.ts`, Interp A —
+        // narrowing it is a reviewable code + `dist/` diff, never a runtime self-attest); OBSERVED is
+        // re-derived from `verify-report.json` at gate time (the SAME `observedDimensionsFromReport` the
+        // BSC-3 sensor uses). The receipt's stored sets/verdict are NEVER trusted — the gate recomputes
+        // declared (live constant) + observed (live report) + the `declared ⊆ observed` verdict, so a
+        // forged "all covered" claim, a stripped report dimension, or a post-mint narrowing of the
+        // committed set is mechanically detectable. Governed by `bsc5EnforcementEnabled()` (defaults ON):
+        // the verdict is ALWAYS computed (so `coverage` summarizes the posture for the I1 hook), but it
+        // BLOCKS with `dimension_set_uncovered` only when enforcement is on; OFF ⇒ a non-blocking notice.
+        id: "dimension-set-coverage",
+        check: (paths, _state, ctx) => {
+            const coverage = checkDimensionSetCoverage(paths);
+            ctx.captured.coverage = coverage;
+            if (!coverage.ok) {
+                // Preserve the upstream driver `dimensions` summary on the coverage block so the full trust
+                // posture stays visible alongside the coverage failure.
+                const driver = ctx.captured.driver;
+                return driver?.dimensions ? { ...coverage, dimensions: driver.dimensions } : coverage;
+            }
+            return null;
+        },
+    },
+    {
         // 9. (BSC-10 / Axis-B slice-BSC10a) EXTERNAL-REFERENCE GROUNDING — a THIN summary rung composed
         // among the reality rungs. It does NOT recompute: it CONSUMES the `groundingVerdict` already
         // HOISTED before the 1c approval leg (Principle 1 — single live recompute), folding `grounding?`
@@ -1967,6 +2077,7 @@ function checkProductionReality(paths, state) {
     const assertion = ctx.captured.assertion;
     const grounding = ctx.captured.grounding;
     const tierCorrespondence = ctx.captured.tierCorrespondence;
+    const coverage = ctx.captured.coverage;
     const merged = { ok: true };
     const dimensions = driver?.dimensions ?? assertion?.dimensions;
     if (dimensions)
@@ -1977,6 +2088,8 @@ function checkProductionReality(paths, state) {
         merged.mutationEfficacy = assertion.mutationEfficacy;
     if (grounding?.grounding)
         merged.grounding = grounding.grounding;
+    if (coverage?.coverage)
+        merged.coverage = coverage.coverage;
     // BSC-9 (slice-7): the bsc9 rung's WARN `notice` (enforcement off) folds in LAST in the
     // precedence chain, so a would-be projection/readiness block stays visible without blocking.
     const bsc9 = ctx.captured.bsc9;
@@ -1985,6 +2098,7 @@ function checkProductionReality(paths, state) {
         assertion?.notice ??
         grounding?.notice ??
         tierCorrespondence?.notice ??
+        coverage?.notice ??
         bsc9?.notice;
     if (notice)
         merged.notice = notice;
@@ -1993,6 +2107,7 @@ function checkProductionReality(paths, state) {
         merged.assertionPresence ||
         merged.mutationEfficacy ||
         merged.grounding ||
+        merged.coverage ||
         merged.notice
         ? merged
         : PASS;
