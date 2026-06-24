@@ -118,6 +118,59 @@ checklist for any mode, read `${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference
 | `parallelism` | `docs/09-implementation-plan.md` (Phase 3, REQ-PCO-030) | Slice plan minimizes shared components and `depends_on` edges so build waves are wider; consults `th build plan --advise` for current parallelism width + the conflict pairs that serialize the plan; routes concrete re-cut suggestions back to the Vertical-Slice agent. Never weakens vertical-slice integrity or the coverage hard-gate. |
 | `debate-reconcile` | A Reconciler's merged artifact (Phase 4, REQ-PCO-043) | Merged artifact is coherent against the competing inputs it reconciles + the resolved debate-ledger entries; no resolved fork silently dropped or contradicted; every concept still REQ-ID-anchored. Reviewed in fresh context like every other mode. |
 
+## External-reference grounding challenges (BSC-10)
+
+In every mode where the artifact under review references external dependencies, version figures,
+UI reference screenshots, or accessibility conformance claims, you carry additional grounding
+challenges. These are grounded defects — raise them only when the specific flaw is present.
+
+### Research currency (`research` mode)
+
+- A version figure or schema assertion that lacks a cited, dated fetch is an uncited claim — fail it.
+- A benchmark or compatibility claim sourced from a page that predates a rewritten major version is
+  stale — fail it with the specific finding and the version boundary where the claim becomes stale.
+- A finding that states "version X is current" without a fetch date is unverifiable — fail it.
+
+### Claim support (`architecture` mode, `technical-design` mode)
+
+- Every external-dependency version declared in the stack must be traceable to a signed ground
+  receipt (manifest path pointer in the **Grounding Manifest Pointer** section). A version figure
+  with no manifest pointer is an ungrounded claim — raise it as a grounded defect citing the
+  specific dependency and version.
+- A digest value copied inline into the architecture document instead of a manifest pointer is the
+  BSC-1 anti-pattern — raise it as a grounded defect.
+- An architecture document that was produced before the required ground kinds (version-pin,
+  digest-manifest) were signed is structurally out of order — raise it.
+
+### Stack justification (`architecture` mode)
+
+- Every technology choice must carry: pinned version, one-sentence rationale, manifest pointer,
+  and alternative considered. Any of these four missing is a grounded defect.
+- "Latest" or an unpinned version range (e.g., `^4.x`) is not a pinned version — raise it.
+
+### Declared-vs-derived grounding mismatch (all modes touching grounding artifacts)
+
+- If the artifact declares a ground kind (e.g., `visual-hash: tight`) but the signed
+  EvidenceManifest records a different fidelity tier or a different conformance value, that is a
+  declared ≠ derived mismatch — raise it citing both the declared value and the manifest value.
+- If a permitted-difference carve-out appears in the artifact but has no corresponding signed
+  producer entry (unsigned carve-out), raise it — an unsigned carve-out masks nothing and its
+  presence in the artifact implies a false exemption.
+- If the artifact claims conformance is within-budget but the manifest records an over-budget
+  value, raise it as a grounded defect with the specific values.
+
+### UI/UX grounding (`ui-design` mode)
+
+- The design artifact must declare a fidelity tier (`tight` / `medium` / `loose`). Absent tier
+  is a grounded defect.
+- Every permitted-difference carve-out must name the screen, the region, and the reason. A
+  carve-out without a stated reason is a grounded defect.
+- The **Grounding Manifest Pointer** section must be present and must point to the signed manifest
+  path. An absent pointer means the downstream Tester has no grounded reference — raise it.
+
+These challenges are additive to each mode's existing grounded-defect checklist in
+`${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference/critic-modes.md`. They do not replace it.
+
 ## Critic vs Red-Team (P5-4)
 
 The **Critic owns the gate on security + failure-modes**; the Red-Team (`agents/red-team.md`) supplies

@@ -40,6 +40,8 @@
  *     [--scope <module>] \
  *     [--grounding-report <path>] \
  *     [--work-class <greenfield|redesign|recreation|integration|migration|greenfield+dep>] \
+ *     [--grounding-bound] \
+ *     [--manifest-digest <sha256:hex>] \
  *     [--producer-identity <string>]
  *
  * The terminal-receipt kinds (drift-resolve|sim-retire|decision-approve) require
@@ -333,7 +335,13 @@ function produceScanException(paths, { target, privateKey, publicKey }) {
  * be a `humanGate` stage AND its governing artifact (`produces`) MUST resolve in source —
  * else we refuse BEFORE any write rather than mint an approval whose ground is already gone.
  */
-function produceApproval(paths, { stage, producerIdentity, privateKey, publicKey }) {
+/**
+ * BSC-10 Slice-C / C4a: `groundingBound` and `manifestDigest` are additive-optional.
+ * Passing `groundingBound:true` sets `grounding_bound:true` on the approval receipt.
+ * Passing `manifestDigest` threads the evidence-spine `manifest_digest` field.
+ * Both are omit-when-absent; the dist's canonical helper serializes them in the correct order.
+ */
+function produceApproval(paths, { stage, producerIdentity, privateKey, publicKey, groundingBound, manifestDigest }) {
   if (!isHumanGateStage(stage)) {
     fail(`--stage "${stage}" is not a humanGate stage — refusing to mint an approval`, { stage });
   }
@@ -353,6 +361,8 @@ function produceApproval(paths, { stage, producerIdentity, privateKey, publicKey
   // recordHash are trailers, excluded). Field order is owned by 3a's
   // APPROVAL_CANONICAL_FIELD_ORDER inside approvalCanonicalText; the producer never
   // re-orders, it hands the object to the imported helper so the bytes can never drift.
+  // C4a opt-in: grounding_bound (BEFORE manifest_digest in canonical order) and
+  // manifest_digest are omit-when-absent — absent approval stays byte-identical to pre-C4a.
   const withPrev = {
     kind: "human-approval",
     stage,
@@ -363,6 +373,8 @@ function produceApproval(paths, { stage, producerIdentity, privateKey, publicKey
     producer_identity: producerIdentity,
     producer_kind: "external",
     key_id: keyId,
+    ...(groundingBound === true ? { grounding_bound: true } : {}),
+    ...(manifestDigest !== undefined ? { manifest_digest: manifestDigest } : {}),
     prevHash,
   };
   const canonical = approvalCanonicalText(withPrev);
@@ -404,8 +416,15 @@ function produceApproval(paths, { stage, producerIdentity, privateKey, publicKey
  * report that observes NOTHING refuses BEFORE any write rather than mint an ungrounded receipt.
  * A `--dimension` claim is INTERSECTED with the observed set; a claimed-but-unobserved name
  * refuses (nonzero exit, no line), exactly like the in-process `appendDriverReceipt`.
+ *
+ * BSC-10 Slice C / C4a opt-in: `--grounding-bound` sets `grounding_bound:true` on the receipt,
+ * declaring that this driver is bound to a grounding manifest. `--manifest-digest <digest>` sets
+ * the `manifest_digest` field (the evidence-spine thread). Both are omit-when-absent so a receipt
+ * without either flag is byte-identical to a pre-C4a receipt. The canonical field order
+ * (grounding_bound BEFORE manifest_digest) is owned by the compiled dist's DRIVER_CANONICAL_FIELD_ORDER;
+ * the producer just passes the fields and lets the helper serialize them in the correct order.
  */
-function produceDriver(paths, { dimensionNames, producerIdentity, privateKey, publicKey }) {
+function produceDriver(paths, { dimensionNames, producerIdentity, privateKey, publicKey, groundingBound, manifestDigest }) {
   // SENSOR: what the report actually OBSERVES (the ONLY thing recordable). A report that
   // observes nothing ⇒ refuse — a receipt with no grounded dimension is ungrounded.
   const observed = observeDriverDimensions(paths);
@@ -435,6 +454,12 @@ function produceDriver(paths, { dimensionNames, producerIdentity, privateKey, pu
   // are trailers, excluded; `undefined` keys are dropped by the helper). Field order is owned
   // by 4a's DRIVER_CANONICAL_FIELD_ORDER inside driverCanonicalText; the producer never
   // re-orders, it hands the object to the imported helper so the bytes can never drift.
+  // C4a opt-in fields (omit-when-absent so pre-C4a receipts stay byte-identical):
+  //   grounding_bound: true declares this driver is bound to a grounding manifest.
+  //   manifest_digest: the evidence-spine thread (sha256:<hex>).
+  // Field order in canonical text is owned by the dist's DRIVER_CANONICAL_FIELD_ORDER
+  // (grounding_bound BEFORE manifest_digest, both BEFORE prevHash). The helper skips
+  // undefined keys so omitted fields produce no canonical bytes.
   const withPrev = {
     kind: "driver-dimension",
     refId: coord.gitHead ?? "no-git",
@@ -443,6 +468,8 @@ function produceDriver(paths, { dimensionNames, producerIdentity, privateKey, pu
     producer_identity: producerIdentity,
     producer_kind: "external",
     key_id: keyId,
+    ...(groundingBound === true ? { grounding_bound: true } : {}),
+    ...(manifestDigest !== undefined ? { manifest_digest: manifestDigest } : {}),
     prevHash,
   };
   const canonical = driverCanonicalText(withPrev);
@@ -485,7 +512,13 @@ function produceDriver(paths, { dimensionNames, producerIdentity, privateKey, pu
  * authored (the producer signs an agent-chosen path); it proves the receipt was not forged
  * in-process, NOT that the referent is independent.
  */
-function produceRealization(paths, { reqId, target, producerIdentity, privateKey, publicKey }) {
+/**
+ * BSC-10 Slice-C / C4a: `groundingBound` and `manifestDigest` are additive-optional.
+ * Passing `groundingBound:true` sets `grounding_bound:true` on the realization receipt.
+ * Passing `manifestDigest` threads the evidence-spine `manifest_digest` field.
+ * Both are omit-when-absent; the dist's canonical helper serializes them in the correct order.
+ */
+function produceRealization(paths, { reqId, target, producerIdentity, privateKey, publicKey, groundingBound, manifestDigest }) {
   const digest = computeTargetDigest(paths.root, target);
   if (digest === null) {
     fail(`--target "${target}" does not resolve in source — refusing to mint an ungrounded realization receipt`, { target });
@@ -499,6 +532,8 @@ function produceRealization(paths, { reqId, target, producerIdentity, privateKey
   // producer never re-orders, it hands the object to the imported helper so bytes can't drift.
   // `owning_slice` is left empty here — the producer is out-of-process and does not consult
   // state; the in-process gate recomputes ownership fresh and never trusts this field.
+  // C4a opt-in: grounding_bound (BEFORE manifest_digest in canonical order) and manifest_digest
+  // are omit-when-absent — an absent realization stays byte-identical to pre-C4a.
   const withPrev = {
     kind: "realization",
     req_id: reqId,
@@ -508,6 +543,8 @@ function produceRealization(paths, { reqId, target, producerIdentity, privateKey
     producer_identity: producerIdentity,
     producer_kind: "external",
     key_id: keyId,
+    ...(groundingBound === true ? { grounding_bound: true } : {}),
+    ...(manifestDigest !== undefined ? { manifest_digest: manifestDigest } : {}),
     prevHash,
   };
   const canonical = realizationCanonicalText(withPrev);
@@ -1070,6 +1107,16 @@ function main() {
   // grounding only: the pinned-env measurement report path + optional --work-class override.
   const groundingReportPath = args["grounding-report"]; // optional (required for grounding)
   const workClassOverride = args["work-class"]; // optional (wins over report-supplied workClass)
+  // BSC-10 Slice-C / C4a opt-in: for driver|realization|approval receipts, these two flags
+  // declare that the receipt participates in the BSC-10 evidence spine.
+  //   --grounding-bound   sets `grounding_bound:true` (boolean flag, no value needed)
+  //   --manifest-digest <sha256:hex>   threads the evidence-spine manifest_digest field
+  // Both are omit-when-absent; a receipt without either flag is byte-identical to pre-C4a.
+  const groundingBound = args["grounding-bound"] !== undefined; // presence of flag = true
+  const manifestDigest =
+    args["manifest-digest"] !== undefined && args["manifest-digest"] !== "true"
+      ? args["manifest-digest"]
+      : undefined;
   const producerIdentity = args["producer-identity"] ?? "external:th-receipt-producer";
 
   if (!root || root === "true") fail("--root <projectRoot> is required");
@@ -1126,7 +1173,7 @@ function main() {
   // (`external-approvals.jsonl`) with the 3a approval canonical shape — branch BEFORE the
   // terminal-receipt machinery so that flow stays byte-identical.
   if (kind === "approval") {
-    produceApproval(paths, { stage, producerIdentity, privateKey, publicKey });
+    produceApproval(paths, { stage, producerIdentity, privateKey, publicKey, groundingBound, manifestDigest });
     return;
   }
 
@@ -1134,7 +1181,7 @@ function main() {
   // (`external-driver-receipts.jsonl`) with the 4a driver canonical shape — branch BEFORE the
   // terminal-receipt machinery so that flow stays byte-identical.
   if (kind === "driver") {
-    produceDriver(paths, { dimensionNames, producerIdentity, privateKey, publicKey });
+    produceDriver(paths, { dimensionNames, producerIdentity, privateKey, publicKey, groundingBound, manifestDigest });
     return;
   }
 
@@ -1142,7 +1189,7 @@ function main() {
   // (`external-realization-receipts.jsonl`) with the slice-5 realization canonical shape —
   // branch BEFORE the terminal-receipt machinery so that flow stays byte-identical.
   if (kind === "realization") {
-    produceRealization(paths, { reqId: refId, target, producerIdentity, privateKey, publicKey });
+    produceRealization(paths, { reqId: refId, target, producerIdentity, privateKey, publicKey, groundingBound, manifestDigest });
     return;
   }
 

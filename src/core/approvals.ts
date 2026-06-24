@@ -149,6 +149,16 @@ export interface HumanApprovalReceipt {
    * BSC-7 conformance-precondition enforce.
    */
   manifest_digest?: string;
+  /**
+   * Axis-B slice-BSC10c / BSC-10 (C4a) — the evidence-spine BINDING OPT-IN. `true` declares this
+   * approval PARTICIPATES in the BSC-10 evidence-spine and is therefore REQUIRED to carry a
+   * `manifest_digest`. The gate blocks under enforce with reason `manifest_digest_absent` when
+   * `grounding_bound === true` AND `manifest_digest` is absent. ADDITIVE-OPTIONAL + omit-when-absent,
+   * AND IN {@link APPROVAL_CANONICAL_FIELD_ORDER} (just before `manifest_digest`) so a PRESENT value
+   * is signature/hash-bound. Absent OR `false` ⇒ NOT bound ⇒ back-compat PASS (byte-identical for a
+   * pre-BSC-10 / unenrolled approval; absence ≠ forgery — keeps shipped BSC-7 probes + parity green).
+   */
+  grounding_bound?: boolean;
   /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
   prevHash: string;
   /** SHA-256 hex (64) of THIS approval's canonical text (computed before set). */
@@ -176,6 +186,10 @@ const APPROVAL_CANONICAL_FIELD_ORDER: ReadonlyArray<keyof HumanApprovalReceipt> 
   "producer_kind",
   "key_id",
   "legacy",
+  // BSC-10 (C4a) evidence-spine BINDING OPT-IN: IN the canonical order just BEFORE `manifest_digest`
+  // so a PRESENT `grounding_bound` is signature/hash-bound. Omit-when-absent ⇒ a pre-BSC-10 / un-
+  // enrolled approval (the field absent) is byte-identical, so shipped BSC-7 probes + parity hold.
+  "grounding_bound",
   // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
   // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
   // approval (the field absent) is byte-identical, so shipped BSC-7 probes + receipts-parity hold.
@@ -265,6 +279,7 @@ function isValidApproval(parsed: unknown): parsed is HumanApprovalReceipt {
   if (r.kind !== "human-approval") return false;
   if (typeof r.stage !== "string" || r.stage === "") return false;
   if (typeof r.producer_identity !== "string") return false;
+  if (r.grounding_bound !== undefined && typeof r.grounding_bound !== "boolean") return false;
   if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
   if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
   if (r.legacy !== undefined && typeof r.legacy !== "boolean") return false;

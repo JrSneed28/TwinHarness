@@ -108,6 +108,7 @@ exports.validGroundingExemptions = validGroundingExemptions;
 exports.groundingExemptionKey = groundingExemptionKey;
 exports.validGroundingBudgets = validGroundingBudgets;
 exports.validGroundingCarveouts = validGroundingCarveouts;
+exports.toleranceThresholdVerdicts = toleranceThresholdVerdicts;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const paths_1 = require("./paths");
@@ -365,7 +366,13 @@ function isValidConformanceMetric(parsed) {
     const m = parsed;
     if (m.metric !== "version" && m.metric !== "api" && m.metric !== "visual" && m.metric !== "a11y")
         return false;
-    if (!(typeof m.observed === "string" || typeof m.observed === "number"))
+    // A numeric `observed` must be FINITE (mirrors the `isValidGroundingBudget` threshold guard) so a
+    // non-finite value can never reach the C4c `observed > threshold` arithmetic as a numeric input.
+    if (typeof m.observed === "number") {
+        if (!Number.isFinite(m.observed))
+            return false;
+    }
+    else if (typeof m.observed !== "string")
         return false;
     if (m.status !== "within-budget" && m.status !== "over-budget" && m.status !== "unobserved")
         return false;
@@ -910,4 +917,82 @@ function validGroundingCarveouts(paths) {
         valid.set(c.regionDigest, c);
     }
     return valid;
+}
+// ---------------------------------------------------------------------------
+// Tolerance-kind threshold comparison (C4c — observed-vs-SIGNED-budget, Slice C)
+// ---------------------------------------------------------------------------
+//
+// The deferred MED-1 the deterministic-kind enforce-flip (Slice B) left open: for the RUNNER-
+// SENSITIVE TOLERANCE kinds (`visual-hash`, carrying the `visual` perceptual-diff + `a11y` scan-
+// count conformance metrics) the over-budget verdict in `groundingConformanceOf` comes from the
+// receipt's OWN signed `conformance[].status` — the signed budget THRESHOLD is verified for
+// AUTHENTICITY (3-party authority, E4) but NEVER compared against the metric's `observed` value.
+// That makes the budget INERT: a producer that signs a generous `status:"within-budget"` over an
+// observed value that EXCEEDS the separately-signed threshold would pass. C4c closes that with an
+// INDEPENDENT gate-side arithmetic comparison: `observed > signed_threshold ⇒ over-budget`,
+// computed HERE (the gate), not trusted from the receipt's self-reported `status`.
+//
+// This is DETERMINISTIC arithmetic only — the `observed` value comes from the externally-signed
+// receipt and the `threshold` from the externally-signed budget store; NO renderer/axe runs here
+// (that toolchain stays in the producer/CI). Fail-closed: an `unobserved` observed value under
+// enforce, or a required tolerance metric with NO matching signed budget under enforce, is a hard
+// FAIL (never a silent pass). The `version`/`api` metrics on the DETERMINISTIC kinds are NOT
+// re-compared here — they are binary exact-equality the signed receipt status fully decides (the
+// Slice-B posture is unchanged for them).
+/** The conformance metrics that are TOLERANCE-based (a numeric `observed ≤ threshold` band). */
+const TOLERANCE_METRICS = new Set(["visual", "a11y"]);
+/**
+ * The independent tolerance-threshold verdict for a `visual-hash` grounding receipt (C4c). For each
+ * TOLERANCE conformance metric (`visual` / `a11y`) on the receipt, look up the validly-signed
+ * budget for `(receipt.workClass, "visual-hash", metric)` and compute `observed ≤ threshold` with
+ * the gate's OWN arithmetic (recompute-don't-trust — the receipt's self-reported `status` is NOT
+ * consulted here). `validBudgets` is the caller-resolved `validGroundingBudgets(paths)` map (passed
+ * in so the gate resolves it ONCE per run, not per receipt). A non-`visual-hash` ground ⇒ `[]`
+ * (deterministic kinds are not tolerance-gated). A `visual-hash` ground with NO tolerance metric on
+ * its conformance list ⇒ `[]`. The CALLER (`evaluateGrounding`) fail-closes that case: a required
+ * `visual-hash` ground with no `visual`/`a11y` tolerance verdict is forced to `unobserved` (a
+ * producer that OMITS the measurement must not slip through as `within-budget`).
+ *
+ * Fail-closed precedence within a metric: `unobserved` (the stub) and `unpinned` (no signed
+ * tolerance) are BOTH soft-fails the gate blocks under enforce; a numeric `observed` over its
+ * signed `threshold` is `over-budget`. Only a numeric `observed` at-or-under a SIGNED threshold is
+ * `within-budget`. The verdicts are emitted in `metric` order for determinism.
+ *
+ * TRUST SCOPE (review-fix, sec HIGH): the THRESHOLD is externally-signed / 3-party
+ * (`validGroundingBudgets`), but `observed` comes from the trusted receipt. For an EXTERNAL
+ * (`valid-grounded`) visual-hash receipt `observed` is producer-measured (renderer/axe in CI) and
+ * 3-party. For an IN-PROCESS (`valid`) receipt `observed` is AGENT-AUTHORED — so this recompute
+ * defends against a lying `status` given an honest `observed`, NOT against a lying `observed`.
+ * In-process tolerance conformance is therefore ATTRIBUTION-TRUST ONLY (mirrors realization.ts:47-52).
+ * Requiring tolerance grounds to be external (`valid-grounded`) to count under enforce is the P4
+ * `require-grounded` tightening, deferred uniformly with the other Axis-B rows.
+ */
+function toleranceThresholdVerdicts(receipt, validBudgets) {
+    if (receipt.ground.groundKind !== "visual-hash")
+        return [];
+    const verdicts = [];
+    for (const m of receipt.conformance) {
+        if (!TOLERANCE_METRICS.has(m.metric))
+            continue;
+        if (m.observed === "unobserved" || typeof m.observed !== "number") {
+            // The stubbed / non-numeric measurement — fail-closed (never a silent pass under enforce).
+            verdicts.push({ metric: m.metric, observed: "unobserved", threshold: null, status: "unobserved" });
+            continue;
+        }
+        const observed = m.observed;
+        const budget = validBudgets.get(`${receipt.workClass}::visual-hash::${m.metric}`);
+        if (budget === undefined) {
+            // Observed but UNPINNED: no validly-signed tolerance for this axis ⇒ cannot be gated as
+            // passing (fail-closed under enforce). The threshold is unknown, so `null`.
+            verdicts.push({ metric: m.metric, observed, threshold: null, status: "unpinned" });
+            continue;
+        }
+        verdicts.push({
+            metric: m.metric,
+            observed,
+            threshold: budget.threshold,
+            status: observed > budget.threshold ? "over-budget" : "within-budget",
+        });
+    }
+    return verdicts.sort((a, b) => a.metric.localeCompare(b.metric));
 }

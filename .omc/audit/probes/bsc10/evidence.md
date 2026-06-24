@@ -92,3 +92,33 @@ offender set produces `ok:true + advisory notice`, not a block.
 - `bsc10-slice-b.test.ts` E3 ARM B: wrong-key/no-key ⇒ ungrounded ⇒ gate blocks.
 - `bsc10-slice-b.test.ts` M4: unsigned budget ⇒ validGroundingBudgets empty ⇒ over-budget still blocks.
 - `bsc10-integration.test.ts` M-1 (:493/:518): tampered chain blocks under ENFORCE; non-blocking under WARN (flag-gated, intentional Slice-A design).
+
+## Slice C (C4a/b/c/d) — evidence-spine close + visual/a11y enforce-flip
+
+Live probe (`slice-c-neg-controls.test.ts`, gitignored per the bsc10 probe precedent — this
+file is the force-tracked record). Coverage in `tests/bsc10-slice-c.test.ts` (27 tests):
+
+- **C4a — `grounding_bound` opt-in (resolves the unsatisfiable manifest_digest-presence model).**
+  A per-receipt `grounding_bound?: boolean` on BSC-1/3/7 receipts, in each signed canonical order
+  before `manifest_digest`, omit-when-absent ⇒ byte-identical (I7g). Gate `hasUnboundGroundingReceipt`
+  bumps `manifest_digest_absent` ⇒ BLOCK under enforce when `grounding_bound && !manifest_digest`
+  (I7b); absent/false ⇒ PASS (I7e legacy, neg-4 grandfathered). Positive control I7f
+  (grounding_bound + matching manifest_digest ⇒ PASS).
+- **C4b — BSC-7 conformance precondition.** The approval β-acceptance leg consumes the hoisted
+  grounding verdict: a present-but-over-budget/unobserved required ground BLOCKS acceptance in the
+  same leg (I2a/I2b/I2c), and the observed-vs-budget `toleranceDiff` is surfaced in `res.grounding`.
+- **C4c — observed-vs-signed-budget threshold for tolerance kinds (closes deferred MED-1).** The gate
+  RECOMPUTES `observed > signed_threshold` (C4c-c: a receipt self-reporting `within-budget` at
+  observed=200 > threshold=100 is overridden to over-budget by the gate's own arithmetic);
+  unobserved/unpinned under enforce fail-closed (I8b). Deterministic — no renderer/axe.
+  TRUST SCOPE (sec-review HIGH, disclosed): the threshold is 3-party-signed; `observed` is
+  producer-measured/3-party only for EXTERNAL valid-grounded receipts — for in-process receipts
+  `observed` is agent-authored (attribution-trust), so the recompute catches a lying *status*, not a
+  lying *observed*. Require-external for tolerance kinds is the P4 require-grounded tightening.
+- **C4d — visual-hash enforce-flip.** `ENFORCED_GROUND_KINDS` gains `visual-hash` (a11y rides within
+  it). Flag-aware tests (`bsc10KindEnforced("visual-hash")`) are green in BOTH flag states; the flip
+  is a revertable unit. Enforce-sim: the real project declares no grounding receipts ⇒ 0 unwaived
+  offenders.
+
+DEFERRED (Done-final / follow-up): real renderer/axe toolchain measurement in the producer/CI;
+P4-5 trust-boundary extraction (require-grounded, chain-sealed migration markers).

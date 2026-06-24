@@ -137,6 +137,10 @@ const CANONICAL_FIELD_ORDER = [
     "producer_kind",
     "key_id",
     "legacy",
+    // BSC-10 (C4a) evidence-spine BINDING OPT-IN: IN the canonical order just BEFORE `manifest_digest`
+    // so a PRESENT `grounding_bound` is signature/hash-bound. Omit-when-absent ⇒ a pre-BSC-10 / un-
+    // enrolled receipt (the field absent) is byte-identical, so shipped BSC-1 probes + parity hold.
+    "grounding_bound",
     // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
     // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
     // receipt (the field absent) is byte-identical, so shipped BSC-1 probes + receipts-parity hold.
@@ -213,6 +217,8 @@ function isValidRealizationReceipt(parsed) {
     if (typeof r.owning_slice !== "string")
         return false;
     if (typeof r.producer_identity !== "string")
+        return false;
+    if (r.grounding_bound !== undefined && typeof r.grounding_bound !== "boolean")
         return false;
     if (typeof r.prevHash !== "string" || !hash_1.HEX64.test(r.prevHash))
         return false;

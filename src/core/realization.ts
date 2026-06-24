@@ -156,6 +156,16 @@ export interface RealizationReceipt {
    * (a producer actually sets it) under the Slice-B cross-receipt chain-mismatch enforce.
    */
   manifest_digest?: string;
+  /**
+   * Axis-B slice-BSC10c / BSC-10 (C4a) — the evidence-spine BINDING OPT-IN. `true` declares this
+   * realization receipt PARTICIPATES in the BSC-10 evidence-spine and is therefore REQUIRED to
+   * carry a `manifest_digest`. The gate blocks under enforce with reason `manifest_digest_absent`
+   * when `grounding_bound === true` AND `manifest_digest` is absent. ADDITIVE-OPTIONAL + omit-when-
+   * absent, AND IN {@link CANONICAL_FIELD_ORDER} (just before `manifest_digest`) so a PRESENT value
+   * is signature/hash-bound. Absent OR `false` ⇒ NOT bound ⇒ back-compat PASS (byte-identical for a
+   * pre-BSC-10 / unenrolled receipt; absence ≠ forgery — keeps shipped BSC-1 probes + parity green).
+   */
+  grounding_bound?: boolean;
   /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
   prevHash: string;
   /** SHA-256 hex (64) of THIS receipt's canonical text (computed before set). */
@@ -182,6 +192,10 @@ const CANONICAL_FIELD_ORDER: ReadonlyArray<keyof RealizationReceipt> = [
   "producer_kind",
   "key_id",
   "legacy",
+  // BSC-10 (C4a) evidence-spine BINDING OPT-IN: IN the canonical order just BEFORE `manifest_digest`
+  // so a PRESENT `grounding_bound` is signature/hash-bound. Omit-when-absent ⇒ a pre-BSC-10 / un-
+  // enrolled receipt (the field absent) is byte-identical, so shipped BSC-1 probes + parity hold.
+  "grounding_bound",
   // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
   // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
   // receipt (the field absent) is byte-identical, so shipped BSC-1 probes + receipts-parity hold.
@@ -260,6 +274,7 @@ export function isValidRealizationReceipt(parsed: unknown): parsed is Realizatio
   if (typeof r.req_id !== "string" || r.req_id === "") return false;
   if (typeof r.owning_slice !== "string") return false;
   if (typeof r.producer_identity !== "string") return false;
+  if (r.grounding_bound !== undefined && typeof r.grounding_bound !== "boolean") return false;
   if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
   if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
   if (r.legacy !== undefined && typeof r.legacy !== "boolean") return false;

@@ -97,16 +97,17 @@
     "title": "External-Reference Grounding — computable ground that the real external reference was checked",
     "phase": "done-phase",
     "independence": ">0",
-    "independenceNote": "signature-provenance only; external Ed25519-signed grounding control-flip proves the receipt was not forged in-process (producer-signed ⇒ valid-grounded/PASS; wrong-key/unsigned ⇒ forged+BLOCK). Honest scope: single-axis at the Ed25519 boundary; budgets 3-party-signed (agent cannot self-sign its own budget).",
-    "pr": [],
+    "independenceNote": "signature-provenance only; external Ed25519-signed grounding control-flip proves the receipt was not forged in-process (producer-signed ⇒ valid-grounded/PASS; wrong-key/unsigned ⇒ forged+BLOCK). Honest scope: single-axis at the Ed25519 boundary; budgets 3-party-signed (agent cannot self-sign its own budget). Slice C (C4a/b/c/d): per-receipt grounding_bound opt-in ⇒ manifest_digest_absent block; BSC-7 β-acceptance leg consumes the grounding verdict; visual/a11y observed-vs-signed-budget tolerance threshold (recompute-don't-trust — a generous self-reported status cannot mask a breached signed budget; CAVEAT (sec-review HIGH): the THRESHOLD is 3-party-signed, but OBSERVED is producer-measured/3-party only for EXTERNAL valid-grounded receipts — for in-process receipts observed is agent-authored/attribution-trust, so the recompute catches a lying status, NOT a lying observed; require-external for tolerance kinds is the P4 require-grounded tightening); visual-hash flipped to ENFORCE so all ground-kinds now enforce. Renderer/axe MEASUREMENT deferred to producer/CI (producer signs a report, never measures).",
+    "pr": [43, 44, 45],
     "probe": ".omc/audit/probes/bsc10",
     "anchors": [
       "core/grounding.ts",
-      "core/bsc10-flag.ts",
+      "core/bsc10-flag.ts (ENFORCED_GROUND_KINDS incl. visual-hash @ C4d)",
       "commands/grounding.ts",
-      "core/gate-preconditions.ts (evaluateGrounding + checkGrounding + hoisted-verdict split rung)",
-      "scripts/th-receipt-producer.mjs (--kind grounding)"
+      "core/gate-preconditions.ts (evaluateGrounding + checkGrounding + hoisted-verdict split rung; hasUnboundGroundingReceipt/manifest_digest_absent @ C4a; β-acceptance consume @ C4b; toleranceThresholdVerdicts @ C4c)",
+      "core/{realization,verification-driver,approvals}.ts (grounding_bound in canonical order @ C4a)",
+      "scripts/th-receipt-producer.mjs (--kind grounding; --grounding-bound/--manifest-digest @ C4a)"
     ],
-    "updatedAt": "2026-06-23T14:00:00Z"
+    "updatedAt": "2026-06-23T18:45:00Z"
   }
 ]
