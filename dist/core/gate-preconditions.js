@@ -55,7 +55,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CAN_ADVANCE_RUNGS = void 0;
+exports.CAN_ADVANCE_RUNGS = exports.PRODUCTION_REALITY_RUNGS = void 0;
 exports.checkBlockingDrift = checkBlockingDrift;
 exports.checkReviseEscalation = checkReviseEscalation;
 exports.checkVerifySuite = checkVerifySuite;
@@ -1304,6 +1304,344 @@ function checkGrounding(verdict) {
     }
     return { ok: false, error: "grounding_unverified", detail, grounding: verdict.summary };
 }
+/**
+ * The ordered production-reality rung registry — the LITERAL execution list iterated by
+ * {@link checkProductionReality}. Order here IS runtime order; every rung is enumerable
+ * for observability (consensus plan §8). Each entry's body is the verbatim logic the old
+ * monolithic `checkProductionReality` ran inline at the same ordinal; only the call-site
+ * weaving moved into this list. The hoist (`bsc10-grounding-hoist`) sits between the
+ * terminal-receipt rung and the human-approval rung exactly as before, and the gating
+ * rungs (driver/realization/assertion/grounding) record their result into `ctx.captured`
+ * so the post-loop fold reproduces the original `merged` roll-up.
+ */
+exports.PRODUCTION_REALITY_RUNGS = [
+    {
+        // 1. A user-visible simulation still blocks. BSC-4 receipt-aware: an entry blocks
+        // when it is active+user-visible+simulated (the original rule) OR when it is marked
+        // `retired` but that retirement is NOT grounded by a valid/legacy sim-retire receipt
+        // (a retire-by-attestation with no source replacement — no double-exoneration). The
+        // SAME `simEntryBlocksProductionReality` predicate backs `th sim`, so reporting agrees.
+        id: "simulation-unretired",
+        check: (paths, _state, ctx) => {
+            const blocking = ctx.entries.filter((e) => (0, sim_1.simEntryBlocksProductionReality)(paths, e));
+            if (blocking.length > 0) {
+                return {
+                    ok: false,
+                    error: "simulation_unretired",
+                    detail: { ids: blocking.map((e) => e.id), classifications: blocking.map((e) => e.classification) },
+                };
+            }
+            return null;
+        },
+    },
+    {
+        // 1b. Terminal-flip grounding (BSC-4). Every drift-resolution and decision-approval
+        // in force must carry a VALID (or grandfathered-`legacy`) TerminalTransitionReceipt.
+        // A resolve/approve done via a bypass (no receipt) — or whose recorded source target
+        // was deleted (`target_missing`) / changed (`target_mismatch`), or whose snapshot is
+        // forged/stale (`stale`) — is ungrounded and blocks. `sim-retire` grounding is owned
+        // by rung 1 (excluded here to avoid a duplicate token). Pre-upgrade projects carry no
+        // migration marker, so an absent receipt classifies `legacy` and this is a NO-OP until
+        // the receipt regime is active — it never reds an existing complete run.
+        id: "terminal-receipt",
+        check: (paths) => {
+            for (const ent of (0, receipts_1.collectTerminalEntities)(paths)) {
+                if (ent.kind === "sim-retire")
+                    continue; // owned by rung 1's receipt-aware blocker
+                const v = (0, receipts_1.readReceiptValidated)(paths, ent.kind, ent.refId);
+                // Accept set (slice-1b): `valid` (in-process attested), `valid-grounded` (external
+                // keyed receipt that verified), or `legacy` (grandfathered). A `forged` external
+                // claim — and the existing absent/target_missing/target_mismatch/stale — BLOCK.
+                if (v.status !== "valid" && v.status !== "valid-grounded" && v.status !== "legacy") {
+                    return {
+                        ok: false,
+                        error: "terminal_receipt_unverified",
+                        detail: {
+                            kind: ent.kind,
+                            refId: ent.refId,
+                            status: v.status,
+                            ...(v.staleReasons ? { staleReasons: v.staleReasons } : {}),
+                        },
+                    };
+                }
+            }
+            return null;
+        },
+    },
+    {
+        // 1b-grounding. HOIST the BSC-10 external-reference grounding verdict (Axis-B slice-BSC10a,
+        // C1/PCC-1). It is computed ONCE here — BEFORE the human-approval leg — because it depends ONLY
+        // on the grounding receipts + sibling stores + the matrix (NO dependency on verify/tester/dist/
+        // scan/driver/realization/assertion), so it can be resolved first with no ordering hazard. The
+        // SAME verdict is consumed by (i) the SPLIT approval-ACCEPTANCE leg just below and (ii) the thin
+        // grounding summary rung among the reality rungs — a single live recompute, never attached-but-
+        // stale (Principle 1). A late standalone rung after the reality rungs could never inform the 1c
+        // approval leg, which early-`return`s on the happy path — so hoist-evaluate-once is the only
+        // sound control flow. This rung does not terminate (returns null): it only populates `ctx`.
+        id: "bsc10-grounding-hoist",
+        check: (paths, state, ctx) => {
+            ctx.groundingVerdict = evaluateGrounding(paths, state);
+            // A PRESENT-but-UNCONFORMANT ground (grounded, but `over_budget`/`unobserved` — NOT a `missing`
+            // ground, NOT a cross-receipt `chain_mismatch`) is the conformance precondition the BSC-7 approval
+            // ACCEPTANCE leg consumes: an approval cannot be ACCEPTED while the reference it was supposed to be
+            // approved against is itself unconformant. `missing`/`chain_mismatch`/`tampered` are excluded here
+            // (each is the grounding rung's OWN block, not an approval-acceptance failure) so the tokens stay
+            // disjoint. Gated on the PER-KIND enforce-flip ({@link groundingVerdictBlocks}): a deterministic
+            // `digest-manifest`/`version-pin` unconformance blocks acceptance in Slice B, while a runner-
+            // sensitive `visual-hash`-only unconformance stays WARN (does not block) until Slice C.
+            ctx.groundingBlocksAcceptance =
+                ctx.groundingVerdict !== null &&
+                    ctx.groundingVerdict.ok === false &&
+                    (ctx.groundingVerdict.reason === "over_budget" || ctx.groundingVerdict.reason === "unobserved") &&
+                    groundingVerdictBlocks(ctx.groundingVerdict);
+            return null;
+        },
+    },
+    {
+        // 1c. Human-approval grounding over the CLOSED required-set (BSC-7 / Axis-B slice-3a,
+        // R1) — the COMPLETION rung, the L1 backstop. `humanGate` was a declarative-only flag
+        // with ZERO predicate consumers (pure gate theater); this re-validates that EVERY
+        // engaged-and-not-future humanGate stage carries an approval bound to the current
+        // snapshot + governing-artifact digest. The required-set is recomputed FRESH from
+        // `requiredHumanGateStages` (humanGate ∩ engagedStagesFor ∩ ordinal-≤-current) — we do
+        // NOT trust a persisted "approved" summary (the BSC-6 recompute-don't-trust lesson:
+        // presence is the sensed fact). Modeled EXACTLY on the BSC-4 terminal-flip rung above:
+        // for each required stage, `readApprovalValidated` → accept `valid`/`valid-grounded`/
+        // `legacy`, BLOCK on `absent`/`stale`/`target_missing`/`target_mismatch`/`forged`/
+        // `tampered` with the stable token `human_approval_unverified`. Because `engagedStagesFor`
+        // is UI-aware, a `has_ui===false` run does NOT require `ux-design`/`ui-design` (N/A, not
+        // `absent`-blocked); a lower-tier run does not require `security`/`contracts` when not
+        // engaged. This is the backstop the `--emergency`/`state set` jump cannot route around:
+        // jumping `current_stage` to `final-verification` makes every engaged gate ordinal-≤-
+        // current ⇒ required, so the jumped-over stage is re-checked here. The block names the
+        // offending `{stage, status}` (a bounded list — the FIRST failing required stage).
+        //
+        // PCC-1 SPLIT (slice-BSC10a): leg (α) approval-EXISTENCE is the unchanged status check below;
+        // leg (β) approval-ACCEPTANCE additionally refuses to ACCEPT an otherwise-present approval while
+        // `groundingBlocksAcceptance` (a present-but-unconformant BSC-10 ground under enforce). So an
+        // approval that EXISTS but whose reference is unconformant blocks with `grounding_unverified`,
+        // the conformance precondition consumed INSIDE the 1c leg — never bypassed.
+        id: "human-approval",
+        check: (paths, state, ctx) => {
+            for (const stage of requiredHumanGateStages(state)) {
+                const a = (0, approvals_1.readApprovalValidated)(paths, stage);
+                // Leg (α) — approval EXISTENCE: an absent/stale/forged/tampered approval blocks as before.
+                if (a.status !== "valid" && a.status !== "valid-grounded" && a.status !== "legacy") {
+                    return {
+                        ok: false,
+                        error: "human_approval_unverified",
+                        detail: {
+                            stage,
+                            status: a.status,
+                            ...(a.staleReasons ? { staleReasons: a.staleReasons } : {}),
+                        },
+                    };
+                }
+                // Leg (β) — approval ACCEPTANCE: the approval EXISTS, but a present-but-unconformant BSC-10
+                // ground means the reference it authorizes is itself unconformant ⇒ the approval cannot be
+                // ACCEPTED (the conformance precondition is consumed here, not bypassed). Slice-BSC10a only:
+                // gated on the enforce flag (default OFF ⇒ this leg is inert in the WARN commit).
+                if (ctx.groundingBlocksAcceptance) {
+                    const v = ctx.groundingVerdict;
+                    return {
+                        ok: false,
+                        error: "grounding_unverified",
+                        detail: { stage, ...groundingDetail(v) },
+                        grounding: v.summary,
+                    };
+                }
+            }
+            return null;
+        },
+    },
+    {
+        // 2. The verify suite must be green against production-targeted commands, AND the
+        // report must be a CURRENT-binding report (F2/R-30 — not a legacy bare report, not a
+        // stale/copied one). The validated reader classifies the report; only a `valid` GREEN
+        // report passes. A corrupt config still blocks (fail-closed). One stable token
+        // (`production_verify_not_green`) with a `reason` detail naming the divergence.
+        id: "production-verify",
+        check: (paths) => {
+            const verifyLoaded = (0, verify_1.loadVerifyConfig)(paths);
+            if (verifyLoaded.status === "corrupt") {
+                return { ok: false, error: "production_verify_not_green", detail: { reason: "config_corrupt" } };
+            }
+            const verifyCfg = verifyLoaded.config;
+            if (verifyCfg.commands.length > 0) {
+                const validated = (0, verify_1.readVerifyReportValidated)(paths);
+                if (validated.status === "absent") {
+                    return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
+                }
+                if (validated.status !== "valid") {
+                    // legacy / stale / corrupt report → the green claim cannot be trusted for the
+                    // current snapshot. Re-run `th verify run` to seal a fresh bound envelope.
+                    return { ok: false, error: "production_verify_not_green", detail: { reason: validated.status, ...(validated.staleReasons ? { staleReasons: validated.staleReasons } : {}) } };
+                }
+                if (!validated.report.ok) {
+                    const failed = validated.report.results.filter((x) => !x.ok).length;
+                    return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
+                }
+            }
+            return null;
+        },
+    },
+    {
+        // 3. A live-QA Tester run record must be attached (audit C-08).
+        id: "tester-record",
+        check: (paths) => {
+            if (!(0, tester_1.testerRecordPresent)(paths)) {
+                return { ok: false, error: "tester_record_missing", detail: {} };
+            }
+            return null;
+        },
+    },
+    {
+        // 4. dist/ must not carry unledgered simulation patterns. A dist hit is "ledgered"
+        // only when an ACTIVE simulation entry DECLARES that specific hit — matched
+        // PER-DEPENDENCY (audit P1), so a single unrelated, non-user-visible entry no longer
+        // blanket-suppresses every dist hit. The SAME `computeUnledgeredDistHits` join backs
+        // `th sim scan`, so scan and gate agree. The two-tier scan never throws. The scan is
+        // COMPUTED ONCE here and STASHED on `ctx` for the scan-coverage rung to reuse.
+        id: "unledgered-dist",
+        check: (paths, _state, ctx) => {
+            ctx.scan = (0, sim_1.scanForSimulationHits)(paths);
+            const unledgered = (0, sim_1.computeUnledgeredDistHitsReceiptAware)(paths, ctx.entries, ctx.scan.distHits);
+            if (unledgered.length > 0) {
+                return {
+                    ok: false,
+                    error: "unledgered_simulation_in_dist",
+                    detail: { hits: unledgered.slice(0, 20), total: unledgered.length },
+                };
+            }
+            return null;
+        },
+    },
+    {
+        // 5. (BSC-6 / Axis-B slice-2) SCAN-COVERAGE COMPLETENESS — fail closed on the scan's
+        // OWN incompleteness, INDEPENDENT of and ADDITIONAL to the unledgered-token check
+        // above. The two-tier scan enumerated + streaming-hashed every `dist/` path; any path
+        // it could not deep-inspect (per-file / aggregate / watchdog / read error) is
+        // `unobserved` (≠ clean). This rung RECOMPUTES that set fresh every run (it MUST NOT
+        // read `scan-completeness.jsonl` to decide — trusting a persisted "complete" summary is
+        // the exact bug class BSC-6 is) and BLOCKS with the stable token `scan_coverage_incomplete`
+        // when any `unobserved` path is not exonerated by a valid external-signed exception ack.
+        // The SAME `uncoveredAfterExceptions` residual backs `th sim scan`, so scan and gate
+        // agree (control e). This closes the proven RED of `.omc/audit/probes/new-a-scancap/`:
+        // a >2 MB token-bearing file is now either deep-inspected (→ unledgered block) or
+        // `unobserved{file_limit}` (→ this block), never silently skipped. Consumes the same
+        // `scan` the unledgered-dist rung stashed on `ctx` (single scan per run, as before).
+        id: "scan-coverage",
+        check: (paths, _state, ctx) => {
+            const uncovered = (0, sim_1.uncoveredAfterExceptions)(paths, ctx.scan.unobserved);
+            if (uncovered.length > 0) {
+                return {
+                    ok: false,
+                    error: "scan_coverage_incomplete",
+                    detail: {
+                        unobserved: uncovered.slice(0, 20).map((u) => ({ path: u.path, reason: u.reason })),
+                        total: uncovered.length,
+                        reasons: [...new Set(uncovered.map((u) => u.reason))].sort(),
+                    },
+                };
+            }
+            return null;
+        },
+    },
+    {
+        // 6. (BSC-3 / Axis-B slice-4a) VERIFICATION-DRIVER DIMENSION GROUNDING — composed LAST.
+        // A run may not be certified complete on a verify-report that merely says "ok" with NO
+        // record of WHICH verification dimensions a trusted runner actually EXERCISED. The
+        // verification-driver receipt is the SENSOR; this re-derives its ground from
+        // `verify-report.json` and enforces by SIGNATURE-derived trust label (valid / valid-
+        // grounded / forged). ABSENCE ≠ FORGERY: a run with no driver receipt is grandfathered
+        // (in-process attested, allowed). Governed by `bsc3EnforcementEnabled()` (defaults ON):
+        // the verdict is ALWAYS computed (so `dimensions` summarizes the trust posture for the
+        // I1 observability hook), but it BLOCKS with `driver_dimension_unverified` only when
+        // enforcement is on. The `dimensions` summary rides on the result whether PASS or BLOCK.
+        // The result is CAPTURED on `ctx` so later rungs' blocks and the final fold can carry
+        // the driver `dimensions` summary forward (the cross-rung observability dependency).
+        id: "driver-dimensions",
+        check: (paths, _state, ctx) => {
+            const driver = checkDriverDimensions(paths);
+            ctx.captured.driver = driver;
+            if (!driver.ok)
+                return driver;
+            return null;
+        },
+    },
+    {
+        // 7. (BSC-1 / Axis-B slice-5) REALIZATION-RECEIPT GROUNDING — composed LAST. A run may not
+        // be certified complete while a REQ-ID owned by a `done` slice lacks a valid, reachable,
+        // digest-fresh realization referent. The CLAIM (`SliceState.status==="done"`) is authored
+        // independently of the REFERENT (recorded by `th realize`); this enumerates done-slice
+        // REQ-IDs from the cached repo-map, recomputes each referent digest, COLLECTS ALL failures,
+        // and blocks on absent/stale/forged/target_*/tampered/unresolved. ABSENCE is grandfathered
+        // (`legacy`) until the migration marker is stamped, so this is a NO-OP on pre-upgrade
+        // projects. Governed by `realizationEnforcementEnabled()` (defaults ON).
+        id: "realization",
+        check: (paths, state, ctx) => {
+            const realization = checkRealization(paths, state);
+            ctx.captured.realization = realization;
+            if (!realization.ok) {
+                // Preserve the driver `dimensions` summary on the realization block so the trust posture
+                // stays visible alongside the realization failure.
+                const driver = ctx.captured.driver;
+                return driver?.dimensions ? { ...realization, dimensions: driver.dimensions } : realization;
+            }
+            return null;
+        },
+    },
+    {
+        // 8. (BSC-2 / Axis-B slice-6) ASSERTION-PRESENCE GROUNDING — composed LAST (after realization).
+        // A run may not be certified complete while a `tested` REQ-ID lacks a NON-TRIVIAL assertion:
+        // the coverage gate counts a REQ "tested" on anchor presence alone, so a test file with no
+        // cannot-fail-free assertion clears that bar (BSC-2). This recomputes the per-REQ
+        // assertion-presence ground FRESH, requires an F8-bound in-process AssertionPresenceReceipt
+        // for correspondence, subtracts validly-WAIVED REQs, and BLOCKS on a forged MutationKillReceipt.
+        // A signature-verified external MutationKillReceipt is recorded as a DISTINCT module-scoped
+        // `mutationEfficacy` observability signal — it does NOT override the presence rung (presence ≠
+        // efficacy; review HIGH). Governed by `bsc2EnforcementEnabled()` (WARN-first): the verdict is
+        // ALWAYS computed (so `assertionPresence` summarizes the per-REQ posture for the I1 hook), but
+        // it BLOCKS with `assertion_presence_unverified` / `assertion_unobserved` / `mutation_kill_forged`
+        // only when enforcement is on. The summary rides on the result whether PASS or BLOCK.
+        id: "assertion-presence",
+        check: (paths, _state, ctx) => {
+            const assertion = checkAssertionPresence(paths);
+            ctx.captured.assertion = assertion;
+            if (!assertion.ok) {
+                // Preserve the upstream driver `dimensions` summary on the assertion block so the full trust
+                // posture stays visible alongside the assertion failure (assertion already carries its own
+                // `assertionPresence` + `mutationEfficacy`).
+                const driver = ctx.captured.driver;
+                return driver?.dimensions ? { ...assertion, dimensions: driver.dimensions } : assertion;
+            }
+            return null;
+        },
+    },
+    {
+        // 9. (BSC-10 / Axis-B slice-BSC10a) EXTERNAL-REFERENCE GROUNDING — a THIN summary rung composed
+        // among the reality rungs. It does NOT recompute: it CONSUMES the `groundingVerdict` already
+        // HOISTED before the 1c approval leg (Principle 1 — single live recompute), folding `grounding?`
+        // onto the result exactly like `dimensions?`/`assertionPresence?`. The `missing` reason blocks
+        // HERE (a required input-ground never checked); the present-but-unconformant (`over_budget`/
+        // `unobserved`) reasons already gated the approval-ACCEPTANCE leg above. Governed by
+        // `bsc10EnforcementEnabled()` (slice-BSC10a is the WARN commit, default OFF): the verdict is
+        // ALWAYS computed (so `grounding` summarizes the posture for the I1 hook), but it BLOCKS with
+        // `grounding_unverified` only when enforcement is on; OFF ⇒ a non-blocking `notice` + summary.
+        id: "bsc10-grounding-summary",
+        check: (_paths, _state, ctx) => {
+            const grounding = checkGrounding(ctx.groundingVerdict);
+            ctx.captured.grounding = grounding;
+            if (!grounding.ok) {
+                // Preserve the upstream driver `dimensions` summary on the grounding block so the full trust
+                // posture stays visible (grounding already carries its own `grounding` summary).
+                const driver = ctx.captured.driver;
+                return driver?.dimensions ? { ...grounding, dimensions: driver.dimensions } : grounding;
+            }
+            return null;
+        },
+    },
+];
 function checkProductionReality(paths, state) {
     // Stage-aware: production reality is a CERTIFY-COMPLETION condition, so it only
     // enforces at the completion boundary (final-verification). Earlier stages have no
@@ -1311,11 +1649,9 @@ function checkProductionReality(paths, state) {
     // every in-flight run's obligation ladder. Mirrors checkInterview's front-gate shape.
     if (!(0, stages_1.isFinalVerification)(state.current_stage))
         return PASS;
-    // 1. A user-visible simulation still blocks. BSC-4 receipt-aware: an entry blocks
-    // when it is active+user-visible+simulated (the original rule) OR when it is marked
-    // `retired` but that retirement is NOT grounded by a valid/legacy sim-retire receipt
-    // (a retire-by-attestation with no source replacement — no double-exoneration). The
-    // SAME `simEntryBlocksProductionReality` predicate backs `th sim`, so reporting agrees.
+    // Read the simulation ledger ONCE up front (it backs both the sim-unretired rung and
+    // the unledgered-dist rung). A corrupt ledger is the fail-closed front block — it must
+    // precede every rung, exactly as the old inline body's first read did.
     let entries;
     try {
         entries = (0, sim_1.readSimulationLedger)(paths);
@@ -1326,258 +1662,41 @@ function checkProductionReality(paths, state) {
         }
         throw e;
     }
-    const blocking = entries.filter((e) => (0, sim_1.simEntryBlocksProductionReality)(paths, e));
-    if (blocking.length > 0) {
-        return {
-            ok: false,
-            error: "simulation_unretired",
-            detail: { ids: blocking.map((e) => e.id), classifications: blocking.map((e) => e.classification) },
-        };
+    // The shared context threaded through the rung sweep — the same object the old
+    // function-local `const`s lived in. `RUNGS` iterate in order; the FIRST non-null return
+    // is the terminal result (an early-return block, identical to the old hand-woven returns).
+    const ctx = {
+        entries,
+        scan: null,
+        groundingVerdict: null,
+        groundingBlocksAcceptance: false,
+        captured: {},
+    };
+    for (const rung of exports.PRODUCTION_REALITY_RUNGS) {
+        const r = rung.check(paths, state, ctx);
+        if (r !== null)
+            return r;
     }
-    // 1b. Terminal-flip grounding (BSC-4). Every drift-resolution and decision-approval
-    // in force must carry a VALID (or grandfathered-`legacy`) TerminalTransitionReceipt.
-    // A resolve/approve done via a bypass (no receipt) — or whose recorded source target
-    // was deleted (`target_missing`) / changed (`target_mismatch`), or whose snapshot is
-    // forged/stale (`stale`) — is ungrounded and blocks. `sim-retire` grounding is owned
-    // by rung 1 (excluded here to avoid a duplicate token). Pre-upgrade projects carry no
-    // migration marker, so an absent receipt classifies `legacy` and this is a NO-OP until
-    // the receipt regime is active — it never reds an existing complete run.
-    for (const ent of (0, receipts_1.collectTerminalEntities)(paths)) {
-        if (ent.kind === "sim-retire")
-            continue; // owned by rung 1's receipt-aware blocker
-        const v = (0, receipts_1.readReceiptValidated)(paths, ent.kind, ent.refId);
-        // Accept set (slice-1b): `valid` (in-process attested), `valid-grounded` (external
-        // keyed receipt that verified), or `legacy` (grandfathered). A `forged` external
-        // claim — and the existing absent/target_missing/target_mismatch/stale — BLOCK.
-        if (v.status !== "valid" && v.status !== "valid-grounded" && v.status !== "legacy") {
-            return {
-                ok: false,
-                error: "terminal_receipt_unverified",
-                detail: {
-                    kind: ent.kind,
-                    refId: ent.refId,
-                    status: v.status,
-                    ...(v.staleReasons ? { staleReasons: v.staleReasons } : {}),
-                },
-            };
-        }
-    }
-    // 1b-grounding. HOIST the BSC-10 external-reference grounding verdict (Axis-B slice-BSC10a,
-    // C1/PCC-1). It is computed ONCE here — BEFORE the human-approval leg — because it depends ONLY
-    // on the grounding receipts + sibling stores + the matrix (NO dependency on verify/tester/dist/
-    // scan/driver/realization/assertion), so it can be resolved first with no ordering hazard. The
-    // SAME verdict is consumed by (i) the SPLIT approval-ACCEPTANCE leg just below and (ii) the thin
-    // grounding summary rung among the reality rungs — a single live recompute, never attached-but-
-    // stale (Principle 1). A late standalone rung after the reality rungs could never inform the 1c
-    // approval leg, which early-`return`s on the happy path — so hoist-evaluate-once is the only
-    // sound control flow.
-    const groundingVerdict = evaluateGrounding(paths, state);
-    // A PRESENT-but-UNCONFORMANT ground (grounded, but `over_budget`/`unobserved` — NOT a `missing`
-    // ground, NOT a cross-receipt `chain_mismatch`) is the conformance precondition the BSC-7 approval
-    // ACCEPTANCE leg consumes: an approval cannot be ACCEPTED while the reference it was supposed to be
-    // approved against is itself unconformant. `missing`/`chain_mismatch`/`tampered` are excluded here
-    // (each is the grounding rung's OWN block, not an approval-acceptance failure) so the tokens stay
-    // disjoint. Gated on the PER-KIND enforce-flip ({@link groundingVerdictBlocks}): a deterministic
-    // `digest-manifest`/`version-pin` unconformance blocks acceptance in Slice B, while a runner-
-    // sensitive `visual-hash`-only unconformance stays WARN (does not block) until Slice C.
-    const groundingBlocksAcceptance = groundingVerdict !== null &&
-        groundingVerdict.ok === false &&
-        (groundingVerdict.reason === "over_budget" || groundingVerdict.reason === "unobserved") &&
-        groundingVerdictBlocks(groundingVerdict);
-    // 1c. Human-approval grounding over the CLOSED required-set (BSC-7 / Axis-B slice-3a,
-    // R1) — the COMPLETION rung, the L1 backstop. `humanGate` was a declarative-only flag
-    // with ZERO predicate consumers (pure gate theater); this re-validates that EVERY
-    // engaged-and-not-future humanGate stage carries an approval bound to the current
-    // snapshot + governing-artifact digest. The required-set is recomputed FRESH from
-    // `requiredHumanGateStages` (humanGate ∩ engagedStagesFor ∩ ordinal-≤-current) — we do
-    // NOT trust a persisted "approved" summary (the BSC-6 recompute-don't-trust lesson:
-    // presence is the sensed fact). Modeled EXACTLY on the BSC-4 terminal-flip rung above:
-    // for each required stage, `readApprovalValidated` → accept `valid`/`valid-grounded`/
-    // `legacy`, BLOCK on `absent`/`stale`/`target_missing`/`target_mismatch`/`forged`/
-    // `tampered` with the stable token `human_approval_unverified`. Because `engagedStagesFor`
-    // is UI-aware, a `has_ui===false` run does NOT require `ux-design`/`ui-design` (N/A, not
-    // `absent`-blocked); a lower-tier run does not require `security`/`contracts` when not
-    // engaged. This is the backstop the `--emergency`/`state set` jump cannot route around:
-    // jumping `current_stage` to `final-verification` makes every engaged gate ordinal-≤-
-    // current ⇒ required, so the jumped-over stage is re-checked here. The block names the
-    // offending `{stage, status}` (a bounded list — the FIRST failing required stage).
-    //
-    // PCC-1 SPLIT (slice-BSC10a): leg (α) approval-EXISTENCE is the unchanged status check below;
-    // leg (β) approval-ACCEPTANCE additionally refuses to ACCEPT an otherwise-present approval while
-    // `groundingBlocksAcceptance` (a present-but-unconformant BSC-10 ground under enforce). So an
-    // approval that EXISTS but whose reference is unconformant blocks with `grounding_unverified`,
-    // the conformance precondition consumed INSIDE the 1c leg — never bypassed.
-    for (const stage of requiredHumanGateStages(state)) {
-        const a = (0, approvals_1.readApprovalValidated)(paths, stage);
-        // Leg (α) — approval EXISTENCE: an absent/stale/forged/tampered approval blocks as before.
-        if (a.status !== "valid" && a.status !== "valid-grounded" && a.status !== "legacy") {
-            return {
-                ok: false,
-                error: "human_approval_unverified",
-                detail: {
-                    stage,
-                    status: a.status,
-                    ...(a.staleReasons ? { staleReasons: a.staleReasons } : {}),
-                },
-            };
-        }
-        // Leg (β) — approval ACCEPTANCE: the approval EXISTS, but a present-but-unconformant BSC-10
-        // ground means the reference it authorizes is itself unconformant ⇒ the approval cannot be
-        // ACCEPTED (the conformance precondition is consumed here, not bypassed). Slice-BSC10a only:
-        // gated on the enforce flag (default OFF ⇒ this leg is inert in the WARN commit).
-        if (groundingBlocksAcceptance) {
-            const v = groundingVerdict;
-            return {
-                ok: false,
-                error: "grounding_unverified",
-                detail: { stage, ...groundingDetail(v) },
-                grounding: v.summary,
-            };
-        }
-    }
-    // 2. The verify suite must be green against production-targeted commands, AND the
-    // report must be a CURRENT-binding report (F2/R-30 — not a legacy bare report, not a
-    // stale/copied one). The validated reader classifies the report; only a `valid` GREEN
-    // report passes. A corrupt config still blocks (fail-closed). One stable token
-    // (`production_verify_not_green`) with a `reason` detail naming the divergence.
-    const verifyLoaded = (0, verify_1.loadVerifyConfig)(paths);
-    if (verifyLoaded.status === "corrupt") {
-        return { ok: false, error: "production_verify_not_green", detail: { reason: "config_corrupt" } };
-    }
-    const verifyCfg = verifyLoaded.config;
-    if (verifyCfg.commands.length > 0) {
-        const validated = (0, verify_1.readVerifyReportValidated)(paths);
-        if (validated.status === "absent") {
-            return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
-        }
-        if (validated.status !== "valid") {
-            // legacy / stale / corrupt report → the green claim cannot be trusted for the
-            // current snapshot. Re-run `th verify run` to seal a fresh bound envelope.
-            return { ok: false, error: "production_verify_not_green", detail: { reason: validated.status, ...(validated.staleReasons ? { staleReasons: validated.staleReasons } : {}) } };
-        }
-        if (!validated.report.ok) {
-            const failed = validated.report.results.filter((x) => !x.ok).length;
-            return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
-        }
-    }
-    // 3. A live-QA Tester run record must be attached (audit C-08).
-    if (!(0, tester_1.testerRecordPresent)(paths)) {
-        return { ok: false, error: "tester_record_missing", detail: {} };
-    }
-    // 4. dist/ must not carry unledgered simulation patterns. A dist hit is "ledgered"
-    // only when an ACTIVE simulation entry DECLARES that specific hit — matched
-    // PER-DEPENDENCY (audit P1), so a single unrelated, non-user-visible entry no longer
-    // blanket-suppresses every dist hit. The SAME `computeUnledgeredDistHits` join backs
-    // `th sim scan`, so scan and gate agree. The two-tier scan never throws.
-    const scan = (0, sim_1.scanForSimulationHits)(paths);
-    const unledgered = (0, sim_1.computeUnledgeredDistHitsReceiptAware)(paths, entries, scan.distHits);
-    if (unledgered.length > 0) {
-        return {
-            ok: false,
-            error: "unledgered_simulation_in_dist",
-            detail: { hits: unledgered.slice(0, 20), total: unledgered.length },
-        };
-    }
-    // 5. (BSC-6 / Axis-B slice-2) SCAN-COVERAGE COMPLETENESS — fail closed on the scan's
-    // OWN incompleteness, INDEPENDENT of and ADDITIONAL to the unledgered-token check
-    // above. The two-tier scan enumerated + streaming-hashed every `dist/` path; any path
-    // it could not deep-inspect (per-file / aggregate / watchdog / read error) is
-    // `unobserved` (≠ clean). This rung RECOMPUTES that set fresh every run (it MUST NOT
-    // read `scan-completeness.jsonl` to decide — trusting a persisted "complete" summary is
-    // the exact bug class BSC-6 is) and BLOCKS with the stable token `scan_coverage_incomplete`
-    // when any `unobserved` path is not exonerated by a valid external-signed exception ack.
-    // The SAME `uncoveredAfterExceptions` residual backs `th sim scan`, so scan and gate
-    // agree (control e). This closes the proven RED of `.omc/audit/probes/new-a-scancap/`:
-    // a >2 MB token-bearing file is now either deep-inspected (→ unledgered block) or
-    // `unobserved{file_limit}` (→ this block), never silently skipped.
-    const uncovered = (0, sim_1.uncoveredAfterExceptions)(paths, scan.unobserved);
-    if (uncovered.length > 0) {
-        return {
-            ok: false,
-            error: "scan_coverage_incomplete",
-            detail: {
-                unobserved: uncovered.slice(0, 20).map((u) => ({ path: u.path, reason: u.reason })),
-                total: uncovered.length,
-                reasons: [...new Set(uncovered.map((u) => u.reason))].sort(),
-            },
-        };
-    }
-    // 6. (BSC-3 / Axis-B slice-4a) VERIFICATION-DRIVER DIMENSION GROUNDING — composed LAST.
-    // A run may not be certified complete on a verify-report that merely says "ok" with NO
-    // record of WHICH verification dimensions a trusted runner actually EXERCISED. The
-    // verification-driver receipt is the SENSOR; this re-derives its ground from
-    // `verify-report.json` and enforces by SIGNATURE-derived trust label (valid / valid-
-    // grounded / forged). ABSENCE ≠ FORGERY: a run with no driver receipt is grandfathered
-    // (in-process attested, allowed). Governed by `bsc3EnforcementEnabled()` (defaults ON):
-    // the verdict is ALWAYS computed (so `dimensions` summarizes the trust posture for the
-    // I1 observability hook), but it BLOCKS with `driver_dimension_unverified` only when
-    // enforcement is on. The `dimensions` summary rides on the result whether PASS or BLOCK.
-    const driver = checkDriverDimensions(paths);
-    if (!driver.ok)
-        return driver;
-    // 7. (BSC-1 / Axis-B slice-5) REALIZATION-RECEIPT GROUNDING — composed LAST. A run may not
-    // be certified complete while a REQ-ID owned by a `done` slice lacks a valid, reachable,
-    // digest-fresh realization referent. The CLAIM (`SliceState.status==="done"`) is authored
-    // independently of the REFERENT (recorded by `th realize`); this enumerates done-slice
-    // REQ-IDs from the cached repo-map, recomputes each referent digest, COLLECTS ALL failures,
-    // and blocks on absent/stale/forged/target_*/tampered/unresolved. ABSENCE is grandfathered
-    // (`legacy`) until the migration marker is stamped, so this is a NO-OP on pre-upgrade
-    // projects. Governed by `realizationEnforcementEnabled()` (defaults ON).
-    const realization = checkRealization(paths, state);
-    if (!realization.ok) {
-        // Preserve the driver `dimensions` summary on the realization block so the trust posture
-        // stays visible alongside the realization failure.
-        return driver.dimensions ? { ...realization, dimensions: driver.dimensions } : realization;
-    }
-    // 8. (BSC-2 / Axis-B slice-6) ASSERTION-PRESENCE GROUNDING — composed LAST (after realization).
-    // A run may not be certified complete while a `tested` REQ-ID lacks a NON-TRIVIAL assertion:
-    // the coverage gate counts a REQ "tested" on anchor presence alone, so a test file with no
-    // cannot-fail-free assertion clears that bar (BSC-2). This recomputes the per-REQ
-    // assertion-presence ground FRESH, requires an F8-bound in-process AssertionPresenceReceipt
-    // for correspondence, subtracts validly-WAIVED REQs, and BLOCKS on a forged MutationKillReceipt.
-    // A signature-verified external MutationKillReceipt is recorded as a DISTINCT module-scoped
-    // `mutationEfficacy` observability signal — it does NOT override the presence rung (presence ≠
-    // efficacy; review HIGH). Governed by `bsc2EnforcementEnabled()` (WARN-first): the verdict is
-    // ALWAYS computed (so `assertionPresence` summarizes the per-REQ posture for the I1 hook), but
-    // it BLOCKS with `assertion_presence_unverified` / `assertion_unobserved` / `mutation_kill_forged`
-    // only when enforcement is on. The summary rides on the result whether PASS or BLOCK.
-    const assertion = checkAssertionPresence(paths);
-    if (!assertion.ok) {
-        // Preserve the upstream driver `dimensions` summary on the assertion block so the full trust
-        // posture stays visible alongside the assertion failure (assertion already carries its own
-        // `assertionPresence` + `mutationEfficacy`).
-        return driver.dimensions ? { ...assertion, dimensions: driver.dimensions } : assertion;
-    }
-    // 9. (BSC-10 / Axis-B slice-BSC10a) EXTERNAL-REFERENCE GROUNDING — a THIN summary rung composed
-    // among the reality rungs. It does NOT recompute: it CONSUMES the `groundingVerdict` already
-    // HOISTED before the 1c approval leg (Principle 1 — single live recompute), folding `grounding?`
-    // onto the result exactly like `dimensions?`/`assertionPresence?`. The `missing` reason blocks
-    // HERE (a required input-ground never checked); the present-but-unconformant (`over_budget`/
-    // `unobserved`) reasons already gated the approval-ACCEPTANCE leg above. Governed by
-    // `bsc10EnforcementEnabled()` (slice-BSC10a is the WARN commit, default OFF): the verdict is
-    // ALWAYS computed (so `grounding` summarizes the posture for the I1 hook), but it BLOCKS with
-    // `grounding_unverified` only when enforcement is on; OFF ⇒ a non-blocking `notice` + summary.
-    const grounding = checkGrounding(groundingVerdict);
-    if (!grounding.ok) {
-        // Preserve the upstream driver `dimensions` summary on the grounding block so the full trust
-        // posture stays visible (grounding already carries its own `grounding` summary).
-        return driver.dimensions ? { ...grounding, dimensions: driver.dimensions } : grounding;
-    }
-    // All passed: fold the optional observability fields up onto ONE result so a single PASS
-    // carries the driver `dimensions`, the assertion `assertionPresence`, the module-scoped
+    // All rungs passed: fold the optional observability fields up onto ONE result so a single
+    // PASS carries the driver `dimensions`, the assertion `assertionPresence`, the module-scoped
     // `mutationEfficacy`, the BSC-10 `grounding`, and at most one warn-phase `notice` (driver wins,
-    // then realization, then assertion, then grounding — first non-empty).
+    // then realization, then assertion, then grounding — first non-empty). Reads the rung results
+    // captured on `ctx` during the sweep, reproducing the original `merged` roll-up verbatim.
+    const driver = ctx.captured.driver;
+    const realization = ctx.captured.realization;
+    const assertion = ctx.captured.assertion;
+    const grounding = ctx.captured.grounding;
     const merged = { ok: true };
-    const dimensions = driver.dimensions ?? assertion.dimensions;
+    const dimensions = driver?.dimensions ?? assertion?.dimensions;
     if (dimensions)
         merged.dimensions = dimensions;
-    if (assertion.assertionPresence)
+    if (assertion?.assertionPresence)
         merged.assertionPresence = assertion.assertionPresence;
-    if (assertion.mutationEfficacy)
+    if (assertion?.mutationEfficacy)
         merged.mutationEfficacy = assertion.mutationEfficacy;
-    if (grounding.grounding)
+    if (grounding?.grounding)
         merged.grounding = grounding.grounding;
-    const notice = driver.notice ?? realization.notice ?? assertion.notice ?? grounding.notice;
+    const notice = driver?.notice ?? realization?.notice ?? assertion?.notice ?? grounding?.notice;
     if (notice)
         merged.notice = notice;
     // Degrade to the shared bare PASS when nothing was observed, preserving `{ ok: true }`.

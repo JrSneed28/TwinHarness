@@ -4,7 +4,8 @@ import type { ProjectPaths } from "../core/paths";
 import { resolveWithinRoot } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { type ValidationIssue, type Tier, type TwinHarnessState, TIERS } from "../core/state-schema";
-import { loadBriefFromFile, type TaskBrief } from "../core/brief";
+import { loadBriefFromFile } from "../core/brief";
+import { classifyBrief } from "../core/tier-classify";
 import { structuredLog } from "../core/log";
 import { NOT_INIT, formatIssues } from "../core/guards";
 import { readState } from "../core/state-store";
@@ -318,33 +319,6 @@ function briefLoadFailure(briefPath: string, issues: ValidationIssue[]): Command
     human: `Could not load brief "${briefPath}":\n${formatIssues(issues)}`,
     data: { error: "invalid_brief", issues },
   });
-}
-
-/** The five Tier-0 conditions plus the veto, computed mechanically (spec §5). */
-function classifyBrief(brief: TaskBrief): {
-  tier0_eligible: boolean;
-  blocked_by_veto: boolean;
-  reasons: string[];
-} {
-  const reasons: string[] = [];
-  if (!brief.single_file_or_local) reasons.push("not a single file / tightly local area");
-  if (brief.changes_public_interface) reasons.push("changes a public interface, schema, or contract");
-  if (brief.adds_dependency) reasons.push("adds a new dependency");
-  if (!brief.obvious_testable_answer) reasons.push("no obvious, testable correct answer");
-
-  const blocked_by_veto = brief.blast_radius_flags.length > 0;
-  if (blocked_by_veto) {
-    reasons.push(`blast-radius flag(s) force ≥T1 (§5 veto): ${brief.blast_radius_flags.join(", ")}`);
-  }
-
-  const tier0_eligible =
-    brief.single_file_or_local &&
-    !brief.changes_public_interface &&
-    !brief.adds_dependency &&
-    brief.obvious_testable_answer &&
-    brief.blast_radius_flags.length === 0;
-
-  return { tier0_eligible, blocked_by_veto, reasons };
 }
 
 /**
