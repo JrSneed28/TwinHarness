@@ -32,3 +32,7 @@ AUDIT.md
 
 # examples/ are reference projects, not part of the shipped plugin.
 /examples/
+
+# Agent session scratch (gjc/ralplan/ultragoal/deep-interview runtime state) —
+# recreated at runtime, never part of the plugin deliverable. Same class as .omc/.
+.gjc/
