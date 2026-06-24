@@ -141,16 +141,14 @@
   },
   {
     "bsc": 9,
-    "title": "MCP behavioral-parity + readiness receipt",
-    "phase": "todo",
-    "independence": 0,
+    "title": "MCP toToolResult projection oracle + readiness-from-scores receipt",
+    "phase": "done-phase",
+    "independence": ">0",
+    "independenceNote": "signature-provenance only: the external Ed25519-signed InterviewReadinessReceipt control-flip proves the receipt was not forged in-process (the in-process surface holds no key ⇒ a wrong-key/unsigned line classifies forged and BLOCKs bsc9_unverified; a producer-signed line classifies valid-grounded). The scored judgment remains agent-authored — this proves the readiness receipt was not forged in-process, NOT that the judgment is independent. The projection oracle is a structural correspondence (toToolResult fidelity over a committed fixture set), attribution-only. Done-final deferred to P4-5.",
     "pr": [],
-    "probe": null,
-    "anchors": [
-      "tests/mcp-cli-parity.test.ts",
-      "commands/interview.ts:185-188"
-    ],
-    "updatedAt": "2026-06-22T13:10:00Z"
+    "probe": ".omc/audit/probes/bsc9",
+    "anchors": ["core/interview-readiness.ts", "core/projection-oracle.ts", "core/bsc9-flag.ts", "core/gate-preconditions.ts (checkBsc9 + checkProductionReality rung 10 bsc9-projection-readiness)", "commands/interview.ts (runInterviewRecord mints readiness receipt)", "tests/mcp-cli-parity.test.ts (projection oracle extension)", ".omc/audit/probes/bsc9/projection-fixtures.json"],
+    "updatedAt": "2026-06-24T00:00:00Z"
   },
   {
     "bsc": 10,

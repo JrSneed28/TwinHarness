@@ -29,11 +29,33 @@ import {
   MCP_ONLY_TOOLS,
   CLI_COMMAND_LEAVES,
   cliCommandToToolName,
+  toToolResult,
 } from "../src/mcp-server";
 import { GATE_OWNED } from "../src/core/state-fields";
+import type { CommandResult } from "../src/core/output";
+import {
+  type ProjectedResult,
+  referenceProjection,
+  projectionFidelity,
+  runProjectionOracle,
+  loadProjectionFixtures,
+} from "../src/core/projection-oracle";
 
 const ROOT = path.resolve(__dirname, "..");
 const TOOL_NAMES = new Set(TOOL_DEFS.map((t) => t.name));
+
+/** Project the real CallToolResult down to the SDK-free ProjectedResult subset the oracle reads. */
+function realProjection(result: CommandResult): ProjectedResult {
+  const r = toToolResult(result);
+  const first = r.content[0];
+  return {
+    isError: r.isError === true,
+    text: first && first.type === "text" ? first.text : "",
+    structuredContent: (r.structuredContent ?? {}) as Record<string, unknown>,
+  };
+}
+
+const BSC9_FIXTURES_PATH = path.join(ROOT, ".omc", "audit", "probes", "bsc9", "projection-fixtures.json");
 
 describe("REQ-PCO-070: CLI↔MCP command parity (every CLI leaf covered or excluded)", () => {
   it("REQ-PCO-070: every non-excluded CLI command has a matching TOOL_DEFS entry", () => {
@@ -352,5 +374,60 @@ describe("AC#5: th_repo_map overwrite is documented and stays non-destructive (O
     expect(ann!.destructiveHint).toBe(false); // but regen is idempotent, not data-loss
     const body = repoMap!.run.toString();
     expect(/assertDestructiveAck/.test(body), "th_repo_map must NOT carry the data-loss ack gate").toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * BSC-9 (Axis-B slice-7) — toToolResult PROJECTION ORACLE.            *
+ *                                                                     *
+ * Every tool closure delegates to the same `run*` handler the CLI    *
+ * dispatches to (the REQ-PCO-070 thinness guard above), so there is   *
+ * NO divergent execution path. The ONE authentic CLI↔MCP divergence  *
+ * surface is the PROJECTION — `toToolResult` mapping a CommandResult  *
+ * onto the MCP CallToolResult. This suite EXTENDS the REQ-PCO-070     *
+ * partition with a projection-fidelity oracle:                       *
+ *   1. the real `toToolResult` matches the core `referenceProjection` *
+ *      contract over the committed twin-call fixture set (so the two  *
+ *      can never drift — a regression in the real projector fails);   *
+ *   2. the committed fixtures are themselves faithful (the gate-time  *
+ *      oracle finds ZERO infidelities on the shipped set).            *
+ * ------------------------------------------------------------------ */
+describe("REQ-PCO-070: toToolResult projection oracle (the only authentic CLI↔MCP divergence surface)", () => {
+  const set = loadProjectionFixtures(BSC9_FIXTURES_PATH);
+
+  it("the committed twin-call fixture set loads and is non-empty", () => {
+    expect(set, `BSC-9 fixtures must load from ${BSC9_FIXTURES_PATH}`).toBeTruthy();
+    expect(set!.fixtures.length).toBeGreaterThan(0);
+  });
+
+  it("the REAL toToolResult matches the core referenceProjection contract over every fixture", () => {
+    // Pin the runtime projector (`toToolResult`) to the core gate-time contract
+    // (`referenceProjection`) so a change to one without the other is caught.
+    for (const f of set!.fixtures) {
+      const real = realProjection(f.result);
+      const infidelities = projectionFidelity(f.tool, f.result, real);
+      expect(infidelities, `${f.tool}: real toToolResult diverged from the contract: ${JSON.stringify(infidelities)}`).toEqual([]);
+      // And the real projection equals the reference projection structurally.
+      expect(real).toEqual(referenceProjection(f.result));
+    }
+  });
+
+  it("the gate-time oracle finds ZERO infidelities on the shipped fixture set", () => {
+    expect(runProjectionOracle(set!)).toEqual([]);
+  });
+
+  it("the fixture set exercises every fidelity axis (ok/exitCode/data/text shapes)", () => {
+    // Non-vacuous: the set must include a failing command, a non-1 exit code (the
+    // taxonomy isError can't carry), a data-bearing result, a no-data result, and the
+    // reserved-key precedence case (data.exitCode shadowed by the envelope exitCode).
+    const tools = new Set(set!.fixtures.map((f) => f.tool));
+    expect(tools.has("th_repo_check"), "needs a non-1 exit-code (4=stale) failing fixture").toBe(true);
+    expect(tools.has("th_state_status"), "needs the reserved-key precedence fixture").toBe(true);
+    const precedence = set!.fixtures.find((f) => f.tool === "th_state_status")!;
+    // data.exitCode is 999 but the projected exitCode MUST be the envelope's 0.
+    expect((precedence.result.data as { exitCode?: number }).exitCode).toBe(999);
+    expect(precedence.projected.structuredContent.exitCode).toBe(0);
+    const anyFailing = set!.fixtures.some((f) => f.projected.isError === true);
+    expect(anyFailing, "needs at least one failing (isError) fixture").toBe(true);
   });
 });

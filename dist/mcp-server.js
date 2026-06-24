@@ -34,9 +34,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// ../../../../node_modules/ajv/dist/compile/codegen/code.js
+// node_modules/ajv/dist/compile/codegen/code.js
 var require_code = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/codegen/code.js"(exports2) {
+  "node_modules/ajv/dist/compile/codegen/code.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.regexpCode = exports2.getEsmExportName = exports2.getProperty = exports2.safeStringify = exports2.stringify = exports2.strConcat = exports2.addCodeArg = exports2.str = exports2._ = exports2.nil = exports2._Code = exports2.Name = exports2.IDENTIFIER = exports2._CodeOrName = void 0;
@@ -188,9 +188,9 @@ var require_code = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/codegen/scope.js
+// node_modules/ajv/dist/compile/codegen/scope.js
 var require_scope = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/codegen/scope.js"(exports2) {
+  "node_modules/ajv/dist/compile/codegen/scope.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.ValueScope = exports2.ValueScopeName = exports2.Scope = exports2.varKinds = exports2.UsedValueState = void 0;
@@ -333,9 +333,9 @@ var require_scope = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/codegen/index.js
+// node_modules/ajv/dist/compile/codegen/index.js
 var require_codegen = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/codegen/index.js"(exports2) {
+  "node_modules/ajv/dist/compile/codegen/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.or = exports2.and = exports2.not = exports2.CodeGen = exports2.operators = exports2.varKinds = exports2.ValueScopeName = exports2.ValueScope = exports2.Scope = exports2.Name = exports2.regexpCode = exports2.stringify = exports2.getProperty = exports2.nil = exports2.strConcat = exports2.str = exports2._ = void 0;
@@ -1053,9 +1053,9 @@ var require_codegen = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/util.js
+// node_modules/ajv/dist/compile/util.js
 var require_util = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/util.js"(exports2) {
+  "node_modules/ajv/dist/compile/util.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.checkStrictMode = exports2.getErrorPath = exports2.Type = exports2.useFunc = exports2.setEvaluated = exports2.evaluatedPropsToName = exports2.mergeEvaluated = exports2.eachItem = exports2.unescapeJsonPointer = exports2.escapeJsonPointer = exports2.escapeFragment = exports2.unescapeFragment = exports2.schemaRefOrVal = exports2.schemaHasRulesButRef = exports2.schemaHasRules = exports2.checkUnknownRules = exports2.alwaysValidSchema = exports2.toHash = void 0;
@@ -1220,9 +1220,9 @@ var require_util = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/names.js
+// node_modules/ajv/dist/compile/names.js
 var require_names = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/names.js"(exports2) {
+  "node_modules/ajv/dist/compile/names.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -1259,9 +1259,9 @@ var require_names = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/errors.js
+// node_modules/ajv/dist/compile/errors.js
 var require_errors = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/errors.js"(exports2) {
+  "node_modules/ajv/dist/compile/errors.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.extendErrors = exports2.resetErrorsCount = exports2.reportExtraError = exports2.reportError = exports2.keyword$DataError = exports2.keywordError = void 0;
@@ -1381,9 +1381,9 @@ var require_errors = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/validate/boolSchema.js
+// node_modules/ajv/dist/compile/validate/boolSchema.js
 var require_boolSchema = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/validate/boolSchema.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/boolSchema.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.boolOrEmptySchema = exports2.topBoolOrEmptySchema = void 0;
@@ -1432,9 +1432,9 @@ var require_boolSchema = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/rules.js
+// node_modules/ajv/dist/compile/rules.js
 var require_rules = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/rules.js"(exports2) {
+  "node_modules/ajv/dist/compile/rules.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.getRules = exports2.isJSONType = void 0;
@@ -1463,9 +1463,9 @@ var require_rules = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/validate/applicability.js
+// node_modules/ajv/dist/compile/validate/applicability.js
 var require_applicability = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/validate/applicability.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/applicability.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.shouldUseRule = exports2.shouldUseGroup = exports2.schemaHasRulesForType = void 0;
@@ -1486,9 +1486,9 @@ var require_applicability = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/validate/dataType.js
+// node_modules/ajv/dist/compile/validate/dataType.js
 var require_dataType = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/validate/dataType.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/dataType.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.reportTypeError = exports2.checkDataTypes = exports2.checkDataType = exports2.coerceAndCheckDataType = exports2.getJSONTypes = exports2.getSchemaTypes = exports2.DataType = void 0;
@@ -1670,9 +1670,9 @@ var require_dataType = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/validate/defaults.js
+// node_modules/ajv/dist/compile/validate/defaults.js
 var require_defaults = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/validate/defaults.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/defaults.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.assignDefaults = void 0;
@@ -1707,9 +1707,9 @@ var require_defaults = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/code.js
+// node_modules/ajv/dist/vocabularies/code.js
 var require_code2 = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/code.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/code.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.validateUnion = exports2.validateArray = exports2.usePattern = exports2.callValidateCode = exports2.schemaProperties = exports2.allSchemaProperties = exports2.noPropertyInData = exports2.propertyInData = exports2.isOwnProperty = exports2.hasPropFunc = exports2.reportMissingProp = exports2.checkMissingProp = exports2.checkReportMissingProp = void 0;
@@ -1840,9 +1840,9 @@ var require_code2 = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/validate/keyword.js
+// node_modules/ajv/dist/compile/validate/keyword.js
 var require_keyword = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/validate/keyword.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/keyword.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.validateKeywordUsage = exports2.validSchemaType = exports2.funcKeywordCode = exports2.macroKeywordCode = void 0;
@@ -1958,9 +1958,9 @@ var require_keyword = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/validate/subschema.js
+// node_modules/ajv/dist/compile/validate/subschema.js
 var require_subschema = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/validate/subschema.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/subschema.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.extendSubschemaMode = exports2.extendSubschemaData = exports2.getSubschema = void 0;
@@ -2041,9 +2041,9 @@ var require_subschema = __commonJS({
   }
 });
 
-// ../../../../node_modules/fast-deep-equal/index.js
+// node_modules/fast-deep-equal/index.js
 var require_fast_deep_equal = __commonJS({
-  "../../../../node_modules/fast-deep-equal/index.js"(exports2, module2) {
+  "node_modules/fast-deep-equal/index.js"(exports2, module2) {
     "use strict";
     module2.exports = function equal(a, b) {
       if (a === b) return true;
@@ -2076,9 +2076,9 @@ var require_fast_deep_equal = __commonJS({
   }
 });
 
-// ../../../../node_modules/json-schema-traverse/index.js
+// node_modules/json-schema-traverse/index.js
 var require_json_schema_traverse = __commonJS({
-  "../../../../node_modules/json-schema-traverse/index.js"(exports2, module2) {
+  "node_modules/json-schema-traverse/index.js"(exports2, module2) {
     "use strict";
     var traverse = module2.exports = function(schema, opts, cb) {
       if (typeof opts == "function") {
@@ -2164,9 +2164,9 @@ var require_json_schema_traverse = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/resolve.js
+// node_modules/ajv/dist/compile/resolve.js
 var require_resolve = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/resolve.js"(exports2) {
+  "node_modules/ajv/dist/compile/resolve.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.getSchemaRefs = exports2.resolveUrl = exports2.normalizeId = exports2._getFullPath = exports2.getFullPath = exports2.inlineRef = void 0;
@@ -2320,9 +2320,9 @@ var require_resolve = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/validate/index.js
+// node_modules/ajv/dist/compile/validate/index.js
 var require_validate = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/validate/index.js"(exports2) {
+  "node_modules/ajv/dist/compile/validate/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.getData = exports2.KeywordCxt = exports2.validateFunctionCode = void 0;
@@ -2828,9 +2828,9 @@ var require_validate = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/runtime/validation_error.js
+// node_modules/ajv/dist/runtime/validation_error.js
 var require_validation_error = __commonJS({
-  "../../../../node_modules/ajv/dist/runtime/validation_error.js"(exports2) {
+  "node_modules/ajv/dist/runtime/validation_error.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var ValidationError = class extends Error {
@@ -2844,9 +2844,9 @@ var require_validation_error = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/ref_error.js
+// node_modules/ajv/dist/compile/ref_error.js
 var require_ref_error = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/ref_error.js"(exports2) {
+  "node_modules/ajv/dist/compile/ref_error.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var resolve_1 = require_resolve();
@@ -2861,9 +2861,9 @@ var require_ref_error = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/compile/index.js
+// node_modules/ajv/dist/compile/index.js
 var require_compile = __commonJS({
-  "../../../../node_modules/ajv/dist/compile/index.js"(exports2) {
+  "node_modules/ajv/dist/compile/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.resolveSchema = exports2.getCompilingSchema = exports2.resolveRef = exports2.compileSchema = exports2.SchemaEnv = void 0;
@@ -3085,9 +3085,9 @@ var require_compile = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/refs/data.json
+// node_modules/ajv/dist/refs/data.json
 var require_data = __commonJS({
-  "../../../../node_modules/ajv/dist/refs/data.json"(exports2, module2) {
+  "node_modules/ajv/dist/refs/data.json"(exports2, module2) {
     module2.exports = {
       $id: "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#",
       description: "Meta-schema for $data reference (JSON AnySchema extension proposal)",
@@ -3104,9 +3104,9 @@ var require_data = __commonJS({
   }
 });
 
-// ../../../../node_modules/fast-uri/lib/utils.js
+// node_modules/fast-uri/lib/utils.js
 var require_utils = __commonJS({
-  "../../../../node_modules/fast-uri/lib/utils.js"(exports2, module2) {
+  "node_modules/fast-uri/lib/utils.js"(exports2, module2) {
     "use strict";
     var isUUID = RegExp.prototype.test.bind(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu);
     var isIPv4 = RegExp.prototype.test.bind(/^(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)$/u);
@@ -3230,8 +3230,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path49) {
-      let input = path49;
+    function removeDotSegments(path51) {
+      let input = path51;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3417,9 +3417,9 @@ var require_utils = __commonJS({
   }
 });
 
-// ../../../../node_modules/fast-uri/lib/schemes.js
+// node_modules/fast-uri/lib/schemes.js
 var require_schemes = __commonJS({
-  "../../../../node_modules/fast-uri/lib/schemes.js"(exports2, module2) {
+  "node_modules/fast-uri/lib/schemes.js"(exports2, module2) {
     "use strict";
     var { isUUID } = require_utils();
     var URN_REG = /([\da-z][\d\-a-z]{0,31}):((?:[\w!$'()*+,\-.:;=@]|%[\da-f]{2})+)/iu;
@@ -3483,8 +3483,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path49, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path49 && path49 !== "/" ? path49 : void 0;
+        const [path51, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path51 && path51 !== "/" ? path51 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -3627,9 +3627,9 @@ var require_schemes = __commonJS({
   }
 });
 
-// ../../../../node_modules/fast-uri/index.js
+// node_modules/fast-uri/index.js
 var require_fast_uri = __commonJS({
-  "../../../../node_modules/fast-uri/index.js"(exports2, module2) {
+  "node_modules/fast-uri/index.js"(exports2, module2) {
     "use strict";
     var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, escapePreservingEscapes, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
     var { SCHEMES, getSchemeHandler } = require_schemes();
@@ -3649,49 +3649,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative24, options, skipNormalization) {
+    function resolveComponent(base, relative25, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative24 = parse3(serialize(relative24, options), options);
+        relative25 = parse3(serialize(relative25, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative24.scheme) {
-        target.scheme = relative24.scheme;
-        target.userinfo = relative24.userinfo;
-        target.host = relative24.host;
-        target.port = relative24.port;
-        target.path = removeDotSegments(relative24.path || "");
-        target.query = relative24.query;
+      if (!options.tolerant && relative25.scheme) {
+        target.scheme = relative25.scheme;
+        target.userinfo = relative25.userinfo;
+        target.host = relative25.host;
+        target.port = relative25.port;
+        target.path = removeDotSegments(relative25.path || "");
+        target.query = relative25.query;
       } else {
-        if (relative24.userinfo !== void 0 || relative24.host !== void 0 || relative24.port !== void 0) {
-          target.userinfo = relative24.userinfo;
-          target.host = relative24.host;
-          target.port = relative24.port;
-          target.path = removeDotSegments(relative24.path || "");
-          target.query = relative24.query;
+        if (relative25.userinfo !== void 0 || relative25.host !== void 0 || relative25.port !== void 0) {
+          target.userinfo = relative25.userinfo;
+          target.host = relative25.host;
+          target.port = relative25.port;
+          target.path = removeDotSegments(relative25.path || "");
+          target.query = relative25.query;
         } else {
-          if (!relative24.path) {
+          if (!relative25.path) {
             target.path = base.path;
-            if (relative24.query !== void 0) {
-              target.query = relative24.query;
+            if (relative25.query !== void 0) {
+              target.query = relative25.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative24.path[0] === "/") {
-              target.path = removeDotSegments(relative24.path);
+            if (relative25.path[0] === "/") {
+              target.path = removeDotSegments(relative25.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative24.path;
+                target.path = "/" + relative25.path;
               } else if (!base.path) {
-                target.path = relative24.path;
+                target.path = relative25.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative24.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative25.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative24.query;
+            target.query = relative25.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3699,7 +3699,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative24.fragment;
+      target.fragment = relative25.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -3913,9 +3913,9 @@ var require_fast_uri = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/runtime/uri.js
+// node_modules/ajv/dist/runtime/uri.js
 var require_uri = __commonJS({
-  "../../../../node_modules/ajv/dist/runtime/uri.js"(exports2) {
+  "node_modules/ajv/dist/runtime/uri.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var uri = require_fast_uri();
@@ -3924,9 +3924,9 @@ var require_uri = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/core.js
+// node_modules/ajv/dist/core.js
 var require_core = __commonJS({
-  "../../../../node_modules/ajv/dist/core.js"(exports2) {
+  "node_modules/ajv/dist/core.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.CodeGen = exports2.Name = exports2.nil = exports2.stringify = exports2.str = exports2._ = exports2.KeywordCxt = void 0;
@@ -4535,9 +4535,9 @@ var require_core = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/core/id.js
+// node_modules/ajv/dist/vocabularies/core/id.js
 var require_id = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/core/id.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/core/id.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var def = {
@@ -4550,9 +4550,9 @@ var require_id = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/core/ref.js
+// node_modules/ajv/dist/vocabularies/core/ref.js
 var require_ref = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/core/ref.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/core/ref.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.callRef = exports2.getValidate = void 0;
@@ -4672,9 +4672,9 @@ var require_ref = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/core/index.js
+// node_modules/ajv/dist/vocabularies/core/index.js
 var require_core2 = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/core/index.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/core/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var id_1 = require_id();
@@ -4693,9 +4693,9 @@ var require_core2 = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/validation/limitNumber.js
+// node_modules/ajv/dist/vocabularies/validation/limitNumber.js
 var require_limitNumber = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/validation/limitNumber.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/limitNumber.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -4725,9 +4725,9 @@ var require_limitNumber = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/validation/multipleOf.js
+// node_modules/ajv/dist/vocabularies/validation/multipleOf.js
 var require_multipleOf = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/validation/multipleOf.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/multipleOf.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -4753,9 +4753,9 @@ var require_multipleOf = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/runtime/ucs2length.js
+// node_modules/ajv/dist/runtime/ucs2length.js
 var require_ucs2length = __commonJS({
-  "../../../../node_modules/ajv/dist/runtime/ucs2length.js"(exports2) {
+  "node_modules/ajv/dist/runtime/ucs2length.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     function ucs2length(str) {
@@ -4779,9 +4779,9 @@ var require_ucs2length = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/validation/limitLength.js
+// node_modules/ajv/dist/vocabularies/validation/limitLength.js
 var require_limitLength = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/validation/limitLength.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/limitLength.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -4811,9 +4811,9 @@ var require_limitLength = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/validation/pattern.js
+// node_modules/ajv/dist/vocabularies/validation/pattern.js
 var require_pattern = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/validation/pattern.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/pattern.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -4848,9 +4848,9 @@ var require_pattern = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/validation/limitProperties.js
+// node_modules/ajv/dist/vocabularies/validation/limitProperties.js
 var require_limitProperties = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/validation/limitProperties.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/limitProperties.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -4877,9 +4877,9 @@ var require_limitProperties = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/validation/required.js
+// node_modules/ajv/dist/vocabularies/validation/required.js
 var require_required = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/validation/required.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/required.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -4959,9 +4959,9 @@ var require_required = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/validation/limitItems.js
+// node_modules/ajv/dist/vocabularies/validation/limitItems.js
 var require_limitItems = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/validation/limitItems.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/limitItems.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -4988,9 +4988,9 @@ var require_limitItems = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/runtime/equal.js
+// node_modules/ajv/dist/runtime/equal.js
 var require_equal = __commonJS({
-  "../../../../node_modules/ajv/dist/runtime/equal.js"(exports2) {
+  "node_modules/ajv/dist/runtime/equal.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var equal = require_fast_deep_equal();
@@ -4999,9 +4999,9 @@ var require_equal = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
+// node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
 var require_uniqueItems = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/validation/uniqueItems.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/uniqueItems.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var dataType_1 = require_dataType();
@@ -5066,9 +5066,9 @@ var require_uniqueItems = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/validation/const.js
+// node_modules/ajv/dist/vocabularies/validation/const.js
 var require_const = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/validation/const.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/const.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -5095,9 +5095,9 @@ var require_const = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/validation/enum.js
+// node_modules/ajv/dist/vocabularies/validation/enum.js
 var require_enum = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/validation/enum.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/enum.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -5144,9 +5144,9 @@ var require_enum = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/validation/index.js
+// node_modules/ajv/dist/vocabularies/validation/index.js
 var require_validation = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/validation/index.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/validation/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var limitNumber_1 = require_limitNumber();
@@ -5182,9 +5182,9 @@ var require_validation = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
+// node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
 var require_additionalItems = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/additionalItems.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/additionalItems.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.validateAdditionalItems = void 0;
@@ -5235,9 +5235,9 @@ var require_additionalItems = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/items.js
+// node_modules/ajv/dist/vocabularies/applicator/items.js
 var require_items = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/items.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/items.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.validateTuple = void 0;
@@ -5292,9 +5292,9 @@ var require_items = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
+// node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
 var require_prefixItems = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/prefixItems.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/prefixItems.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var items_1 = require_items();
@@ -5309,9 +5309,9 @@ var require_prefixItems = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/items2020.js
+// node_modules/ajv/dist/vocabularies/applicator/items2020.js
 var require_items2020 = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/items2020.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/items2020.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -5344,9 +5344,9 @@ var require_items2020 = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/contains.js
+// node_modules/ajv/dist/vocabularies/applicator/contains.js
 var require_contains = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/contains.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/contains.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -5438,9 +5438,9 @@ var require_contains = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/dependencies.js
+// node_modules/ajv/dist/vocabularies/applicator/dependencies.js
 var require_dependencies = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/dependencies.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/dependencies.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.validateSchemaDeps = exports2.validatePropertyDeps = exports2.error = void 0;
@@ -5532,9 +5532,9 @@ var require_dependencies = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
+// node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
 var require_propertyNames = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/propertyNames.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/propertyNames.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -5575,9 +5575,9 @@ var require_propertyNames = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
+// node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
 var require_additionalProperties = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -5681,9 +5681,9 @@ var require_additionalProperties = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/properties.js
+// node_modules/ajv/dist/vocabularies/applicator/properties.js
 var require_properties = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/properties.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/properties.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var validate_1 = require_validate();
@@ -5739,9 +5739,9 @@ var require_properties = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
+// node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
 var require_patternProperties = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/patternProperties.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/patternProperties.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -5813,9 +5813,9 @@ var require_patternProperties = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/not.js
+// node_modules/ajv/dist/vocabularies/applicator/not.js
 var require_not = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/not.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/not.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var util_1 = require_util();
@@ -5844,9 +5844,9 @@ var require_not = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/anyOf.js
+// node_modules/ajv/dist/vocabularies/applicator/anyOf.js
 var require_anyOf = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/anyOf.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/anyOf.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -5861,9 +5861,9 @@ var require_anyOf = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/oneOf.js
+// node_modules/ajv/dist/vocabularies/applicator/oneOf.js
 var require_oneOf = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/oneOf.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/oneOf.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -5919,9 +5919,9 @@ var require_oneOf = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/allOf.js
+// node_modules/ajv/dist/vocabularies/applicator/allOf.js
 var require_allOf = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/allOf.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/allOf.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var util_1 = require_util();
@@ -5946,9 +5946,9 @@ var require_allOf = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/if.js
+// node_modules/ajv/dist/vocabularies/applicator/if.js
 var require_if = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/if.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/if.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6015,9 +6015,9 @@ var require_if = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/thenElse.js
+// node_modules/ajv/dist/vocabularies/applicator/thenElse.js
 var require_thenElse = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/thenElse.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/thenElse.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var util_1 = require_util();
@@ -6033,9 +6033,9 @@ var require_thenElse = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/applicator/index.js
+// node_modules/ajv/dist/vocabularies/applicator/index.js
 var require_applicator = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/applicator/index.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/applicator/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var additionalItems_1 = require_additionalItems();
@@ -6081,9 +6081,9 @@ var require_applicator = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/format/format.js
+// node_modules/ajv/dist/vocabularies/format/format.js
 var require_format = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/format/format.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/format/format.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6171,9 +6171,9 @@ var require_format = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/format/index.js
+// node_modules/ajv/dist/vocabularies/format/index.js
 var require_format2 = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/format/index.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/format/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var format_1 = require_format();
@@ -6182,9 +6182,9 @@ var require_format2 = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/metadata.js
+// node_modules/ajv/dist/vocabularies/metadata.js
 var require_metadata = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/metadata.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/metadata.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.contentVocabulary = exports2.metadataVocabulary = void 0;
@@ -6205,9 +6205,9 @@ var require_metadata = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/draft7.js
+// node_modules/ajv/dist/vocabularies/draft7.js
 var require_draft7 = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/draft7.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/draft7.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var core_1 = require_core2();
@@ -6227,9 +6227,9 @@ var require_draft7 = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/discriminator/types.js
+// node_modules/ajv/dist/vocabularies/discriminator/types.js
 var require_types = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/discriminator/types.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/discriminator/types.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.DiscrError = void 0;
@@ -6241,9 +6241,9 @@ var require_types = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/vocabularies/discriminator/index.js
+// node_modules/ajv/dist/vocabularies/discriminator/index.js
 var require_discriminator = __commonJS({
-  "../../../../node_modules/ajv/dist/vocabularies/discriminator/index.js"(exports2) {
+  "node_modules/ajv/dist/vocabularies/discriminator/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6346,9 +6346,9 @@ var require_discriminator = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/refs/json-schema-draft-07.json
+// node_modules/ajv/dist/refs/json-schema-draft-07.json
 var require_json_schema_draft_07 = __commonJS({
-  "../../../../node_modules/ajv/dist/refs/json-schema-draft-07.json"(exports2, module2) {
+  "node_modules/ajv/dist/refs/json-schema-draft-07.json"(exports2, module2) {
     module2.exports = {
       $schema: "http://json-schema.org/draft-07/schema#",
       $id: "http://json-schema.org/draft-07/schema#",
@@ -6503,9 +6503,9 @@ var require_json_schema_draft_07 = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv/dist/ajv.js
+// node_modules/ajv/dist/ajv.js
 var require_ajv = __commonJS({
-  "../../../../node_modules/ajv/dist/ajv.js"(exports2, module2) {
+  "node_modules/ajv/dist/ajv.js"(exports2, module2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.MissingRefError = exports2.ValidationError = exports2.CodeGen = exports2.Name = exports2.nil = exports2.stringify = exports2.str = exports2._ = exports2.KeywordCxt = exports2.Ajv = void 0;
@@ -6573,9 +6573,9 @@ var require_ajv = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv-formats/dist/formats.js
+// node_modules/ajv-formats/dist/formats.js
 var require_formats = __commonJS({
-  "../../../../node_modules/ajv-formats/dist/formats.js"(exports2) {
+  "node_modules/ajv-formats/dist/formats.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.formatNames = exports2.fastFormats = exports2.fullFormats = void 0;
@@ -6776,9 +6776,9 @@ var require_formats = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv-formats/dist/limit.js
+// node_modules/ajv-formats/dist/limit.js
 var require_limit = __commonJS({
-  "../../../../node_modules/ajv-formats/dist/limit.js"(exports2) {
+  "node_modules/ajv-formats/dist/limit.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.formatLimitDefinition = void 0;
@@ -6848,9 +6848,9 @@ var require_limit = __commonJS({
   }
 });
 
-// ../../../../node_modules/ajv-formats/dist/index.js
+// node_modules/ajv-formats/dist/index.js
 var require_dist = __commonJS({
-  "../../../../node_modules/ajv-formats/dist/index.js"(exports2, module2) {
+  "node_modules/ajv-formats/dist/index.js"(exports2, module2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     var formats_1 = require_formats();
@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs44, exportName) {
+    function addFormats(ajv, list, fs46, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs44[f]);
+        ajv.addFormat(f, fs46[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -6912,7 +6912,7 @@ __export(mcp_server_exports, {
 });
 module.exports = __toCommonJS(mcp_server_exports);
 
-// ../../../../node_modules/zod/v4/core/core.js
+// node_modules/zod/v4/core/core.js
 var _a;
 // @__NO_SIDE_EFFECTS__
 function $constructor(name, initializer3, params) {
@@ -6985,7 +6985,7 @@ function config(newConfig) {
   return globalConfig;
 }
 
-// ../../../../node_modules/zod/v4/core/util.js
+// node_modules/zod/v4/core/util.js
 var util_exports = {};
 __export(util_exports, {
   BIGINT_FORMAT_RANGES: () => BIGINT_FORMAT_RANGES,
@@ -7152,10 +7152,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path49) {
-  if (!path49)
+function getElementAtPath(obj, path51) {
+  if (!path51)
     return obj;
-  return path49.reduce((acc, key) => acc?.[key], obj);
+  return path51.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7564,11 +7564,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path49, issues) {
+function prefixIssues(path51, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path49);
+    iss.path.unshift(path51);
     return iss;
   });
 }
@@ -7681,7 +7681,7 @@ var Class = class {
   }
 };
 
-// ../../../../node_modules/zod/v4/core/errors.js
+// node_modules/zod/v4/core/errors.js
 var initializer = (inst, def) => {
   inst.name = "$ZodError";
   Object.defineProperty(inst, "_zod", {
@@ -7715,16 +7715,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path49 = []) => {
+  const processError = (error3, path51 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path49, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path51, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path49, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path51, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path49, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path51, ...issue2.path]);
       } else {
-        const fullpath = [...path49, ...issue2.path];
+        const fullpath = [...path51, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -7750,7 +7750,7 @@ function formatError(error2, mapper = (issue2) => issue2.message) {
   return fieldErrors;
 }
 
-// ../../../../node_modules/zod/v4/core/parse.js
+// node_modules/zod/v4/core/parse.js
 var _parse = (_Err) => (schema, value, _ctx, _params) => {
   const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
   const result = schema._zod.run({ value, issues: [] }, ctx);
@@ -7828,7 +7828,7 @@ var _safeDecodeAsync = (_Err) => async (schema, value, _ctx) => {
   return _safeParseAsync(_Err)(schema, value, _ctx);
 };
 
-// ../../../../node_modules/zod/v4/core/regexes.js
+// node_modules/zod/v4/core/regexes.js
 var cuid = /^[cC][0-9a-z]{6,}$/;
 var cuid2 = /^[0-9a-z]+$/;
 var ulid = /^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$/;
@@ -7886,7 +7886,7 @@ var _null = /^null$/i;
 var lowercase = /^[^A-Z]*$/;
 var uppercase = /^[^a-z]*$/;
 
-// ../../../../node_modules/zod/v4/core/checks.js
+// node_modules/zod/v4/core/checks.js
 var $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
   var _a3;
   inst._zod ?? (inst._zod = {});
@@ -8276,7 +8276,7 @@ var $ZodCheckOverwrite = /* @__PURE__ */ $constructor("$ZodCheckOverwrite", (ins
   };
 });
 
-// ../../../../node_modules/zod/v4/core/doc.js
+// node_modules/zod/v4/core/doc.js
 var Doc = class {
   constructor(args = []) {
     this.content = [];
@@ -8312,14 +8312,14 @@ var Doc = class {
   }
 };
 
-// ../../../../node_modules/zod/v4/core/versions.js
+// node_modules/zod/v4/core/versions.js
 var version = {
   major: 4,
   minor: 4,
   patch: 3
 };
 
-// ../../../../node_modules/zod/v4/core/schemas.js
+// node_modules/zod/v4/core/schemas.js
 var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
   var _a3;
   inst ?? (inst = {});
@@ -9799,7 +9799,7 @@ function handleRefineResult(result, payload, input, inst) {
   }
 }
 
-// ../../../../node_modules/zod/v4/locales/en.js
+// node_modules/zod/v4/locales/en.js
 var error = () => {
   const Sizable = {
     string: { unit: "characters", verb: "to have" },
@@ -9912,7 +9912,7 @@ function en_default() {
   };
 }
 
-// ../../../../node_modules/zod/v4/core/registries.js
+// node_modules/zod/v4/core/registries.js
 var _a2;
 var $ZodRegistry = class {
   constructor() {
@@ -9960,7 +9960,7 @@ function registry() {
 (_a2 = globalThis).__zod_globalRegistry ?? (_a2.__zod_globalRegistry = registry());
 var globalRegistry = globalThis.__zod_globalRegistry;
 
-// ../../../../node_modules/zod/v4/core/api.js
+// node_modules/zod/v4/core/api.js
 // @__NO_SIDE_EFFECTS__
 function _string(Class2, params) {
   return new Class2({
@@ -10488,7 +10488,7 @@ function _check(fn, params) {
   return ch;
 }
 
-// ../../../../node_modules/zod/v4/core/to-json-schema.js
+// node_modules/zod/v4/core/to-json-schema.js
 function initializeContext(params) {
   let target = params?.target ?? "draft-2020-12";
   if (target === "draft-4")
@@ -10847,7 +10847,7 @@ var createStandardJSONSchemaMethod = (schema, io, processors = {}) => (params) =
   return finalize(ctx, schema);
 };
 
-// ../../../../node_modules/zod/v4/core/json-schema-processors.js
+// node_modules/zod/v4/core/json-schema-processors.js
 var formatMap = {
   guid: "uuid",
   url: "uri",
@@ -11180,7 +11180,7 @@ var optionalProcessor = (schema, ctx, _json, params) => {
   seen.ref = def.innerType;
 };
 
-// ../../../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
 function isZ4Schema(s) {
   const schema = s;
   return !!schema._zod;
@@ -11243,7 +11243,7 @@ function getLiteralValue(schema) {
   return void 0;
 }
 
-// ../../../../node_modules/zod/v4/classic/iso.js
+// node_modules/zod/v4/classic/iso.js
 var iso_exports = {};
 __export(iso_exports, {
   ZodISODate: () => ZodISODate,
@@ -11284,7 +11284,7 @@ function duration2(params) {
   return _isoDuration(ZodISODuration, params);
 }
 
-// ../../../../node_modules/zod/v4/classic/errors.js
+// node_modules/zod/v4/classic/errors.js
 var initializer2 = (inst, issues) => {
   $ZodError.init(inst, issues);
   inst.name = "ZodError";
@@ -11323,7 +11323,7 @@ var ZodRealError = /* @__PURE__ */ $constructor("ZodError", initializer2, {
   Parent: Error
 });
 
-// ../../../../node_modules/zod/v4/classic/parse.js
+// node_modules/zod/v4/classic/parse.js
 var parse2 = /* @__PURE__ */ _parse(ZodRealError);
 var parseAsync2 = /* @__PURE__ */ _parseAsync(ZodRealError);
 var safeParse3 = /* @__PURE__ */ _safeParse(ZodRealError);
@@ -11337,7 +11337,7 @@ var safeDecode2 = /* @__PURE__ */ _safeDecode(ZodRealError);
 var safeEncodeAsync2 = /* @__PURE__ */ _safeEncodeAsync(ZodRealError);
 var safeDecodeAsync2 = /* @__PURE__ */ _safeDecodeAsync(ZodRealError);
 
-// ../../../../node_modules/zod/v4/classic/schemas.js
+// node_modules/zod/v4/classic/schemas.js
 var _installedGroups = /* @__PURE__ */ new WeakMap();
 function _installLazyMethods(inst, group, methods) {
   const proto = Object.getPrototypeOf(inst);
@@ -12179,10 +12179,10 @@ function preprocess(fn, schema) {
   });
 }
 
-// ../../../../node_modules/zod/v4/classic/external.js
+// node_modules/zod/v4/classic/external.js
 config(en_default());
 
-// ../../../../node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
 var LATEST_PROTOCOL_VERSION = "2025-11-25";
 var SUPPORTED_PROTOCOL_VERSIONS = [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 var RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task";
@@ -13701,15 +13701,15 @@ var UrlElicitationRequiredError = class extends McpError {
   }
 };
 
-// ../../../../node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
 function isTerminal(status) {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 
-// ../../../../node_modules/zod-to-json-schema/dist/esm/parsers/string.js
+// node_modules/zod-to-json-schema/dist/esm/parsers/string.js
 var ALPHA_NUMERIC = new Set("ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvxyz0123456789");
 
-// ../../../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
 function getMethodLiteral(schema) {
   const shape = getObjectShape(schema);
   const methodSchema = shape?.method;
@@ -13730,7 +13730,7 @@ function parseWithCompat(schema, data) {
   return result.data;
 }
 
-// ../../../../node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
 var DEFAULT_REQUEST_TIMEOUT_MSEC = 6e4;
 var Protocol = class {
   constructor(_options) {
@@ -14684,7 +14684,7 @@ function mergeCapabilities(base, additional) {
   return result;
 }
 
-// ../../../../node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
 var import_ajv = __toESM(require_ajv(), 1);
 var import_ajv_formats = __toESM(require_dist(), 1);
 function createDefaultAjvInstance() {
@@ -14752,7 +14752,7 @@ var AjvJsonSchemaValidator = class {
   }
 };
 
-// ../../../../node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
 var ExperimentalServerTasks = class {
   constructor(_server) {
     this._server = _server;
@@ -14965,7 +14965,7 @@ var ExperimentalServerTasks = class {
   }
 };
 
-// ../../../../node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
 function assertToolsCallTaskCapability(requests, method, entityName) {
   if (!requests) {
     throw new Error(`${entityName} does not support task creation (required for ${method})`);
@@ -15000,7 +15000,7 @@ function assertClientRequestTaskCapability(requests, method, entityName) {
   }
 }
 
-// ../../../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
 var Server = class extends Protocol {
   /**
    * Initializes this server with the given name and version information.
@@ -15380,10 +15380,10 @@ var Server = class extends Protocol {
   }
 };
 
-// ../../../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 var import_node_process = __toESM(require("node:process"), 1);
 
-// ../../../../node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
 var ReadBuffer = class {
   append(chunk) {
     this._buffer = this._buffer ? Buffer.concat([this._buffer, chunk]) : chunk;
@@ -15411,7 +15411,7 @@ function serializeMessage(message) {
   return JSON.stringify(message) + "\n";
 }
 
-// ../../../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 var StdioServerTransport = class {
   constructor(_stdin = import_node_process.default.stdin, _stdout = import_node_process.default.stdout) {
     this._stdin = _stdin;
@@ -15473,8 +15473,8 @@ var StdioServerTransport = class {
 };
 
 // src/mcp-server.ts
-var fs43 = __toESM(require("node:fs"));
-var path48 = __toESM(require("node:path"));
+var fs45 = __toESM(require("node:fs"));
+var path50 = __toESM(require("node:path"));
 
 // src/core/paths.ts
 var fs = __toESM(require("node:fs"));
@@ -17772,8 +17772,8 @@ function readDriftLog(paths) {
 function appendDriftLog(paths, block) {
   readDriftLog(paths);
   assertGovernedWriteSurface(paths.root, paths.driftLog);
-  const sep25 = endsWithNewline(paths.driftLog) ? "" : "\n";
-  fs11.appendFileSync(paths.driftLog, `${sep25}${block}`, "utf8");
+  const sep26 = endsWithNewline(paths.driftLog) ? "" : "\n";
+  fs11.appendFileSync(paths.driftLog, `${sep26}${block}`, "utf8");
 }
 function runDriftAdd(paths, opts) {
   return withStateLock(paths, () => runDriftAddLocked(paths, opts));
@@ -18522,8 +18522,8 @@ function ledgerCorruptFailure(e) {
 }
 
 // src/core/gate-preconditions.ts
-var fs28 = __toESM(require("node:fs"));
-var path27 = __toESM(require("node:path"));
+var fs30 = __toESM(require("node:fs"));
+var path29 = __toESM(require("node:path"));
 
 // src/core/health.ts
 var fs14 = __toESM(require("node:fs"));
@@ -22288,7 +22288,220 @@ function collectTemplateNames(root) {
 }
 
 // src/commands/interview.ts
+var fs22 = __toESM(require("node:fs"));
+var path22 = __toESM(require("node:path"));
+
+// src/core/interview-readiness.ts
 var fs21 = __toESM(require("node:fs"));
+var path21 = __toESM(require("node:path"));
+function computeReadinessGround(confidence, cutoff) {
+  return { confidence, cutoff, ready: confidence !== null && confidence >= cutoff };
+}
+var CANONICAL_FIELD_ORDER3 = [
+  "kind",
+  "refId",
+  "ground",
+  "store_coord",
+  "snapshot_coord",
+  "producer_identity",
+  "producer_kind",
+  "key_id",
+  "legacy",
+  "prevHash"
+];
+var GROUND_FIELD_ORDER = ["confidence", "cutoff", "ready"];
+var STORE_FIELD_ORDER = ["path", "digest"];
+var SNAPSHOT_FIELD_ORDER3 = ["gitHead", "treeDigest"];
+function reorder2(obj, order) {
+  const out = {};
+  for (const key of order) out[key] = obj[key];
+  return out;
+}
+function readinessCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of CANONICAL_FIELD_ORDER3) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "ground") {
+      ordered[key] = reorder2(val, GROUND_FIELD_ORDER);
+    } else if (key === "store_coord") {
+      ordered[key] = reorder2(val, STORE_FIELD_ORDER);
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder2(val, SNAPSHOT_FIELD_ORDER3);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeReadinessRecordHash(receipt) {
+  return hashContent(readinessCanonicalText(receipt));
+}
+function readinessReceiptsPath(paths) {
+  return path21.join(paths.stateDir, "interview-readiness-receipts.jsonl");
+}
+function externalReadinessReceiptsPath(paths) {
+  return path21.join(paths.stateDir, "external-interview-readiness-receipts.jsonl");
+}
+var ED25519_SIGNATURE_BASE643 = /^[A-Za-z0-9+/]{86}==$/;
+function isValidReadinessReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "interview-readiness") return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
+  if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
+  if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE643.test(r.signature))) {
+    return false;
+  }
+  const g = r.ground;
+  if (typeof g !== "object" || g === null) return false;
+  const gr = g;
+  if (!(gr.confidence === null || typeof gr.confidence === "number" && Number.isFinite(gr.confidence))) return false;
+  if (typeof gr.cutoff !== "number" || !Number.isFinite(gr.cutoff)) return false;
+  if (typeof gr.ready !== "boolean") return false;
+  const sc = r.store_coord;
+  if (typeof sc !== "object" || sc === null) return false;
+  const s2 = sc;
+  if (typeof s2.path !== "string" || typeof s2.digest !== "string") return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readReadinessReceipts(paths) {
+  return readJsonlValues(readinessReceiptsPath(paths), isValidReadinessReceipt);
+}
+function readExternalReadinessReceipts(paths) {
+  return readJsonlValues(externalReadinessReceiptsPath(paths), isValidReadinessReceipt);
+}
+function readLastReadinessRecordHash(paths) {
+  const last = scanTailValid(readinessReceiptsPath(paths), isValidReadinessReceipt);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function verifyReadinessChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeReadinessRecordHash(rest);
+    if (recomputed !== recordHash) return { ok: false, brokenAt: i, reason: "edited" };
+    if (r.prevHash !== expectedPrev) return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+function readinessRefId(paths) {
+  return currentReceiptSnapshotCoord(paths).gitHead ?? "no-git";
+}
+var StoreUnresolvedError = class extends Error {
+  constructor(message, store) {
+    super(message);
+    this.store = store;
+    this.name = "StoreUnresolvedError";
+  }
+  store;
+  /** Stable machine token for the CLI failure envelope. */
+  code = "readiness_store_unresolved";
+};
+function appendReadinessReceipt(paths, input) {
+  const digest = computeTargetDigest(paths.root, input.storePath);
+  if (digest === null) {
+    throw new StoreUnresolvedError(
+      `Refusing to mint an interview-readiness receipt for ${input.refId}: store "${input.storePath}" does not resolve in source.`,
+      input.storePath
+    );
+  }
+  return sealAndAppend2(paths, {
+    kind: "interview-readiness",
+    refId: input.refId,
+    ground: computeReadinessGround(input.confidence, input.cutoff),
+    store_coord: { path: input.storePath, digest },
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: input.producerIdentity,
+    producer_kind: "in-process"
+  });
+}
+function sealAndAppend2(paths, receipt) {
+  assertGovernedWriteSurface(paths.root, readinessReceiptsPath(paths));
+  fs21.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastReadinessRecordHash(paths);
+  const withPrev = { ...receipt, prevHash };
+  const recordHash = computeReadinessRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs21.appendFileSync(readinessReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function snapshotStaleReasons2(recorded, current) {
+  const reasons = [];
+  if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
+    reasons.push("gitHead");
+  }
+  if (recorded.treeDigest !== null && current.treeDigest !== null && recorded.treeDigest !== current.treeDigest) {
+    reasons.push("treeDigest");
+  }
+  return reasons;
+}
+function classifyReadinessContent(paths, receipt, passStatus) {
+  const recordedPath = receipt.store_coord.path;
+  const recordedDigest = receipt.store_coord.digest;
+  const currentDigest = computeTargetDigest(paths.root, recordedPath);
+  if (currentDigest === null) return { status: "store_missing", receipt };
+  if (currentDigest !== recordedDigest) return { status: "store_mismatch", receipt };
+  const staleReasons = snapshotStaleReasons2(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
+  if (staleReasons.length > 0) return { status: "stale", receipt, staleReasons };
+  const reground = computeReadinessGround(receipt.ground.confidence, receipt.ground.cutoff);
+  if (!reground.ready) return { status: "not-ready", receipt };
+  return { status: passStatus, receipt };
+}
+function claimsExternal(r) {
+  return typeof r.signature === "string" || typeof r.key_id === "string";
+}
+function signatureVerifies(receipt) {
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return false;
+  if (typeof receipt.signature !== "string") return false;
+  if (receipt.key_id !== externalKeyId(publicKey)) return false;
+  const { recordHash: _rh, signature: _sig, ...signedView } = receipt;
+  return verifyCanonical(readinessCanonicalText(signedView), receipt.signature, publicKey);
+}
+function readReadinessReceiptValidated(paths, refId) {
+  const matches = (r) => r.refId === refId;
+  const inProcessReceipts = readReadinessReceipts(paths);
+  if (!verifyReadinessChain(inProcessReceipts).ok) return { status: "tampered" };
+  let inProcess;
+  for (const r of inProcessReceipts) {
+    if (matches(r)) inProcess = r;
+  }
+  const externalReceipts = readExternalReadinessReceipts(paths);
+  const externalChainOk = verifyReadinessChain(externalReceipts).ok;
+  const externalCandidates = externalReceipts.filter((r) => matches(r) && claimsExternal(r));
+  if (externalCandidates.length > 0) {
+    const publicKey = loadExternalPublicKey();
+    if (publicKey !== null && externalChainOk) {
+      let verified;
+      for (const cand of externalCandidates) {
+        if (signatureVerifies(cand)) verified = cand;
+      }
+      if (verified) {
+        if (verified.legacy === true) return { status: "legacy", receipt: verified };
+        return classifyReadinessContent(paths, verified, "valid-grounded");
+      }
+    }
+    return { status: "forged", receipt: externalCandidates[externalCandidates.length - 1] };
+  }
+  if (!inProcess) return { status: "absent" };
+  if (inProcess.legacy === true) return { status: "legacy", receipt: inProcess };
+  return classifyReadinessContent(paths, inProcess, "valid");
+}
+
+// src/commands/interview.ts
 var DEFAULT_INTERVIEW_CUTOFF = 0.8;
 function isUnit(n) {
   return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
@@ -22335,8 +22548,8 @@ function upgradeLegacy(o) {
 function readInterview(paths, opts = {}) {
   const persist = opts.persist !== false;
   try {
-    if (!fs21.existsSync(paths.interviewFile)) return null;
-    const raw = fs21.readFileSync(paths.interviewFile, "utf8");
+    if (!fs22.existsSync(paths.interviewFile)) return null;
+    const raw = fs22.readFileSync(paths.interviewFile, "utf8");
     const parsed = JSON.parse(raw);
     if (!isInterviewState(parsed)) return null;
     const o = parsed;
@@ -22345,7 +22558,7 @@ function readInterview(paths, opts = {}) {
       if (!persist) return upgraded;
       const bak = paths.interviewFile + ".bak";
       try {
-        if (!fs21.existsSync(bak)) fs21.writeFileSync(bak, raw, "utf8");
+        if (!fs22.existsSync(bak)) fs22.writeFileSync(bak, raw, "utf8");
       } catch {
       }
       writeInterview(paths, upgraded);
@@ -22449,6 +22662,19 @@ function runInterviewRecord(paths, opts = {}) {
   };
   writeInterview(paths, next);
   const ready = computeReady(confidence, next.cutoff);
+  if (ready) {
+    const storePath = path22.relative(paths.root, paths.interviewFile).split(path22.sep).join("/");
+    withStateLock(
+      paths,
+      () => appendReadinessReceipt(paths, {
+        refId: readinessRefId(paths),
+        confidence,
+        cutoff: next.cutoff,
+        storePath,
+        producerIdentity: "in-process:interview-record"
+      })
+    );
+  }
   structuredLog({ cmd: "interview record", rounds: next.rounds.length });
   return success({
     data: { rounds: next.rounds.length, confidence, cutoff: next.cutoff, ready },
@@ -22485,21 +22711,21 @@ function runInterviewStatus(paths) {
 }
 
 // src/core/tester.ts
-var fs22 = __toESM(require("node:fs"));
-var path21 = __toESM(require("node:path"));
+var fs23 = __toESM(require("node:fs"));
+var path23 = __toESM(require("node:path"));
 function testerRecordPath(paths) {
-  return path21.join(paths.stateDir, "tester-record.json");
+  return path23.join(paths.stateDir, "tester-record.json");
 }
 function isRemoteEvidenceRef(ref) {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(ref);
 }
 function resolveEvidencePath(root, ref) {
-  return path21.isAbsolute(ref) ? ref : path21.resolve(root, ref);
+  return path23.isAbsolute(ref) ? ref : path23.resolve(root, ref);
 }
 function localEvidenceReadable(root, ref) {
   const abs = resolveEvidencePath(root, ref);
   try {
-    return fs22.existsSync(abs) && fs22.statSync(abs).isFile();
+    return fs23.existsSync(abs) && fs23.statSync(abs).isFile();
   } catch {
     return false;
   }
@@ -22509,8 +22735,8 @@ function computeReceiptDigest(root, parts) {
   if (parts.evidenceRef && !isRemoteEvidenceRef(parts.evidenceRef)) {
     const abs = resolveEvidencePath(root, parts.evidenceRef);
     try {
-      if (fs22.existsSync(abs) && fs22.statSync(abs).isFile()) {
-        evidenceContent = fs22.readFileSync(abs, "utf8");
+      if (fs23.existsSync(abs) && fs23.statSync(abs).isFile()) {
+        evidenceContent = fs23.readFileSync(abs, "utf8");
       }
     } catch {
     }
@@ -22526,10 +22752,10 @@ function computeReceiptDigest(root, parts) {
 }
 function readTesterRecord(paths) {
   const file = testerRecordPath(paths);
-  if (!fs22.existsSync(file)) return null;
+  if (!fs23.existsSync(file)) return null;
   let raw;
   try {
-    raw = fs22.readFileSync(file, "utf8");
+    raw = fs23.readFileSync(file, "utf8");
   } catch {
     return null;
   }
@@ -22602,8 +22828,8 @@ function bsc8EnforcementEnabled() {
 }
 
 // src/core/approvals.ts
-var fs23 = __toESM(require("node:fs"));
-var path22 = __toESM(require("node:path"));
+var fs24 = __toESM(require("node:fs"));
+var path24 = __toESM(require("node:path"));
 var HUMAN_GATE_STAGES = new Set(
   STAGE_PIPELINE.filter((s) => s.humanGate).map((s) => s.stage)
 );
@@ -22628,12 +22854,12 @@ var APPROVAL_CANONICAL_FIELD_ORDER = [
   "manifest_digest",
   "prevHash"
 ];
-var GROUND_FIELD_ORDER = [
+var GROUND_FIELD_ORDER2 = [
   "snapshot_coord",
   "governing_artifact_digest"
 ];
-var SNAPSHOT_FIELD_ORDER3 = ["gitHead", "treeDigest"];
-function reorder2(obj, order) {
+var SNAPSHOT_FIELD_ORDER4 = ["gitHead", "treeDigest"];
+function reorder3(obj, order) {
   const out = {};
   for (const key of order) out[key] = obj[key];
   return out;
@@ -22646,10 +22872,10 @@ function approvalCanonicalText2(receipt) {
     if (key === "approval_of") {
       const g = val;
       const normalized = {
-        snapshot_coord: reorder2(g.snapshot_coord, SNAPSHOT_FIELD_ORDER3),
+        snapshot_coord: reorder3(g.snapshot_coord, SNAPSHOT_FIELD_ORDER4),
         governing_artifact_digest: g.governing_artifact_digest
       };
-      ordered[key] = reorder2(normalized, GROUND_FIELD_ORDER);
+      ordered[key] = reorder3(normalized, GROUND_FIELD_ORDER2);
     } else {
       ordered[key] = val;
     }
@@ -22660,12 +22886,12 @@ function computeApprovalRecordHash(receipt) {
   return hashContent(approvalCanonicalText2(receipt));
 }
 function approvalReceiptsPath(paths) {
-  return path22.join(paths.stateDir, "approval-receipts.jsonl");
+  return path24.join(paths.stateDir, "approval-receipts.jsonl");
 }
 function externalApprovalsPath(paths) {
-  return path22.join(paths.stateDir, "external-approvals.jsonl");
+  return path24.join(paths.stateDir, "external-approvals.jsonl");
 }
-var ED25519_SIGNATURE_BASE643 = /^[A-Za-z0-9+/]{86}==$/;
+var ED25519_SIGNATURE_BASE644 = /^[A-Za-z0-9+/]{86}==$/;
 function isValidApproval(parsed) {
   if (typeof parsed !== "object" || parsed === null) return false;
   const r = parsed;
@@ -22678,7 +22904,7 @@ function isValidApproval(parsed) {
   if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
   if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
   if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
-  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE643.test(r.signature))) {
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE644.test(r.signature))) {
     return false;
   }
   const ground = r.approval_of;
@@ -22750,7 +22976,7 @@ function appendApprovalReceipt(paths, input) {
       artifact
     );
   }
-  return sealAndAppend2(paths, {
+  return sealAndAppend3(paths, {
     kind: "human-approval",
     stage: input.stage,
     approval_of: {
@@ -22761,17 +22987,17 @@ function appendApprovalReceipt(paths, input) {
     producer_kind: "in-process"
   });
 }
-function sealAndAppend2(paths, receipt) {
+function sealAndAppend3(paths, receipt) {
   assertGovernedWriteSurface(paths.root, approvalReceiptsPath(paths));
-  fs23.mkdirSync(paths.stateDir, { recursive: true });
+  fs24.mkdirSync(paths.stateDir, { recursive: true });
   const prevHash = readLastApprovalRecordHash(paths);
   const withPrev = { ...receipt, prevHash };
   const recordHash = computeApprovalRecordHash(withPrev);
   const sealed = { ...withPrev, recordHash };
-  fs23.appendFileSync(approvalReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  fs24.appendFileSync(approvalReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   return sealed;
 }
-function snapshotStaleReasons2(recorded, current) {
+function snapshotStaleReasons3(recorded, current) {
   const reasons = [];
   if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
     reasons.push("gitHead");
@@ -22788,7 +23014,7 @@ function classifyApprovalContent(paths, receipt, passStatus) {
   const currentDigest = computeTargetDigest(paths.root, contract.produces);
   if (currentDigest === null) return { status: "target_missing", receipt };
   if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt };
-  const staleReasons = snapshotStaleReasons2(
+  const staleReasons = snapshotStaleReasons3(
     receipt.approval_of.snapshot_coord,
     currentReceiptSnapshotCoord(paths)
   );
@@ -22842,14 +23068,14 @@ function verifyExternalApproval(candidates) {
   return verified;
 }
 function migrationMarkerPath2(paths) {
-  return path22.join(paths.stateDir, ".approval-receipts-migration");
+  return path24.join(paths.stateDir, ".approval-receipts-migration");
 }
 function readMigrationMarker2(paths) {
   const file = migrationMarkerPath2(paths);
-  if (!fs23.existsSync(file)) return void 0;
+  if (!fs24.existsSync(file)) return void 0;
   let raw;
   try {
-    raw = fs23.readFileSync(file, "utf8");
+    raw = fs24.readFileSync(file, "utf8");
   } catch {
     return void 0;
   }
@@ -22873,9 +23099,9 @@ function grandfatheredBaseline2(paths) {
 }
 
 // src/core/realization.ts
-var fs24 = __toESM(require("node:fs"));
-var path23 = __toESM(require("node:path"));
-var CANONICAL_FIELD_ORDER3 = [
+var fs25 = __toESM(require("node:fs"));
+var path25 = __toESM(require("node:path"));
+var CANONICAL_FIELD_ORDER4 = [
   "kind",
   "req_id",
   "owning_slice",
@@ -22896,21 +23122,21 @@ var CANONICAL_FIELD_ORDER3 = [
   "prevHash"
 ];
 var REFERENT_FIELD_ORDER = ["path", "digest"];
-var SNAPSHOT_FIELD_ORDER4 = ["gitHead", "treeDigest"];
-function reorder3(obj, order) {
+var SNAPSHOT_FIELD_ORDER5 = ["gitHead", "treeDigest"];
+function reorder4(obj, order) {
   const out = {};
   for (const key of order) out[key] = obj[key];
   return out;
 }
 function realizationCanonicalText(receipt) {
   const ordered = {};
-  for (const key of CANONICAL_FIELD_ORDER3) {
+  for (const key of CANONICAL_FIELD_ORDER4) {
     const val = receipt[key];
     if (val === void 0) continue;
     if (key === "referent") {
-      ordered[key] = reorder3(val, REFERENT_FIELD_ORDER);
+      ordered[key] = reorder4(val, REFERENT_FIELD_ORDER);
     } else if (key === "snapshot_coord") {
-      ordered[key] = reorder3(val, SNAPSHOT_FIELD_ORDER4);
+      ordered[key] = reorder4(val, SNAPSHOT_FIELD_ORDER5);
     } else {
       ordered[key] = val;
     }
@@ -22921,12 +23147,12 @@ function computeRealizationRecordHash(receipt) {
   return hashContent(realizationCanonicalText(receipt));
 }
 function realizationReceiptsPath(paths) {
-  return path23.join(paths.stateDir, "realization-receipts.jsonl");
+  return path25.join(paths.stateDir, "realization-receipts.jsonl");
 }
 function externalRealizationReceiptsPath(paths) {
-  return path23.join(paths.stateDir, "external-realization-receipts.jsonl");
+  return path25.join(paths.stateDir, "external-realization-receipts.jsonl");
 }
-var ED25519_SIGNATURE_BASE644 = /^[A-Za-z0-9+/]{86}==$/;
+var ED25519_SIGNATURE_BASE645 = /^[A-Za-z0-9+/]{86}==$/;
 function isValidRealizationReceipt(parsed) {
   if (typeof parsed !== "object" || parsed === null) return false;
   const r = parsed;
@@ -22940,7 +23166,7 @@ function isValidRealizationReceipt(parsed) {
   if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
   if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
   if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
-  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE644.test(r.signature))) {
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE645.test(r.signature))) {
     return false;
   }
   const ref = r.referent;
@@ -23040,10 +23266,10 @@ function unresolvedDoneSliceReqs(map, state) {
   return [...unresolved].sort();
 }
 function loadRepoMapForRealization(paths) {
-  const mapJsonPath = path23.join(paths.stateDir, "repo-map.json");
+  const mapJsonPath = path25.join(paths.stateDir, "repo-map.json");
   let raw = null;
   try {
-    raw = fs24.readFileSync(mapJsonPath, "utf8");
+    raw = fs25.readFileSync(mapJsonPath, "utf8");
   } catch {
     return null;
   }
@@ -23068,7 +23294,7 @@ function appendRealizationReceipt(paths, input) {
       input.artifactPath
     );
   }
-  return sealAndAppend3(paths, {
+  return sealAndAppend4(paths, {
     kind: "realization",
     req_id: input.reqId,
     owning_slice: input.owningSlice,
@@ -23079,7 +23305,7 @@ function appendRealizationReceipt(paths, input) {
   });
 }
 function appendLegacyRealizationReceipt(paths, reqId, owningSlice) {
-  return sealAndAppend3(paths, {
+  return sealAndAppend4(paths, {
     kind: "realization",
     req_id: reqId,
     owning_slice: owningSlice,
@@ -23089,17 +23315,17 @@ function appendLegacyRealizationReceipt(paths, reqId, owningSlice) {
     legacy: true
   });
 }
-function sealAndAppend3(paths, receipt) {
+function sealAndAppend4(paths, receipt) {
   assertGovernedWriteSurface(paths.root, realizationReceiptsPath(paths));
-  fs24.mkdirSync(paths.stateDir, { recursive: true });
+  fs25.mkdirSync(paths.stateDir, { recursive: true });
   const prevHash = readLastRealizationRecordHash(paths);
   const withPrev = { ...receipt, prevHash };
   const recordHash = computeRealizationRecordHash(withPrev);
   const sealed = { ...withPrev, recordHash };
-  fs24.appendFileSync(realizationReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  fs25.appendFileSync(realizationReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   return sealed;
 }
-function snapshotStaleReasons3(recorded, current) {
+function snapshotStaleReasons4(recorded, current) {
   const reasons = [];
   if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
     reasons.push("gitHead");
@@ -23115,14 +23341,14 @@ function classifyRealizationContent(paths, receipt, passStatus) {
   const currentDigest = computeTargetDigest(paths.root, recordedPath);
   if (currentDigest === null) return { status: "target_missing", receipt };
   if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt };
-  const staleReasons = snapshotStaleReasons3(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
+  const staleReasons = snapshotStaleReasons4(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
   if (staleReasons.length > 0) return { status: "stale", receipt, staleReasons };
   return { status: passStatus, receipt };
 }
-function claimsExternal(r) {
+function claimsExternal2(r) {
   return typeof r.signature === "string" || typeof r.key_id === "string";
 }
-function signatureVerifies(receipt) {
+function signatureVerifies2(receipt) {
   const publicKey = loadExternalPublicKey();
   if (publicKey === null) return false;
   if (typeof receipt.signature !== "string") return false;
@@ -23140,13 +23366,13 @@ function readRealizationReceiptValidated(paths, reqId) {
   }
   const externalReceipts = readExternalRealizationReceipts(paths);
   const externalChainOk = verifyRealizationChain(externalReceipts).ok;
-  const externalCandidates = externalReceipts.filter((r) => matches(r) && claimsExternal(r));
+  const externalCandidates = externalReceipts.filter((r) => matches(r) && claimsExternal2(r));
   if (externalCandidates.length > 0) {
     const publicKey = loadExternalPublicKey();
     if (publicKey !== null && externalChainOk) {
       let verified;
       for (const cand of externalCandidates) {
-        if (signatureVerifies(cand)) verified = cand;
+        if (signatureVerifies2(cand)) verified = cand;
       }
       if (verified) {
         if (verified.legacy === true) return { status: "legacy", receipt: verified };
@@ -23164,14 +23390,14 @@ function readRealizationReceiptValidated(paths, reqId) {
   return classifyRealizationContent(paths, inProcess, "valid");
 }
 function migrationMarkerPath3(paths) {
-  return path23.join(paths.stateDir, ".realization-receipts-migration");
+  return path25.join(paths.stateDir, ".realization-receipts-migration");
 }
 function readMigrationMarker3(paths) {
   const file = migrationMarkerPath3(paths);
-  if (!fs24.existsSync(file)) return void 0;
+  if (!fs25.existsSync(file)) return void 0;
   let raw;
   try {
-    raw = fs24.readFileSync(file, "utf8");
+    raw = fs25.readFileSync(file, "utf8");
   } catch {
     return void 0;
   }
@@ -23202,8 +23428,8 @@ function ensureRealizationMigration(paths, state, map) {
   const baseline = owned.map((o) => o.reqId);
   const marker = { migratedAt: (/* @__PURE__ */ new Date()).toISOString(), baseline };
   assertGovernedWriteSurface(paths.root, migrationMarkerPath3(paths));
-  fs24.mkdirSync(paths.stateDir, { recursive: true });
-  fs24.writeFileSync(migrationMarkerPath3(paths), JSON.stringify(marker), "utf8");
+  fs25.mkdirSync(paths.stateDir, { recursive: true });
+  fs25.writeFileSync(migrationMarkerPath3(paths), JSON.stringify(marker), "utf8");
 }
 function ensureRealizationMigrationOpportunistic(paths) {
   if (realizationMigrationDone(paths)) return;
@@ -23224,8 +23450,8 @@ function ensureRealizationMigrationOpportunistic(paths) {
 }
 
 // src/core/verification-driver.ts
-var fs25 = __toESM(require("node:fs"));
-var path24 = __toESM(require("node:path"));
+var fs26 = __toESM(require("node:fs"));
+var path26 = __toESM(require("node:path"));
 var SEED_DIMENSIONS = [
   // `tests-executed` — a test runner command actually ran and passed.
   { name: "tests-executed", commandMarkers: ["test", "vitest", "jest", "mocha"] },
@@ -23271,8 +23497,8 @@ var DRIVER_CANONICAL_FIELD_ORDER = [
   "prevHash"
 ];
 var DIMENSION_FIELD_ORDER = ["name", "observed", "evidenceRef"];
-var SNAPSHOT_FIELD_ORDER5 = ["gitHead", "treeDigest"];
-function reorder4(obj, order) {
+var SNAPSHOT_FIELD_ORDER6 = ["gitHead", "treeDigest"];
+function reorder5(obj, order) {
   const out = {};
   for (const key of order) out[key] = obj[key];
   return out;
@@ -23283,9 +23509,9 @@ function driverCanonicalText(receipt) {
     const val = receipt[key];
     if (val === void 0) continue;
     if (key === "dimensions") {
-      ordered[key] = val.map((d) => reorder4(d, DIMENSION_FIELD_ORDER));
+      ordered[key] = val.map((d) => reorder5(d, DIMENSION_FIELD_ORDER));
     } else if (key === "snapshot_coord") {
-      ordered[key] = reorder4(val, SNAPSHOT_FIELD_ORDER5);
+      ordered[key] = reorder5(val, SNAPSHOT_FIELD_ORDER6);
     } else {
       ordered[key] = val;
     }
@@ -23296,12 +23522,12 @@ function computeDriverRecordHash(receipt) {
   return hashContent(driverCanonicalText(receipt));
 }
 function driverReceiptsPath(paths) {
-  return path24.join(paths.stateDir, "driver-receipts.jsonl");
+  return path26.join(paths.stateDir, "driver-receipts.jsonl");
 }
 function externalDriverReceiptsPath(paths) {
-  return path24.join(paths.stateDir, "external-driver-receipts.jsonl");
+  return path26.join(paths.stateDir, "external-driver-receipts.jsonl");
 }
-var ED25519_SIGNATURE_BASE645 = /^[A-Za-z0-9+/]{86}==$/;
+var ED25519_SIGNATURE_BASE646 = /^[A-Za-z0-9+/]{86}==$/;
 function isValidDriverReceipt(parsed) {
   if (typeof parsed !== "object" || parsed === null) return false;
   const r = parsed;
@@ -23314,7 +23540,7 @@ function isValidDriverReceipt(parsed) {
   if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
   if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
   if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
-  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE645.test(r.signature))) {
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE646.test(r.signature))) {
     return false;
   }
   if (!Array.isArray(r.dimensions)) return false;
@@ -23379,7 +23605,7 @@ var EvidenceUnresolvedError = class extends Error {
   code = "driver_evidence_unresolved";
 };
 function observeDriverDimensions(paths) {
-  const evidenceRef = path24.relative(paths.root, verifyReportPath(paths)).split(path24.sep).join("/");
+  const evidenceRef = path26.relative(paths.root, verifyReportPath(paths)).split(path26.sep).join("/");
   const observed = observedDimensionsFromReport(readVerifyReport(paths));
   const out = [];
   for (const name of SEED_DIMENSION_NAMES) {
@@ -23388,7 +23614,7 @@ function observeDriverDimensions(paths) {
   return out;
 }
 function appendDriverReceipt(paths, input) {
-  const evidenceRef = path24.relative(paths.root, verifyReportPath(paths)).split(path24.sep).join("/");
+  const evidenceRef = path26.relative(paths.root, verifyReportPath(paths)).split(path26.sep).join("/");
   if (computeTargetDigest(paths.root, evidenceRef) === null) {
     throw new EvidenceUnresolvedError(
       `Refusing to mint a driver-dimension receipt: evidence artifact "${evidenceRef}" does not resolve in source.`,
@@ -23407,7 +23633,7 @@ function appendDriverReceipt(paths, input) {
     }
   }
   const dimensions = input.dimensionNames === void 0 ? observed : observed.filter((d) => input.dimensionNames.includes(d.name));
-  return sealAndAppend4(paths, {
+  return sealAndAppend5(paths, {
     kind: "driver-dimension",
     refId: driverRefId(paths),
     dimensions,
@@ -23419,17 +23645,17 @@ function appendDriverReceipt(paths, input) {
 function driverRefId(paths) {
   return currentReceiptSnapshotCoord(paths).gitHead ?? "no-git";
 }
-function sealAndAppend4(paths, receipt) {
+function sealAndAppend5(paths, receipt) {
   assertGovernedWriteSurface(paths.root, driverReceiptsPath(paths));
-  fs25.mkdirSync(paths.stateDir, { recursive: true });
+  fs26.mkdirSync(paths.stateDir, { recursive: true });
   const prevHash = readLastDriverRecordHash(paths);
   const withPrev = { ...receipt, prevHash };
   const recordHash = computeDriverRecordHash(withPrev);
   const sealed = { ...withPrev, recordHash };
-  fs25.appendFileSync(driverReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  fs26.appendFileSync(driverReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   return sealed;
 }
-function snapshotStaleReasons4(recorded, current) {
+function snapshotStaleReasons5(recorded, current) {
   const reasons = [];
   if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
     reasons.push("gitHead");
@@ -23450,7 +23676,7 @@ function validateDriverReceiptContent(paths, receipt) {
   if (unobserved.length > 0) {
     return { status: "dimension_unobserved", unobservedDimensions: unobserved };
   }
-  const staleReasons = snapshotStaleReasons4(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
+  const staleReasons = snapshotStaleReasons5(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
   if (staleReasons.length > 0) return { status: "stale", staleReasons };
   return { status: "valid" };
 }
@@ -23479,9 +23705,87 @@ function bsc2EnforcementEnabled() {
   return !(normalized === "0" || normalized === "false");
 }
 
+// src/core/bsc9-flag.ts
+function bsc9EnforcementEnabled() {
+  const raw = process.env.TH_BSC9_ENFORCE;
+  if (raw === void 0) return true;
+  const normalized = raw.trim().toLowerCase();
+  return !(normalized === "0" || normalized === "false");
+}
+
+// src/core/projection-oracle.ts
+var fs27 = __toESM(require("node:fs"));
+function referenceProjection(result) {
+  const text = result.human !== void 0 ? result.human : result.data !== void 0 ? JSON.stringify(result.data, null, 2) : result.ok ? "OK" : "FAILED";
+  return {
+    isError: !result.ok,
+    text,
+    // `exitCode` is spread LAST so the envelope's exitCode deterministically WINS over any
+    // `exitCode` nested inside `result.data` (the reserved-key precedence invariant).
+    structuredContent: { ...result.data ?? {}, exitCode: result.exitCode }
+  };
+}
+function projectionFidelity(tool, result, projected) {
+  const ref = referenceProjection(result);
+  const out = [];
+  if (projected.isError !== ref.isError) {
+    out.push({ tool, axis: "isError", detail: `expected isError=${ref.isError}, got ${projected.isError}` });
+  }
+  if (projected.structuredContent?.exitCode !== ref.structuredContent.exitCode) {
+    out.push({
+      tool,
+      axis: "exitCode",
+      detail: `expected exitCode=${String(ref.structuredContent.exitCode)}, got ${String(projected.structuredContent?.exitCode)}`
+    });
+  }
+  for (const [k, v] of Object.entries(ref.structuredContent)) {
+    if (k === "exitCode") continue;
+    if (JSON.stringify(projected.structuredContent?.[k]) !== JSON.stringify(v)) {
+      out.push({ tool, axis: "data", detail: `data.${k}: expected ${JSON.stringify(v)}, got ${JSON.stringify(projected.structuredContent?.[k])}` });
+    }
+  }
+  if (projected.text !== ref.text) {
+    out.push({ tool, axis: "text", detail: `text rendering diverged` });
+  }
+  return out;
+}
+function isValidFixtureSet(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const fx = parsed.fixtures;
+  if (!Array.isArray(fx)) return false;
+  return fx.every((f) => {
+    if (typeof f !== "object" || f === null) return false;
+    const r = f;
+    if (typeof r.tool !== "string" || r.tool === "") return false;
+    if (typeof r.result !== "object" || r.result === null) return false;
+    if (typeof r.projected !== "object" || r.projected === null) return false;
+    const proj = r.projected;
+    if (typeof proj.isError !== "boolean") return false;
+    if (typeof proj.text !== "string") return false;
+    if (typeof proj.structuredContent !== "object" || proj.structuredContent === null) return false;
+    return true;
+  });
+}
+function loadProjectionFixtures(absPath) {
+  try {
+    if (!fs27.existsSync(absPath)) return null;
+    const parsed = JSON.parse(fs27.readFileSync(absPath, "utf8"));
+    return isValidFixtureSet(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function runProjectionOracle(set) {
+  const out = [];
+  for (const f of set.fixtures) {
+    out.push(...projectionFidelity(f.tool, f.result, f.projected));
+  }
+  return out;
+}
+
 // src/core/assertion-presence.ts
-var fs26 = __toESM(require("node:fs"));
-var path25 = __toESM(require("node:path"));
+var fs28 = __toESM(require("node:fs"));
+var path27 = __toESM(require("node:path"));
 var PARSEABLE_TEST_EXTENSIONS = /* @__PURE__ */ new Set([
   ".ts",
   ".tsx",
@@ -23640,7 +23944,7 @@ function countAssertionsInText(text) {
   return { total, trivial };
 }
 function computeAssertionPresenceGround(paths, opts = {}) {
-  const testsDir = opts.testsDir ?? path25.resolve(paths.root, "tests");
+  const testsDir = opts.testsDir ?? path27.resolve(paths.root, "tests");
   const anchors = scanDirForReqIds(testsDir);
   const summaries = [];
   for (const [reqId, files] of anchors) {
@@ -23654,8 +23958,8 @@ function computeAssertionPresenceGround(paths, opts = {}) {
       if (abs === null) continue;
       let content;
       try {
-        if (!fs26.existsSync(abs) || !fs26.statSync(abs).isFile()) continue;
-        content = fs26.readFileSync(abs, "utf8");
+        if (!fs28.existsSync(abs) || !fs28.statSync(abs).isFile()) continue;
+        content = fs28.readFileSync(abs, "utf8");
       } catch {
         continue;
       }
@@ -23689,14 +23993,14 @@ var MUTATION_GROUND_FIELD_ORDER = [
   "score",
   "scope"
 ];
-var SNAPSHOT_FIELD_ORDER6 = ["gitHead", "treeDigest"];
-function reorder5(obj, order) {
+var SNAPSHOT_FIELD_ORDER7 = ["gitHead", "treeDigest"];
+function reorder6(obj, order) {
   const out = {};
   for (const key of order) out[key] = obj[key];
   return out;
 }
 function reorderSummary(summary) {
-  return reorder5(summary, SUMMARY_FIELD_ORDER);
+  return reorder6(summary, SUMMARY_FIELD_ORDER);
 }
 function serializeAssertionGround(ground) {
   return JSON.stringify(ground.map(reorderSummary));
@@ -23721,7 +24025,7 @@ function assertionPresenceCanonicalText(receipt) {
     if (key === "ground") {
       ordered[key] = val.map(reorderSummary);
     } else if (key === "snapshot_coord") {
-      ordered[key] = reorder5(val, SNAPSHOT_FIELD_ORDER6);
+      ordered[key] = reorder6(val, SNAPSHOT_FIELD_ORDER7);
     } else {
       ordered[key] = val;
     }
@@ -23732,7 +24036,7 @@ function computeAssertionPresenceRecordHash(receipt) {
   return hashContent(assertionPresenceCanonicalText(receipt));
 }
 function assertionPresenceReceiptsPath(paths) {
-  return path25.join(paths.stateDir, "assertion-presence-receipts.jsonl");
+  return path27.join(paths.stateDir, "assertion-presence-receipts.jsonl");
 }
 function isValidAssertionPresenceReceipt(parsed) {
   if (typeof parsed !== "object" || parsed === null) return false;
@@ -23798,15 +24102,15 @@ function assertionRefId(paths) {
 }
 function sealAndAppendAssertion(paths, receipt) {
   assertGovernedWriteSurface(paths.root, assertionPresenceReceiptsPath(paths));
-  fs26.mkdirSync(paths.stateDir, { recursive: true });
+  fs28.mkdirSync(paths.stateDir, { recursive: true });
   const prevHash = readLastAssertionPresenceRecordHash(paths);
   const withPrev = { ...receipt, prevHash };
   const recordHash = computeAssertionPresenceRecordHash(withPrev);
   const sealed = { ...withPrev, recordHash };
-  fs26.appendFileSync(assertionPresenceReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  fs28.appendFileSync(assertionPresenceReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   return sealed;
 }
-function snapshotStaleReasons5(recorded, current) {
+function snapshotStaleReasons6(recorded, current) {
   const reasons = [];
   if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
     reasons.push("gitHead");
@@ -23825,7 +24129,7 @@ function validateAssertionPresenceContent(paths, receipt) {
   if (assertionGroundDigest(recomputed) !== assertionGroundDigest(receipt.ground)) {
     return { status: "target_mismatch", offenders };
   }
-  const staleReasons = snapshotStaleReasons5(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
+  const staleReasons = snapshotStaleReasons6(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
   if (staleReasons.length > 0) return { status: "stale", staleReasons, offenders };
   return { status: "valid", offenders };
 }
@@ -23844,9 +24148,9 @@ function mutationKillCanonicalText(receipt) {
     const val = receipt[key];
     if (val === void 0) continue;
     if (key === "ground") {
-      ordered[key] = reorder5(val, MUTATION_GROUND_FIELD_ORDER);
+      ordered[key] = reorder6(val, MUTATION_GROUND_FIELD_ORDER);
     } else if (key === "snapshot_coord") {
-      ordered[key] = reorder5(val, SNAPSHOT_FIELD_ORDER6);
+      ordered[key] = reorder6(val, SNAPSHOT_FIELD_ORDER7);
     } else {
       ordered[key] = val;
     }
@@ -23857,9 +24161,9 @@ function computeMutationKillRecordHash(receipt) {
   return hashContent(mutationKillCanonicalText(receipt));
 }
 function externalMutationReceiptsPath(paths) {
-  return path25.join(paths.stateDir, "external-mutation-receipts.jsonl");
+  return path27.join(paths.stateDir, "external-mutation-receipts.jsonl");
 }
-var ED25519_SIGNATURE_BASE646 = /^[A-Za-z0-9+/]{86}==$/;
+var ED25519_SIGNATURE_BASE647 = /^[A-Za-z0-9+/]{86}==$/;
 function isValidMutationKillReceipt(parsed) {
   if (typeof parsed !== "object" || parsed === null) return false;
   const r = parsed;
@@ -23869,7 +24173,7 @@ function isValidMutationKillReceipt(parsed) {
   if (typeof r.key_id !== "string" || r.key_id === "") return false;
   if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
   if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
-  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE646.test(r.signature))) {
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE647.test(r.signature))) {
     return false;
   }
   const g = r.ground;
@@ -23905,7 +24209,7 @@ function verifyMutationChain(receipts) {
   }
   return { ok: true };
 }
-function signatureVerifies2(receipt) {
+function signatureVerifies3(receipt) {
   const publicKey = loadExternalPublicKey();
   if (publicKey === null) return false;
   if (typeof receipt.signature !== "string") return false;
@@ -23922,14 +24226,14 @@ function readMutationKillValidated(paths) {
   if (publicKey !== null && chainOk) {
     let verified;
     for (const cand of candidates) {
-      if (signatureVerifies2(cand)) verified = cand;
+      if (signatureVerifies3(cand)) verified = cand;
     }
     if (verified) return { status: "valid-grounded", receipt: verified };
   }
   return { status: "forged", receipt: candidates[candidates.length - 1] };
 }
 function assertionWaiversPath(paths) {
-  return path25.join(paths.stateDir, "assertion-waivers.jsonl");
+  return path27.join(paths.stateDir, "assertion-waivers.jsonl");
 }
 var ASSERTION_WAIVER_CANONICAL_FIELD_ORDER = [
   "kind",
@@ -23946,7 +24250,7 @@ function assertionWaiverCanonicalText(waiver) {
     const val = waiver[key];
     if (val === void 0) continue;
     if (key === "snapshot_coord") {
-      ordered[key] = reorder5(val, SNAPSHOT_FIELD_ORDER6);
+      ordered[key] = reorder6(val, SNAPSHOT_FIELD_ORDER7);
     } else {
       ordered[key] = val;
     }
@@ -23964,7 +24268,7 @@ function isValidAssertionWaiver(parsed) {
   if (typeof r.groundDigest !== "string" || !HEX64.test(r.groundDigest)) return false;
   if (r.producer_kind !== "external") return false;
   if (typeof r.key_id !== "string" || r.key_id === "") return false;
-  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE646.test(r.signature))) {
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE647.test(r.signature))) {
     return false;
   }
   if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
@@ -24024,9 +24328,9 @@ function validWaivedReqs(paths) {
 }
 
 // src/core/grounding.ts
-var fs27 = __toESM(require("node:fs"));
-var path26 = __toESM(require("node:path"));
-var ED25519_SIGNATURE_BASE647 = /^[A-Za-z0-9+/]{86}==$/;
+var fs29 = __toESM(require("node:fs"));
+var path28 = __toESM(require("node:path"));
+var ED25519_SIGNATURE_BASE648 = /^[A-Za-z0-9+/]{86}==$/;
 var WORK_CLASS_GROUND_MATRIX = {
   redesign: ["digest-manifest", "visual-hash"],
   recreation: ["digest-manifest", "visual-hash", "version-pin"],
@@ -24050,8 +24354,8 @@ function requiredGroundKindsForWorkClass(workClass, surfaces = [], derivedClass)
   const required2 = [...set].sort();
   return crossCheckFlag ? { required: required2, crossCheckFlag } : { required: required2 };
 }
-var SNAPSHOT_FIELD_ORDER7 = ["gitHead", "treeDigest"];
-function reorder6(obj, order) {
+var SNAPSHOT_FIELD_ORDER8 = ["gitHead", "treeDigest"];
+function reorder7(obj, order) {
   const out = {};
   for (const key of order) out[key] = obj[key];
   return out;
@@ -24086,7 +24390,7 @@ function serializeGroundingGround(ground) {
 }
 var CONFORMANCE_FIELD_ORDER = ["metric", "observed", "status"];
 function serializeConformance(conformance) {
-  return [...conformance].sort((a, b) => a.metric < b.metric ? -1 : a.metric > b.metric ? 1 : 0).map((m) => reorder6(m, CONFORMANCE_FIELD_ORDER));
+  return [...conformance].sort((a, b) => a.metric < b.metric ? -1 : a.metric > b.metric ? 1 : 0).map((m) => reorder7(m, CONFORMANCE_FIELD_ORDER));
 }
 var GROUNDING_CANONICAL_FIELD_ORDER = [
   "kind",
@@ -24113,7 +24417,7 @@ function groundingCanonicalText(receipt) {
     } else if (key === "conformance") {
       ordered[key] = serializeConformance(val);
     } else if (key === "snapshot_coord") {
-      ordered[key] = reorder6(val, SNAPSHOT_FIELD_ORDER7);
+      ordered[key] = reorder7(val, SNAPSHOT_FIELD_ORDER8);
     } else {
       ordered[key] = val;
     }
@@ -24124,16 +24428,16 @@ function computeGroundingRecordHash(receipt) {
   return hashContent(groundingCanonicalText(receipt));
 }
 function groundingReceiptsPath(paths) {
-  return path26.join(paths.stateDir, "grounding-receipts.jsonl");
+  return path28.join(paths.stateDir, "grounding-receipts.jsonl");
 }
 function externalGroundingReceiptsPath(paths) {
-  return path26.join(paths.stateDir, "external-grounding-receipts.jsonl");
+  return path28.join(paths.stateDir, "external-grounding-receipts.jsonl");
 }
 function groundingBudgetsPath(paths) {
-  return path26.join(paths.stateDir, "grounding-budgets.jsonl");
+  return path28.join(paths.stateDir, "grounding-budgets.jsonl");
 }
 function groundingExceptionsPath(paths) {
-  return path26.join(paths.stateDir, "grounding-exceptions.jsonl");
+  return path28.join(paths.stateDir, "grounding-exceptions.jsonl");
 }
 function isValidGround(parsed) {
   if (typeof parsed !== "object" || parsed === null) return false;
@@ -24185,7 +24489,7 @@ function isValidGroundingReceipt(parsed) {
   if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
   if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
   if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
-  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE647.test(r.signature))) {
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE648.test(r.signature))) {
     return false;
   }
   const snap = r.snapshot_coord;
@@ -24234,18 +24538,18 @@ function appendGroundingReceipt(paths, input) {
     ...input.diffBand !== void 0 ? { diffBand: input.diffBand } : {}
   };
   assertGovernedWriteSurface(paths.root, groundingReceiptsPath(paths));
-  fs27.mkdirSync(paths.stateDir, { recursive: true });
+  fs29.mkdirSync(paths.stateDir, { recursive: true });
   const prevHash = readLastGroundingRecordHash(paths);
   const withPrev = { ...receipt, prevHash };
   const recordHash = computeGroundingRecordHash(withPrev);
   const sealed = { ...withPrev, recordHash };
-  fs27.appendFileSync(groundingReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  fs29.appendFileSync(groundingReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   return sealed;
 }
 function groundingRefId(paths) {
   return currentReceiptSnapshotCoord(paths).gitHead ?? "no-git";
 }
-function snapshotStaleReasons6(recorded, current) {
+function snapshotStaleReasons7(recorded, current) {
   const reasons = [];
   if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
     reasons.push("gitHead");
@@ -24263,7 +24567,7 @@ function validateGroundingContent(paths, receipt) {
   const recorded = receipt.snapshot_coord;
   const hasRecordedCoord = recorded != null && (recorded.gitHead != null || recorded.treeDigest != null);
   if (hasRecordedCoord) {
-    const staleReasons = snapshotStaleReasons6(recorded, currentReceiptSnapshotCoord(paths));
+    const staleReasons = snapshotStaleReasons7(recorded, currentReceiptSnapshotCoord(paths));
     if (staleReasons.length > 0) return { status: "stale", staleReasons };
   }
   return { status: "valid" };
@@ -24298,7 +24602,7 @@ function readGroundingValidated(paths) {
 function hasValidExternalTrailer(r) {
   if (r.producer_kind !== "external") return false;
   if (typeof r.key_id !== "string" || r.key_id === "") return false;
-  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE647.test(r.signature))) {
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE648.test(r.signature))) {
     return false;
   }
   if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
@@ -24365,7 +24669,7 @@ function siblingCanonicalText(line, order) {
     const val = line[key];
     if (val === void 0) continue;
     if (key === "snapshot_coord") {
-      ordered[key] = reorder6(val, SNAPSHOT_FIELD_ORDER7);
+      ordered[key] = reorder7(val, SNAPSHOT_FIELD_ORDER8);
     } else {
       ordered[key] = val;
     }
@@ -24548,7 +24852,7 @@ function checkGoverningArtifact(paths, state) {
     const produced = contract.produces.replace(/\/$/, "");
     const registered = state.approved_artifacts.some((a) => a.file === produced);
     if (!registered) {
-      const exists = fs28.existsSync(path27.resolve(paths.root, produced));
+      const exists = fs30.existsSync(path29.resolve(paths.root, produced));
       if (!exists) {
         return { ok: false, error: "artifact_not_produced", detail: { stage: current, produces: contract.produces } };
       }
@@ -24622,7 +24926,7 @@ function checkFinalVerification(paths, state) {
     const produced = contract.produces.replace(/\/$/, "");
     const registered = state.approved_artifacts.some((a) => a.file === produced);
     if (!registered) {
-      const exists = fs28.existsSync(path27.resolve(paths.root, produced));
+      const exists = fs30.existsSync(path29.resolve(paths.root, produced));
       return exists ? { ok: false, error: "report_not_registered", detail: { file: produced } } : { ok: false, error: "report_not_produced", detail: { produces: produced } };
     }
   }
@@ -25018,7 +25322,7 @@ function checkGrounding(verdict) {
   return { ok: false, error: "grounding_unverified", detail, grounding: verdict.summary };
 }
 function computeMinTierFromBrief(root) {
-  const briefFile = path27.resolve(root, TASK_BRIEF_RELPATH);
+  const briefFile = path29.resolve(root, TASK_BRIEF_RELPATH);
   const loaded = loadBriefFromFile(briefFile);
   if (!loaded.ok || !loaded.brief) return { minTier: "T0", briefPresent: false };
   const { tier0_eligible } = classifyBrief(loaded.brief);
@@ -25121,6 +25425,27 @@ function checkTierCorrespondence(paths, state) {
     error: "tier_correspondence_unverified",
     detail: { reason: verdict.reason, ...verdict.detail }
   };
+}
+function projectionFixturesPath(paths) {
+  return path29.join(paths.root, ".omc", "audit", "probes", "bsc9", "projection-fixtures.json");
+}
+function checkBsc9(paths, state) {
+  const fixtures = loadProjectionFixtures(projectionFixturesPath(paths));
+  const infidelities = fixtures ? runProjectionOracle(fixtures) : [];
+  let readinessStatus = null;
+  if (interviewRequired(state) && interviewReady(paths)) {
+    readinessStatus = readReadinessReceiptValidated(paths, readinessRefId(paths)).status;
+  }
+  const readinessAccepted = readinessStatus === null || readinessStatus === "valid" || readinessStatus === "valid-grounded" || readinessStatus === "legacy";
+  if (infidelities.length === 0 && readinessAccepted) return PASS;
+  const detail = {
+    ...infidelities.length > 0 ? { projectionInfidelities: infidelities } : {},
+    ...readinessStatus !== null && !readinessAccepted ? { readinessStatus } : {}
+  };
+  if (!bsc9EnforcementEnabled()) {
+    return { ok: true, notice: { token: "bsc9_unverified", detail } };
+  }
+  return { ok: false, error: "bsc9_unverified", detail };
 }
 var PRODUCTION_REALITY_RUNGS = [
   {
@@ -25438,6 +25763,24 @@ var PRODUCTION_REALITY_RUNGS = [
       }
       return null;
     }
+  },
+  {
+    // 10. (BSC-9 / Axis-B slice-7) MCP `toToolResult` PROJECTION ORACLE + INTERVIEW-READINESS.
+    // The ONLY authentic CLI↔MCP divergence surface is the PROJECTION (every tool closure
+    // delegates to the same `run*` handler the CLI does, guarded by REQ-PCO-070), so this rung
+    // (a) runs the projection oracle over the committed twin-call fixture set — a projection that
+    // drops/alters ok/exitCode/data BLOCKS — and (b) grounds the soft interview gate's
+    // `interviewReady` claim: an asserted readiness must ride a backing InterviewReadinessReceipt
+    // (a no-receipt / sub-cutoff / forged / tampered / stale readiness BLOCKS). Governed by
+    // `bsc9EnforcementEnabled()` (defaults ON): the verdict is ALWAYS computed (a WARN `notice`
+    // when enforcement is off), but it BLOCKS with `bsc9_unverified` only when enforcement is on.
+    // Self-contained: it does not read or write `ctx` (no cross-rung dependency).
+    id: "bsc9-projection-readiness",
+    check: (paths, state, ctx) => {
+      const bsc9 = checkBsc9(paths, state);
+      ctx.captured.bsc9 = bsc9;
+      return bsc9.ok ? null : bsc9;
+    }
   }
 ];
 function checkProductionReality(paths, state) {
@@ -25473,7 +25816,8 @@ function checkProductionReality(paths, state) {
   if (assertion?.assertionPresence) merged.assertionPresence = assertion.assertionPresence;
   if (assertion?.mutationEfficacy) merged.mutationEfficacy = assertion.mutationEfficacy;
   if (grounding?.grounding) merged.grounding = grounding.grounding;
-  const notice = driver?.notice ?? realization?.notice ?? assertion?.notice ?? grounding?.notice ?? tierCorrespondence?.notice;
+  const bsc9 = ctx.captured.bsc9;
+  const notice = driver?.notice ?? realization?.notice ?? assertion?.notice ?? grounding?.notice ?? tierCorrespondence?.notice ?? bsc9?.notice;
   if (notice) merged.notice = notice;
   return merged.dimensions || merged.assertionPresence || merged.mutationEfficacy || merged.grounding || merged.notice ? merged : PASS;
 }
@@ -25682,10 +26026,10 @@ function conflictPairs(slices) {
 }
 
 // src/core/leases.ts
-var fs29 = __toESM(require("node:fs"));
-var path28 = __toESM(require("node:path"));
+var fs31 = __toESM(require("node:fs"));
+var path30 = __toESM(require("node:path"));
 function leasesPath(paths) {
-  return path28.join(paths.stateDir, "build-leases.jsonl");
+  return path30.join(paths.stateDir, "build-leases.jsonl");
 }
 var LEASE_FIELD_ORDER = [
   "ts",
@@ -25705,9 +26049,9 @@ function serializeLeaseEvent(event) {
 }
 function readLeaseEvents(paths) {
   const file = leasesPath(paths);
-  if (!fs29.existsSync(file)) return [];
+  if (!fs31.existsSync(file)) return [];
   const out = [];
-  for (const line of fs29.readFileSync(file, "utf8").split(/\r?\n/)) {
+  for (const line of fs31.readFileSync(file, "utf8").split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
@@ -25725,9 +26069,9 @@ function readLeaseEvents(paths) {
 }
 function appendLeaseEvent(paths, event, now = () => /* @__PURE__ */ new Date()) {
   assertGovernedWriteSurface(paths.root, leasesPath(paths));
-  fs29.mkdirSync(paths.stateDir, { recursive: true });
+  fs31.mkdirSync(paths.stateDir, { recursive: true });
   const line = serializeLeaseEvent({ ts: now().toISOString(), ...event }) + "\n";
-  fs29.appendFileSync(leasesPath(paths), line, "utf8");
+  fs31.appendFileSync(leasesPath(paths), line, "utf8");
 }
 function activeLeases(paths) {
   const byOwner = /* @__PURE__ */ new Map();
@@ -26214,7 +26558,7 @@ function readLeaseEventsForParent(paths, parentSlice) {
 }
 
 // src/commands/coverage.ts
-var path29 = __toESM(require("node:path"));
+var path31 = __toESM(require("node:path"));
 function rejectEscapingPath(paths, opts) {
   const fields = [
     ["reqsFile", opts.reqsFile],
@@ -26233,13 +26577,13 @@ function rejectEscapingPath(paths, opts) {
 function runCoverageCheck(paths, opts = {}) {
   const escaped = rejectEscapingPath(paths, opts);
   if (escaped) return escaped;
-  const reqsAbs = path29.resolve(paths.root, opts.reqsFile ?? "docs/01-requirements.md");
-  const planAbs = path29.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
-  const testsAbs = path29.resolve(paths.root, opts.testsDir ?? "tests");
-  const scopeAbs = path29.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
+  const reqsAbs = path31.resolve(paths.root, opts.reqsFile ?? "docs/01-requirements.md");
+  const planAbs = path31.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  const testsAbs = path31.resolve(paths.root, opts.testsDir ?? "tests");
+  const scopeAbs = path31.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
   const reqsContent = readFileOrUndefined(reqsAbs);
   if (reqsContent === void 0) {
-    const rel = path29.relative(paths.root, reqsAbs).split(path29.sep).join("/");
+    const rel = path31.relative(paths.root, reqsAbs).split(path31.sep).join("/");
     return failure({
       human: `Requirements file not found: ${rel}. Run \`th init\` and author requirements first.`,
       data: { error: "reqs_file_not_found", reqsFile: rel }
@@ -26332,19 +26676,19 @@ function runCoverageReport(paths, opts = {}) {
 }
 
 // src/core/telemetry.ts
-var fs30 = __toESM(require("node:fs"));
-var path30 = __toESM(require("node:path"));
+var fs32 = __toESM(require("node:fs"));
+var path32 = __toESM(require("node:path"));
 function telemetryConfigPath(paths) {
-  return path30.join(paths.stateDir, "telemetry.json");
+  return path32.join(paths.stateDir, "telemetry.json");
 }
 function telemetryLogPath(paths) {
-  return path30.join(paths.stateDir, "telemetry.jsonl");
+  return path32.join(paths.stateDir, "telemetry.jsonl");
 }
 function readTelemetryConfig(paths) {
   const file = telemetryConfigPath(paths);
-  if (!fs30.existsSync(file)) return { enabled: false };
+  if (!fs32.existsSync(file)) return { enabled: false };
   try {
-    const parsed = JSON.parse(fs30.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs32.readFileSync(file, "utf8"));
     if (parsed && typeof parsed === "object" && typeof parsed.enabled === "boolean") {
       return { enabled: parsed.enabled };
     }
@@ -26356,8 +26700,8 @@ function appendTelemetry(paths, record2) {
   if (!readTelemetryConfig(paths).enabled) return;
   try {
     assertGovernedWriteSurface(paths.root, telemetryLogPath(paths));
-    fs30.mkdirSync(paths.stateDir, { recursive: true });
-    fs30.appendFileSync(telemetryLogPath(paths), JSON.stringify(record2) + "\n", "utf8");
+    fs32.mkdirSync(paths.stateDir, { recursive: true });
+    fs32.appendFileSync(telemetryLogPath(paths), JSON.stringify(record2) + "\n", "utf8");
   } catch {
   }
 }
@@ -26866,11 +27210,11 @@ why: ${next.why}` : `next: ${next.action}`;
 }
 
 // src/commands/delegate.ts
-var fs32 = __toESM(require("node:fs"));
+var fs34 = __toESM(require("node:fs"));
 
 // src/commands/context.ts
-var fs31 = __toESM(require("node:fs"));
-var path31 = __toESM(require("node:path"));
+var fs33 = __toESM(require("node:fs"));
+var path33 = __toESM(require("node:path"));
 
 // src/core/summary.ts
 var SUMMARY_HEADING_RE = /^(#{1,3})\s+summary\b/i;
@@ -26951,15 +27295,15 @@ function runContextPack(paths, opts = {}) {
   if (!r.state) return failure({ human: "state.json is invalid.", data: { error: "invalid_state", issues: r.issues } });
   const s = r.state;
   const packed = s.approved_artifacts.map((a) => {
-    const abs = path31.resolve(paths.root, a.file);
+    const abs = path33.resolve(paths.root, a.file);
     let exists = false;
     let isDir = false;
     let content = "";
-    if (fs31.existsSync(abs)) {
-      const stat = fs31.statSync(abs);
+    if (fs33.existsSync(abs)) {
+      const stat = fs33.statSync(abs);
       if (stat.isFile()) {
         exists = true;
-        content = fs31.readFileSync(abs, "utf8");
+        content = fs33.readFileSync(abs, "utf8");
       } else if (stat.isDirectory()) {
         exists = true;
         isDir = true;
@@ -27103,15 +27447,15 @@ function runContextRead(paths, opts = {}) {
   let running = 0;
   let budgetExhausted = false;
   for (const f of files) {
-    const relKey = path31.relative(paths.root, path31.resolve(paths.root, f)).split(path31.sep).join("/");
+    const relKey = path33.relative(paths.root, path33.resolve(paths.root, f)).split(path33.sep).join("/");
     const abs = resolveWithinRoot(paths.root, f);
-    if (abs === null || !fs31.existsSync(abs) || !fs31.statSync(abs).isFile()) {
+    if (abs === null || !fs33.existsSync(abs) || !fs33.statSync(abs).isFile()) {
       results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
       continue;
     }
     let content;
     try {
-      content = fs31.readFileSync(abs, "utf8");
+      content = fs33.readFileSync(abs, "utf8");
     } catch {
       results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
       continue;
@@ -27431,13 +27775,13 @@ function runDelegateCheck(paths, opts) {
         data: { error: "path_outside_root", file: opts.file }
       });
     }
-    if (!fs32.existsSync(abs) || !fs32.statSync(abs).isFile()) {
+    if (!fs34.existsSync(abs) || !fs34.statSync(abs).isFile()) {
       return failure({
         human: `Capsule file not found: ${opts.file}`,
         data: { error: "capsule_not_found", file: opts.file }
       });
     }
-    text = fs32.readFileSync(abs, "utf8");
+    text = fs34.readFileSync(abs, "utf8");
   }
   const v = validateCapsule(text);
   structuredLog({ cmd: "delegate check", ok: v.ok, missing: v.missing.length });
@@ -27538,10 +27882,10 @@ function runBudgetCheck(paths, opts = {}) {
 }
 
 // src/commands/handoff.ts
-var fs33 = __toESM(require("node:fs"));
-var path32 = __toESM(require("node:path"));
+var fs35 = __toESM(require("node:fs"));
+var path34 = __toESM(require("node:path"));
 function handoffPath(paths) {
-  return path32.join(paths.stateDir, "HANDOFF.md");
+  return path34.join(paths.stateDir, "HANDOFF.md");
 }
 var HANDOFF_STATE_OPEN = "<!-- TH-HANDOFF-STATE";
 var HANDOFF_STATE_CLOSE = "TH-HANDOFF-STATE -->";
@@ -27609,9 +27953,9 @@ function runHandoffWrite(paths) {
     HANDOFF_STATE_CLOSE,
     ""
   ].join("\n");
-  fs33.mkdirSync(paths.stateDir, { recursive: true });
+  fs35.mkdirSync(paths.stateDir, { recursive: true });
   atomicWriteFile(handoffPath(paths), md, { root: paths.root });
-  const relPath2 = path32.relative(paths.root, handoffPath(paths)).split(path32.sep).join("/");
+  const relPath2 = path34.relative(paths.root, handoffPath(paths)).split(path34.sep).join("/");
   structuredLog({ cmd: "handoff write", path: relPath2, slices: slices.length, artifacts: s.approved_artifacts.length });
   return success({
     data: {
@@ -27633,14 +27977,14 @@ function runHandoffWrite(paths) {
 }
 
 // src/commands/inspector.ts
-var path34 = __toESM(require("node:path"));
+var path36 = __toESM(require("node:path"));
 
 // src/commands/artifact.ts
-var fs34 = __toESM(require("node:fs"));
-var path33 = __toESM(require("node:path"));
+var fs36 = __toESM(require("node:fs"));
+var path35 = __toESM(require("node:path"));
 function toRelKey(root, file) {
-  const abs = path33.resolve(root, file);
-  return path33.relative(root, abs).split(path33.sep).join("/");
+  const abs = path35.resolve(root, file);
+  return path35.relative(root, abs).split(path35.sep).join("/");
 }
 function runArtifactRegister(paths, file, version2) {
   return withStateLock(paths, () => runArtifactRegisterLocked(paths, file, version2));
@@ -27654,10 +27998,10 @@ function runArtifactRegisterLocked(paths, file, version2) {
   if (abs === null) {
     return failure({ human: `Path outside project root: ${file}`, data: { error: "path_outside_root", file } });
   }
-  if (!fs34.existsSync(abs)) {
+  if (!fs36.existsSync(abs)) {
     return failure({ human: `File not found: ${file}`, data: { error: "file_not_found", file } });
   }
-  const stat = fs34.statSync(abs);
+  const stat = fs36.statSync(abs);
   if (!stat.isFile() && !stat.isDirectory()) {
     return failure({ human: `Not a file or directory: ${file}`, data: { error: "not_a_file_or_dir", file } });
   }
@@ -27686,7 +28030,7 @@ ${formatIssues(r.issues)}`,
   let summaryWarning = null;
   if (stat.isFile() && /\.(md|markdown)$/i.test(relKey)) {
     try {
-      const { summary } = extractSummary(fs34.readFileSync(abs, "utf8"));
+      const { summary } = extractSummary(fs36.readFileSync(abs, "utf8"));
       if (summary === null) {
         summaryWarning = `no \`## Summary\` block \u2014 \`th context pack\` will fall back to the file head; add a Summary block to keep the handoff tight.`;
       }
@@ -27772,14 +28116,14 @@ function runArtifactSection(paths, opts = {}) {
     structuredLog({ cmd: "artifact section", error: "path_outside_root", file: opts.file });
     return failure({ human: `Path outside project root: ${opts.file}`, data: { error: "path_outside_root", file: opts.file } });
   }
-  if (!fs34.existsSync(abs) || !fs34.statSync(abs).isFile()) {
+  if (!fs36.existsSync(abs) || !fs36.statSync(abs).isFile()) {
     structuredLog({ cmd: "artifact section", error: "file_not_found", file: opts.file });
     return failure({ human: `File not found: ${opts.file}`, data: { error: "file_not_found", file: opts.file } });
   }
   const relKey = toRelKey(paths.root, opts.file);
   let content;
   try {
-    content = fs34.readFileSync(abs, "utf8");
+    content = fs36.readFileSync(abs, "utf8");
   } catch {
     structuredLog({ cmd: "artifact section", error: "read_failed", file: relKey });
     return failure({ human: `Could not read ${relKey}`, data: { error: "read_failed", file: relKey } });
@@ -27879,7 +28223,7 @@ ${formatIssues(r.issues)}`,
   const guard = guardApprovedArtifactReauthor(r.state.approved_artifacts, INSPECTOR_ANALYSIS_FILE, opts.version, `inspector write ${INSPECTOR_ANALYSIS_FILE}`);
   if (!guard.ok) return guard.result;
   const version2 = guard.version;
-  const abs = path34.resolve(paths.root, INSPECTOR_ANALYSIS_FILE);
+  const abs = path36.resolve(paths.root, INSPECTOR_ANALYSIS_FILE);
   atomicWriteFile(abs, content, { root: paths.root });
   const reg = runArtifactRegister(paths, INSPECTOR_ANALYSIS_FILE, version2);
   if (!reg.ok) {
@@ -27894,11 +28238,11 @@ ${formatIssues(r.issues)}`,
   });
 }
 function normalizeRel(p) {
-  return p.split(path34.sep).join("/").replace(/^\.\//, "");
+  return p.split(path36.sep).join("/").replace(/^\.\//, "");
 }
 
 // src/commands/tester.ts
-var path35 = __toESM(require("node:path"));
+var path37 = __toESM(require("node:path"));
 function runTesterRecord(paths, opts) {
   const driver = (opts.driver ?? "").trim();
   if (driver === "") {
@@ -27933,7 +28277,7 @@ Pass --evidence-ref pointing at the live run's saved output (a readable file und
   const body = JSON.stringify(record2, null, 2) + "\n";
   atomicWriteFile(testerRecordPath(paths), body, { root: paths.root });
   const hash = shortHash(body);
-  const rel = path35.relative(paths.root, testerRecordPath(paths)).split(path35.sep).join("/");
+  const rel = path37.relative(paths.root, testerRecordPath(paths)).split(path37.sep).join("/");
   appendLedger(paths, { event: "tester-record", driver: record2.driver, provider: record2.provider ?? null, passed });
   structuredLog({ cmd: "tester record", driver: record2.driver, provider: record2.provider ?? null, passed });
   const gateNote = passed ? "The production-reality gate's Tester condition is now satisfied." : "NOTE: recorded as NOT passed (`--passed` absent) \u2014 the production-reality gate's Tester condition is NOT satisfied. Re-record with `--passed` once the live run is green.";
@@ -27945,7 +28289,7 @@ Pass --evidence-ref pointing at the live run's saved output (a readable file und
 }
 
 // src/commands/approve.ts
-var path36 = __toESM(require("node:path"));
+var path38 = __toESM(require("node:path"));
 function runApprove(paths, stage, opts = {}) {
   return withStateLock(paths, () => runApproveLocked(paths, stage, opts));
 }
@@ -27988,7 +28332,7 @@ function runApproveLocked(paths, stageArg, opts) {
     }
     throw e;
   }
-  const rel = path36.relative(paths.root, approvalReceiptsPath(paths)).split(path36.sep).join("/");
+  const rel = path38.relative(paths.root, approvalReceiptsPath(paths)).split(path38.sep).join("/");
   appendLedger(paths, { event: "approve", stage, approvalRecordHash: sealed.recordHash });
   structuredLog({ cmd: "approve", stage, approvalRecordHash: sealed.recordHash });
   return success({
@@ -28005,7 +28349,7 @@ function runApproveLocked(paths, stageArg, opts) {
 }
 
 // src/commands/driver.ts
-var path37 = __toESM(require("node:path"));
+var path39 = __toESM(require("node:path"));
 function runDriverRecord(paths, opts = {}) {
   return withStateLock(paths, () => runDriverRecordLocked(paths, opts));
 }
@@ -28039,7 +28383,7 @@ function runDriverRecordLocked(paths, opts) {
     }
     throw e;
   }
-  const rel = path37.relative(paths.root, driverReceiptsPath(paths)).split(path37.sep).join("/");
+  const rel = path39.relative(paths.root, driverReceiptsPath(paths)).split(path39.sep).join("/");
   const recorded = sealed.dimensions.map((d) => d.name);
   appendLedger(paths, { event: "driver-record", dimensions: recorded, driverRecordHash: sealed.recordHash });
   structuredLog({ cmd: "driver record", dimensions: recorded, driverRecordHash: sealed.recordHash });
@@ -28056,7 +28400,7 @@ function runDriverRecordLocked(paths, opts) {
 }
 
 // src/commands/realize.ts
-var path38 = __toESM(require("node:path"));
+var path40 = __toESM(require("node:path"));
 function runRealize(paths, opts = {}) {
   return withStateLock(paths, () => runRealizeLocked(paths, opts));
 }
@@ -28103,7 +28447,7 @@ function runRealizeLocked(paths, opts) {
     }
     throw e;
   }
-  const rel = path38.relative(paths.root, realizationReceiptsPath(paths)).split(path38.sep).join("/");
+  const rel = path40.relative(paths.root, realizationReceiptsPath(paths)).split(path40.sep).join("/");
   appendLedger(paths, {
     event: "realize",
     reqId,
@@ -28129,7 +28473,7 @@ function runRealizeLocked(paths, opts) {
 }
 
 // src/commands/assertion-presence.ts
-var path39 = __toESM(require("node:path"));
+var path41 = __toESM(require("node:path"));
 function runAssertionPresenceRecord(paths, opts = {}) {
   return withStateLock(paths, () => runAssertionPresenceRecordLocked(paths, opts));
 }
@@ -28145,7 +28489,7 @@ function runAssertionPresenceRecordLocked(paths, opts) {
   const sealed = appendAssertionPresenceReceipt(paths, {
     producerIdentity: opts.producerIdentity ?? "cli:th assertion-presence record"
   });
-  const rel = path39.relative(paths.root, assertionPresenceReceiptsPath(paths)).split(path39.sep).join("/");
+  const rel = path41.relative(paths.root, assertionPresenceReceiptsPath(paths)).split(path41.sep).join("/");
   const reqs = sealed.ground.length;
   const assertionFree = sealed.ground.filter((g) => g.assertionFree).length;
   appendLedger(paths, {
@@ -28167,7 +28511,7 @@ function runAssertionPresenceRecordLocked(paths, opts) {
 }
 
 // src/commands/grounding.ts
-var path40 = __toESM(require("node:path"));
+var path42 = __toESM(require("node:path"));
 function runGroundingRecord(paths, opts = {}) {
   return withStateLock(paths, () => runGroundingRecordLocked(paths, opts));
 }
@@ -28242,7 +28586,7 @@ function runGroundingRecordLocked(paths, opts) {
     ground,
     producerIdentity: opts.producerIdentity ?? "cli:th grounding record"
   });
-  const rel = path40.relative(paths.root, groundingReceiptsPath(paths)).split(path40.sep).join("/");
+  const rel = path42.relative(paths.root, groundingReceiptsPath(paths)).split(path42.sep).join("/");
   appendLedger(paths, {
     event: "grounding-record",
     groundKind,
@@ -28305,8 +28649,8 @@ function runGroundingCheck(paths, _opts = {}) {
 }
 
 // src/commands/decision.ts
-var fs35 = __toESM(require("node:fs"));
-var path41 = __toESM(require("node:path"));
+var fs37 = __toESM(require("node:fs"));
+var path43 = __toESM(require("node:path"));
 
 // src/core/decision-key.ts
 function resolveDecisionKey() {
@@ -28365,14 +28709,14 @@ function firstHeading(body) {
 }
 function runDecisionDetect(paths, _opts = {}) {
   const candidates = [];
-  const adrDir = path41.join(paths.docsDir, "05-adrs");
+  const adrDir = path43.join(paths.docsDir, "05-adrs");
   try {
-    const entries = fs35.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
+    const entries = fs37.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
     for (const f of entries) {
-      const rel = path41.posix.join("docs/05-adrs", f);
+      const rel = path43.posix.join("docs/05-adrs", f);
       let title = f;
       try {
-        const heading = firstHeading(fs35.readFileSync(path41.join(adrDir, f), "utf8"));
+        const heading = firstHeading(fs37.readFileSync(path43.join(adrDir, f), "utf8"));
         if (heading) title = heading;
       } catch {
       }
@@ -28381,7 +28725,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const driftBody = fs35.readFileSync(paths.driftLog, "utf8");
+    const driftBody = fs37.readFileSync(paths.driftLog, "utf8");
     const seen = /* @__PURE__ */ new Set();
     for (const line of driftBody.split(/\r?\n/)) {
       const m = /^##\s+(DRIFT-\d+)\b(.*)$/.exec(line);
@@ -28400,7 +28744,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const scopeBody = fs35.readFileSync(path41.join(paths.docsDir, "02-scope.md"), "utf8");
+    const scopeBody = fs37.readFileSync(path43.join(paths.docsDir, "02-scope.md"), "utf8");
     if (/(^##\s+Changes\b)|(^\s*(ADDED|CHANGED):)/m.test(scopeBody)) {
       candidates.push({
         title: "Scope signal: a post-requirements scope change is recorded",
@@ -28515,15 +28859,15 @@ function sealWarningData(events) {
 }
 
 // src/commands/template.ts
-var fs36 = __toESM(require("node:fs"));
-var path42 = __toESM(require("node:path"));
+var fs38 = __toESM(require("node:fs"));
+var path44 = __toESM(require("node:path"));
 var TEMPLATE_EXT = ".md";
-var PROJECT_TEMPLATE_REL = path42.join(".twinharness", "templates");
+var PROJECT_TEMPLATE_REL = path44.join(".twinharness", "templates");
 var PLUGIN_TEMPLATE_REL = "templates";
 function pluginRoot() {
   const env = process.env.CLAUDE_PLUGIN_ROOT;
-  if (typeof env === "string" && env.length > 0) return path42.resolve(env);
-  return path42.resolve(__dirname, "..", "..");
+  if (typeof env === "string" && env.length > 0) return path44.resolve(env);
+  return path44.resolve(__dirname, "..", "..");
 }
 function normalizeTemplateName(name) {
   const trimmed = name.trim();
@@ -28534,15 +28878,15 @@ function normalizeTemplateName(name) {
   return trimmed.toLowerCase().endsWith(TEMPLATE_EXT) ? trimmed : trimmed + TEMPLATE_EXT;
 }
 function resolve19(name, projectRoot, plugin) {
-  const projectPath = path42.join(projectRoot, PROJECT_TEMPLATE_REL, name);
-  const pluginPath = path42.join(plugin, PLUGIN_TEMPLATE_REL, name);
+  const projectPath = path44.join(projectRoot, PROJECT_TEMPLATE_REL, name);
+  const pluginPath = path44.join(plugin, PLUGIN_TEMPLATE_REL, name);
   for (const [abs, source] of [
     [projectPath, "project-override"],
     [pluginPath, "plugin-bundled"]
   ]) {
     try {
-      const st = fs36.statSync(abs);
-      if (st.isFile()) return { path: abs, content: fs36.readFileSync(abs, "utf8"), source };
+      const st = fs38.statSync(abs);
+      if (st.isFile()) return { path: abs, content: fs38.readFileSync(abs, "utf8"), source };
     } catch {
     }
   }
@@ -28577,17 +28921,17 @@ function runTemplateGet(paths, name) {
   });
 }
 function listTemplateDir(dir) {
-  if (!fs36.existsSync(dir)) return [];
+  if (!fs38.existsSync(dir)) return [];
   try {
-    if (!fs36.statSync(dir).isDirectory()) return [];
-    return fs36.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(TEMPLATE_EXT)).map((e) => e.name);
+    if (!fs38.statSync(dir).isDirectory()) return [];
+    return fs38.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(TEMPLATE_EXT)).map((e) => e.name);
   } catch {
     return [];
   }
 }
 function runTemplateList(paths) {
-  const projectDir = path42.join(paths.root, PROJECT_TEMPLATE_REL);
-  const pluginDir = path42.join(pluginRoot(), PLUGIN_TEMPLATE_REL);
+  const projectDir = path44.join(paths.root, PROJECT_TEMPLATE_REL);
+  const pluginDir = path44.join(pluginRoot(), PLUGIN_TEMPLATE_REL);
   const projectNames = new Set(listTemplateDir(projectDir));
   const pluginNames = new Set(listTemplateDir(pluginDir));
   const byName = /* @__PURE__ */ new Map();
@@ -28685,10 +29029,10 @@ function runArtifactLeases(paths) {
 }
 
 // src/core/collab.ts
-var fs37 = __toESM(require("node:fs"));
-var path43 = __toESM(require("node:path"));
+var fs39 = __toESM(require("node:fs"));
+var path45 = __toESM(require("node:path"));
 function validatePathSegment(segment, label) {
-  if (path43.isAbsolute(segment)) {
+  if (path45.isAbsolute(segment)) {
     throw new PathContainmentError(`collab: ${label} must not be an absolute path: "${segment}"`, segment);
   }
   if (segment === ".." || segment.includes("/") || segment.includes("\\")) {
@@ -28709,16 +29053,16 @@ var FragmentExistsError = class extends Error {
 function collabDir(paths, stage, round) {
   validatePathSegment(stage, "stage");
   if (round !== void 0) validatePathSegment(round, "round");
-  const base = path43.join(paths.stateDir, "collab", stage);
-  return round === void 0 ? base : path43.join(base, round);
+  const base = path45.join(paths.stateDir, "collab", stage);
+  return round === void 0 ? base : path45.join(base, round);
 }
 function writeFragment(paths, input) {
   validatePathSegment(input.name, "name");
   const dir = collabDir(paths, input.stage, input.round);
-  const file = path43.join(dir, input.name);
-  fs37.mkdirSync(dir, { recursive: true });
+  const file = path45.join(dir, input.name);
+  fs39.mkdirSync(dir, { recursive: true });
   try {
-    fs37.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
+    fs39.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
   } catch (e) {
     if (e.code === "EEXIST") throw new FragmentExistsError(file);
     throw e;
@@ -28729,10 +29073,10 @@ function listFragments(paths, stage, round) {
   const out = [];
   const readRound = (r) => {
     const dir = collabDir(paths, stage, r);
-    if (!fs37.existsSync(dir) || !fs37.statSync(dir).isDirectory()) return;
-    const names = fs37.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
+    if (!fs39.existsSync(dir) || !fs39.statSync(dir).isDirectory()) return;
+    const names = fs39.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
     for (const name of names) {
-      out.push({ stage, round: r, name, path: path43.join(dir, name) });
+      out.push({ stage, round: r, name, path: path45.join(dir, name) });
     }
   };
   if (round !== void 0) {
@@ -28740,8 +29084,8 @@ function listFragments(paths, stage, round) {
     return out;
   }
   const stageDir = collabDir(paths, stage);
-  if (!fs37.existsSync(stageDir) || !fs37.statSync(stageDir).isDirectory()) return out;
-  const rounds = fs37.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  if (!fs39.existsSync(stageDir) || !fs39.statSync(stageDir).isDirectory()) return out;
+  const rounds = fs39.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
   for (const r of rounds) readRound(r);
   return out;
 }
@@ -28750,14 +29094,14 @@ function mergeFragments(paths, stage, round) {
   const fragments = listFragments(paths, stage, round);
   const unanchored = [];
   for (const f of fragments) {
-    const content = fs37.readFileSync(f.path, "utf8");
+    const content = fs39.readFileSync(f.path, "utf8");
     if (extractReqIds(content).length === 0) unanchored.push(f.name);
   }
   if (unanchored.length > 0) {
     return { ok: false, merged: "", fragments, unanchored };
   }
   const parts = fragments.map((f) => {
-    const content = fs37.readFileSync(f.path, "utf8");
+    const content = fs39.readFileSync(f.path, "utf8");
     return content.endsWith("\n") ? content : `${content}
 `;
   });
@@ -28870,8 +29214,8 @@ function runCollabMerge(paths, opts) {
 }
 
 // src/commands/debate.ts
-var fs38 = __toESM(require("node:fs"));
-var path44 = __toESM(require("node:path"));
+var fs40 = __toESM(require("node:fs"));
+var path46 = __toESM(require("node:path"));
 
 // src/core/debate-log.ts
 var DEBATE_LEDGER = {
@@ -28939,22 +29283,22 @@ Links      : ...
 \`\`\`
 `;
 function debateLogPath(paths) {
-  return path44.join(paths.root, "debate-log.md");
+  return path46.join(paths.root, "debate-log.md");
 }
 function readDebateLog(paths) {
   const file = debateLogPath(paths);
-  if (!fs38.existsSync(file)) {
+  if (!fs40.existsSync(file)) {
     atomicWriteFile(file, DEBATE_LOG_HEADER, { root: paths.root });
     return DEBATE_LOG_HEADER;
   }
-  return fs38.readFileSync(file, "utf8");
+  return fs40.readFileSync(file, "utf8");
 }
 function appendDebateLog(paths, block) {
   const file = debateLogPath(paths);
   readDebateLog(paths);
   assertGovernedWriteSurface(paths.root, file);
-  const sep25 = endsWithNewline(file) ? "" : "\n";
-  fs38.appendFileSync(file, `${sep25}${block}`, "utf8");
+  const sep26 = endsWithNewline(file) ? "" : "\n";
+  fs40.appendFileSync(file, `${sep26}${block}`, "utf8");
 }
 function runDebateAdd(paths, opts) {
   const locked = assertFeatureUnlocked(paths, "debate");
@@ -29017,7 +29361,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs38.existsSync(file) ? fs38.readFileSync(file, "utf8") : "";
+  const text = fs40.existsSync(file) ? fs40.readFileSync(file, "utf8") : "";
   const entries = sortById(effectiveEntries(parseDebateEntries(text)));
   const openBlocking = r.state.debate_open_blocking ?? 0;
   const human = entries.length ? entries.map((e) => `${e.id}  (${e.topic})  ${e.status}`).join("\n") : "(no debate entries)";
@@ -29053,7 +29397,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs38.existsSync(file) ? fs38.readFileSync(file, "utf8") : "";
+  const text = fs40.existsSync(file) ? fs40.readFileSync(file, "utf8") : "";
   const entries = parseDebateEntries(text);
   const entry = entries.find((e) => e.id === id);
   if (!entry) {
@@ -29099,7 +29443,7 @@ ${formatIssues(r.issues)}`,
 }
 
 // src/commands/init.ts
-var fs39 = __toESM(require("node:fs"));
+var fs41 = __toESM(require("node:fs"));
 var DRIFT_LOG_HEADER2 = `# Drift Log
 
 Append-only record of implementation discoveries (spec \xA710). Each entry records the
@@ -29134,11 +29478,11 @@ function runInit(paths, opts) {
   const created = [];
   const skipped = [];
   const maxTokens = opts.maxTokens !== void 0 && Number.isFinite(opts.maxTokens) && opts.maxTokens > 0 ? kToTokens(opts.maxTokens) : void 0;
-  if (!fs39.existsSync(paths.docsDir)) {
-    fs39.mkdirSync(paths.docsDir, { recursive: true });
+  if (!fs41.existsSync(paths.docsDir)) {
+    fs41.mkdirSync(paths.docsDir, { recursive: true });
     created.push("docs/");
   }
-  fs39.mkdirSync(paths.stateDir, { recursive: true });
+  fs41.mkdirSync(paths.stateDir, { recursive: true });
   const existing = readState(paths);
   if (existing.exists && !opts.force) {
     if (maxTokens !== void 0 && existing.state) {
@@ -29164,7 +29508,7 @@ ${formatIssues(validation.issues)}`,
     writeState(paths, state);
     created.push(".twinharness/state.json");
   }
-  if (!fs39.existsSync(paths.driftLog)) {
+  if (!fs41.existsSync(paths.driftLog)) {
     atomicWriteFile(paths.driftLog, DRIFT_LOG_HEADER2, { root: paths.root });
     created.push("drift-log.md");
   } else {
@@ -29208,7 +29552,7 @@ function runInitMcp(paths, opts = {}) {
 }
 
 // src/commands/research.ts
-var path45 = __toESM(require("node:path"));
+var path47 = __toESM(require("node:path"));
 var WINDOWS_RESERVED = /* @__PURE__ */ new Set([
   "con",
   "prn",
@@ -29237,7 +29581,7 @@ function sanitizeTopic(topic) {
   const raw = topic.trim();
   if (raw === "") return { error: "empty topic" };
   if (raw.includes("/") || raw.includes("\\")) return { error: "topic must not contain a path separator" };
-  if (path45.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) return { error: "topic must not be an absolute or drive path" };
+  if (path47.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) return { error: "topic must not be an absolute or drive path" };
   if (raw.includes("..")) return { error: "topic must not contain `..`" };
   const stem = raw.replace(/\.(md|markdown)$/i, "");
   if (stem === "") return { error: "empty topic" };
@@ -29263,8 +29607,8 @@ function runResearchWrite(paths, opts) {
     return failure({ human: `Refusing research write: ${sanitized.error}: ${topic}`, data: { error: "invalid_topic", reason: sanitized.error, topic } });
   }
   const relTarget = `${RESEARCH_DIR}/${sanitized.stem}.md`;
-  const absTarget = path45.resolve(paths.root, relTarget);
-  const reRel = path45.relative(paths.root, absTarget).split(path45.sep).join("/");
+  const absTarget = path47.resolve(paths.root, relTarget);
+  const reRel = path47.relative(paths.root, absTarget).split(path47.sep).join("/");
   if (reRel !== relTarget) {
     return failure({ human: `Refusing research write outside ${RESEARCH_DIR}/: ${reRel}`, data: { error: "path_not_pinned", expected: relTarget, got: reRel } });
   }
@@ -29455,11 +29799,11 @@ function runStageCurrent(paths) {
 }
 
 // src/commands/doctor.ts
-var fs40 = __toESM(require("node:fs"));
-var path46 = __toESM(require("node:path"));
+var fs42 = __toESM(require("node:fs"));
+var path48 = __toESM(require("node:path"));
 var DOCTOR_STRICT_KEY_ALLOWLIST = /* @__PURE__ */ new Set([]);
 function pluginRoot2() {
-  return path46.resolve(__dirname, "..", "..");
+  return path48.resolve(__dirname, "..", "..");
 }
 function packagingCheck(root, files) {
   if (files.length === 0) {
@@ -29468,10 +29812,10 @@ function packagingCheck(root, files) {
   const missing = [];
   const counts = [];
   for (const entry of files) {
-    const abs = path46.join(root, entry);
+    const abs = path48.join(root, entry);
     let st;
     try {
-      st = fs40.statSync(abs);
+      st = fs42.statSync(abs);
     } catch {
       missing.push(entry);
       continue;
@@ -29479,7 +29823,7 @@ function packagingCheck(root, files) {
     if (st.isDirectory()) {
       let n = 0;
       try {
-        n = fs40.readdirSync(abs).length;
+        n = fs42.readdirSync(abs).length;
       } catch {
       }
       counts.push(`${entry}/ (${n})`);
@@ -29501,12 +29845,12 @@ function nodeMajor() {
   return m ? Number(m[1]) : 0;
 }
 function templateShadowCheck(root, pluginDir) {
-  const projectDir = path46.join(root, ".twinharness", "templates");
+  const projectDir = path48.join(root, ".twinharness", "templates");
   const mdFiles = (dir) => {
     try {
-      if (!fs40.statSync(dir).isDirectory()) return /* @__PURE__ */ new Set();
+      if (!fs42.statSync(dir).isDirectory()) return /* @__PURE__ */ new Set();
       return new Set(
-        fs40.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => e.name)
+        fs42.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => e.name)
       );
     } catch {
       return /* @__PURE__ */ new Set();
@@ -29528,7 +29872,7 @@ function templateShadowCheck(root, pluginDir) {
   };
 }
 function ledgerChecks(paths, opts) {
-  if (!fs40.existsSync(ledgerPath(paths))) return [];
+  if (!fs42.existsSync(ledgerPath(paths))) return [];
   const ledgerEntries = readLedger(paths);
   const ledgerCount = ledgerEntries.length;
   const anchors = ledgerEntries.filter((e) => e.event === "high-water").length;
@@ -29572,23 +29916,23 @@ function runDoctor(paths, opts = {}) {
     detail: major >= 20 ? `${process.version} (>= 20)` : `${process.version} \u2014 TwinHarness requires Node >= 20`
   });
   const root = pluginRoot2();
-  const distCli = path46.join(root, "dist", "cli.js");
+  const distCli = path48.join(root, "dist", "cli.js");
   checks.push({
     name: "plugin cli",
-    status: fs40.existsSync(distCli) ? "ok" : "warn",
-    detail: fs40.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary"
+    status: fs42.existsSync(distCli) ? "ok" : "warn",
+    detail: fs42.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary"
   });
   let version2 = "unknown";
   let pkgFiles = [];
   try {
-    const pkg = JSON.parse(fs40.readFileSync(path46.join(root, "package.json"), "utf8"));
+    const pkg = JSON.parse(fs42.readFileSync(path48.join(root, "package.json"), "utf8"));
     if (typeof pkg.version === "string") version2 = pkg.version;
     if (Array.isArray(pkg.files)) pkgFiles = pkg.files.filter((f) => typeof f === "string");
   } catch {
   }
   checks.push({ name: "version", status: "ok", detail: version2 });
   checks.push(packagingCheck(root, pkgFiles));
-  checks.push(templateShadowCheck(paths.root, path46.join(root, "templates")));
+  checks.push(templateShadowCheck(paths.root, path48.join(root, "templates")));
   checks.push({
     name: "claude code",
     status: "warn",
@@ -29624,11 +29968,11 @@ function runDoctor(paths, opts = {}) {
       status: "ok",
       detail: `mode: ${writeMode} \u2014 GUARDRAIL for a compliant agent, NOT a security sandbox. The Bash heuristic is conservative and fail-open (unparsed here-docs/subshells/variable indirection and program-mediated writes like \`python -c\`/\`node -e\` bypass it). Do not run TwinHarness against untrusted repos and review \`th verify list\` before \`th verify run\`.`
     });
-    const lockDir = path46.join(paths.stateDir, ".state.lock");
-    if (fs40.existsSync(lockDir)) {
+    const lockDir = path48.join(paths.stateDir, ".state.lock");
+    if (fs42.existsSync(lockDir)) {
       let age = 0;
       try {
-        age = Date.now() - fs40.statSync(lockDir).mtimeMs;
+        age = Date.now() - fs42.statSync(lockDir).mtimeMs;
       } catch {
       }
       checks.push({
@@ -29757,7 +30101,7 @@ function runDoctor(paths, opts = {}) {
 }
 
 // src/commands/scorecard.ts
-var fs41 = __toESM(require("node:fs"));
+var fs43 = __toESM(require("node:fs"));
 function summarizeRouting(paths) {
   const models = {};
   let events = 0;
@@ -29847,8 +30191,8 @@ function runScorecard(paths, opts) {
   const suiteFailures = report ? report.results.filter((x) => !x.ok).length : 0;
   let driftEntries = 0;
   try {
-    if (fs41.existsSync(paths.driftLog)) {
-      driftEntries = parseDriftEntries(fs41.readFileSync(paths.driftLog, "utf8")).length;
+    if (fs43.existsSync(paths.driftLog)) {
+      driftEntries = parseDriftEntries(fs43.readFileSync(paths.driftLog, "utf8")).length;
     }
   } catch {
   }
@@ -29912,8 +30256,8 @@ function renderScorecard(d) {
 }
 
 // src/commands/slices.ts
-var fs42 = __toESM(require("node:fs"));
-var path47 = __toESM(require("node:path"));
+var fs44 = __toESM(require("node:fs"));
+var path49 = __toESM(require("node:path"));
 function parseComponentTokens(raw) {
   const quoted = [];
   for (const m of raw.matchAll(/`([^`]+)`/g)) {
@@ -29964,15 +30308,15 @@ function runSlicesSync(paths, opts = {}) {
   return withStateLock(paths, () => runSlicesSyncLocked(paths, opts));
 }
 function runSlicesSyncLocked(paths, opts = {}) {
-  const planAbs = path47.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
-  if (!fs42.existsSync(planAbs) || !fs42.statSync(planAbs).isFile()) {
-    const rel = path47.relative(paths.root, planAbs).split(path47.sep).join("/");
+  const planAbs = path49.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  if (!fs44.existsSync(planAbs) || !fs44.statSync(planAbs).isFile()) {
+    const rel = path49.relative(paths.root, planAbs).split(path49.sep).join("/");
     return failure({
       human: `Plan file not found: ${rel}. Provide the path with --plan or author the implementation plan first.`,
       data: { error: "plan_file_not_found", planFile: rel }
     });
   }
-  const planContent = fs42.readFileSync(planAbs, "utf8");
+  const planContent = fs44.readFileSync(planAbs, "utf8");
   const planSlices = parsePlanSlices(planContent);
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
@@ -31828,13 +32172,13 @@ function listTools() {
 var SERVER_NAME = "twinharness-th";
 function readServerVersion() {
   const candidates = [
-    path48.join(__dirname, "..", "package.json"),
-    path48.join(__dirname, "..", "..", "package.json")
+    path50.join(__dirname, "..", "package.json"),
+    path50.join(__dirname, "..", "..", "package.json")
   ];
   for (const candidate of candidates) {
     try {
-      if (fs43.existsSync(candidate)) {
-        const json = JSON.parse(fs43.readFileSync(candidate, "utf8"));
+      if (fs45.existsSync(candidate)) {
+        const json = JSON.parse(fs45.readFileSync(candidate, "utf8"));
         if (typeof json === "object" && json !== null && "version" in json) {
           const v = json.version;
           if (typeof v === "string") return v;
