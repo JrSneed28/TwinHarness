@@ -66,9 +66,12 @@ exports.runInterviewStart = runInterviewStart;
 exports.runInterviewRecord = runInterviewRecord;
 exports.runInterviewStatus = runInterviewStatus;
 const fs = __importStar(require("node:fs"));
+const path = __importStar(require("node:path"));
 const atomic_io_1 = require("../core/atomic-io");
 const output_1 = require("../core/output");
 const log_1 = require("../core/log");
+const state_store_1 = require("../core/state-store");
+const interview_readiness_1 = require("../core/interview-readiness");
 /** Default confidence-gate cutoff (spec R15): the run gates once confidence ≥ 0.80. */
 exports.DEFAULT_INTERVIEW_CUTOFF = 0.8;
 /** True iff `n` is a finite number within the closed unit interval [0,1]. */
@@ -317,6 +320,23 @@ function runInterviewRecord(paths, opts = {}) {
     };
     writeInterview(paths, next);
     const ready = computeReady(confidence, next.cutoff);
+    // BSC-9 (Axis-B slice-7): when this round makes the interview READY, mint a backing
+    // InterviewReadinessReceipt so the soft interview gate's `interviewReady` claim rides a
+    // recomputable correspondence artifact (confidence/cutoff over the interview-store digest
+    // + snapshot coordinate), not a self-assertion. Minted AFTER `writeInterview` so the
+    // store digest binds the new content, under `withStateLock` (the append serializes the
+    // read-modify-append exactly like the other receipt producers). A non-ready round mints
+    // nothing — readiness is only asserted (and therefore only requires a receipt) when true.
+    if (ready) {
+        const storePath = path.relative(paths.root, paths.interviewFile).split(path.sep).join("/");
+        (0, state_store_1.withStateLock)(paths, () => (0, interview_readiness_1.appendReadinessReceipt)(paths, {
+            refId: (0, interview_readiness_1.readinessRefId)(paths),
+            confidence,
+            cutoff: next.cutoff,
+            storePath,
+            producerIdentity: "in-process:interview-record",
+        }));
+    }
     (0, log_1.structuredLog)({ cmd: "interview record", rounds: next.rounds.length });
     return (0, output_1.success)({
         data: { rounds: next.rounds.length, confidence, cutoff: next.cutoff, ready },

@@ -27,10 +27,13 @@
  */
 
 import * as fs from "node:fs";
+import * as path from "node:path";
 import type { ProjectPaths } from "../core/paths";
 import { atomicWriteFile } from "../core/atomic-io";
 import { type CommandResult, success, failure } from "../core/output";
 import { structuredLog } from "../core/log";
+import { withStateLock } from "../core/state-store";
+import { appendReadinessReceipt, readinessRefId } from "../core/interview-readiness";
 
 /** Default confidence-gate cutoff (spec R15): the run gates once confidence ≥ 0.80. */
 export const DEFAULT_INTERVIEW_CUTOFF = 0.8;
@@ -331,6 +334,25 @@ export function runInterviewRecord(paths: ProjectPaths, opts: InterviewRecordOpt
   writeInterview(paths, next);
 
   const ready = computeReady(confidence, next.cutoff);
+  // BSC-9 (Axis-B slice-7): when this round makes the interview READY, mint a backing
+  // InterviewReadinessReceipt so the soft interview gate's `interviewReady` claim rides a
+  // recomputable correspondence artifact (confidence/cutoff over the interview-store digest
+  // + snapshot coordinate), not a self-assertion. Minted AFTER `writeInterview` so the
+  // store digest binds the new content, under `withStateLock` (the append serializes the
+  // read-modify-append exactly like the other receipt producers). A non-ready round mints
+  // nothing — readiness is only asserted (and therefore only requires a receipt) when true.
+  if (ready) {
+    const storePath = path.relative(paths.root, paths.interviewFile).split(path.sep).join("/");
+    withStateLock(paths, () =>
+      appendReadinessReceipt(paths, {
+        refId: readinessRefId(paths),
+        confidence,
+        cutoff: next.cutoff,
+        storePath,
+        producerIdentity: "in-process:interview-record",
+      }),
+    );
+  }
   structuredLog({ cmd: "interview record", rounds: next.rounds.length });
   return success({
     data: { rounds: next.rounds.length, confidence, cutoff: next.cutoff, ready },

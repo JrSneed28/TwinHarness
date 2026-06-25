@@ -101,6 +101,9 @@ const receipt_signing_1 = require("./receipt-signing");
 const bsc3_flag_1 = require("./bsc3-flag");
 const bsc1_flag_1 = require("./bsc1-flag");
 const bsc2_flag_1 = require("./bsc2-flag");
+const bsc9_flag_1 = require("./bsc9-flag");
+const interview_readiness_1 = require("./interview-readiness");
+const projection_oracle_1 = require("./projection-oracle");
 const assertion_presence_1 = require("./assertion-presence");
 const realization_2 = require("./realization");
 const grounding_1 = require("./grounding");
@@ -1490,6 +1493,55 @@ function checkTierCorrespondence(paths, state) {
         detail: { reason: verdict.reason, ...verdict.detail },
     };
 }
+/** `<root>/.omc/audit/probes/bsc9/projection-fixtures.json` — the committed twin-call fixtures. */
+function projectionFixturesPath(paths) {
+    return path.join(paths.root, ".omc", "audit", "probes", "bsc9", "projection-fixtures.json");
+}
+/**
+ * The BSC-9 sub-check (Axis-B slice-7) — the production-reality rung grounding the MCP
+ * `toToolResult` projection AND the interview-readiness claim. Two independent block conditions:
+ *
+ *  (i) PROJECTION ORACLE — load the committed twin-call fixture set and run the projection
+ *      oracle ({@link runProjectionOracle}). Any infidelity (a `toToolResult` projection that
+ *      drops/alters `ok`/`exitCode`/`data`) BLOCKS. A missing/malformed fixture set is
+ *      NOT-APPLICABLE (a downstream project that ships no MCP tools has nothing to project) →
+ *      no oracle block, mirroring the realization rung's "no repo-map ⇒ grandfathered PASS".
+ *
+ *  (ii) READINESS — when an interview is REQUIRED and ASSERTED ready (`interviewReady`), the
+ *      readiness MUST ride a backing {@link InterviewReadinessReceipt} that validates: a
+ *      `valid`/`valid-grounded`/`legacy` status passes; `absent` (readiness with no receipt),
+ *      `not-ready` (sub-cutoff), `forged`, `tampered`, `store_missing`/`store_mismatch`/`stale`
+ *      all BLOCK. Readiness NOT asserted ⇒ nothing to ground (PASS).
+ *
+ * Governed by {@link bsc9EnforcementEnabled} (defaults ON, WARN-flippable via `TH_BSC9_ENFORCE`):
+ * the verdict is ALWAYS computed (so the would-be block surfaces as a non-blocking `notice` when
+ * enforcement is off), but it BLOCKS with the stable token only when enforcement is on.
+ */
+function checkBsc9(paths, state) {
+    // (i) Projection oracle over the committed fixture set (not-applicable when absent).
+    const fixtures = (0, projection_oracle_1.loadProjectionFixtures)(projectionFixturesPath(paths));
+    const infidelities = fixtures ? (0, projection_oracle_1.runProjectionOracle)(fixtures) : [];
+    // (ii) Readiness grounding — only when an interview is required AND asserted ready.
+    let readinessStatus = null;
+    if (interviewRequired(state) && (0, interview_1.interviewReady)(paths)) {
+        readinessStatus = (0, interview_readiness_1.readReadinessReceiptValidated)(paths, (0, interview_readiness_1.readinessRefId)(paths)).status;
+    }
+    const readinessAccepted = readinessStatus === null ||
+        readinessStatus === "valid" ||
+        readinessStatus === "valid-grounded" ||
+        readinessStatus === "legacy";
+    if (infidelities.length === 0 && readinessAccepted)
+        return PASS;
+    const detail = {
+        ...(infidelities.length > 0 ? { projectionInfidelities: infidelities } : {}),
+        ...(readinessStatus !== null && !readinessAccepted ? { readinessStatus } : {}),
+    };
+    // WARN→ENFORCE: when enforcement is OFF, surface the verdict as a non-blocking notice.
+    if (!(0, bsc9_flag_1.bsc9EnforcementEnabled)()) {
+        return { ok: true, notice: { token: "bsc9_unverified", detail } };
+    }
+    return { ok: false, error: "bsc9_unverified", detail };
+}
 /**
  * The ordered production-reality rung registry — the LITERAL execution list iterated by
  * {@link checkProductionReality}. Order here IS runtime order; every rung is enumerable
@@ -1849,6 +1901,26 @@ exports.PRODUCTION_REALITY_RUNGS = [
             return null;
         },
     },
+    {
+        // 10. (BSC-9 / Axis-B slice-7) MCP `toToolResult` PROJECTION ORACLE + INTERVIEW-READINESS.
+        // The ONLY authentic CLI↔MCP divergence surface is the PROJECTION (every tool closure
+        // delegates to the same `run*` handler the CLI does, guarded by REQ-PCO-070), so this rung
+        // (a) runs the projection oracle over the committed twin-call fixture set — a projection that
+        // drops/alters ok/exitCode/data BLOCKS — and (b) grounds the soft interview gate's
+        // `interviewReady` claim: an asserted readiness must ride a backing InterviewReadinessReceipt
+        // (a no-receipt / sub-cutoff / forged / tampered / stale readiness BLOCKS). Governed by
+        // `bsc9EnforcementEnabled()` (defaults ON): the verdict is ALWAYS computed (a WARN `notice`
+        // when enforcement is off), but it BLOCKS with `bsc9_unverified` only when enforcement is on.
+        // Self-contained: it does not read or write `ctx` (no cross-rung dependency).
+        id: "bsc9-projection-readiness",
+        check: (paths, state, ctx) => {
+            const bsc9 = checkBsc9(paths, state);
+            ctx.captured.bsc9 = bsc9;
+            // A hard block (enforcement on) early-returns; the WARN `notice` (enforcement off) is
+            // folded onto the final PASS via `ctx.captured.bsc9`, mirroring the other gating rungs.
+            return bsc9.ok ? null : bsc9;
+        },
+    },
 ];
 function checkProductionReality(paths, state) {
     // Stage-aware: production reality is a CERTIFY-COMPLETION condition, so it only
@@ -1905,11 +1977,15 @@ function checkProductionReality(paths, state) {
         merged.mutationEfficacy = assertion.mutationEfficacy;
     if (grounding?.grounding)
         merged.grounding = grounding.grounding;
+    // BSC-9 (slice-7): the bsc9 rung's WARN `notice` (enforcement off) folds in LAST in the
+    // precedence chain, so a would-be projection/readiness block stays visible without blocking.
+    const bsc9 = ctx.captured.bsc9;
     const notice = driver?.notice ??
         realization?.notice ??
         assertion?.notice ??
         grounding?.notice ??
-        tierCorrespondence?.notice;
+        tierCorrespondence?.notice ??
+        bsc9?.notice;
     if (notice)
         merged.notice = notice;
     // Degrade to the shared bare PASS when nothing was observed, preserving `{ ok: true }`.
