@@ -63,7 +63,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TargetUnresolvedError = void 0;
+exports.TASK_BRIEF_RELPATH = exports.TargetUnresolvedError = void 0;
 exports.canonicalText = canonicalText;
 exports.computeRecordHash = computeRecordHash;
 exports.terminalReceiptsPath = terminalReceiptsPath;
@@ -83,6 +83,14 @@ exports.receiptMigrationDone = receiptMigrationDone;
 exports.grandfatheredBaseline = grandfatheredBaseline;
 exports.collectTerminalEntities = collectTerminalEntities;
 exports.ensureReceiptMigration = ensureReceiptMigration;
+exports.computeBriefDigest = computeBriefDigest;
+exports.tierCorrespondenceCanonicalText = tierCorrespondenceCanonicalText;
+exports.computeTierCorrespondenceRecordHash = computeTierCorrespondenceRecordHash;
+exports.tierCorrespondenceReceiptsPath = tierCorrespondenceReceiptsPath;
+exports.readTierCorrespondenceReceipts = readTierCorrespondenceReceipts;
+exports.readLastTierCorrespondenceRecordHash = readLastTierCorrespondenceRecordHash;
+exports.verifyTierCorrespondenceChain = verifyTierCorrespondenceChain;
+exports.appendTierCorrespondenceReceipt = appendTierCorrespondenceReceipt;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const paths_1 = require("./paths");
@@ -738,4 +746,165 @@ function ensureReceiptMigration(paths) {
     (0, paths_1.assertGovernedWriteSurface)(paths.root, migrationMarkerPath(paths));
     fs.mkdirSync(paths.stateDir, { recursive: true });
     fs.writeFileSync(migrationMarkerPath(paths), JSON.stringify(marker), "utf8");
+}
+/**
+ * The project-root-relative path of the task brief the BSC-8 tier-correspondence ground
+ * binds to. The SAME constant the producer (at mint) and the gate (at validation) read,
+ * so the two sides can never drift apart on WHICH file is the brief.
+ */
+exports.TASK_BRIEF_RELPATH = "docs/00-task-brief.md";
+/**
+ * The SINGLE shared brief-digest formula (BSC-8) — used by BOTH the producer (at mint) and
+ * the gate (at validation), so a brief edited after attestation is mechanically detectable.
+ * Resolves {@link TASK_BRIEF_RELPATH} within `root` and returns `hashContent(<file utf8>)`
+ * (CRLF-normalized, a text target), or `null` when the brief does not resolve (absent /
+ * path-escape / unreadable — a non-discriminating null: a run with no brief has no stale
+ * brief to detect).
+ */
+function computeBriefDigest(root) {
+    return computeTargetDigest(root, exports.TASK_BRIEF_RELPATH);
+}
+/** The fixed canonical field order for hashing a {@link TierCorrespondenceReceipt}. */
+const TIER_CORR_CANONICAL_FIELD_ORDER = [
+    "kind",
+    "refId",
+    "claimed_tier",
+    "computed_min_tier",
+    "brief_digest",
+    "current_stage_at_mint",
+    "snapshot_coord",
+    "producer_identity",
+    "legacy",
+    "prevHash",
+];
+/**
+ * Deterministic canonical text of a tier-correspondence receipt for hashing. Field order
+ * is fixed; `undefined` keys and `recordHash` are dropped; the nested `snapshot_coord` is
+ * re-emitted in its fixed key order; `JSON.stringify` with no indentation. Mirrors
+ * {@link canonicalText} EXACTLY (the same byte-stability discipline).
+ */
+function tierCorrespondenceCanonicalText(receipt) {
+    const ordered = {};
+    for (const key of TIER_CORR_CANONICAL_FIELD_ORDER) {
+        const val = receipt[key];
+        if (val === undefined)
+            continue;
+        if (key === "snapshot_coord") {
+            ordered[key] = reorder(val, SNAPSHOT_FIELD_ORDER);
+        }
+        else {
+            ordered[key] = val;
+        }
+    }
+    return JSON.stringify(ordered);
+}
+/** `recordHash` for a tier-correspondence receipt = SHA-256 of its canonical text. */
+function computeTierCorrespondenceRecordHash(receipt) {
+    return (0, hash_1.hashContent)(tierCorrespondenceCanonicalText(receipt));
+}
+/** `<stateDir>/tier-correspondence-receipts.jsonl` — the in-process BSC-8 ledger. */
+function tierCorrespondenceReceiptsPath(paths) {
+    return path.join(paths.stateDir, "tier-correspondence-receipts.jsonl");
+}
+const TIER_CORR_KIND = "tier-correspondence";
+/** Validate the shape of a parsed tier-correspondence line; malformed lines are skipped. */
+function isValidTierCorrespondenceReceipt(parsed) {
+    if (typeof parsed !== "object" || parsed === null)
+        return false;
+    const r = parsed;
+    if (r.kind !== TIER_CORR_KIND)
+        return false;
+    if (typeof r.refId !== "string" || r.refId === "")
+        return false;
+    if (typeof r.claimed_tier !== "string" || r.claimed_tier === "")
+        return false;
+    if (typeof r.computed_min_tier !== "string" || r.computed_min_tier === "")
+        return false;
+    if (!(r.brief_digest === null || typeof r.brief_digest === "string"))
+        return false;
+    if (r.current_stage_at_mint !== undefined && typeof r.current_stage_at_mint !== "string")
+        return false;
+    if (typeof r.producer_identity !== "string")
+        return false;
+    if (r.legacy !== undefined && typeof r.legacy !== "boolean")
+        return false;
+    if (typeof r.prevHash !== "string" || !hash_1.HEX64.test(r.prevHash))
+        return false;
+    if (typeof r.recordHash !== "string" || !hash_1.HEX64.test(r.recordHash))
+        return false;
+    const snap = r.snapshot_coord;
+    if (typeof snap !== "object" || snap === null)
+        return false;
+    const s = snap;
+    if (!(s.gitHead === null || typeof s.gitHead === "string"))
+        return false;
+    if (!(s.treeDigest === null || typeof s.treeDigest === "string"))
+        return false;
+    return true;
+}
+/**
+ * Read + parse every tier-correspondence receipt in file order. Missing file → `[]`. Bad
+ * lines (non-JSON, partial-tail, schema-invalid) are silently skipped — tolerant, never
+ * throws (mirrors {@link readTerminalReceipts}).
+ */
+function readTierCorrespondenceReceipts(paths) {
+    return (0, jsonl_1.readJsonlValues)(tierCorrespondenceReceiptsPath(paths), isValidTierCorrespondenceReceipt);
+}
+/**
+ * The `recordHash` of the ledger's last VALID receipt — the `prevHash` seed for the next
+ * link. Missing/empty/no-valid-tail → `GENESIS_PREV_HASH` (mirrors
+ * {@link readLastReceiptRecordHash}).
+ */
+function readLastTierCorrespondenceRecordHash(paths) {
+    const last = (0, jsonl_1.scanTailValid)(tierCorrespondenceReceiptsPath(paths), isValidTierCorrespondenceReceipt);
+    return last ? last.recordHash : hash_1.GENESIS_PREV_HASH;
+}
+/**
+ * Walk tier-correspondence receipts in file order with a running `expectedPrev`. Recompute
+ * each `recordHash`; a mismatch ⇒ `edited`; a `prevHash !== expectedPrev` ⇒ `prev_mismatch`.
+ * Byte-identical posture to {@link verifyReceiptChain}.
+ */
+function verifyTierCorrespondenceChain(receipts) {
+    let expectedPrev = hash_1.GENESIS_PREV_HASH;
+    for (let i = 0; i < receipts.length; i++) {
+        const r = receipts[i];
+        const { recordHash, ...rest } = r;
+        if (computeTierCorrespondenceRecordHash(rest) !== recordHash) {
+            return { ok: false, brokenAt: i, reason: "edited" };
+        }
+        if (r.prevHash !== expectedPrev) {
+            return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+        }
+        expectedPrev = r.recordHash;
+    }
+    return { ok: true };
+}
+/**
+ * Append one tier-correspondence receipt, sealing the hash chain. The caller MUST already
+ * hold the `withStateLock` span (read-modify-append is serialized there), exactly like
+ * {@link appendTerminalReceipt}. Records the claimed/computed-min tiers, the brief digest,
+ * and the current snapshot coordinate, derives `prevHash` from the tail, computes
+ * `recordHash`, asserts the governed write-surface, mkdirs, and atomically appends. Returns
+ * the sealed receipt.
+ */
+function appendTierCorrespondenceReceipt(paths, input) {
+    (0, paths_1.assertGovernedWriteSurface)(paths.root, tierCorrespondenceReceiptsPath(paths));
+    fs.mkdirSync(paths.stateDir, { recursive: true });
+    const prevHash = readLastTierCorrespondenceRecordHash(paths);
+    const withPrev = {
+        kind: TIER_CORR_KIND,
+        refId: input.refId,
+        claimed_tier: input.claimedTier,
+        computed_min_tier: input.computedMinTier,
+        brief_digest: input.briefDigest,
+        // omit-when-absent: a `undefined` witness is dropped from the canonical text.
+        ...(input.currentStageAtMint !== undefined ? { current_stage_at_mint: input.currentStageAtMint } : {}),
+        snapshot_coord: currentReceiptSnapshotCoord(paths),
+        producer_identity: input.producerIdentity,
+        prevHash,
+    };
+    const recordHash = computeTierCorrespondenceRecordHash(withPrev);
+    const sealed = { ...withPrev, recordHash };
+    fs.appendFileSync(tierCorrespondenceReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+    return sealed;
 }

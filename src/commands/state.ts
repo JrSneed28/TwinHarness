@@ -9,6 +9,14 @@ import { appendLedger, appendHighWater, GATE_LEDGER_KEYS } from "../core/ledger"
 import { NOT_INIT, formatIssues } from "../core/guards";
 import { fieldPolicy, GATE_OWNED } from "../core/state-fields";
 import { canonicalizeStage, STAGE_PIPELINE, engagedStages } from "../core/stages";
+import {
+  appendTierCorrespondenceReceipt,
+  computeBriefDigest,
+  TASK_BRIEF_RELPATH,
+} from "../core/receipts";
+import { loadBriefFromFile } from "../core/brief";
+import { classifyBrief } from "../core/tier-classify";
+import { gitHead } from "../core/git-revision";
 
 /** Key segments that must never be written through a dotted path (proto-pollution guard, S3). */
 const UNSAFE_KEY_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
@@ -306,6 +314,16 @@ export function applyGateMutation(
     for (const [key, value] of Object.entries(effective)) {
       appendLedger(paths, { event: "gate-state-change", key, value, source });
     }
+    // BSC-8 / Axis-B slice-7 — mint the tier-correspondence receipt when THIS mutation
+    // touched `tier`. The receipt is the F8 correspondence artifact the completion gate
+    // re-validates (claimed tier vs the brief's computed-min tier vs the brief digest at
+    // mint). Minted under the SAME `withStateLock` span as the write, AFTER the write
+    // succeeds, over the POST-mutation tier (`validation.state!.tier`). Best-effort: a
+    // missing/invalid brief yields a permissive `T0` min + null digest (non-discriminating)
+    // and a mint never throws on the happy path, so it never wedges a legitimate tier flip.
+    if (Object.prototype.hasOwnProperty.call(effective, "tier")) {
+      mintTierCorrespondenceReceipt(paths, validation.state!.tier, validation.state!.current_stage);
+    }
     // One in-chain high-water anchor after the batch of gate flips (mirrors
     // `runStateSetLocked`'s post-flip seal).
     appendHighWater(paths);
@@ -355,6 +373,40 @@ function tierUpgradeBackfillStage(
     if (newEngaged.has(stage) && !oldEngaged.has(stage)) return stage;
   }
   return null;
+}
+
+/**
+ * BSC-8 / Axis-B slice-7 — mint the tier-correspondence receipt for a tier mutation.
+ * Called inside the `withStateLock` span of {@link applyGateMutation} (after the write)
+ * when `tier` was among the changed fields, so it is serialized with the state write.
+ *
+ * Derives the computed-min tier from the brief (`classifyBrief` over `docs/00-task-brief.md`)
+ * and the brief digest with the SAME shared helper the gate uses, so the recompute is
+ * identical at mint + gate. A missing/invalid brief is non-discriminating: `T0` min + null
+ * digest. The `refId` is the current snapshot's `gitHead` (or `"no-git"`), mirroring the
+ * other snapshot-keyed receipts. Best-effort — never throws on the happy path, so it never
+ * wedges a legitimate tier flip.
+ */
+function mintTierCorrespondenceReceipt(
+  paths: ProjectPaths,
+  claimedTier: string | null,
+  currentStage: string,
+): void {
+  if (claimedTier === null) return; // an unset tier has no correspondence to record
+  const briefFile = path.resolve(paths.root, TASK_BRIEF_RELPATH);
+  const loaded = loadBriefFromFile(briefFile);
+  const minTier = loaded.ok && loaded.brief && classifyBrief(loaded.brief).tier0_eligible ? "T0" : "T1";
+  const computedMinTier = loaded.ok && loaded.brief ? minTier : "T0"; // no brief ⇒ permissive
+  appendTierCorrespondenceReceipt(paths, {
+    refId: gitHead(paths.root) ?? "no-git",
+    claimedTier,
+    computedMinTier,
+    briefDigest: computeBriefDigest(paths.root),
+    // The POST-rewind current_stage (the rewind already folded into the write) — the gate's
+    // upgrade witness for the stage-invalidation check (BSC-8b).
+    currentStageAtMint: canonicalizeStage(currentStage),
+    producerIdentity: "th tier record (in-process)",
+  });
 }
 
 /** `th state status` — human-readable snapshot of tier/stage/gates. */

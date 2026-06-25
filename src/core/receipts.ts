@@ -1351,3 +1351,277 @@ export function ensureReceiptMigration(paths: ProjectPaths): void {
   fs.mkdirSync(paths.stateDir, { recursive: true });
   fs.writeFileSync(migrationMarkerPath(paths), JSON.stringify(marker), "utf8");
 }
+
+// ---------------------------------------------------------------------------
+// Axis-B slice-7 / BSC-8 — tier-correspondence receipt store
+//
+// THE BLIND SPOT (BSC-8): the run's `tier` is a GATE_OWNED field (raw `state set tier`
+// is refused without `--emergency`), but NOTHING at the completion gate re-checks the
+// declared tier against the brief's mechanically-computed MINIMUM tier, nor against the
+// stage-invalidation a tier upgrade should have rewound. So a run can declare `tier:T0`
+// over `--emergency` while its brief's blast-radius signals force ≥T1, or jump to
+// `final-verification` after an un-rewound T0→T2 upgrade that silently skipped every
+// newly-engaged stage — both certify "complete" on a tier that does not correspond to
+// the work.
+//
+// This receipt makes the correspondence a mintable, recomputable fact: it records the
+// CLAIMED tier, the COMPUTED-MIN tier (derived by the gate from `classifyBrief` over the
+// brief), and a DIGEST of the brief at mint time. The gate re-loads the brief, re-derives
+// the min-tier and the digest with the SAME shared helpers, and detects under-declared
+// tier / stale brief / un-rewound upgrade. The dedicated store mirrors the BSC-4 terminal
+// store EXACTLY (append-only, SHA-256 hash-chained, tolerant reader, `withStateLock`
+// writer, tamper-detecting walk) so it stays single-purpose (the F8 lesson).
+//
+// `producer_identity` carries ZERO trust weight in-process (Done-phase only): it is an
+// audit breadcrumb, NEVER a trust anchor (the independent producer is a P4–5 follow-up).
+// ---------------------------------------------------------------------------
+
+/** Fixed discriminator of a {@link TierCorrespondenceReceipt}. */
+export type TierCorrespondenceKind = "tier-correspondence";
+
+/**
+ * One tier-correspondence receipt (Axis-B slice-7 / BSC-8). Append-only and hash-chained
+ * like a {@link TerminalTransitionReceipt}: any single field edit breaks `recordHash`, and
+ * an insert/delete/reorder breaks the next `prevHash`, so a forged or tampered receipt is
+ * detectable by {@link verifyTierCorrespondenceChain}.
+ */
+export interface TierCorrespondenceReceipt {
+  /** Fixed discriminator. */
+  kind: TierCorrespondenceKind;
+  /**
+   * The run identity this receipt grounds — the snapshot coordinate's `gitHead` (or
+   * `"no-git"` on a non-git checkout), so a re-run at a new HEAD mints a fresh receipt and
+   * the gate finds the LATEST for the current snapshot (mirrors `DriverDimensionReceipt.refId`).
+   */
+  refId: string;
+  /** The tier the run DECLARED (the gate-owned `state.tier` at mint time). */
+  claimed_tier: string;
+  /**
+   * The MINIMUM tier the brief mechanically requires, derived by the producer from
+   * `classifyBrief` over the brief (`T0` when the brief is T0-eligible, else `T1` — any
+   * failed T0 condition or a blast-radius veto forces ≥T1). Recomputed IDENTICALLY at gate
+   * time; the receipt records it as the F8 correspondence artifact.
+   */
+  computed_min_tier: string;
+  /**
+   * A digest of the brief at mint time ({@link computeBriefDigest}). `null` when no brief
+   * file exists (non-discriminating — a run with no brief cannot have a stale brief). The
+   * gate recomputes this with the SAME helper, so a brief edited after attestation reads as
+   * a stale-digest block.
+   */
+  brief_digest: string | null;
+  /**
+   * The canonical `current_stage` at mint time (POST-rewind on a legitimate upgrade, since
+   * `applyGateMutation` folds the `tierUpgradeBackfillStage` rewind into the write BEFORE
+   * minting). This is the gate's UPGRADE WITNESS for the stage-invalidation check (BSC-8
+   * negative-control b): a legitimate `th tier record` upgrade rewinds `current_stage`
+   * BACKWARD to the earliest newly-engaged stage, so its minted stage sits at-or-before the
+   * skip; a raw `state set tier --emergency` jump bypasses both the rewind AND the mint, so
+   * there is no fresh receipt at the live tier. Optional + omit-when-absent so a pre-BSC-8b
+   * receipt (or a tolerant grandfathered line) stays byte-stable; an absent value is
+   * non-discriminating at the gate (treated as ordinal -1).
+   */
+  current_stage_at_mint?: string;
+  /** The repository snapshot coordinate at mint time (reuses `git-revision.ts`). */
+  snapshot_coord: SnapshotCoord;
+  /**
+   * The producer's self-asserted identity. ZERO trust weight in-process — an audit
+   * breadcrumb ONLY (Done-phase only). The un-forgeable property is a P4–5 follow-up, NOT
+   * this field. Part of the canonical hash input.
+   */
+  producer_identity: string;
+  /**
+   * `true` ONLY on a one-time backfill stamp (migration). A `legacy` receipt is
+   * grandfathered. Omit-when-absent so a real receipt's canonical text never carries it.
+   */
+  legacy?: boolean;
+  /** SHA-256 hex (64) of the prior line's canonical text, or GENESIS for the first. */
+  prevHash: string;
+  /** SHA-256 hex (64) of THIS receipt's canonical text (computed before set). */
+  recordHash: string;
+}
+
+/**
+ * The project-root-relative path of the task brief the BSC-8 tier-correspondence ground
+ * binds to. The SAME constant the producer (at mint) and the gate (at validation) read,
+ * so the two sides can never drift apart on WHICH file is the brief.
+ */
+export const TASK_BRIEF_RELPATH = "docs/00-task-brief.md";
+
+/**
+ * The SINGLE shared brief-digest formula (BSC-8) — used by BOTH the producer (at mint) and
+ * the gate (at validation), so a brief edited after attestation is mechanically detectable.
+ * Resolves {@link TASK_BRIEF_RELPATH} within `root` and returns `hashContent(<file utf8>)`
+ * (CRLF-normalized, a text target), or `null` when the brief does not resolve (absent /
+ * path-escape / unreadable — a non-discriminating null: a run with no brief has no stale
+ * brief to detect).
+ */
+export function computeBriefDigest(root: string): string | null {
+  return computeTargetDigest(root, TASK_BRIEF_RELPATH);
+}
+
+/** The fixed canonical field order for hashing a {@link TierCorrespondenceReceipt}. */
+const TIER_CORR_CANONICAL_FIELD_ORDER: ReadonlyArray<keyof TierCorrespondenceReceipt> = [
+  "kind",
+  "refId",
+  "claimed_tier",
+  "computed_min_tier",
+  "brief_digest",
+  "current_stage_at_mint",
+  "snapshot_coord",
+  "producer_identity",
+  "legacy",
+  "prevHash",
+];
+
+/**
+ * Deterministic canonical text of a tier-correspondence receipt for hashing. Field order
+ * is fixed; `undefined` keys and `recordHash` are dropped; the nested `snapshot_coord` is
+ * re-emitted in its fixed key order; `JSON.stringify` with no indentation. Mirrors
+ * {@link canonicalText} EXACTLY (the same byte-stability discipline).
+ */
+export function tierCorrespondenceCanonicalText(
+  receipt: Omit<TierCorrespondenceReceipt, "recordHash">,
+): string {
+  const ordered: Record<string, unknown> = {};
+  for (const key of TIER_CORR_CANONICAL_FIELD_ORDER) {
+    const val = (receipt as Record<string, unknown>)[key];
+    if (val === undefined) continue;
+    if (key === "snapshot_coord") {
+      ordered[key] = reorder(val as SnapshotCoord, SNAPSHOT_FIELD_ORDER);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+
+/** `recordHash` for a tier-correspondence receipt = SHA-256 of its canonical text. */
+export function computeTierCorrespondenceRecordHash(
+  receipt: Omit<TierCorrespondenceReceipt, "recordHash">,
+): string {
+  return hashContent(tierCorrespondenceCanonicalText(receipt));
+}
+
+/** `<stateDir>/tier-correspondence-receipts.jsonl` — the in-process BSC-8 ledger. */
+export function tierCorrespondenceReceiptsPath(paths: ProjectPaths): string {
+  return path.join(paths.stateDir, "tier-correspondence-receipts.jsonl");
+}
+
+const TIER_CORR_KIND: TierCorrespondenceKind = "tier-correspondence";
+
+/** Validate the shape of a parsed tier-correspondence line; malformed lines are skipped. */
+function isValidTierCorrespondenceReceipt(parsed: unknown): parsed is TierCorrespondenceReceipt {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed as Record<string, unknown>;
+  if (r.kind !== TIER_CORR_KIND) return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.claimed_tier !== "string" || r.claimed_tier === "") return false;
+  if (typeof r.computed_min_tier !== "string" || r.computed_min_tier === "") return false;
+  if (!(r.brief_digest === null || typeof r.brief_digest === "string")) return false;
+  if (r.current_stage_at_mint !== undefined && typeof r.current_stage_at_mint !== "string") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (r.legacy !== undefined && typeof r.legacy !== "boolean") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap as Record<string, unknown>;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+
+/**
+ * Read + parse every tier-correspondence receipt in file order. Missing file → `[]`. Bad
+ * lines (non-JSON, partial-tail, schema-invalid) are silently skipped — tolerant, never
+ * throws (mirrors {@link readTerminalReceipts}).
+ */
+export function readTierCorrespondenceReceipts(paths: ProjectPaths): TierCorrespondenceReceipt[] {
+  return readJsonlValues(tierCorrespondenceReceiptsPath(paths), isValidTierCorrespondenceReceipt);
+}
+
+/**
+ * The `recordHash` of the ledger's last VALID receipt — the `prevHash` seed for the next
+ * link. Missing/empty/no-valid-tail → `GENESIS_PREV_HASH` (mirrors
+ * {@link readLastReceiptRecordHash}).
+ */
+export function readLastTierCorrespondenceRecordHash(paths: ProjectPaths): string {
+  const last = scanTailValid(tierCorrespondenceReceiptsPath(paths), isValidTierCorrespondenceReceipt);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+
+/**
+ * Walk tier-correspondence receipts in file order with a running `expectedPrev`. Recompute
+ * each `recordHash`; a mismatch ⇒ `edited`; a `prevHash !== expectedPrev` ⇒ `prev_mismatch`.
+ * Byte-identical posture to {@link verifyReceiptChain}.
+ */
+export function verifyTierCorrespondenceChain(
+  receipts: TierCorrespondenceReceipt[],
+): VerifyChainResult {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i]!;
+    const { recordHash, ...rest } = r;
+    if (computeTierCorrespondenceRecordHash(rest) !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+
+/** Input to {@link appendTierCorrespondenceReceipt}. */
+export interface MintTierCorrespondenceInput {
+  /** The snapshot identity (`gitHead` or `"no-git"`) — the run this receipt grounds. */
+  refId: string;
+  /** The tier the run DECLARED (the gate-owned `state.tier`). */
+  claimedTier: string;
+  /** The minimum tier the brief mechanically requires (derived via `classifyBrief`). */
+  computedMinTier: string;
+  /** The brief digest at mint time ({@link computeBriefDigest}; `null` when no brief). */
+  briefDigest: string | null;
+  /**
+   * The canonical `current_stage` at mint time — the gate's upgrade witness (BSC-8b). Omit
+   * to record no witness (a grandfathered/legacy line); a present value is hash-bound.
+   */
+  currentStageAtMint?: string;
+  /** Self-asserted producer identity (zero in-process trust weight). */
+  producerIdentity: string;
+}
+
+/**
+ * Append one tier-correspondence receipt, sealing the hash chain. The caller MUST already
+ * hold the `withStateLock` span (read-modify-append is serialized there), exactly like
+ * {@link appendTerminalReceipt}. Records the claimed/computed-min tiers, the brief digest,
+ * and the current snapshot coordinate, derives `prevHash` from the tail, computes
+ * `recordHash`, asserts the governed write-surface, mkdirs, and atomically appends. Returns
+ * the sealed receipt.
+ */
+export function appendTierCorrespondenceReceipt(
+  paths: ProjectPaths,
+  input: MintTierCorrespondenceInput,
+): TierCorrespondenceReceipt {
+  assertGovernedWriteSurface(paths.root, tierCorrespondenceReceiptsPath(paths));
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastTierCorrespondenceRecordHash(paths);
+  const withPrev: Omit<TierCorrespondenceReceipt, "recordHash"> = {
+    kind: TIER_CORR_KIND,
+    refId: input.refId,
+    claimed_tier: input.claimedTier,
+    computed_min_tier: input.computedMinTier,
+    brief_digest: input.briefDigest,
+    // omit-when-absent: a `undefined` witness is dropped from the canonical text.
+    ...(input.currentStageAtMint !== undefined ? { current_stage_at_mint: input.currentStageAtMint } : {}),
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: input.producerIdentity,
+    prevHash,
+  };
+  const recordHash = computeTierCorrespondenceRecordHash(withPrev);
+  const sealed: TierCorrespondenceReceipt = { ...withPrev, recordHash };
+  fs.appendFileSync(tierCorrespondenceReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
