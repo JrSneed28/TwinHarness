@@ -17461,6 +17461,81 @@ function appendTierCorrespondenceReceipt(paths, input) {
   fs9.appendFileSync(tierCorrespondenceReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   return sealed;
 }
+var COVERAGE_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "refId",
+  "declared_set_digest",
+  "declared_set",
+  "observed_set",
+  "covered",
+  "snapshot_coord",
+  "producer_identity",
+  "prevHash"
+];
+var COVERAGE_SNAPSHOT_FIELD_ORDER = ["gitHead", "treeDigest"];
+function coverageCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of COVERAGE_CANONICAL_FIELD_ORDER) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "declared_set" || key === "observed_set") {
+      ordered[key] = [...new Set(val)].sort();
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder(val, COVERAGE_SNAPSHOT_FIELD_ORDER);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeCoverageRecordHash(receipt) {
+  return hashContent(coverageCanonicalText(receipt));
+}
+function coverageReceiptsPath(paths) {
+  return path7.join(paths.stateDir, "dimension-coverage-receipts.jsonl");
+}
+function isValidCoverageReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "dimension-set-coverage") return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.declared_set_digest !== "string" || !HEX64.test(r.declared_set_digest)) return false;
+  if (!Array.isArray(r.declared_set) || !r.declared_set.every((d) => typeof d === "string")) return false;
+  if (!Array.isArray(r.observed_set) || !r.observed_set.every((d) => typeof d === "string")) return false;
+  if (typeof r.covered !== "boolean") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readCoverageReceipts(paths) {
+  return readJsonlValues(coverageReceiptsPath(paths), isValidCoverageReceipt);
+}
+function verifyCoverageChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const { recordHash, ...rest } = receipts[i];
+    const recomputed = computeCoverageRecordHash(rest);
+    if (recomputed !== recordHash) return { ok: false, brokenAt: i, reason: "edited" };
+    if (rest.prevHash !== expectedPrev) return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    expectedPrev = recordHash;
+  }
+  return { ok: true };
+}
+function validateCoverageContent(receipt, liveDeclaredDigest, liveDeclaredSet, liveObservedSet) {
+  if (receipt.declared_set_digest !== liveDeclaredDigest) {
+    return { status: "declared_set_diverged", digests: { stored: receipt.declared_set_digest, live: liveDeclaredDigest } };
+  }
+  const observed = new Set(liveObservedSet);
+  const missing = [...new Set(liveDeclaredSet)].sort().filter((d) => !observed.has(d));
+  if (missing.length > 0) return { status: "uncovered", missing };
+  return { status: "covered" };
+}
 
 // src/core/brief.ts
 var fs10 = __toESM(require("node:fs"));
@@ -22827,9 +22902,271 @@ function bsc8EnforcementEnabled() {
   return !(normalized === "0" || normalized === "false");
 }
 
-// src/core/approvals.ts
+// src/core/verification-driver.ts
 var fs24 = __toESM(require("node:fs"));
 var path24 = __toESM(require("node:path"));
+var SEED_DIMENSIONS = [
+  // `tests-executed` — a test runner command actually ran and passed.
+  { name: "tests-executed", commandMarkers: ["test", "vitest", "jest", "mocha"] },
+  // `typecheck` — a no-emit type check ran and passed.
+  { name: "typecheck", commandMarkers: ["typecheck", "tsc", "type-check"] },
+  // `build` — a build/compile command ran and passed. NOT the committed-`dist/` digest
+  // (that would be circular with the dist invariant); the runner's verify exit is the ground.
+  { name: "build", commandMarkers: ["build", "compile", "esbuild"] }
+];
+var SEED_DIMENSION_NAMES = SEED_DIMENSIONS.map((d) => d.name);
+function commandMatchesDimension(command, markers) {
+  const lc = command.toLowerCase();
+  return markers.some((m) => lc.includes(m));
+}
+function observedDimensionsFromReport(report) {
+  const observed = /* @__PURE__ */ new Set();
+  if (report === null || !Array.isArray(report.results)) return observed;
+  for (const dim of SEED_DIMENSIONS) {
+    const hit = report.results.some(
+      (r) => r.ok === true && typeof r.command === "string" && commandMatchesDimension(r.command, dim.commandMarkers)
+    );
+    if (hit) observed.add(dim.name);
+  }
+  return observed;
+}
+var DRIVER_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "refId",
+  "dimensions",
+  "snapshot_coord",
+  "producer_identity",
+  "producer_kind",
+  "key_id",
+  "legacy",
+  // BSC-10 (C4a) evidence-spine BINDING OPT-IN: IN the canonical order just BEFORE `manifest_digest`
+  // so a PRESENT `grounding_bound` is signature/hash-bound. Omit-when-absent ⇒ a pre-BSC-10 / un-
+  // enrolled receipt (the field absent) is byte-identical, so shipped BSC-3 probes + parity hold.
+  "grounding_bound",
+  // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
+  // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
+  // receipt (the field absent) is byte-identical, so shipped BSC-3 probes + receipts-parity hold.
+  "manifest_digest",
+  "prevHash"
+];
+var DIMENSION_FIELD_ORDER = ["name", "observed", "evidenceRef"];
+var SNAPSHOT_FIELD_ORDER4 = ["gitHead", "treeDigest"];
+function reorder3(obj, order) {
+  const out = {};
+  for (const key of order) out[key] = obj[key];
+  return out;
+}
+function driverCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of DRIVER_CANONICAL_FIELD_ORDER) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "dimensions") {
+      ordered[key] = val.map((d) => reorder3(d, DIMENSION_FIELD_ORDER));
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder3(val, SNAPSHOT_FIELD_ORDER4);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeDriverRecordHash(receipt) {
+  return hashContent(driverCanonicalText(receipt));
+}
+function driverReceiptsPath(paths) {
+  return path24.join(paths.stateDir, "driver-receipts.jsonl");
+}
+function externalDriverReceiptsPath(paths) {
+  return path24.join(paths.stateDir, "external-driver-receipts.jsonl");
+}
+var ED25519_SIGNATURE_BASE644 = /^[A-Za-z0-9+/]{86}==$/;
+function isValidDriverReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "driver-dimension") return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (r.grounding_bound !== void 0 && typeof r.grounding_bound !== "boolean") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
+  if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
+  if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE644.test(r.signature))) {
+    return false;
+  }
+  if (!Array.isArray(r.dimensions)) return false;
+  for (const d of r.dimensions) {
+    if (typeof d !== "object" || d === null) return false;
+    const dim = d;
+    if (typeof dim.name !== "string" || dim.name === "") return false;
+    if (dim.observed !== true) return false;
+    if (typeof dim.evidenceRef !== "string" || dim.evidenceRef === "") return false;
+  }
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readDriverReceipts(paths) {
+  return readJsonlValues(driverReceiptsPath(paths), isValidDriverReceipt);
+}
+function readExternalDriverReceipts(paths) {
+  return readJsonlValues(externalDriverReceiptsPath(paths), isValidDriverReceipt);
+}
+function readLastDriverRecordHash(paths) {
+  const last = scanTailValid(driverReceiptsPath(paths), isValidDriverReceipt);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function verifyDriverChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeDriverRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+var DimensionUnobservedError = class extends Error {
+  constructor(message, unobserved) {
+    super(message);
+    this.unobserved = unobserved;
+    this.name = "DimensionUnobservedError";
+  }
+  unobserved;
+  /** Stable machine token for the CLI failure envelope. */
+  code = "driver_dimension_unobserved";
+};
+var EvidenceUnresolvedError = class extends Error {
+  constructor(message, evidenceRef) {
+    super(message);
+    this.evidenceRef = evidenceRef;
+    this.name = "EvidenceUnresolvedError";
+  }
+  evidenceRef;
+  /** Stable machine token for the CLI failure envelope. */
+  code = "driver_evidence_unresolved";
+};
+function observeDriverDimensions(paths) {
+  const evidenceRef = path24.relative(paths.root, verifyReportPath(paths)).split(path24.sep).join("/");
+  const observed = observedDimensionsFromReport(readVerifyReport(paths));
+  const out = [];
+  for (const name of SEED_DIMENSION_NAMES) {
+    if (observed.has(name)) out.push({ name, observed: true, evidenceRef });
+  }
+  return out;
+}
+function appendDriverReceipt(paths, input) {
+  const evidenceRef = path24.relative(paths.root, verifyReportPath(paths)).split(path24.sep).join("/");
+  if (computeTargetDigest(paths.root, evidenceRef) === null) {
+    throw new EvidenceUnresolvedError(
+      `Refusing to mint a driver-dimension receipt: evidence artifact "${evidenceRef}" does not resolve in source.`,
+      evidenceRef
+    );
+  }
+  const observed = observeDriverDimensions(paths);
+  const observedNames = new Set(observed.map((d) => d.name));
+  if (input.dimensionNames !== void 0) {
+    const unobserved = input.dimensionNames.filter((n) => !observedNames.has(n));
+    if (unobserved.length > 0) {
+      throw new DimensionUnobservedError(
+        `Refusing to record driver dimension(s) not observed in verify-report.json: ${unobserved.join(", ")}.`,
+        unobserved
+      );
+    }
+  }
+  const dimensions = input.dimensionNames === void 0 ? observed : observed.filter((d) => input.dimensionNames.includes(d.name));
+  return sealAndAppend3(paths, {
+    kind: "driver-dimension",
+    refId: driverRefId(paths),
+    dimensions,
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: input.producerIdentity,
+    producer_kind: "in-process"
+  });
+}
+function driverRefId(paths) {
+  return currentReceiptSnapshotCoord(paths).gitHead ?? "no-git";
+}
+function sealAndAppend3(paths, receipt) {
+  assertGovernedWriteSurface(paths.root, driverReceiptsPath(paths));
+  fs24.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastDriverRecordHash(paths);
+  const withPrev = { ...receipt, prevHash };
+  const recordHash = computeDriverRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs24.appendFileSync(driverReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function snapshotStaleReasons3(recorded, current) {
+  const reasons = [];
+  if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
+    reasons.push("gitHead");
+  }
+  if (recorded.treeDigest !== null && current.treeDigest !== null && recorded.treeDigest !== current.treeDigest) {
+    reasons.push("treeDigest");
+  }
+  return reasons;
+}
+function validateDriverReceiptContent(paths, receipt) {
+  for (const dim of receipt.dimensions) {
+    if (computeTargetDigest(paths.root, dim.evidenceRef) === null) {
+      return { status: "evidence_missing" };
+    }
+  }
+  const observed = observedDimensionsFromReport(readVerifyReport(paths));
+  const unobserved = receipt.dimensions.filter((d) => !observed.has(d.name)).map((d) => d.name);
+  if (unobserved.length > 0) {
+    return { status: "dimension_unobserved", unobservedDimensions: unobserved };
+  }
+  const staleReasons = snapshotStaleReasons3(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
+  if (staleReasons.length > 0) return { status: "stale", staleReasons };
+  return { status: "valid" };
+}
+
+// src/core/declared-dimensions.ts
+var DECLARED_DIMENSION_SET = ["tests-executed", "typecheck", "build"];
+function declaredDimensionSetCanonical() {
+  return [...new Set(DECLARED_DIMENSION_SET)].sort().join("\n");
+}
+function declaredDimensionSetDigest() {
+  return hashContent(declaredDimensionSetCanonical());
+}
+function declaredDimensionSet() {
+  return [...DECLARED_DIMENSION_SET];
+}
+function assertDeclaredDimensionsObservable() {
+  const seed = new Set(SEED_DIMENSION_NAMES);
+  const unobservable = DECLARED_DIMENSION_SET.filter((d) => !seed.has(d));
+  if (unobservable.length > 0) {
+    throw new Error(
+      `DECLARED_DIMENSION_SET contains dimension(s) the BSC-3 sensor cannot observe (not in SEED_DIMENSION_NAMES): ${unobservable.join(", ")}. A declared dimension must be observable, or it is an always-absent always-blocking mis-declaration.`
+    );
+  }
+}
+assertDeclaredDimensionsObservable();
+
+// src/core/bsc5-flag.ts
+function bsc5EnforcementEnabled() {
+  const raw = process.env.TH_BSC5_ENFORCE;
+  if (raw === void 0) return true;
+  const normalized = raw.trim().toLowerCase();
+  return !(normalized === "0" || normalized === "false");
+}
+
+// src/core/approvals.ts
+var fs25 = __toESM(require("node:fs"));
+var path25 = __toESM(require("node:path"));
 var HUMAN_GATE_STAGES = new Set(
   STAGE_PIPELINE.filter((s) => s.humanGate).map((s) => s.stage)
 );
@@ -22858,8 +23195,8 @@ var GROUND_FIELD_ORDER2 = [
   "snapshot_coord",
   "governing_artifact_digest"
 ];
-var SNAPSHOT_FIELD_ORDER4 = ["gitHead", "treeDigest"];
-function reorder3(obj, order) {
+var SNAPSHOT_FIELD_ORDER5 = ["gitHead", "treeDigest"];
+function reorder4(obj, order) {
   const out = {};
   for (const key of order) out[key] = obj[key];
   return out;
@@ -22872,10 +23209,10 @@ function approvalCanonicalText2(receipt) {
     if (key === "approval_of") {
       const g = val;
       const normalized = {
-        snapshot_coord: reorder3(g.snapshot_coord, SNAPSHOT_FIELD_ORDER4),
+        snapshot_coord: reorder4(g.snapshot_coord, SNAPSHOT_FIELD_ORDER5),
         governing_artifact_digest: g.governing_artifact_digest
       };
-      ordered[key] = reorder3(normalized, GROUND_FIELD_ORDER2);
+      ordered[key] = reorder4(normalized, GROUND_FIELD_ORDER2);
     } else {
       ordered[key] = val;
     }
@@ -22886,12 +23223,12 @@ function computeApprovalRecordHash(receipt) {
   return hashContent(approvalCanonicalText2(receipt));
 }
 function approvalReceiptsPath(paths) {
-  return path24.join(paths.stateDir, "approval-receipts.jsonl");
+  return path25.join(paths.stateDir, "approval-receipts.jsonl");
 }
 function externalApprovalsPath(paths) {
-  return path24.join(paths.stateDir, "external-approvals.jsonl");
+  return path25.join(paths.stateDir, "external-approvals.jsonl");
 }
-var ED25519_SIGNATURE_BASE644 = /^[A-Za-z0-9+/]{86}==$/;
+var ED25519_SIGNATURE_BASE645 = /^[A-Za-z0-9+/]{86}==$/;
 function isValidApproval(parsed) {
   if (typeof parsed !== "object" || parsed === null) return false;
   const r = parsed;
@@ -22904,7 +23241,7 @@ function isValidApproval(parsed) {
   if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
   if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
   if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
-  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE644.test(r.signature))) {
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE645.test(r.signature))) {
     return false;
   }
   const ground = r.approval_of;
@@ -22976,7 +23313,7 @@ function appendApprovalReceipt(paths, input) {
       artifact
     );
   }
-  return sealAndAppend3(paths, {
+  return sealAndAppend4(paths, {
     kind: "human-approval",
     stage: input.stage,
     approval_of: {
@@ -22987,17 +23324,17 @@ function appendApprovalReceipt(paths, input) {
     producer_kind: "in-process"
   });
 }
-function sealAndAppend3(paths, receipt) {
+function sealAndAppend4(paths, receipt) {
   assertGovernedWriteSurface(paths.root, approvalReceiptsPath(paths));
-  fs24.mkdirSync(paths.stateDir, { recursive: true });
+  fs25.mkdirSync(paths.stateDir, { recursive: true });
   const prevHash = readLastApprovalRecordHash(paths);
   const withPrev = { ...receipt, prevHash };
   const recordHash = computeApprovalRecordHash(withPrev);
   const sealed = { ...withPrev, recordHash };
-  fs24.appendFileSync(approvalReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  fs25.appendFileSync(approvalReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   return sealed;
 }
-function snapshotStaleReasons3(recorded, current) {
+function snapshotStaleReasons4(recorded, current) {
   const reasons = [];
   if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
     reasons.push("gitHead");
@@ -23014,7 +23351,7 @@ function classifyApprovalContent(paths, receipt, passStatus) {
   const currentDigest = computeTargetDigest(paths.root, contract.produces);
   if (currentDigest === null) return { status: "target_missing", receipt };
   if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt };
-  const staleReasons = snapshotStaleReasons3(
+  const staleReasons = snapshotStaleReasons4(
     receipt.approval_of.snapshot_coord,
     currentReceiptSnapshotCoord(paths)
   );
@@ -23068,14 +23405,14 @@ function verifyExternalApproval(candidates) {
   return verified;
 }
 function migrationMarkerPath2(paths) {
-  return path24.join(paths.stateDir, ".approval-receipts-migration");
+  return path25.join(paths.stateDir, ".approval-receipts-migration");
 }
 function readMigrationMarker2(paths) {
   const file = migrationMarkerPath2(paths);
-  if (!fs24.existsSync(file)) return void 0;
+  if (!fs25.existsSync(file)) return void 0;
   let raw;
   try {
-    raw = fs24.readFileSync(file, "utf8");
+    raw = fs25.readFileSync(file, "utf8");
   } catch {
     return void 0;
   }
@@ -23099,8 +23436,8 @@ function grandfatheredBaseline2(paths) {
 }
 
 // src/core/realization.ts
-var fs25 = __toESM(require("node:fs"));
-var path25 = __toESM(require("node:path"));
+var fs26 = __toESM(require("node:fs"));
+var path26 = __toESM(require("node:path"));
 var CANONICAL_FIELD_ORDER4 = [
   "kind",
   "req_id",
@@ -23122,8 +23459,8 @@ var CANONICAL_FIELD_ORDER4 = [
   "prevHash"
 ];
 var REFERENT_FIELD_ORDER = ["path", "digest"];
-var SNAPSHOT_FIELD_ORDER5 = ["gitHead", "treeDigest"];
-function reorder4(obj, order) {
+var SNAPSHOT_FIELD_ORDER6 = ["gitHead", "treeDigest"];
+function reorder5(obj, order) {
   const out = {};
   for (const key of order) out[key] = obj[key];
   return out;
@@ -23134,9 +23471,9 @@ function realizationCanonicalText(receipt) {
     const val = receipt[key];
     if (val === void 0) continue;
     if (key === "referent") {
-      ordered[key] = reorder4(val, REFERENT_FIELD_ORDER);
+      ordered[key] = reorder5(val, REFERENT_FIELD_ORDER);
     } else if (key === "snapshot_coord") {
-      ordered[key] = reorder4(val, SNAPSHOT_FIELD_ORDER5);
+      ordered[key] = reorder5(val, SNAPSHOT_FIELD_ORDER6);
     } else {
       ordered[key] = val;
     }
@@ -23147,12 +23484,12 @@ function computeRealizationRecordHash(receipt) {
   return hashContent(realizationCanonicalText(receipt));
 }
 function realizationReceiptsPath(paths) {
-  return path25.join(paths.stateDir, "realization-receipts.jsonl");
+  return path26.join(paths.stateDir, "realization-receipts.jsonl");
 }
 function externalRealizationReceiptsPath(paths) {
-  return path25.join(paths.stateDir, "external-realization-receipts.jsonl");
+  return path26.join(paths.stateDir, "external-realization-receipts.jsonl");
 }
-var ED25519_SIGNATURE_BASE645 = /^[A-Za-z0-9+/]{86}==$/;
+var ED25519_SIGNATURE_BASE646 = /^[A-Za-z0-9+/]{86}==$/;
 function isValidRealizationReceipt(parsed) {
   if (typeof parsed !== "object" || parsed === null) return false;
   const r = parsed;
@@ -23166,7 +23503,7 @@ function isValidRealizationReceipt(parsed) {
   if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
   if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
   if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
-  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE645.test(r.signature))) {
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE646.test(r.signature))) {
     return false;
   }
   const ref = r.referent;
@@ -23266,10 +23603,10 @@ function unresolvedDoneSliceReqs(map, state) {
   return [...unresolved].sort();
 }
 function loadRepoMapForRealization(paths) {
-  const mapJsonPath = path25.join(paths.stateDir, "repo-map.json");
+  const mapJsonPath = path26.join(paths.stateDir, "repo-map.json");
   let raw = null;
   try {
-    raw = fs25.readFileSync(mapJsonPath, "utf8");
+    raw = fs26.readFileSync(mapJsonPath, "utf8");
   } catch {
     return null;
   }
@@ -23294,7 +23631,7 @@ function appendRealizationReceipt(paths, input) {
       input.artifactPath
     );
   }
-  return sealAndAppend4(paths, {
+  return sealAndAppend5(paths, {
     kind: "realization",
     req_id: input.reqId,
     owning_slice: input.owningSlice,
@@ -23305,7 +23642,7 @@ function appendRealizationReceipt(paths, input) {
   });
 }
 function appendLegacyRealizationReceipt(paths, reqId, owningSlice) {
-  return sealAndAppend4(paths, {
+  return sealAndAppend5(paths, {
     kind: "realization",
     req_id: reqId,
     owning_slice: owningSlice,
@@ -23315,17 +23652,17 @@ function appendLegacyRealizationReceipt(paths, reqId, owningSlice) {
     legacy: true
   });
 }
-function sealAndAppend4(paths, receipt) {
+function sealAndAppend5(paths, receipt) {
   assertGovernedWriteSurface(paths.root, realizationReceiptsPath(paths));
-  fs25.mkdirSync(paths.stateDir, { recursive: true });
+  fs26.mkdirSync(paths.stateDir, { recursive: true });
   const prevHash = readLastRealizationRecordHash(paths);
   const withPrev = { ...receipt, prevHash };
   const recordHash = computeRealizationRecordHash(withPrev);
   const sealed = { ...withPrev, recordHash };
-  fs25.appendFileSync(realizationReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  fs26.appendFileSync(realizationReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
   return sealed;
 }
-function snapshotStaleReasons4(recorded, current) {
+function snapshotStaleReasons5(recorded, current) {
   const reasons = [];
   if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
     reasons.push("gitHead");
@@ -23341,7 +23678,7 @@ function classifyRealizationContent(paths, receipt, passStatus) {
   const currentDigest = computeTargetDigest(paths.root, recordedPath);
   if (currentDigest === null) return { status: "target_missing", receipt };
   if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt };
-  const staleReasons = snapshotStaleReasons4(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
+  const staleReasons = snapshotStaleReasons5(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
   if (staleReasons.length > 0) return { status: "stale", receipt, staleReasons };
   return { status: passStatus, receipt };
 }
@@ -23390,14 +23727,14 @@ function readRealizationReceiptValidated(paths, reqId) {
   return classifyRealizationContent(paths, inProcess, "valid");
 }
 function migrationMarkerPath3(paths) {
-  return path25.join(paths.stateDir, ".realization-receipts-migration");
+  return path26.join(paths.stateDir, ".realization-receipts-migration");
 }
 function readMigrationMarker3(paths) {
   const file = migrationMarkerPath3(paths);
-  if (!fs25.existsSync(file)) return void 0;
+  if (!fs26.existsSync(file)) return void 0;
   let raw;
   try {
-    raw = fs25.readFileSync(file, "utf8");
+    raw = fs26.readFileSync(file, "utf8");
   } catch {
     return void 0;
   }
@@ -23428,8 +23765,8 @@ function ensureRealizationMigration(paths, state, map) {
   const baseline = owned.map((o) => o.reqId);
   const marker = { migratedAt: (/* @__PURE__ */ new Date()).toISOString(), baseline };
   assertGovernedWriteSurface(paths.root, migrationMarkerPath3(paths));
-  fs25.mkdirSync(paths.stateDir, { recursive: true });
-  fs25.writeFileSync(migrationMarkerPath3(paths), JSON.stringify(marker), "utf8");
+  fs26.mkdirSync(paths.stateDir, { recursive: true });
+  fs26.writeFileSync(migrationMarkerPath3(paths), JSON.stringify(marker), "utf8");
 }
 function ensureRealizationMigrationOpportunistic(paths) {
   if (realizationMigrationDone(paths)) return;
@@ -23447,238 +23784,6 @@ function ensureRealizationMigrationOpportunistic(paths) {
     });
   } catch {
   }
-}
-
-// src/core/verification-driver.ts
-var fs26 = __toESM(require("node:fs"));
-var path26 = __toESM(require("node:path"));
-var SEED_DIMENSIONS = [
-  // `tests-executed` — a test runner command actually ran and passed.
-  { name: "tests-executed", commandMarkers: ["test", "vitest", "jest", "mocha"] },
-  // `typecheck` — a no-emit type check ran and passed.
-  { name: "typecheck", commandMarkers: ["typecheck", "tsc", "type-check"] },
-  // `build` — a build/compile command ran and passed. NOT the committed-`dist/` digest
-  // (that would be circular with the dist invariant); the runner's verify exit is the ground.
-  { name: "build", commandMarkers: ["build", "compile", "esbuild"] }
-];
-var SEED_DIMENSION_NAMES = SEED_DIMENSIONS.map((d) => d.name);
-function commandMatchesDimension(command, markers) {
-  const lc = command.toLowerCase();
-  return markers.some((m) => lc.includes(m));
-}
-function observedDimensionsFromReport(report) {
-  const observed = /* @__PURE__ */ new Set();
-  if (report === null || !Array.isArray(report.results)) return observed;
-  for (const dim of SEED_DIMENSIONS) {
-    const hit = report.results.some(
-      (r) => r.ok === true && typeof r.command === "string" && commandMatchesDimension(r.command, dim.commandMarkers)
-    );
-    if (hit) observed.add(dim.name);
-  }
-  return observed;
-}
-var DRIVER_CANONICAL_FIELD_ORDER = [
-  "kind",
-  "refId",
-  "dimensions",
-  "snapshot_coord",
-  "producer_identity",
-  "producer_kind",
-  "key_id",
-  "legacy",
-  // BSC-10 (C4a) evidence-spine BINDING OPT-IN: IN the canonical order just BEFORE `manifest_digest`
-  // so a PRESENT `grounding_bound` is signature/hash-bound. Omit-when-absent ⇒ a pre-BSC-10 / un-
-  // enrolled receipt (the field absent) is byte-identical, so shipped BSC-3 probes + parity hold.
-  "grounding_bound",
-  // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
-  // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
-  // receipt (the field absent) is byte-identical, so shipped BSC-3 probes + receipts-parity hold.
-  "manifest_digest",
-  "prevHash"
-];
-var DIMENSION_FIELD_ORDER = ["name", "observed", "evidenceRef"];
-var SNAPSHOT_FIELD_ORDER6 = ["gitHead", "treeDigest"];
-function reorder5(obj, order) {
-  const out = {};
-  for (const key of order) out[key] = obj[key];
-  return out;
-}
-function driverCanonicalText(receipt) {
-  const ordered = {};
-  for (const key of DRIVER_CANONICAL_FIELD_ORDER) {
-    const val = receipt[key];
-    if (val === void 0) continue;
-    if (key === "dimensions") {
-      ordered[key] = val.map((d) => reorder5(d, DIMENSION_FIELD_ORDER));
-    } else if (key === "snapshot_coord") {
-      ordered[key] = reorder5(val, SNAPSHOT_FIELD_ORDER6);
-    } else {
-      ordered[key] = val;
-    }
-  }
-  return JSON.stringify(ordered);
-}
-function computeDriverRecordHash(receipt) {
-  return hashContent(driverCanonicalText(receipt));
-}
-function driverReceiptsPath(paths) {
-  return path26.join(paths.stateDir, "driver-receipts.jsonl");
-}
-function externalDriverReceiptsPath(paths) {
-  return path26.join(paths.stateDir, "external-driver-receipts.jsonl");
-}
-var ED25519_SIGNATURE_BASE646 = /^[A-Za-z0-9+/]{86}==$/;
-function isValidDriverReceipt(parsed) {
-  if (typeof parsed !== "object" || parsed === null) return false;
-  const r = parsed;
-  if (r.kind !== "driver-dimension") return false;
-  if (typeof r.refId !== "string" || r.refId === "") return false;
-  if (typeof r.producer_identity !== "string") return false;
-  if (r.grounding_bound !== void 0 && typeof r.grounding_bound !== "boolean") return false;
-  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
-  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
-  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
-  if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
-  if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
-  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE646.test(r.signature))) {
-    return false;
-  }
-  if (!Array.isArray(r.dimensions)) return false;
-  for (const d of r.dimensions) {
-    if (typeof d !== "object" || d === null) return false;
-    const dim = d;
-    if (typeof dim.name !== "string" || dim.name === "") return false;
-    if (dim.observed !== true) return false;
-    if (typeof dim.evidenceRef !== "string" || dim.evidenceRef === "") return false;
-  }
-  const snap = r.snapshot_coord;
-  if (typeof snap !== "object" || snap === null) return false;
-  const s = snap;
-  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
-  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
-  return true;
-}
-function readDriverReceipts(paths) {
-  return readJsonlValues(driverReceiptsPath(paths), isValidDriverReceipt);
-}
-function readExternalDriverReceipts(paths) {
-  return readJsonlValues(externalDriverReceiptsPath(paths), isValidDriverReceipt);
-}
-function readLastDriverRecordHash(paths) {
-  const last = scanTailValid(driverReceiptsPath(paths), isValidDriverReceipt);
-  return last ? last.recordHash : GENESIS_PREV_HASH;
-}
-function verifyDriverChain(receipts) {
-  let expectedPrev = GENESIS_PREV_HASH;
-  for (let i = 0; i < receipts.length; i++) {
-    const r = receipts[i];
-    const { recordHash, ...rest } = r;
-    const recomputed = computeDriverRecordHash(rest);
-    if (recomputed !== recordHash) {
-      return { ok: false, brokenAt: i, reason: "edited" };
-    }
-    if (r.prevHash !== expectedPrev) {
-      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
-    }
-    expectedPrev = r.recordHash;
-  }
-  return { ok: true };
-}
-var DimensionUnobservedError = class extends Error {
-  constructor(message, unobserved) {
-    super(message);
-    this.unobserved = unobserved;
-    this.name = "DimensionUnobservedError";
-  }
-  unobserved;
-  /** Stable machine token for the CLI failure envelope. */
-  code = "driver_dimension_unobserved";
-};
-var EvidenceUnresolvedError = class extends Error {
-  constructor(message, evidenceRef) {
-    super(message);
-    this.evidenceRef = evidenceRef;
-    this.name = "EvidenceUnresolvedError";
-  }
-  evidenceRef;
-  /** Stable machine token for the CLI failure envelope. */
-  code = "driver_evidence_unresolved";
-};
-function observeDriverDimensions(paths) {
-  const evidenceRef = path26.relative(paths.root, verifyReportPath(paths)).split(path26.sep).join("/");
-  const observed = observedDimensionsFromReport(readVerifyReport(paths));
-  const out = [];
-  for (const name of SEED_DIMENSION_NAMES) {
-    if (observed.has(name)) out.push({ name, observed: true, evidenceRef });
-  }
-  return out;
-}
-function appendDriverReceipt(paths, input) {
-  const evidenceRef = path26.relative(paths.root, verifyReportPath(paths)).split(path26.sep).join("/");
-  if (computeTargetDigest(paths.root, evidenceRef) === null) {
-    throw new EvidenceUnresolvedError(
-      `Refusing to mint a driver-dimension receipt: evidence artifact "${evidenceRef}" does not resolve in source.`,
-      evidenceRef
-    );
-  }
-  const observed = observeDriverDimensions(paths);
-  const observedNames = new Set(observed.map((d) => d.name));
-  if (input.dimensionNames !== void 0) {
-    const unobserved = input.dimensionNames.filter((n) => !observedNames.has(n));
-    if (unobserved.length > 0) {
-      throw new DimensionUnobservedError(
-        `Refusing to record driver dimension(s) not observed in verify-report.json: ${unobserved.join(", ")}.`,
-        unobserved
-      );
-    }
-  }
-  const dimensions = input.dimensionNames === void 0 ? observed : observed.filter((d) => input.dimensionNames.includes(d.name));
-  return sealAndAppend5(paths, {
-    kind: "driver-dimension",
-    refId: driverRefId(paths),
-    dimensions,
-    snapshot_coord: currentReceiptSnapshotCoord(paths),
-    producer_identity: input.producerIdentity,
-    producer_kind: "in-process"
-  });
-}
-function driverRefId(paths) {
-  return currentReceiptSnapshotCoord(paths).gitHead ?? "no-git";
-}
-function sealAndAppend5(paths, receipt) {
-  assertGovernedWriteSurface(paths.root, driverReceiptsPath(paths));
-  fs26.mkdirSync(paths.stateDir, { recursive: true });
-  const prevHash = readLastDriverRecordHash(paths);
-  const withPrev = { ...receipt, prevHash };
-  const recordHash = computeDriverRecordHash(withPrev);
-  const sealed = { ...withPrev, recordHash };
-  fs26.appendFileSync(driverReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
-  return sealed;
-}
-function snapshotStaleReasons5(recorded, current) {
-  const reasons = [];
-  if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
-    reasons.push("gitHead");
-  }
-  if (recorded.treeDigest !== null && current.treeDigest !== null && recorded.treeDigest !== current.treeDigest) {
-    reasons.push("treeDigest");
-  }
-  return reasons;
-}
-function validateDriverReceiptContent(paths, receipt) {
-  for (const dim of receipt.dimensions) {
-    if (computeTargetDigest(paths.root, dim.evidenceRef) === null) {
-      return { status: "evidence_missing" };
-    }
-  }
-  const observed = observedDimensionsFromReport(readVerifyReport(paths));
-  const unobserved = receipt.dimensions.filter((d) => !observed.has(d.name)).map((d) => d.name);
-  if (unobserved.length > 0) {
-    return { status: "dimension_unobserved", unobservedDimensions: unobserved };
-  }
-  const staleReasons = snapshotStaleReasons5(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
-  if (staleReasons.length > 0) return { status: "stale", staleReasons };
-  return { status: "valid" };
 }
 
 // src/core/bsc3-flag.ts
@@ -25028,6 +25133,42 @@ function checkDriverDimensions(paths) {
     dimensions: verdict.dimensions
   };
 }
+function checkDimensionSetCoverage(paths) {
+  const liveDeclaredDigest = declaredDimensionSetDigest();
+  const liveDeclaredSet = declaredDimensionSet();
+  const liveObservedSet = [...observedDimensionsFromReport(readVerifyReport(paths))].sort();
+  const receipts = readCoverageReceipts(paths);
+  if (receipts.length === 0) return PASS;
+  let status;
+  let detail;
+  const chain = verifyCoverageChain(receipts);
+  if (!chain.ok) {
+    status = "chain";
+    detail = { reason: "chain", brokenAt: chain.brokenAt, chainReason: chain.reason };
+  } else {
+    const latest = receipts[receipts.length - 1];
+    const content = validateCoverageContent(latest, liveDeclaredDigest, liveDeclaredSet, liveObservedSet);
+    status = content.status;
+    detail = {
+      reason: content.status,
+      ...content.missing ? { missing: content.missing } : {},
+      ...content.digests ? { digests: content.digests } : {}
+    };
+  }
+  const coverage = {
+    declared: liveDeclaredSet,
+    observed: liveObservedSet,
+    declaredSetDigest: liveDeclaredDigest,
+    status
+  };
+  if (status === "covered") {
+    return { ok: true, coverage };
+  }
+  if (!bsc5EnforcementEnabled()) {
+    return { ok: true, coverage, notice: { token: "dimension_set_uncovered", detail } };
+  }
+  return { ok: false, error: "dimension_set_uncovered", detail, coverage };
+}
 function checkRealization(paths, state) {
   ensureRealizationMigrationOpportunistic(paths);
   const map = loadRepoMapForRealization(paths);
@@ -25744,6 +25885,30 @@ var PRODUCTION_REALITY_RUNGS = [
     }
   },
   {
+    // 8c. (BSC-5 / Axis-B slice-7) DIMENSION-SET-COVERAGE GROUNDING — composed among the gating
+    // tail, AFTER assertion-presence and BEFORE the thin BSC-10 grounding summary. A run may not be
+    // certified complete while a DECLARED required dimension is not OBSERVED. DECLARED is the
+    // COMMITTED `DECLARED_DIMENSION_SET` constant (`core/declared-dimensions.ts`, Interp A —
+    // narrowing it is a reviewable code + `dist/` diff, never a runtime self-attest); OBSERVED is
+    // re-derived from `verify-report.json` at gate time (the SAME `observedDimensionsFromReport` the
+    // BSC-3 sensor uses). The receipt's stored sets/verdict are NEVER trusted — the gate recomputes
+    // declared (live constant) + observed (live report) + the `declared ⊆ observed` verdict, so a
+    // forged "all covered" claim, a stripped report dimension, or a post-mint narrowing of the
+    // committed set is mechanically detectable. Governed by `bsc5EnforcementEnabled()` (defaults ON):
+    // the verdict is ALWAYS computed (so `coverage` summarizes the posture for the I1 hook), but it
+    // BLOCKS with `dimension_set_uncovered` only when enforcement is on; OFF ⇒ a non-blocking notice.
+    id: "dimension-set-coverage",
+    check: (paths, _state, ctx) => {
+      const coverage = checkDimensionSetCoverage(paths);
+      ctx.captured.coverage = coverage;
+      if (!coverage.ok) {
+        const driver = ctx.captured.driver;
+        return driver?.dimensions ? { ...coverage, dimensions: driver.dimensions } : coverage;
+      }
+      return null;
+    }
+  },
+  {
     // 9. (BSC-10 / Axis-B slice-BSC10a) EXTERNAL-REFERENCE GROUNDING — a THIN summary rung composed
     // among the reality rungs. It does NOT recompute: it CONSUMES the `groundingVerdict` already
     // HOISTED before the 1c approval leg (Principle 1 — single live recompute), folding `grounding?`
@@ -25810,16 +25975,18 @@ function checkProductionReality(paths, state) {
   const assertion = ctx.captured.assertion;
   const grounding = ctx.captured.grounding;
   const tierCorrespondence = ctx.captured.tierCorrespondence;
+  const coverage = ctx.captured.coverage;
   const merged = { ok: true };
   const dimensions = driver?.dimensions ?? assertion?.dimensions;
   if (dimensions) merged.dimensions = dimensions;
   if (assertion?.assertionPresence) merged.assertionPresence = assertion.assertionPresence;
   if (assertion?.mutationEfficacy) merged.mutationEfficacy = assertion.mutationEfficacy;
   if (grounding?.grounding) merged.grounding = grounding.grounding;
+  if (coverage?.coverage) merged.coverage = coverage.coverage;
   const bsc9 = ctx.captured.bsc9;
-  const notice = driver?.notice ?? realization?.notice ?? assertion?.notice ?? grounding?.notice ?? tierCorrespondence?.notice ?? bsc9?.notice;
+  const notice = driver?.notice ?? realization?.notice ?? assertion?.notice ?? grounding?.notice ?? tierCorrespondence?.notice ?? coverage?.notice ?? bsc9?.notice;
   if (notice) merged.notice = notice;
-  return merged.dimensions || merged.assertionPresence || merged.mutationEfficacy || merged.grounding || merged.notice ? merged : PASS;
+  return merged.dimensions || merged.assertionPresence || merged.mutationEfficacy || merged.grounding || merged.coverage || merged.notice ? merged : PASS;
 }
 function stageOrdinal(stage) {
   const canonical = canonicalizeStage(stage);
