@@ -24,6 +24,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
+import * as tty from "node:tty";
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { structuredLog } from "../core/log";
@@ -374,13 +376,70 @@ export type TTYConfirmationResult =
  * Injectable for headless tests via `opts.isTTY` / `opts.stdinLine` so all three
  * branches are reachable without a real PTY.
  */
+/**
+ * Read ONE line from stdin (fd 0) for the interactive y/N prompt, returning the
+ * text up to (not including) the first newline.
+ *
+ * Why not `fs.readFileSync(0)`: that reads to EOF, so on a real controlling TTY
+ * pressing Enter does NOT return — the call blocks until the user sends EOF
+ * (Ctrl+D / Ctrl+Z), and on the Windows console it commonly throws outright
+ * (EAGAIN/EOF), which fails the prompt closed and made approval impossible for a
+ * legitimate human at an interactive Windows terminal. Reading byte-by-byte and
+ * stopping at the first `\n` returns on a single keystroke + Enter on every
+ * platform. EAGAIN/EWOULDBLOCK (a non-blocking fd 0 with no byte ready yet) is
+ * retried after a short sleep — it means "wait", not "decline". EOF ends the
+ * line with whatever was typed; only a truly unreadable stdin returns `""`
+ * (fail-closed; the caller treats it as declined).
+ */
+/** Block this thread for ~`ms` without busy-spinning (Atomics.wait on a tiny SAB). */
+function sleepMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function readSingleLineFromStdin(): string {
+  const bytes: number[] = [];
+  const one = Buffer.alloc(1);
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    let n: number;
+    try {
+      n = fs.readSync(0, one, 0, 1, null);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      // Node flips fd 0 to O_NONBLOCK once the stdin stream is referenced, so a
+      // readSync on a real interactive terminal throws EAGAIN/EWOULDBLOCK simply
+      // because the user has not typed the next byte YET. That is "wait", NOT
+      // "decline" — sleep briefly and retry, or the prompt fails closed on the
+      // very platforms (TTY/Windows console) this helper exists to support.
+      if (code === "EAGAIN" || code === "EWOULDBLOCK") {
+        sleepMs(15);
+        continue;
+      }
+      // EOF (Windows console / closed pipe with no trailing newline) ends the
+      // line cleanly with whatever was typed so far.
+      if (code === "EOF") break;
+      // Truly unreadable stdin → fail-closed (declined).
+      return "";
+    }
+    if (n === 0) break; // EOF
+    const ch = one.readUInt8(0);
+    if (ch === 0x0a) break; // \n terminates the line (CR is stripped below)
+    bytes.push(ch);
+  }
+  return Buffer.from(bytes).toString("utf8").replace(/\r$/, "");
+}
+
 export function requireTTYConfirmation(
   id: string,
   disposition: "approve" | "reject" | "supersede",
   opts: TTYConfirmationOpts = {},
 ): TTYConfirmationResult {
   // Barrier 1: TTY check.
-  const isTTY = opts.isTTY ?? Boolean(process.stdin.isTTY);
+  // Use tty.isatty(0) rather than `process.stdin.isTTY`: the latter lazily
+  // CONSTRUCTS the process.stdin stream, which flips fd 0 to O_NONBLOCK on
+  // POSIX and makes the very next readSync throw EAGAIN. isatty detects the
+  // terminal without that side effect on the fd we are about to read.
+  const isTTY = opts.isTTY ?? tty.isatty(0);
   if (!isTTY) {
     return { ok: false, error: "no_tty" };
   }
@@ -390,13 +449,7 @@ export function requireTTYConfirmation(
   if (line === undefined) {
     // Real interactive path: name the id + disposition, then read one line.
     process.stderr.write(`Confirm ${disposition} of ${id}? [y/N] `);
-    try {
-      const raw = fs.readFileSync(0, "utf8");
-      line = raw.split(/\r?\n/)[0] ?? "";
-    } catch {
-      // EOF / unreadable stdin → declined (fail-closed).
-      line = "";
-    }
+    line = readSingleLineFromStdin();
   }
   const answer = line.trim().toLowerCase();
   if (answer === "y" || answer === "yes") {
@@ -413,9 +466,30 @@ export function requireTTYConfirmation(
  */
 function readParentComm(ppid: number): string {
   if (!ppid || ppid <= 0) return "unknown";
+  // Linux fast path: the kernel-maintained command name, no subprocess.
   try {
     const comm = fs.readFileSync(`/proc/${ppid}/comm`, "utf8").trim();
-    return comm || "unknown";
+    if (comm) return comm;
+  } catch {
+    // /proc absent (Windows/macOS) or unreadable → fall through to the per-OS query.
+  }
+  try {
+    if (process.platform === "win32") {
+      // tasklist CSV: the image name is the first quoted field.
+      const out = spawnSync(
+        "tasklist",
+        ["/FI", `PID eq ${ppid}`, "/FO", "CSV", "/NH"],
+        { encoding: "utf8", timeout: 2000, windowsHide: true },
+      );
+      const m = out.stdout?.match(/^"([^"]+)"/);
+      return m?.[1]?.trim() || "unknown";
+    }
+    // macOS / BSD: `ps -p <ppid> -o comm=` prints the command name, no header.
+    const out = spawnSync("ps", ["-p", String(ppid), "-o", "comm="], {
+      encoding: "utf8",
+      timeout: 2000,
+    });
+    return out.stdout?.trim() || "unknown";
   } catch {
     return "unknown";
   }
