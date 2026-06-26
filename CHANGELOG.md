@@ -41,10 +41,17 @@ Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding lay
   could **never** approve (barrier 1 passed on `isTTY`, barrier 2 always declined). The
   helper now reads fd 0 one byte at a time and stops at the first newline, returning on a
   single keystroke + Enter on every platform (CRLF tolerated; EOF without a newline still
-  accepted; unreadable stdin still fails closed). The real fd-0 path — previously covered
-  by nothing, since every test injects `stdinLine` — is now pinned by
-  `tests/tty-interactive-read.test.ts` (compiled-handler subprocess with a hard timeout
-  that turns the old EOF-block into a deterministic failure).
+  accepted; unreadable stdin still fails closed). Crucially it **retries on
+  `EAGAIN`/`EWOULDBLOCK`** (a non-blocking fd 0 with no byte ready yet means "wait", not
+  "decline") rather than failing closed — without this, a real interactive terminal would
+  still always decline, because barrier 1's `process.stdin.isTTY` check used to *construct*
+  the stdin stream and flip fd 0 to `O_NONBLOCK` on POSIX. Barrier 1 now uses
+  `tty.isatty(0)`, which detects the terminal without that side effect on the fd the helper
+  is about to read. The real fd-0 path — previously covered by nothing, since every test
+  injects `stdinLine` — is now pinned by `tests/tty-interactive-read.test.ts`: pipe-based
+  cases cover the byte-level parsing, and a non-blocking-fd-0 case (child references
+  `process.stdin`, parent writes after a delay) covers the `EAGAIN` decline regression and
+  discriminates the fix from the bug on POSIX CI.
 - **Approval provenance now records the parent command name on Windows and macOS.**
   `readParentComm` was Linux-only (`/proc/<ppid>/comm`), so the sealed
   `provenance.parentComm` forensic field was empty on the platforms where the read bug bit

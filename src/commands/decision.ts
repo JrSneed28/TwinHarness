@@ -25,6 +25,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
+import * as tty from "node:tty";
 import type { ProjectPaths } from "../core/paths";
 import { type CommandResult, success, failure } from "../core/output";
 import { structuredLog } from "../core/log";
@@ -385,8 +386,16 @@ export type TTYConfirmationResult =
  * (EAGAIN/EOF), which fails the prompt closed and made approval impossible for a
  * legitimate human at an interactive Windows terminal. Reading byte-by-byte and
  * stopping at the first `\n` returns on a single keystroke + Enter on every
- * platform. Any read error → `""` (fail-closed; the caller treats it as declined).
+ * platform. EAGAIN/EWOULDBLOCK (a non-blocking fd 0 with no byte ready yet) is
+ * retried after a short sleep — it means "wait", not "decline". EOF ends the
+ * line with whatever was typed; only a truly unreadable stdin returns `""`
+ * (fail-closed; the caller treats it as declined).
  */
+/** Block this thread for ~`ms` without busy-spinning (Atomics.wait on a tiny SAB). */
+function sleepMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function readSingleLineFromStdin(): string {
   const bytes: number[] = [];
   const one = Buffer.alloc(1);
@@ -396,9 +405,19 @@ function readSingleLineFromStdin(): string {
     try {
       n = fs.readSync(0, one, 0, 1, null);
     } catch (err) {
-      // EOF surfaces as EOF on some platforms; treat any read failure as
-      // end-of-input rather than declining a line already typed.
-      if ((err as NodeJS.ErrnoException).code === "EOF") break;
+      const code = (err as NodeJS.ErrnoException).code;
+      // Node flips fd 0 to O_NONBLOCK once the stdin stream is referenced, so a
+      // readSync on a real interactive terminal throws EAGAIN/EWOULDBLOCK simply
+      // because the user has not typed the next byte YET. That is "wait", NOT
+      // "decline" — sleep briefly and retry, or the prompt fails closed on the
+      // very platforms (TTY/Windows console) this helper exists to support.
+      if (code === "EAGAIN" || code === "EWOULDBLOCK") {
+        sleepMs(15);
+        continue;
+      }
+      // EOF (Windows console / closed pipe with no trailing newline) ends the
+      // line cleanly with whatever was typed so far.
+      if (code === "EOF") break;
       // Truly unreadable stdin → fail-closed (declined).
       return "";
     }
@@ -416,7 +435,11 @@ export function requireTTYConfirmation(
   opts: TTYConfirmationOpts = {},
 ): TTYConfirmationResult {
   // Barrier 1: TTY check.
-  const isTTY = opts.isTTY ?? Boolean(process.stdin.isTTY);
+  // Use tty.isatty(0) rather than `process.stdin.isTTY`: the latter lazily
+  // CONSTRUCTS the process.stdin stream, which flips fd 0 to O_NONBLOCK on
+  // POSIX and makes the very next readSync throw EAGAIN. isatty detects the
+  // terminal without that side effect on the fd we are about to read.
+  const isTTY = opts.isTTY ?? tty.isatty(0);
   if (!isTTY) {
     return { ok: false, error: "no_tty" };
   }
