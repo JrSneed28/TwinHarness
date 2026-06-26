@@ -30,6 +30,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer + self-epic governance + coordination-primitive hardening), not yet cut as a versioned release. **1100+ tests, green on CI** (1 platform-conditional skip in `tests/concurrency.test.ts`; was 460 at 0.6.2).
 
+### Fixed — interactive approval read (TTY) (2026-06-26)
+
+- **`th decision approve` / `th verify approve` now work at a real interactive terminal,
+  including the Windows console.** The shared confirmation helper
+  (`requireTTYConfirmation`, `src/commands/decision.ts`) previously read the y/N answer
+  with `fs.readFileSync(0, "utf8")`, which reads stdin **to EOF**: on a controlling TTY,
+  pressing Enter did not return (it blocked until Ctrl+D/Ctrl+Z), and on the Windows
+  console the read threw outright, hitting the fail-closed `catch` so a legitimate human
+  could **never** approve (barrier 1 passed on `isTTY`, barrier 2 always declined). The
+  helper now reads fd 0 one byte at a time and stops at the first newline, returning on a
+  single keystroke + Enter on every platform (CRLF tolerated; EOF without a newline still
+  accepted; unreadable stdin still fails closed). The real fd-0 path — previously covered
+  by nothing, since every test injects `stdinLine` — is now pinned by
+  `tests/tty-interactive-read.test.ts` (compiled-handler subprocess with a hard timeout
+  that turns the old EOF-block into a deterministic failure).
+- **Approval provenance now records the parent command name on Windows and macOS.**
+  `readParentComm` was Linux-only (`/proc/<ppid>/comm`), so the sealed
+  `provenance.parentComm` forensic field was empty on the platforms where the read bug bit
+  hardest. It now falls back to `tasklist` (Windows) / `ps -o comm=` (macOS/BSD),
+  best-effort and non-fatal (any failure → `"unknown"`; provenance is forensic, not a gate).
+
 ### UX/UI designer split — new Stage 4a UX (2026-06-17)
 
 - **`agents/ui-designer.md` renamed to `agents/ux-ui-designer.md`** (history preserved via

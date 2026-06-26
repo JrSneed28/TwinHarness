@@ -66,6 +66,7 @@ exports.runDecisionCheck = runDecisionCheck;
 const fs = __importStar(require("node:fs"));
 const os = __importStar(require("node:os"));
 const path = __importStar(require("node:path"));
+const node_child_process_1 = require("node:child_process");
 const output_1 = require("../core/output");
 const log_1 = require("../core/log");
 const state_store_1 = require("../core/state-store");
@@ -333,6 +334,44 @@ function runDecisionList(paths, _opts = {}) {
  * Injectable for headless tests via `opts.isTTY` / `opts.stdinLine` so all three
  * branches are reachable without a real PTY.
  */
+/**
+ * Read ONE line from stdin (fd 0) for the interactive y/N prompt, returning the
+ * text up to (not including) the first newline.
+ *
+ * Why not `fs.readFileSync(0)`: that reads to EOF, so on a real controlling TTY
+ * pressing Enter does NOT return — the call blocks until the user sends EOF
+ * (Ctrl+D / Ctrl+Z), and on the Windows console it commonly throws outright
+ * (EAGAIN/EOF), which fails the prompt closed and made approval impossible for a
+ * legitimate human at an interactive Windows terminal. Reading byte-by-byte and
+ * stopping at the first `\n` returns on a single keystroke + Enter on every
+ * platform. Any read error → `""` (fail-closed; the caller treats it as declined).
+ */
+function readSingleLineFromStdin() {
+    const bytes = [];
+    const one = Buffer.alloc(1);
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+        let n;
+        try {
+            n = fs.readSync(0, one, 0, 1, null);
+        }
+        catch (err) {
+            // EOF surfaces as EOF on some platforms; treat any read failure as
+            // end-of-input rather than declining a line already typed.
+            if (err.code === "EOF")
+                break;
+            // Truly unreadable stdin → fail-closed (declined).
+            return "";
+        }
+        if (n === 0)
+            break; // EOF
+        const ch = one.readUInt8(0);
+        if (ch === 0x0a)
+            break; // \n terminates the line (CR is stripped below)
+        bytes.push(ch);
+    }
+    return Buffer.from(bytes).toString("utf8").replace(/\r$/, "");
+}
 function requireTTYConfirmation(id, disposition, opts = {}) {
     // Barrier 1: TTY check.
     const isTTY = opts.isTTY ?? Boolean(process.stdin.isTTY);
@@ -344,14 +383,7 @@ function requireTTYConfirmation(id, disposition, opts = {}) {
     if (line === undefined) {
         // Real interactive path: name the id + disposition, then read one line.
         process.stderr.write(`Confirm ${disposition} of ${id}? [y/N] `);
-        try {
-            const raw = fs.readFileSync(0, "utf8");
-            line = raw.split(/\r?\n/)[0] ?? "";
-        }
-        catch {
-            // EOF / unreadable stdin → declined (fail-closed).
-            line = "";
-        }
+        line = readSingleLineFromStdin();
     }
     const answer = line.trim().toLowerCase();
     if (answer === "y" || answer === "yes") {
@@ -368,9 +400,28 @@ function requireTTYConfirmation(id, disposition, opts = {}) {
 function readParentComm(ppid) {
     if (!ppid || ppid <= 0)
         return "unknown";
+    // Linux fast path: the kernel-maintained command name, no subprocess.
     try {
         const comm = fs.readFileSync(`/proc/${ppid}/comm`, "utf8").trim();
-        return comm || "unknown";
+        if (comm)
+            return comm;
+    }
+    catch {
+        // /proc absent (Windows/macOS) or unreadable → fall through to the per-OS query.
+    }
+    try {
+        if (process.platform === "win32") {
+            // tasklist CSV: the image name is the first quoted field.
+            const out = (0, node_child_process_1.spawnSync)("tasklist", ["/FI", `PID eq ${ppid}`, "/FO", "CSV", "/NH"], { encoding: "utf8", timeout: 2000, windowsHide: true });
+            const m = out.stdout?.match(/^"([^"]+)"/);
+            return m?.[1]?.trim() || "unknown";
+        }
+        // macOS / BSD: `ps -p <ppid> -o comm=` prints the command name, no header.
+        const out = (0, node_child_process_1.spawnSync)("ps", ["-p", String(ppid), "-o", "comm="], {
+            encoding: "utf8",
+            timeout: 2000,
+        });
+        return out.stdout?.trim() || "unknown";
     }
     catch {
         return "unknown";
