@@ -2,7 +2,7 @@
 
 A Claude Code plugin that runs a vague software idea through requirements, design, and slice-by-slice implementation — with verification gates at every step. It is backed by a deterministic TypeScript CLI (`th`) that owns state, hashing, traceability, coverage, and a completion gate, so progress can't be faked by prompt text.
 
-> **You are reading the `dev` branch.** This is the development/preview channel, currently **ahead of the last release (`v0.7.0`, tagged on `main`)**. The published `0.7.0` does **not** include the changes here, and no new release has been cut from `dev` yet. Install the `@dev` channel (below) to run this code. Expect breaking changes before 1.0 \u2014 interfaces may still move.
+> **TwinHarness 1.0.0 is released.** `main` now ships the first stable release (`v1.0.0`); the recommended **stable channel** (below) installs it. Public CLI and MCP interfaces are stable at 1.0 and follow semver from here. The `@dev` channel remains the optional preview channel for post-1.0, bleeding-edge work \u2014 install it only if you want changes ahead of the next stable release.
 
 ---
 
@@ -20,13 +20,38 @@ Three things make it different from asking an agent to build something directly:
 
 ---
 
+## Find your way
+
+Start with the guide that matches what you're doing:
+
+- **New here / first run** → [docs/guide/getting-started.md](docs/guide/getting-started.md)
+- **Command tour** → [docs/guide/cli-reference.md](docs/guide/cli-reference.md)
+- **Orchestration, gates, coverage, drift, MCP** → [docs/guide/advanced.md](docs/guide/advanced.md)
+- **Internals / how it's built** → [docs/guide/architecture.md](docs/guide/architecture.md)
+
+[USAGE.md](./USAGE.md) is the full deep reference — comprehensive, but not required for a first run.
+
+---
+
 ## Getting started
 
 **Prerequisites:** Claude Code ≥ 1.0.0 and Node ≥ 20 on PATH. On older Node, `th` exits immediately with an upgrade pointer — install Node 20+ via [nvm](https://github.com/nvm-sh/nvm) (`nvm install 20`) or [nodejs.org](https://nodejs.org/).
 
-### Install — dev / preview channel
+### Install — stable channel (recommended)
 
-You're on `dev`, so install the `@dev` marketplace to run this code. It ships as its own marketplace (`twinharness-dev`) and coexists side-by-side with the stable channel.
+The stable channel ships **TwinHarness 1.0.0** and tracks `main`. This is the recommended default for almost everyone.
+
+```
+/plugin marketplace add JrSneed28/TwinHarness
+/plugin install twinharness@twinharness
+```
+
+Throwaway trial without installing: `claude --plugin-dir C:\path\to\TwinHarness`
+
+<details>
+<summary>Preview channel (<code>@dev</code>) — bleeding-edge, post-1.0 work</summary>
+
+The `@dev` channel ships its own marketplace (`twinharness-dev`) and coexists side-by-side with the stable channel. Install it only if you want post-1.0 changes ahead of the next stable release.
 
 ```
 /plugin marketplace add JrSneed28/TwinHarness@dev
@@ -40,19 +65,7 @@ A **local clone checked out on `dev`** registers the same way (the marketplace n
 /plugin install twinharness@twinharness-dev
 ```
 
-The plugin name is always `twinharness`; only the marketplace differs (`@twinharness-dev` vs `@twinharness`), which is what lets both channels coexist.
-
-<details>
-<summary>Stable channel (released v0.7.0) — lags this code</summary>
-
-The released build tracks `main` and is behind the `dev` code above.
-
-```
-/plugin marketplace add JrSneed28/TwinHarness
-/plugin install twinharness@twinharness
-```
-
-Throwaway trial without installing: `claude --plugin-dir C:\path\to\TwinHarness`
+The plugin name is always `twinharness`; only the marketplace differs (`@twinharness` stable vs `@twinharness-dev` preview), which is what lets both channels coexist.
 </details>
 
 ### First run
@@ -192,7 +205,7 @@ A deterministic **repo-understanding layer** (`th repo map|relevant|impact|check
 
 ## Status
 
-**On the `dev` branch:** ahead of the released `v0.7.0` (tagged on `main`); the published build does not include this work, and no release has been cut from `dev`.
+**Released:** `v1.0.0` is tagged on `main` and shipped through the stable channel — the first stable release. The `@dev` channel carries post-1.0 preview work ahead of the next stable cut.
 
 **What works today:**
 
@@ -205,7 +218,7 @@ A deterministic **repo-understanding layer** (`th repo map|relevant|impact|check
 **Not yet done:**
 
 - **Limited real-world mileage** — exercised internally, not yet validated across a broad range of real projects.
-- **No release cut from `dev`** — the version is still `0.7.0`; expect breaking changes (artifact schemas, state fields, CLI flags) before 1.0.
+- **Stable at 1.0, evolving** — public CLI and MCP interfaces are stable at 1.0 and change under semver; artifact schemas and state fields carry versioned `th migrate` paths, so post-1.0 work lands without breaking installed runs.
 
 ---
 
@@ -254,7 +267,11 @@ MIT
 
 ## Links
 
-- [USAGE.md](./USAGE.md) — full usage guide, from install through advanced CLI reference
+- [docs/guide/getting-started.md](docs/guide/getting-started.md) — new users and first run
+- [docs/guide/cli-reference.md](docs/guide/cli-reference.md) — command tour
+- [docs/guide/advanced.md](docs/guide/advanced.md) — orchestration, gates, coverage, drift, MCP
+- [docs/guide/architecture.md](docs/guide/architecture.md) — internals
+- [USAGE.md](./USAGE.md) — full deep reference (not required for a first run)
 - [CHANGELOG.md](./CHANGELOG.md) — version history
 - [SECURITY.md](./SECURITY.md) — threat model, trust boundaries, vulnerability reporting
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — dev setup and packaging invariants
@@ -263,4 +280,4 @@ MIT
 
 ---
 
-[![version](https://img.shields.io/badge/version-0.7.0-blue)](CHANGELOG.md) [![branch](https://img.shields.io/badge/branch-dev%20(ahead)-orange)](#status) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-7c3aed) ![node](https://img.shields.io/badge/node-%E2%89%A5%2020-339933)
+[![version](https://img.shields.io/badge/version-1.0.0-blue)](CHANGELOG.md) [![release](https://img.shields.io/badge/release-1.0.0-green)](#status) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-7c3aed) ![node](https://img.shields.io/badge/node-%E2%89%A5%2020-339933)
