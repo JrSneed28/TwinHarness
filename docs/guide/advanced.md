@@ -52,8 +52,16 @@ verify suite is missing/red. It blocks at most once per stop sequence. See
 `th hook pretool-gate` runs before every file write. **Phase A** (pre-implementation)
 blocks writes to anything but doc/state paths until the gates clear; **Phase B**
 (mid-build) flags writes that cross a slice's component boundary. Semantics are tuned
-by the `write_gate` state field (`ask` default · `deny` · `off` · `strict`) or the
-`TH_DISABLE_WRITE_GATE=1` escape hatch. See [The write-gate](../../USAGE.md#the-write-gate).
+by the `write_gate` state field (`ask` default · `deny` · `off` · `strict`).
+
+**Env bypass — `TH_DISABLE_WRITE_GATE=1`.** Set this environment variable to `1` to
+disable the write-gate globally for the session: the PreToolUse hook stands down and
+every write is allowed, regardless of the `write_gate` mode. It is the emergency
+manual override — reach for it when the gate misclassifies a legitimate write (e.g. a
+tooling edit) and is blocking you, accepting that you own the writes while it is off.
+Like every gate it only binds a *compliant* agent, so it is a convenience switch, **not
+a security boundary** — think "turn the guardrail off for now," not containment. See
+[The write-gate](../../USAGE.md#the-write-gate) and [SECURITY.md](../../SECURITY.md).
 
 ### Decision governance & the audit ledger
 Irreversible, taste-driven decisions go through `th decision add` →
