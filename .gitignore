@@ -11,7 +11,11 @@ node_modules/
 # Tests write these into OS temp dirs, but ignore them at repo root just in case.
 /.twinharness/
 /.agentic-sdlc/
-/docs/
+# Ignore the th-init artifact namespace under docs/ but ship the hand-written
+# user guides under docs/guide/. (Ignoring /docs/* rather than /docs/ lets git
+# descend so the negation below can re-include the guide subtree.)
+/docs/*
+!/docs/guide/
 /drift-log.md
 
 # Local tooling state (not part of the plugin deliverable). .omc/ is session
