@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runStateGet, runStateSet, runStateVerify, runStateStatus } from "../src/commands/state";
@@ -190,9 +191,11 @@ describe("REQ-STATE-CMD-MANAGED: state set refuses managed fields", () => {
     expect(addRes.ok).toBe(true);
     expect(readState(tp.paths).state?.drift_open_blocking).toBe(1);
 
-    // drift resolve decrements the counter.
+    // drift resolve decrements the counter (requirement-layer resolve now requires a
+    // grounding target that resolves in source — BSC-4).
     const id = (addRes.data as { id: string }).id;
-    const resolveRes = runDriftResolve(tp.paths, id);
+    fs.writeFileSync(path.join(tp.paths.root, "grounding.ts"), "export const g = 1;\n", "utf8");
+    const resolveRes = runDriftResolve(tp.paths, id, { target: "grounding.ts" });
     expect(resolveRes.ok).toBe(true);
     expect(readState(tp.paths).state?.drift_open_blocking).toBe(0);
   });

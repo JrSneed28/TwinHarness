@@ -203,6 +203,33 @@ Anchor each risk to the component or decision it affects.>
 
 ---
 
+---
+
+## Grounding Manifest Pointer
+
+> **Builder-pause:** if this project's work class (`redesign`, `recreation`, `integration`,
+> `migration`, or `greenfield` with external dependencies) requires `version-pin` or
+> `digest-manifest` ground kinds and the signed EvidenceManifest listed below does not yet
+> exist or `th grounding check` is not clean, **work pauses here**. The architecture document
+> is not produced and no downstream stage begins until the required grounds are signed and
+> recorded. Surface the gap to the Orchestrator.
+
+<Fill in after the Architect runs the pre-architecture grounding protocol and `th grounding check`
+returns clean. Point to the signed manifest — do NOT copy digest values into this document.>
+
+- **Work class:** <greenfield | redesign | recreation | integration | migration>
+- **Required ground kinds:** <version-pin | digest-manifest | visual-hash — list all that apply>
+- **Signed EvidenceManifest path:** <relative path to the manifest file, e.g., `.twinharness/grounding/manifest-<id>.json`>
+- **Grounding check status:** <output of `th grounding check` — must be clean before streaming>
+- **Pinned renderer (if visual-hash required):** <engine name, version, viewport — e.g., "Chromium 124.0.6367.82, 1280×800">
+- **Pinned a11y scan-rule version (if a11y required):** <e.g., "axe-core 4.9.1">
+
+*The Critic (architecture mode) verifies this section is present and that the manifest path is
+a real pointer, not an inline digest. An absent or empty Grounding Manifest Pointer section is
+a grounded defect when the work class requires external grounds.*
+
+---
+
 ## Verification Notes
 
 <Checklist for the Critic in architecture mode (spec §14.4). The Critic checks coherence only —
@@ -218,3 +245,4 @@ acknowledge.>
 - [ ] Architecture Risks are noted for any area the Critic flags as thin.
 - [ ] Security and Failure Modes sections are present (or pointer to Tier-3 files exists).
 - [ ] Irreversible decisions are identified and their human-gate sign-off is recorded in Summary.
+- [ ] Grounding Manifest Pointer section is present; work class and required ground kinds are declared; manifest path is a pointer (no inline digests); `th grounding check` status is clean.

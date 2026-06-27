@@ -3,6 +3,14 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { resolveProjectPaths, type ProjectPaths } from "../src/core/paths";
 import { CLI_COMMAND_LEAVES, MCP_EXCLUDED, MCP_ONLY_TOOLS } from "../src/mcp-server";
+import { stageContract } from "../src/core/stages";
+import { appendApprovalReceipt, type HumanApprovalReceipt } from "../src/core/approvals";
+import { requiredHumanGateStages } from "../src/core/gate-preconditions";
+import {
+  appendAssertionPresenceReceipt,
+  type AssertionPresenceReceipt,
+} from "../src/core/assertion-presence";
+import type { TwinHarnessState } from "../src/core/state-schema";
 
 /**
  * The SELF-DERIVING MCP tool count, computed from the CLI↔MCP partition rather
@@ -69,6 +77,98 @@ export interface TempProject {
   root: string;
   cleanup: () => void;
 }
+
+/**
+ * Mint a VALID in-process human-approval receipt for a `humanGate` `stage` (BSC-7 /
+ * Axis-B slice-3a). Used by the warn→enforce fixtures (slice-3a C-3) to make a run pass
+ * the human-approval rung in-process, exactly as `th approve` would.
+ *
+ * It guarantees `readApprovalValidated(paths, stage) === "valid"`: the stage's governing
+ * artifact (`produces`) must resolve in source for the digest to bind, so this writes a
+ * minimal artifact first when one is not already present (a caller that already authored
+ * the real artifact keeps it — the approval then binds the REAL digest). The approval is
+ * sealed onto the in-process chain via the production `appendApprovalReceipt` path under
+ * the current snapshot coordinate + that artifact's digest, so a later validation re-reads
+ * the SAME artifact and matches. NOT wired into any fixture here (slice-3a C-3 does that);
+ * defined + smoke-tested only.
+ *
+ * Single-process temp projects do not need an explicit `withStateLock` span (the test is
+ * the only writer) — mirrors how `tests/approvals.test.ts` calls `appendApprovalReceipt`.
+ */
+export function mintApprovalForFixture(
+  paths: ProjectPaths,
+  stage: string,
+  opts: { producerIdentity?: string } = {},
+): HumanApprovalReceipt {
+  const contract = stageContract(stage);
+  if (!contract || !contract.humanGate) {
+    throw new Error(`mintApprovalForFixture: "${stage}" is not a humanGate stage.`);
+  }
+  // Ensure the governing artifact resolves so the mandatory digest binds (R3). A caller
+  // that already wrote the real artifact keeps it; otherwise lay down a minimal placeholder.
+  const abs = path.resolve(paths.root, contract.produces.replace(/\/$/, ""));
+  if (!fs.existsSync(abs)) {
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, `# ${stage}\n\n- REQ-001 covered.\n`, "utf8");
+  }
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  return appendApprovalReceipt(paths, {
+    stage,
+    producerIdentity: opts.producerIdentity ?? "fixture:mintApprovalForFixture",
+  });
+}
+
+/**
+ * Mint a VALID in-process approval for EVERY stage in the CLOSED required-set of `state`
+ * (BSC-7 / Axis-B slice-3a C-2 completion enforcement) — `requiredHumanGateStages(state)`
+ * = humanGate ∩ engagedStagesFor ∩ ordinal-≤-current. This is the green-baseline lever the
+ * completion rung needs: a green-at-final-verification fixture now BLOCKS with
+ * `human_approval_unverified` until its required-set is approved, so every such fixture
+ * calls this once after the state + governing artifacts are in place.
+ *
+ * Each stage is minted via {@link mintApprovalForFixture}, which keeps any real artifact the
+ * fixture already authored (binding its true digest) and lays down a minimal placeholder for
+ * the rest — so the later validation re-reads the SAME artifact and the approval classifies
+ * `valid`. Returns the minted approvals in required-set order.
+ */
+export function mintRequiredApprovals(
+  paths: ProjectPaths,
+  state: Pick<TwinHarnessState, "tier" | "has_ui" | "current_stage">,
+): HumanApprovalReceipt[] {
+  return requiredHumanGateStages(state).map((stage) => mintApprovalForFixture(paths, stage));
+}
+
+/**
+ * Mint a VALID in-process assertion-presence receipt for a green-at-final-verification fixture
+ * (BSC-2 / Axis-B slice-6). The BSC-2 assertion rung (composed in `checkProductionReality`)
+ * now requires an F8-bound AssertionPresenceReceipt: a green-at-final-verification fixture that
+ * has tested REQs but NO recorded receipt BLOCKS with `assertion_unobserved` (and an
+ * assertion-free REQ blocks with `assertion_presence_unverified`). So every such fixture mints
+ * one — the structural twin of {@link mintRequiredApprovals}.
+ *
+ * The ground is computed FRESH from `<root>/tests` at mint time, so this MUST be the LAST setup
+ * step — after every `tests/**` write — or a later test-file write changes the recomputed ground
+ * digest and the rung classifies `target_mismatch`. The fixture's recognized test files must
+ * also carry a NON-TRIVIAL assertion (see the shared `tests/cov.test.ts` content) or the REQ is
+ * an offender even with a receipt. Single-process temp projects need no explicit `withStateLock`
+ * (mirrors {@link mintApprovalForFixture}).
+ */
+export function mintAssertionPresenceForFixture(paths: ProjectPaths): AssertionPresenceReceipt {
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  return appendAssertionPresenceReceipt(paths, {
+    producerIdentity: "fixture:mintAssertionPresenceForFixture",
+  });
+}
+
+/**
+ * The shared "REQ-001 is genuinely asserted" test-file body for green-at-final-verification
+ * fixtures (BSC-2). Carries a NON-TRIVIAL assertion: `expect(1 + 1).toBe(2)` — `argA` (`1 + 1`)
+ * is an expression, NOT a bare literal, and `argA !== argB`, so the pinned trivial-assertion
+ * classifier counts it as non-trivial (NOT `expect(true).toBe(true)` literal-vs-literal, NOT
+ * `expect(x).toBe(x)` tautology — both of which would still be offenders). The `REQ-001` anchor
+ * is preserved so the coverage `tested` set is unchanged.
+ */
+export const ASSERTED_COV_TEST = `import { expect, it } from "vitest";\n\nit("REQ-001 is verified", () => {\n  expect(1 + 1).toBe(2);\n});\n`;
 
 /** Create an isolated temp project dir so tests never touch the repo root. */
 export function makeTempProject(): TempProject {

@@ -58,6 +58,11 @@ import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite } from "./commands/handoff";
 import { runInspectorWrite } from "./commands/inspector";
 import { runTesterRecord } from "./commands/tester";
+import { runApprove } from "./commands/approve";
+import { runDriverRecord } from "./commands/driver";
+import { runRealize } from "./commands/realize";
+import { runAssertionPresenceRecord } from "./commands/assertion-presence";
+import { runGroundingRecord, runGroundingCheck } from "./commands/grounding";
 import { runDecisionDetect, runDecisionAdd, runDecisionCheck, runDecisionList } from "./commands/decision";
 import { runTemplateGet, runTemplateList } from "./commands/template";
 import { runArtifactClaim, runArtifactRelease, runArtifactLeases } from "./commands/artifact-lease";
@@ -632,14 +637,17 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_drift_resolve",
     description:
-      "Resolve an open drift entry by id; decrements the open-blocking counter when it was a requirement-layer (blocking) entry. Errors if the id is unknown or already resolved. Serialized under the state lock.",
+      "Resolve an open drift entry by id; decrements the open-blocking counter when it was a requirement-layer (blocking) entry. A requirement-layer (blocking) resolution REQUIRES `target` — a repo-relative source path that resolves in source — and records a BSC-4 terminal-transition receipt the completion gate re-validates. Errors if the id is unknown, already resolved, or (requirement-layer) the target is missing or does not resolve in source. Serialized under the state lock.",
     inputSchema: {
       type: "object",
-      properties: { id: stringProp("The DRIFT-NNN id to resolve.") },
+      properties: {
+        id: stringProp("The DRIFT-NNN id to resolve."),
+        target: stringProp("Repo-relative source path the resolution resolves in — REQUIRED for requirement-layer (blocking) entries (the BSC-4 receipt ground)."),
+      },
       required: ["id"],
       additionalProperties: false,
     },
-    run: (paths, args) => runDriftResolve(paths, optString(args, "id")),
+    run: (paths, args) => runDriftResolve(paths, optString(args, "id"), { target: optString(args, "target") }),
   },
   {
     name: "th_build_next_wave",
@@ -1627,29 +1635,30 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_sim_retire",
     description:
-      "Mark a simulation entry retired by id (status transition active→retired; entries are never deleted). Optional retireSlice records who/what replaced it with reality. Errors on an unknown id or a double-retire. Serialized under the state lock.",
+      "Mark a simulation entry retired by id (status transition active→retired; entries are never deleted). A user-visible simulation REQUIRES `target` — a repo-relative source path that resolves in source — and records a BSC-4 terminal-transition receipt; an ungrounded retirement does NOT exonerate the entry (it still blocks the production-reality gate and the dist-scan join). Optional retireSlice records who/what replaced it with reality. Errors on an unknown id, a double-retire, or (user-visible) a missing/unresolving target. Serialized under the state lock.",
     inputSchema: {
       type: "object",
       properties: {
         id: stringProp("The SIM-NNN id to retire."),
         retireSlice: stringProp("Slice/owner that replaced the simulation with reality."),
+        target: stringProp("Repo-relative source path the retirement resolves in — REQUIRED for a user-visible simulation (the BSC-4 receipt ground)."),
       },
       required: ["id"],
       additionalProperties: false,
     },
-    run: (paths, args) => runSimRetire(paths, optString(args, "id"), { retireSlice: optString(args, "retireSlice") }),
+    run: (paths, args) => runSimRetire(paths, optString(args, "id"), { retireSlice: optString(args, "retireSlice"), target: optString(args, "target") }),
   },
   {
     name: "th_sim_scan",
     description:
-      "Grep dist/ and tests/ for simulation patterns (mock|fake|stub|fixture|placeholder|demo|TODO|canned|hardcoded) and flag any hit in dist/ that has no active ledger entry. Advisory/read-only (exit 0); the production-reality GATE — not scan — refuses advance.",
+      "Two-tier scan of dist/ for simulation patterns (mock|fake|stub|fixture|placeholder|demo|TODO|canned|hardcoded): enumerate + streaming-hash EVERY dist/ path, deep-inspect within a layered budget (per-file/aggregate/watchdog), and report both unledgered dist/ hits AND `unobserved` dist/ files the scan could not deep-inspect (file_limit|aggregate_limit|watchdog|read_error) — the coverage gaps the production-reality GATE blocks on (scan_coverage_incomplete). Advisory (exit 0; the gate refuses, not scan); records an incomplete-scan receipt under the state lock when coverage is incomplete. tests/ hits stay advisory.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runSimScan(paths, {}),
   },
   {
     name: "th_gate_production_reality",
     description:
-      "Reader: report the production-reality gate (checkProductionReality). FOUR conditions, each a stable error token: simulation_unretired (a non-retired user-visible simulation), production_verify_not_green, tester_record_missing, unledgered_simulation_in_dist. The SAME predicate canAdvanceStage/canUnlockImplementation/checkFinalVerification compose, so a blocked th_stage_advance/th_implementation_unlock returns the IDENTICAL token. Read-only.",
+      "Reader: report the production-reality gate (checkProductionReality). SIX conditions, each a stable error token: simulation_unretired (a non-retired user-visible simulation), production_verify_not_green, tester_record_missing, unledgered_simulation_in_dist, scan_coverage_incomplete (a dist/ file the two-tier scan could not deep-inspect, not exonerated by a signed exception), human_approval_unverified (an engaged-and-not-future humanGate stage lacks a valid snapshot+artifact-bound human approval). The SAME predicate canAdvanceStage/canUnlockImplementation/checkFinalVerification compose, so a blocked th_stage_advance/th_implementation_unlock returns the IDENTICAL token. Read-only.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runGateProductionReality(paths),
   },
@@ -1704,6 +1713,134 @@ export const TOOL_DEFS: readonly ToolDef[] = [
         evidenceRef: optString(args, "evidenceRef"),
       }),
   },
+  // Axis-B slice-4a (BSC-3) — in-process driver-dimension receipt writer. The SENSOR
+  // that records which verification dimensions verify-report.json observed, grounding the
+  // production-reality verification-driver rung. Registration is ALWAYS-ON (parity with
+  // the CLI `th driver record`); the TH_BSC3_ENFORCE flag governs ENFORCEMENT only.
+  {
+    name: "th_driver_record",
+    description:
+      "Axis-B/BSC-3: mint the IN-PROCESS driver-dimension receipt the production-reality verification-driver rung reads (<stateDir>/driver-receipts.jsonl, hash-chained, under the state lock). Records which seed dimensions (tests-executed, typecheck, build) `verify-report.json` actually OBSERVED. SENSOR + refuse-at-creation: optional `dimension` (comma-separated) is INTERSECTED with the observed set — a claimed dimension the report does not evidence is refused (driver_dimension_unobserved), and a missing/unresolving report is refused (driver_evidence_unresolved). Omit `dimension` to record every observed seed dimension. ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its trust label is `valid` NEVER `valid-grounded` — independent grounding is the slice-4b external Ed25519-signed producer. Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dimension: stringProp(
+          "Comma-separated dimension name(s) to record as observed (tests-executed | typecheck | build). Intersected with what verify-report.json observes; omit to record every observed seed dimension.",
+        ),
+        identity: stringProp("Producer identity to record (attribution-only, zero trust weight; defaults to cli:th driver record)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      const raw = optString(args, "dimension");
+      const dimensionNames = raw === undefined ? undefined : raw.split(",").map((s) => s.trim()).filter(Boolean);
+      return runDriverRecord(paths, { dimensionNames, producerIdentity: optString(args, "identity") });
+    },
+  },
+  {
+    name: "th_approve",
+    description:
+      "Axis-B/BSC-7: mint the IN-PROCESS human-approval receipt the humanGate precondition reads (<stateDir>/approval-receipts.jsonl, hash-chained, under the state lock). `stage` defaults to the run's current stage; it MUST be a humanGate stage (requirements, scope, architecture, ux-design, ui-design, contracts, security, final-verification) and its governing `produces` artifact MUST resolve in source — else refused at creation. The approval is bound to {stage, snapshot_coord, governing_artifact_digest}. ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its validated status is `valid` NEVER `valid-grounded` — independent grounding is the slice-3b external Ed25519-signed producer. Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        stage: stringProp("The humanGate stage to approve (defaults to the run's current_stage when omitted)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) => runApprove(paths, optString(args, "stage")),
+  },
+  // Axis-B slice-5 (BSC-1) — in-process realization receipt writer. Binds a REQ-ID to a
+  // content digest of the source artifact it is realized in, grounding the production-reality
+  // realization rung. Registration is ALWAYS-ON (parity with the CLI `th realize`); the
+  // TH_BSC1_ENFORCE flag governs ENFORCEMENT only.
+  {
+    name: "th_realize",
+    description:
+      "Axis-B/BSC-1: mint the IN-PROCESS realization receipt the production-reality realization rung reads (<stateDir>/realization-receipts.jsonl, hash-chained, under the state lock). Binds `req_id` to a content digest of `artifact` (the source file the REQ-ID is realized in). The gate BLOCKS a `done` slice whose owned REQ-ID has no valid, reachable, digest-fresh referent. SEPARABILITY: this does NOT set slice status — the done-claim (SliceState.status===\"done\") and this referent stay separately authored (co-authoring would be self-grounding). Refuse-at-creation: `artifact` MUST resolve in source (realization_referent_unresolved). ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its trust label is `valid` NEVER `valid-grounded` — independent (signature-provenance) grounding is the external Ed25519-signed producer. Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        req_id: stringProp("The REQ-ID being realized (required, non-empty)."),
+        artifact: stringProp("The source path the REQ-ID is realized in — the referent the receipt binds a content digest of (required; must resolve in source)."),
+        identity: stringProp("Producer identity to record (attribution-only, zero trust weight; defaults to cli:th realize)."),
+      },
+      required: ["req_id", "artifact"],
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runRealize(paths, {
+        reqId: optString(args, "req_id"),
+        artifact: optString(args, "artifact"),
+        producerIdentity: optString(args, "identity"),
+      }),
+  },
+  // Axis-B slice-6 (BSC-2 2a) — in-process assertion-PRESENCE receipt writer. The SENSOR
+  // that records, per REQ-ID, whether its recognized test files carry a non-trivial assertion,
+  // grounding the production-reality assertion rung. Registration is ALWAYS-ON (parity with the
+  // CLI `th assertion-presence record`).
+  {
+    name: "th_assertion_presence_record",
+    description:
+      "Axis-B/BSC-2 (2a): mint the IN-PROCESS assertion-PRESENCE receipt the production-reality assertion rung reads (<stateDir>/assertion-presence-receipts.jsonl, hash-chained, under the state lock). Records, per REQ-ID, whether the recognized test files anchoring it carry a NON-TRIVIAL assertion that can fail (an empty `it()`, a smoke-only test, or a tautology like `expect(true).toBe(true)` is assertion-free). MEASURES PRESENCE / non-triviality, NOT efficacy — it does NOT prove the suite catches regressions. ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its in-process status is `valid` NEVER `valid-grounded` — the only efficacy/independence grade is the EXTERNAL Ed25519-signed mutation-kill receipt (2b). Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        identity: stringProp("Producer identity to record (attribution-only, zero trust weight; defaults to cli:th assertion-presence record)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runAssertionPresenceRecord(paths, { producerIdentity: optString(args, "identity") }),
+  },
+  // Axis-B slice-A (BSC-10) — in-process external-reference grounding producer. The SENSOR
+  // that records a GroundingReceipt (digest-manifest / version-pin / visual-hash) grounding
+  // the BSC-10 rung. Registration is ALWAYS-ON (parity with the CLI `th grounding record`);
+  // the TH_BSC10_ENFORCE flag governs ENFORCEMENT only (default OFF in Slice A / WARN).
+  {
+    name: "th_grounding_record",
+    description:
+      "Axis-B/BSC-10 (Slice A): mint the IN-PROCESS external-reference grounding receipt the production-reality grounding rung reads (<stateDir>/grounding-receipts.jsonl, hash-chained, under the state lock). `groundKind` is required and must be one of `digest-manifest`, `version-pin`, or `visual-hash`; supply the matching kind-specific fields (manifestDigest / pkg+version / perceptualHash+renderer). ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its trust label is `valid` NEVER `valid-grounded` — independent grounding arrives only with the Slice-B external Ed25519-signed producer. Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        groundKind: stringProp("Ground kind discriminant: 'digest-manifest' | 'version-pin' | 'visual-hash'. Required."),
+        workClass: stringProp("Work-class this receipt is minted for (drives the required-ground matrix). Required."),
+        manifestDigest: stringProp("For digest-manifest: the manifest digest string."),
+        pkg: stringProp("For version-pin: the package name."),
+        pinVersion: stringProp("For version-pin: the pinned version string (named pinVersion to avoid collision with the numeric artifact --version flag)."),
+        perceptualHash: stringProp("For visual-hash: the perceptual hash string."),
+        renderer: stringProp("For visual-hash: optional renderer identifier."),
+        identity: stringProp("Producer identity to record (attribution-only, zero trust weight; defaults to cli:th grounding record)."),
+      },
+      additionalProperties: false,
+    },
+    run: (paths, args) =>
+      runGroundingRecord(paths, {
+        groundKind: optString(args, "groundKind"),
+        workClass: optString(args, "workClass"),
+        manifestDigest: optString(args, "manifestDigest"),
+        pkg: optString(args, "pkg"),
+        pinVersion: optString(args, "pinVersion"),
+        perceptualHash: optString(args, "perceptualHash"),
+        renderer: optString(args, "renderer"),
+        producerIdentity: optString(args, "identity"),
+      }),
+  },
+  // Axis-B slice-A (BSC-10) — read-only grounding chain validator. Recomputes and validates
+  // the grounding receipt chain; appends NOTHING and leaves NO breadcrumb file. This is a
+  // pure read: the write-surface snapshot must show zero delta for this tool.
+  {
+    name: "th_grounding_check",
+    description:
+      "Axis-B/BSC-10 (Slice A): READ-ONLY validator — recompute and validate the grounding receipt chain (<stateDir>/grounding-receipts.jsonl) and return a summary ({total, chainStatus, receipts[]}). Appends NOTHING; leaves NO breadcrumb file; the write-surface snapshot shows zero delta for this tool. Use `th_grounding_record` to append receipts. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+    run: (paths, _args) => runGroundingCheck(paths, {}),
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -1753,7 +1890,9 @@ export type ToolCategory =
   | "interview"
   | "lifecycle"
   | "template"
-  | "tester";
+  | "tester"
+  | "driver"
+  | "grounding";
 
 /** The behavior hints + category attached to a tool. */
 export interface ToolAnnotation {
@@ -1800,7 +1939,10 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_sim_add: wr("simulation", { idempotent: false }),
   th_sim_list: ro("simulation"),
   th_sim_retire: wr("simulation", { idempotent: false }),
-  th_sim_scan: ro("simulation"),
+  // th_sim_scan now APPENDS an incomplete-scan receipt under the state lock when dist/
+  // coverage is incomplete (BSC-6), so its honest hint is NOT read-only; append-per-call
+  // ⇒ not idempotent (mirrors the other append/ledger tools).
+  th_sim_scan: wr("simulation", { idempotent: false }),
   th_gate_production_reality: ro("gate"),
   // build oracles (read-only) + leases (mutating)
   th_build_next_wave: ro("oracle"),
@@ -1893,6 +2035,23 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   // SG3 P2-C — live-QA Tester record writer (overwriting the marker with a fresh run is
   // an idempotent overwrite of the single tester-record.json under the state dir).
   th_tester_record: wr("tester", { idempotent: true }),
+  // Axis-B/BSC-3 — in-process driver-dimension producer. NOT idempotent: each call appends a
+  // fresh hash-chained driver receipt to driver-receipts.jsonl under the state dir.
+  th_driver_record: wr("driver", { idempotent: false }),
+  // Axis-B/BSC-7 — in-process human-approval producer. NOT idempotent: each call appends a
+  // fresh hash-chained approval record to approval-receipts.jsonl under the state dir.
+  th_approve: wr("stage", { idempotent: false }),
+  // Axis-B/BSC-1 — in-process realization producer. NOT idempotent: each call appends a
+  // fresh hash-chained realization receipt to realization-receipts.jsonl under the state dir.
+  th_realize: wr("slices", { idempotent: false }),
+  // Axis-B/BSC-2 (2a) — in-process assertion-presence producer. NOT idempotent: each call appends
+  // a fresh hash-chained receipt to assertion-presence-receipts.jsonl under the state dir.
+  th_assertion_presence_record: wr("coverage", { idempotent: false }),
+  // Axis-B/BSC-10 (Slice A) — in-process external-reference grounding producer. NOT idempotent:
+  // each call appends a fresh hash-chained grounding receipt to grounding-receipts.jsonl.
+  th_grounding_record: wr("grounding", { idempotent: false }),
+  // Axis-B/BSC-10 (Slice A) — read-only grounding chain validator. Appends nothing; pure read.
+  th_grounding_check: ro("grounding"),
 };
 
 /** The MCP-standard annotation object for a tool (or undefined if unknown). */
@@ -2024,6 +2183,11 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "drift add", "drift list", "drift resolve",
   "sim add", "sim list", "sim retire", "sim scan",
   "tester record",
+  "driver record",
+  "approve",
+  "realize",
+  "assertion-presence record",
+  "grounding record", "grounding check",
   "gate production-reality",
   "collab init", "collab fragment", "collab list", "collab merge",
   "debate add", "debate list", "debate resolve",

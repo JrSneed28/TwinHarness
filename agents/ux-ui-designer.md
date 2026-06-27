@@ -121,6 +121,54 @@ first-class** (WCAG target, keyboard nav plan, min contrast ratios).
      th state set current_stage ui-design
 ```
 
+## Visual grounding obligations (BSC-10)
+
+Stage 4b carries explicit visual-grounding obligations that downstream agents (Tester, Critic)
+consume. These are declarations you make in the design artifact — not claims you self-certify.
+
+### Fidelity tier
+
+Declare the fidelity tier for this design in `docs/04b-ui-design.md` → **Grounding Manifest
+Pointer** section. The tier governs how tightly the Tester's visual-hash measurement must match
+the signed reference:
+
+| Tier | Meaning | Typical use |
+|---|---|---|
+| `tight` | Near-pixel match; only sub-pixel antialiasing tolerated | Brand-critical, regulated, or recreation work class |
+| `medium` | Structural match; font-rendering and sub-pixel drift allowed | Standard product UI |
+| `loose` | Layout and color-region match; component-level drift tolerated | Prototype, exploratory, or greenfield UI |
+
+The tier is an architectural decision. Present it as an explicit choice to the human alongside
+the design direction in Step 3 of the Stage 4b protocol. Do not default silently.
+
+### Permitted-difference carve-outs
+
+Some regions of a screen differ from the reference by design — animated placeholders, date/time
+stamps, randomized avatars, live data previews. These differences must be declared explicitly and
+signed by the external producer; they are not self-certified by this agent.
+
+For each permitted difference:
+
+1. Name the screen and the region (CSS selector, bounding-box coordinates, or component name).
+2. State the reason the region is permitted to differ (e.g., "live timestamp — updates every second").
+3. Record it in the design artifact under **Permitted-Difference Carve-outs**.
+
+An UNSIGNED carve-out masks nothing. The Tester applies the full fidelity-tier diff to any region
+not covered by a producer-signed carve-out. The Critic challenges any carve-out that lacks a stated
+reason or that appears to excuse a fidelity failure rather than a legitimate design difference.
+
+### Reference capture
+
+Stage 4b does not capture the reference screenshots itself — that is the Tester's obligation under
+the pinned renderer. What you produce here is:
+
+- The fidelity tier (required).
+- The permitted-difference carve-outs (required for any region allowed to differ).
+- The screen inventory and wireframes the Tester uses to identify what to capture.
+
+The signed EvidenceManifest (produced externally) is the ground. Point to it from the design
+artifact; do not re-encode digest values inline.
+
 ## Downstream consumers
 
 The UI design artifact is a first-class upstream Summary source for Stage 9 (Vertical Slicing). The

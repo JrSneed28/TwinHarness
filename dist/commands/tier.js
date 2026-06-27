@@ -50,6 +50,7 @@ const output_1 = require("../core/output");
 const state_schema_1 = require("../core/state-schema");
 Object.defineProperty(exports, "TIERS", { enumerable: true, get: function () { return state_schema_1.TIERS; } });
 const brief_1 = require("../core/brief");
+const tier_classify_1 = require("../core/tier-classify");
 const log_1 = require("../core/log");
 const guards_1 = require("../core/guards");
 const state_store_1 = require("../core/state-store");
@@ -290,28 +291,6 @@ function briefLoadFailure(briefPath, issues) {
         data: { error: "invalid_brief", issues },
     });
 }
-/** The five Tier-0 conditions plus the veto, computed mechanically (spec §5). */
-function classifyBrief(brief) {
-    const reasons = [];
-    if (!brief.single_file_or_local)
-        reasons.push("not a single file / tightly local area");
-    if (brief.changes_public_interface)
-        reasons.push("changes a public interface, schema, or contract");
-    if (brief.adds_dependency)
-        reasons.push("adds a new dependency");
-    if (!brief.obvious_testable_answer)
-        reasons.push("no obvious, testable correct answer");
-    const blocked_by_veto = brief.blast_radius_flags.length > 0;
-    if (blocked_by_veto) {
-        reasons.push(`blast-radius flag(s) force ≥T1 (§5 veto): ${brief.blast_radius_flags.join(", ")}`);
-    }
-    const tier0_eligible = brief.single_file_or_local &&
-        !brief.changes_public_interface &&
-        !brief.adds_dependency &&
-        brief.obvious_testable_answer &&
-        brief.blast_radius_flags.length === 0;
-    return { tier0_eligible, blocked_by_veto, reasons };
-}
 /**
  * `th tier classify <brief.json>` — ADVISORY (build plan §3). Computes the five
  * Tier-0 conditions and the blast-radius veto; reports a T0/≥T1 advisory and the
@@ -329,7 +308,7 @@ function runTierClassify(paths, briefPath) {
     const loaded = (0, brief_1.loadBriefFromFile)(briefFile);
     if (!loaded.ok || !loaded.brief)
         return briefLoadFailure(briefFile, loaded.issues);
-    const { tier0_eligible, blocked_by_veto, reasons } = classifyBrief(loaded.brief);
+    const { tier0_eligible, blocked_by_veto, reasons } = (0, tier_classify_1.classifyBrief)(loaded.brief);
     const advisory = tier0_eligible ? "T0" : "≥T1";
     (0, log_1.structuredLog)({ cmd: "tier classify", advisory, blocked_by_veto });
     const human = tier0_eligible

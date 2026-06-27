@@ -12,7 +12,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, mintAssertionPresenceForFixture, ASSERTED_COV_TEST, type TempProject } from "./helpers";
 import { writeState, readState } from "../src/core/state-store";
 import { initialState, type TwinHarnessState } from "../src/core/state-schema";
 import { runArtifactRegister } from "../src/commands/artifact";
@@ -44,7 +44,8 @@ function greenAtFinal(): ProjectPaths {
   const paths = tp.paths;
   write(paths, "docs/01-requirements.md", "# Requirements\n\n- REQ-001 the only requirement.\n");
   write(paths, "docs/09-implementation-plan.md", "# Plan\n\nSLICE-0 covers REQ-001.\n");
-  write(paths, "tests/cov.test.ts", "// REQ-001 verified here\n");
+  // BSC-2 slice-6: REQ-001's test file carries a NON-TRIVIAL assertion (was a bare comment).
+  write(paths, "tests/cov.test.ts", ASSERTED_COV_TEST);
   write(paths, "docs/10-verification-report.md", "# Verification Report\n\nREQ-001 verified.\n");
   writeState(paths, {
     ...initialState(),
@@ -56,6 +57,11 @@ function greenAtFinal(): ProjectPaths {
   expect(runArtifactRegister(paths, "docs/10-verification-report.md", 1).ok).toBe(true);
   // F8/R-31 (enforced): the gate requires a PASSED, receipt+repo-bound Tester record.
   expect(runTesterRecord(paths, { driver: "cli-e2e", passed: true }).ok).toBe(true);
+  // BSC-7 slice-3a C-2: mint the closed human-approval required-set so the green baseline
+  // completes; the per-test perturbations red exactly one non-approval rung.
+  mintRequiredApprovals(paths, state(paths));
+  // BSC-2 slice-6: mint the F8-bound assertion-presence receipt LAST (after every tests/** write).
+  mintAssertionPresenceForFixture(paths);
   return paths;
 }
 

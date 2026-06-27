@@ -67,6 +67,11 @@ import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite, runHandoffVerify, runResume } from "./commands/handoff";
 import { runInspectorWrite } from "./commands/inspector";
 import { runTesterRecord } from "./commands/tester";
+import { runApprove } from "./commands/approve";
+import { runDriverRecord } from "./commands/driver";
+import { runRealize } from "./commands/realize";
+import { runAssertionPresenceRecord } from "./commands/assertion-presence";
+import { runGroundingRecord, runGroundingCheck } from "./commands/grounding";
 import { runManifestExport, runManifestTools } from "./commands/manifest";
 import { runPreview } from "./commands/preview";
 import { runScorecard } from "./commands/scorecard";
@@ -157,7 +162,7 @@ Usage:
   th debate add --topic <t> [--positions ...] [--links a,b] [--source ...]  Open a BLOCKING debate (REQ-PCO-042)
   th debate list                    List debate-ledger entries + open blocking count
   th debate resolve --id <DEBATE-ID> --resolution <r>  Resolve a debate (clears the blocking obligation)
-  th drift resolve <DRIFT-NNN>      Append a resolution note; decrement blocking counter only for requirement-layer entries
+  th drift resolve <DRIFT-NNN> [--target <path>]  Append a resolution note; decrement blocking counter (requirement-layer requires --target resolving in source, recording a BSC-4 receipt)
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
   th hook pretool-gate              Emit a Claude Code PreToolUse write-gate decision
   th hook subagent-stop             Emit a Claude Code SubagentStop-hook decision (state-validity guard)
@@ -183,6 +188,16 @@ Usage:
                                     Codebase-Inspector governed write: emit + auto-register the source-anchored brownfield analysis at docs/00-existing-codebase-analysis.md (path is fixed; refuses any other target)
   th tester record --driver <d> --passed [--provider real|sandbox] [--evidence-ref <p>]
                                     Attach the live-QA Tester record (.twinharness/tester-record.json) that satisfies the production-reality gate's Tester condition (--passed required to clear the gate; the record is bound to the run receipt + repo snapshot)
+  th driver record [--dimension a,b] [--identity <who>]
+                                    Mint the in-process driver-dimension receipt the production-reality verification-driver rung reads (records which seed dimensions — tests-executed/typecheck/build — verify-report.json observed). SENSOR + refuse-at-creation: a claimed dimension the report does not observe is refused. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent grounding is the slice-4b external-signed producer)
+  th approve [<stage>]              Mint the in-process human-approval receipt for a humanGate stage (default: current stage); bound to {stage, snapshot, governing-artifact digest}. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent grounding is the slice-3b external-signed producer)
+  th realize <REQ-ID> --artifact <path> [--identity <who>]
+                                    Mint the in-process realization receipt binding a REQ-ID to a content digest of the source artifact it is realized in (the production-reality realization rung blocks a done slice whose owned REQ-ID has no fresh, reachable referent). Does NOT set slice status — the done-claim and the referent stay separately authored. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent signature-provenance grounding is the external-signed producer)
+  th assertion-presence record [--identity <who>]
+                                    Mint the in-process assertion-PRESENCE receipt the production-reality assertion rung reads (records, per REQ-ID, whether its recognized test files carry a non-trivial assertion that can fail). Measures PRESENCE / non-triviality, NOT efficacy — it does NOT prove the suite catches regressions. ATTRIBUTION-ONLY (zero trust weight — the agent can mint it, so its status is 'valid' NEVER 'valid-grounded'; the only efficacy/independence grade is the external mutation-kill receipt, 2b)
+  th grounding record --ground-kind <digest-manifest|version-pin|visual-hash> --work-class <c> [--identity <who>] [--manifest-digest <d>] [--pkg <p>] [--pin-version <v>] [--perceptual-hash <h>] [--renderer <r>]
+                                    Mint the in-process external-reference grounding receipt the production-reality grounding rung reads (<stateDir>/grounding-receipts.jsonl, hash-chained). --work-class is required (drives the required-ground matrix). Supply kind-specific fields: digest-manifest→--manifest-digest; version-pin→--pkg+--pin-version; visual-hash→--perceptual-hash (--renderer optional). ATTRIBUTION-ONLY (zero trust weight — the agent can mint it; independent grounding requires the Slice-B external Ed25519-signed producer)
+  th grounding check                Read-only: recompute and validate the grounding receipt chain; print summary (total, chainStatus, per-receipt groundKind+status). Appends nothing; leaves no breadcrumb file
   th delegate plan [--intent I] [--files N] [--writes] [--noisy] [--task T] [--slice ID]
                                     Recommend delegate vs keep-main for a task (context-preservation oracle)
   th delegate pack [--agent A] [--slice ID] [--task T] [--intent I] [--allowed-files <a,b,c>]
@@ -210,9 +225,9 @@ Usage:
   th sim add --classification <Real|Sandbox|Emulated|Mocked|Stubbed|Hardcoded> [--replaces ...] [--intro-slice ...] [--retire-slice ...] [--owner ...] [--user-visible]
                                     Append a simulation-ledger entry (.twinharness/simulation-ledger.json); a user-visible simulated entry BLOCKS the production-reality gate until retired
   th sim list                       List simulation-ledger entries + the ids that block production-reality
-  th sim retire <SIM-NNN> [--retire-slice ...]  Mark a simulation entry retired (status transition; entries are never deleted)
-  th sim scan                       Grep dist/+tests for unledgered simulation patterns (mock|fake|stub|fixture|placeholder|demo|TODO|canned|hardcoded); advisory (exit 0)
-  th gate production-reality        Reader: report the production-reality gate (no unretired user-visible simulation, verify green, Tester record, no unledgered dist/ patterns)
+  th sim retire <SIM-NNN> [--retire-slice ...] [--target <path>]  Mark a simulation entry retired (a user-visible simulation requires --target resolving in source, recording a BSC-4 receipt)
+  th sim scan                       Two-tier dist/ scan: unledgered simulation patterns + 'unobserved' coverage gaps the gate blocks on (file_limit|aggregate_limit|watchdog|read_error → scan_coverage_incomplete); advisory (exit 0)
+  th gate production-reality        Reader: report the production-reality gate (no unretired user-visible simulation, verify green, Tester record, no unledgered dist/ patterns, complete dist/ scan coverage)
   th stage current|describe <s>|list  Per-stage contract (produces/critic/gate) from the pipeline
   th manifest export                Deterministic run snapshot (state + drift + ledger); --json for full
   th manifest tools                 List the advertised MCP tool set (name + summary); CLI mirror of ListTools; --json for full
@@ -302,12 +317,16 @@ Global flags:
   --replaces <s>    (sim add) What real dependency this simulation stands in for
   --intro-slice <s> (sim add) Slice/task that introduced the simulation
   --retire-slice <s> (sim add / sim retire) Slice/owner that will (or did) replace it with reality
+  --target <path>   (drift resolve / sim retire) Source path the terminal flip resolves in — records a BSC-4 terminal-transition receipt the completion gate re-validates
   --owner <s>       (sim add) Who owns retiring the simulation
   --user-visible    (sim add) A user-visible production path depends on this (BLOCKS production-reality until retired)
   --driver <d>      (tester record) Driver/runner the live QA used (playwright | curl | cli-e2e | …) (required)
   --passed          (tester record) Record the live run as PASSED — required to clear the production-reality gate's Tester condition
   --provider <p>    (tester record) Provider tier the live run exercised (real | sandbox)
-  --evidence-ref <p>  (tester record) Path/URL to the raw live-run output or screenshots`;
+  --evidence-ref <p>  (tester record) Path/URL to the raw live-run output or screenshots
+  --dimension <a,b>  (driver record) Comma-separated dimension(s) to record as observed; intersected with what verify-report.json observes (default: every observed seed dimension)
+  --identity <who>  (driver record / realize / assertion-presence record / grounding record) Producer identity to record (attribution-only, zero trust weight; default: cli:th driver record / cli:th realize / cli:th assertion-presence record / cli:th grounding record)
+  --artifact <path>  (realize) Source path the REQ-ID is realized in — the referent the realization receipt binds a content digest of; must resolve in source`;
 
 export interface ParsedArgs {
   positionals: string[];
@@ -432,10 +451,23 @@ export interface ParsedArgs {
     retireSlice?: string;
     owner?: string;
     userVisible: boolean;
+    // BSC-4 — terminal-transition receipt grounding target (`th drift resolve` / `th sim retire`).
+    target?: string;
     // SG3 P2-C — live-QA Tester record flags (`th tester record`).
     driver?: string;
     provider?: string;
     evidenceRef?: string;
+    // Axis-B slice-4a (BSC-3) — driver-dimension receipt flags (`th driver record`).
+    dimension?: string;
+    identity?: string;
+    // Axis-B slice-A (BSC-10) — external-reference grounding receipt fields (`th grounding record`).
+    groundKind?: string;
+    manifestDigest?: string;
+    pkg?: string;
+    pinVersion?: string;
+    perceptualHash?: string;
+    renderer?: string;
+    workClass?: string;
     // F8/R-31 — the live run's pass verdict (boolean flag).
     passed: boolean;
   };
@@ -553,10 +585,25 @@ const STRING_FLAGS: Record<string, FlagField> = {
   "--intro-slice": "introSlice",
   "--retire-slice": "retireSlice",
   "--owner": "owner",
+  // BSC-4 — terminal-transition receipt grounding target.
+  "--target": "target",
   // SG3 P2-C — live-QA Tester record fields (`th tester record`).
   "--driver": "driver",
   "--provider": "provider",
   "--evidence-ref": "evidenceRef",
+  // Axis-B slice-4a (BSC-3) — driver-dimension receipt fields (`th driver record`).
+  "--dimension": "dimension",
+  "--identity": "identity",
+  // Axis-B slice-A (BSC-10) — external-reference grounding receipt fields (`th grounding record`).
+  // NOTE: `--pin-version` is used instead of `--version` to avoid the existing numeric `--version`
+  // flag (artifact versioning) which maps to `version?: number` in ParsedArgs.
+  "--ground-kind": "groundKind",
+  "--manifest-digest": "manifestDigest",
+  "--pkg": "pkg",
+  "--pin-version": "pinVersion",
+  "--perceptual-hash": "perceptualHash",
+  "--renderer": "renderer",
+  "--work-class": "workClass",
 };
 
 /** Flags that consume a numeric value. */
@@ -857,6 +904,69 @@ function dispatch(parsed: ParsedArgs): CommandResult {
         default:
           return failure({ human: `unknown 'tester' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
+    // Axis-B slice-4a (BSC-3) — mint the in-process driver-dimension receipt the
+    // production-reality verification-driver rung reads. SENSOR + refuse-at-creation.
+    case "driver":
+      switch (sub) {
+        case "record": {
+          // `--dimension` is comma-separated (mirrors `--links`); absent ⇒ undefined so
+          // the sensor records every observed seed dimension.
+          const dims =
+            parsed.flags.dimension === undefined
+              ? undefined
+              : parsed.flags.dimension.split(",").map((s) => s.trim()).filter(Boolean);
+          return runDriverRecord(paths, {
+            dimensionNames: dims,
+            producerIdentity: parsed.flags.identity,
+          });
+        }
+        default:
+          return failure({ human: `unknown 'driver' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    // Axis-B slice-5 (BSC-1) — mint the in-process realization receipt binding a REQ-ID to a
+    // digest of the source artifact it is realized in. `<REQ-ID>` is the positional; the
+    // referent path is `--artifact`. Does NOT set slice status (claim/referent separability).
+    case "realize":
+      return runRealize(paths, {
+        reqId: sub,
+        artifact: parsed.flags.artifact,
+        producerIdentity: parsed.flags.identity,
+      });
+    // Axis-B slice-6 (BSC-2 2a) — mint the in-process assertion-PRESENCE receipt the
+    // production-reality assertion rung reads. Records whether each REQ's recognized test files
+    // carry a non-trivial assertion. Measures PRESENCE not efficacy; attribution-only.
+    case "assertion-presence":
+      switch (sub) {
+        case "record":
+          return runAssertionPresenceRecord(paths, { producerIdentity: parsed.flags.identity });
+        default:
+          return failure({ human: `unknown 'assertion-presence' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    // Axis-B slice-A (BSC-10) — in-process external-reference grounding producer (record) and
+    // read-only validator (check). `th grounding check` is strictly read-only; it appends
+    // nothing and leaves no breadcrumb file. Registration is ALWAYS-ON (parity with MCP tools).
+    case "grounding":
+      switch (sub) {
+        case "record":
+          return runGroundingRecord(paths, {
+            groundKind: parsed.flags.groundKind,
+            workClass: parsed.flags.workClass,
+            manifestDigest: parsed.flags.manifestDigest,
+            pkg: parsed.flags.pkg,
+            pinVersion: parsed.flags.pinVersion,
+            perceptualHash: parsed.flags.perceptualHash,
+            renderer: parsed.flags.renderer,
+            producerIdentity: parsed.flags.identity,
+          });
+        case "check":
+          return runGroundingCheck(paths, {});
+        default:
+          return failure({ human: `unknown 'grounding' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    // Axis-B slice-3a (BSC-7) — mint the in-process human-approval receipt the humanGate
+    // precondition reads. `<stage>` defaults to the run's current stage. Attribution-only.
+    case "approve":
+      return runApprove(paths, sub);
     case "resume":
       return runResume(paths);
     case "migrate":
@@ -1082,7 +1192,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
         case "list":
           return runSimList(paths, {});
         case "retire":
-          return runSimRetire(paths, rest[0], { retireSlice: parsed.flags.retireSlice });
+          return runSimRetire(paths, rest[0], { retireSlice: parsed.flags.retireSlice, target: parsed.flags.target });
         case "scan":
           // Advisory: grep dist/+tests for unledgered simulation patterns (exit 0).
           return runSimScan(paths, {});
@@ -1362,7 +1472,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
         case "list":
           return runDriftList(paths);
         case "resolve":
-          return runDriftResolve(paths, rest[0]);
+          return runDriftResolve(paths, rest[0], { target: parsed.flags.target });
         default:
           return failure({ human: `unknown 'drift' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }

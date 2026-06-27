@@ -12,7 +12,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { makeTempProject, type TempProject } from "./helpers";
+import { makeTempProject, mintRequiredApprovals, mintAssertionPresenceForFixture, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runArtifactRegister } from "../src/commands/artifact";
 import { runSlicesSync, runSliceSetStatus } from "../src/commands/slices";
@@ -113,8 +113,16 @@ describe("REQ-E2E-001: a run advances init → build → coverage → final-veri
     runBuildClaim(paths, "SLICE-1");
     writeFile(tp, "src/feature.ts", "// REQ-002 feature\nexport const ok2 = true;\n");
 
-    // 8. Tests carry the REQ anchors → coverage is clean.
-    writeFile(tp, "tests/e2e-feature.test.ts", "// REQ-001 and REQ-002 are exercised here\n");
+    // 8. Tests carry the REQ anchors → coverage is clean. BSC-2 slice-6: each REQ's test file
+    // carries a NON-TRIVIAL assertion (an expression-vs-literal `expect`, not a tautology) so the
+    // assertion-presence rung sees a real, can-fail assertion — not just the anchor comment.
+    writeFile(
+      tp,
+      "tests/e2e-feature.test.ts",
+      'import { expect, it } from "vitest";\n\n' +
+        'it("REQ-001 is exercised", () => { expect(1 + 1).toBe(2); });\n' +
+        'it("REQ-002 is exercised", () => { expect(2 + 2).toBe(4); });\n',
+    );
     const cov = runCoverageCheck(paths);
     expect(cov.data?.total).toBe(2);
     expect(cov.data?.covered).toBe(2);
@@ -138,6 +146,15 @@ describe("REQ-E2E-001: a run advances init → build → coverage → final-veri
     // Still blocked: no live-QA Tester record (production-reality rung).
     expect(evaluateStopGate(paths).block).toBe(true);
     expect(runTesterRecord(paths, { driver: "cli-e2e", passed: true }).ok).toBe(true);
+    // BSC-7 slice-3a C-2: the human signs off each engaged humanGate gate. The completion
+    // ladder re-validates the closed required-set (rung 1c), so without these approvals the
+    // gate would still block on human_approval_unverified. Minting them is the e2e analogue
+    // of the operator running `th approve <stage>` for each gate at the final snapshot.
+    mintRequiredApprovals(paths, readState(paths).state!);
+    // BSC-2 slice-6: the assertion-presence rung (composed LAST in the production-reality ladder)
+    // needs an F8-bound receipt over the current tests/ ground. Mint it here — after every
+    // tests/** write — the e2e analogue of `th assertion-presence record` at the final snapshot.
+    mintAssertionPresenceForFixture(paths);
     // Now the full ladder is green with no verify suite configured → allows.
     expect(evaluateStopGate(paths).block).toBe(false);
 

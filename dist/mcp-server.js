@@ -2985,7 +2985,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve21.call(this, root, ref);
+      let _sch = resolve23.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3012,7 +3012,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve21(root, ref) {
+    function resolve23(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3230,8 +3230,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path36) {
-      let input = path36;
+    function removeDotSegments(path51) {
+      let input = path51;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3483,8 +3483,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path36, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path36 && path36 !== "/" ? path36 : void 0;
+        const [path51, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path51 && path51 !== "/" ? path51 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -3643,55 +3643,55 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve21(baseURI, relativeURI, options) {
+    function resolve23(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative17, options, skipNormalization) {
+    function resolveComponent(base, relative25, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative17 = parse3(serialize(relative17, options), options);
+        relative25 = parse3(serialize(relative25, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative17.scheme) {
-        target.scheme = relative17.scheme;
-        target.userinfo = relative17.userinfo;
-        target.host = relative17.host;
-        target.port = relative17.port;
-        target.path = removeDotSegments(relative17.path || "");
-        target.query = relative17.query;
+      if (!options.tolerant && relative25.scheme) {
+        target.scheme = relative25.scheme;
+        target.userinfo = relative25.userinfo;
+        target.host = relative25.host;
+        target.port = relative25.port;
+        target.path = removeDotSegments(relative25.path || "");
+        target.query = relative25.query;
       } else {
-        if (relative17.userinfo !== void 0 || relative17.host !== void 0 || relative17.port !== void 0) {
-          target.userinfo = relative17.userinfo;
-          target.host = relative17.host;
-          target.port = relative17.port;
-          target.path = removeDotSegments(relative17.path || "");
-          target.query = relative17.query;
+        if (relative25.userinfo !== void 0 || relative25.host !== void 0 || relative25.port !== void 0) {
+          target.userinfo = relative25.userinfo;
+          target.host = relative25.host;
+          target.port = relative25.port;
+          target.path = removeDotSegments(relative25.path || "");
+          target.query = relative25.query;
         } else {
-          if (!relative17.path) {
+          if (!relative25.path) {
             target.path = base.path;
-            if (relative17.query !== void 0) {
-              target.query = relative17.query;
+            if (relative25.query !== void 0) {
+              target.query = relative25.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative17.path[0] === "/") {
-              target.path = removeDotSegments(relative17.path);
+            if (relative25.path[0] === "/") {
+              target.path = removeDotSegments(relative25.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative17.path;
+                target.path = "/" + relative25.path;
               } else if (!base.path) {
-                target.path = relative17.path;
+                target.path = relative25.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative17.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative25.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative17.query;
+            target.query = relative25.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3699,7 +3699,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative17.fragment;
+      target.fragment = relative25.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -3901,7 +3901,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve21,
+      resolve: resolve23,
       resolveComponent,
       equal,
       serialize,
@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs36, exportName) {
+    function addFormats(ajv, list, fs46, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs36[f]);
+        ajv.addFormat(f, fs46[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -7152,10 +7152,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path36) {
-  if (!path36)
+function getElementAtPath(obj, path51) {
+  if (!path51)
     return obj;
-  return path36.reduce((acc, key) => acc?.[key], obj);
+  return path51.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7564,11 +7564,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path36, issues) {
+function prefixIssues(path51, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path36);
+    iss.path.unshift(path51);
     return iss;
   });
 }
@@ -7715,16 +7715,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path36 = []) => {
+  const processError = (error3, path51 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path36, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path51, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path36, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path51, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path36, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path51, ...issue2.path]);
       } else {
-        const fullpath = [...path36, ...issue2.path];
+        const fullpath = [...path51, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -14230,7 +14230,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve21) => setTimeout(resolve21, pollInterval));
+        await new Promise((resolve23) => setTimeout(resolve23, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -14247,7 +14247,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve21, reject) => {
+    return new Promise((resolve23, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -14325,7 +14325,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve21(parseResult.data);
+            resolve23(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -14586,12 +14586,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve21, reject) => {
+    return new Promise((resolve23, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve21, interval);
+      const timeoutId = setTimeout(resolve23, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -15461,20 +15461,20 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve21) => {
+    return new Promise((resolve23) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve21();
+        resolve23();
       } else {
-        this._stdout.once("drain", resolve21);
+        this._stdout.once("drain", resolve23);
       }
     });
   }
 };
 
 // src/mcp-server.ts
-var fs35 = __toESM(require("node:fs"));
-var path35 = __toESM(require("node:path"));
+var fs45 = __toESM(require("node:fs"));
+var path50 = __toESM(require("node:path"));
 
 // src/core/paths.ts
 var fs = __toESM(require("node:fs"));
@@ -15883,6 +15883,9 @@ function success(opts) {
 function failure(opts) {
   return { ok: false, exitCode: opts?.exitCode ?? 1, data: opts?.data, human: opts?.human, receipts: opts?.receipts };
 }
+
+// src/commands/state.ts
+var path8 = __toESM(require("node:path"));
 
 // src/core/state-store.ts
 var fs3 = __toESM(require("node:fs"));
@@ -16332,6 +16335,20 @@ function hashDir(absDir, limits = DEFAULT_HASH_LIMITS) {
 function hashFileBytes(abs) {
   return (0, import_node_crypto.createHash)("sha256").update(fs4.readFileSync(abs)).digest("hex");
 }
+function hashFileStreaming(abs) {
+  const hash = (0, import_node_crypto.createHash)("sha256");
+  const fd = fs4.openSync(abs, "r");
+  try {
+    const buf = Buffer.allocUnsafe(64 * 1024);
+    let bytesRead;
+    while ((bytesRead = fs4.readSync(fd, buf, 0, buf.length, null)) > 0) {
+      hash.update(bytesRead === buf.length ? buf : buf.subarray(0, bytesRead));
+    }
+  } finally {
+    fs4.closeSync(fd);
+  }
+  return hash.digest("hex");
+}
 function hashPathContent(abs) {
   return fs4.statSync(abs).isDirectory() ? hashDir(abs) : hashFileBytes(abs);
 }
@@ -16642,6 +16659,954 @@ function nextStageAfterFor(currentStage, state) {
   return engaged.find((s) => STAGE_PIPELINE.findIndex((p) => p.stage === s.stage) > pipelineIdx);
 }
 
+// src/core/receipts.ts
+var fs9 = __toESM(require("node:fs"));
+var path7 = __toESM(require("node:path"));
+
+// src/core/git-revision.ts
+var import_node_child_process = require("node:child_process");
+var import_node_crypto3 = require("node:crypto");
+function git(cwd, args) {
+  try {
+    const out = (0, import_node_child_process.spawnSync)("git", args, {
+      cwd,
+      encoding: "utf8",
+      // A generous-but-bounded buffer: `git diff` on a large dirty tree can be big,
+      // but the digest only needs the bytes — overflow falls through to null (the
+      // honest "unbound" posture) rather than throwing.
+      maxBuffer: 32 * 1024 * 1024,
+      windowsHide: true
+    });
+    if (out.error) return null;
+    if (typeof out.status === "number" && out.status !== 0) return null;
+    return (out.stdout ?? "").trim();
+  } catch {
+    return null;
+  }
+}
+function gitHead(root) {
+  const head = git(root, ["rev-parse", "HEAD"]);
+  if (head === null || head === "") return null;
+  return head;
+}
+function dirtyTreeDigest(root, excludePaths = []) {
+  const pathspec = excludePaths.length === 0 ? [] : [
+    "--",
+    ".",
+    ...excludePaths.map(
+      (p) => `:(exclude,literal)${p.replace(/\\/g, "/").replace(/^\.\/+/, "")}`
+    )
+  ];
+  const status = git(root, ["status", "--porcelain", ...pathspec]);
+  if (status === null) return null;
+  if (status === "") return CLEAN_TREE_DIGEST;
+  const diff = git(root, ["diff", "HEAD", ...pathspec]) ?? "";
+  return (0, import_node_crypto3.createHash)("sha256").update(status + "\n\0\n" + diff, "utf8").digest("hex");
+}
+var CLEAN_TREE_DIGEST = "clean";
+
+// src/core/md-ledger.ts
+function formatLedgerEntry(entry, config2) {
+  const heading = `## ${entry.id}  (${entry.head}, ${entry.source})  \u2014 ${config2.headingTail(entry)}`;
+  const lines = [heading];
+  for (const field of config2.fields) {
+    lines.push(`${field.label}: ${field.value(entry)}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+function extractHead(paren) {
+  const lastComma = paren.lastIndexOf(",");
+  if (lastComma < 0) return paren.trim();
+  return paren.slice(0, lastComma).trim();
+}
+function parseLedgerEntries(text, headingRe, fieldRe, make, assign) {
+  const entries = [];
+  const lines = text.split(/\r?\n/);
+  let current;
+  for (const line of lines) {
+    const head = headingRe.exec(line);
+    if (head) {
+      if (current) entries.push(current);
+      current = make({ id: head[1], head: extractHead(head[2]), tag: head[3] });
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      if (current) {
+        entries.push(current);
+        current = void 0;
+      }
+      continue;
+    }
+    if (current) {
+      const field = fieldRe.exec(line);
+      if (field) {
+        assign(current, field[1], field[2]);
+      }
+    }
+  }
+  if (current) entries.push(current);
+  return entries;
+}
+function nextLedgerId(text, prefix) {
+  let max = 0;
+  const re = new RegExp(`${prefix}-(\\d+)`, "g");
+  for (const m of text.matchAll(re)) {
+    const n = Number(m[1]);
+    if (n > max) max = n;
+  }
+  return `${prefix}-${String(max + 1).padStart(3, "0")}`;
+}
+
+// src/core/drift-log.ts
+function actionTag(layer) {
+  return layer === "requirement" ? "BLOCKING" : "auto-applied";
+}
+var DRIFT_LEDGER = {
+  headingTail: (e) => `${e.layer} layer, ${actionTag(e.layer)}`,
+  fields: [
+    { label: "Discovery ", value: (e) => e.discovery },
+    { label: "Action    ", value: (e) => e.action },
+    { label: "Escalation", value: (e) => e.escalation }
+  ]
+};
+function formatDriftEntry(entry) {
+  return formatLedgerEntry(
+    {
+      id: entry.id,
+      head: entry.ref,
+      source: entry.source ?? "Builder",
+      layer: entry.layer,
+      discovery: entry.discovery,
+      action: entry.action,
+      escalation: entry.escalation
+    },
+    DRIFT_LEDGER
+  );
+}
+var HEADING_RE = /^##\s+(DRIFT-\d+)\s*\(([^)]+)\)\s*—\s*(derived|requirement)\s+layer/;
+var FIELD_RE = /^(Discovery|Action|Escalation)\s*:\s*(.*)$/;
+function parseDriftEntries(text) {
+  return parseLedgerEntries(
+    text,
+    HEADING_RE,
+    FIELD_RE,
+    (h) => ({
+      id: h.id,
+      ref: h.head,
+      layer: h.tag,
+      discovery: "",
+      action: "",
+      escalation: ""
+    }),
+    (entry, key, value) => {
+      if (key === "Discovery") entry.discovery = value;
+      else if (key === "Action") entry.action = value;
+      else entry.escalation = value;
+    }
+  );
+}
+function nextDriftId(text) {
+  return nextLedgerId(text, "DRIFT");
+}
+
+// src/core/decisions.ts
+var fs7 = __toESM(require("node:fs"));
+var path6 = __toESM(require("node:path"));
+var import_node_crypto4 = require("node:crypto");
+var APPROVAL_TRANSITIONS = /* @__PURE__ */ new Set(["approved", "rejected", "superseded"]);
+function decisionsPath(paths) {
+  return path6.join(paths.stateDir, "decisions.jsonl");
+}
+var CANONICAL_FIELD_ORDER = [
+  "id",
+  "event",
+  "title",
+  "rationale",
+  "links",
+  "supersededBy",
+  "proposer",
+  "proposedAt",
+  "approver",
+  "approvedAt",
+  "provenance",
+  "prevHash"
+];
+var PROVENANCE_FIELD_ORDER = [
+  "isTTY",
+  "ppid",
+  "parentComm",
+  "hostname",
+  "pid",
+  "attributionSuspect"
+];
+function canonicalProvenance(p) {
+  const out = {};
+  for (const key of PROVENANCE_FIELD_ORDER) out[key] = p[key];
+  return out;
+}
+function canonicalText(event) {
+  const ordered = {};
+  for (const key of CANONICAL_FIELD_ORDER) {
+    const val = event[key];
+    if (val === void 0) continue;
+    if (key === "links") {
+      ordered[key] = [...val].sort();
+    } else if (key === "provenance") {
+      ordered[key] = canonicalProvenance(val);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeRecordHash(event) {
+  return hashContent(canonicalText(event));
+}
+function computeKeyedHash(event, key) {
+  return (0, import_node_crypto4.createHmac)("sha256", key).update(canonicalText(event)).digest("hex");
+}
+var ID_RE = /^DECISION-\d{3,}$/;
+var EVENT_TYPES = /* @__PURE__ */ new Set(["proposed", "approved", "rejected", "superseded"]);
+function isValidEvent(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const e = parsed;
+  if (typeof e.id !== "string" || !ID_RE.test(e.id)) return false;
+  if (typeof e.event !== "string" || !EVENT_TYPES.has(e.event)) return false;
+  if (typeof e.prevHash !== "string" || !HEX64.test(e.prevHash)) return false;
+  if (typeof e.recordHash !== "string" || !HEX64.test(e.recordHash)) return false;
+  if (e.links !== void 0 && !Array.isArray(e.links)) return false;
+  if (e.keyedHash !== void 0 && typeof e.keyedHash !== "string") return false;
+  if (e.provenance !== void 0 && (typeof e.provenance !== "object" || e.provenance === null)) return false;
+  return true;
+}
+function readDecisionEvents(paths) {
+  return readJsonlValues(decisionsPath(paths), isValidEvent);
+}
+function readLastDecisionRecordHash(paths) {
+  const last = scanTailValid(decisionsPath(paths), isValidEvent);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function numericSuffix(id) {
+  const m = /^DECISION-(\d+)$/.exec(id);
+  if (!m) return null;
+  return Number(m[1]);
+}
+function formatDecisionId(n) {
+  return `DECISION-${String(n).padStart(3, "0")}`;
+}
+function mintNextId(events) {
+  let max = 0;
+  for (const e of events) {
+    const n = numericSuffix(e.id);
+    if (n !== null && n > max) max = n;
+  }
+  return formatDecisionId(max + 1);
+}
+function appendDecisionEvent(paths, event, key) {
+  assertGovernedWriteSurface(paths.root, decisionsPath(paths));
+  fs7.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastDecisionRecordHash(paths);
+  const withPrev = { ...event, prevHash };
+  const recordHash = computeRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  if (key && APPROVAL_TRANSITIONS.has(event.event)) {
+    sealed.keyedHash = computeKeyedHash(withPrev, key);
+  }
+  fs7.appendFileSync(decisionsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function verifyChain(events) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    const { recordHash, ...rest } = e;
+    const recomputed = computeRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (e.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = e.recordHash;
+  }
+  return { ok: true };
+}
+function verifyApprovalSeals(events, key) {
+  const mismatches = [];
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    if (!APPROVAL_TRANSITIONS.has(e.event)) continue;
+    if (e.keyedHash === void 0) continue;
+    const { recordHash: _rh, keyedHash, ...rest } = e;
+    if (computeKeyedHash(rest, key) !== keyedHash) {
+      mismatches.push({ index: i, id: e.id });
+    }
+  }
+  return { ok: mismatches.length === 0, mismatches };
+}
+function reduceDecisions(events) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const e of events) {
+    let d = byId.get(e.id);
+    if (!d) {
+      d = {
+        id: e.id,
+        title: e.title ?? "",
+        rationale: e.rationale ?? "",
+        status: e.event,
+        links: e.links ? [...e.links] : []
+      };
+      byId.set(e.id, d);
+    }
+    if (e.title !== void 0) d.title = e.title;
+    if (e.rationale !== void 0) d.rationale = e.rationale;
+    if (e.links !== void 0) d.links = [...e.links];
+    d.status = e.event;
+    if (e.proposer !== void 0) d.proposer = e.proposer;
+    if (e.proposedAt !== void 0) d.proposedAt = e.proposedAt;
+    if (e.approver !== void 0) d.approver = e.approver;
+    if (e.approvedAt !== void 0) d.approvedAt = e.approvedAt;
+    if (e.supersededBy !== void 0) d.supersededBy = e.supersededBy;
+    if (e.provenance !== void 0) d.provenance = e.provenance;
+  }
+  return [...byId.values()];
+}
+function sortDecisions(decisions) {
+  return [...decisions].sort((a, b) => (numericSuffix(a.id) ?? 0) - (numericSuffix(b.id) ?? 0));
+}
+function canonicalStageLink(stage) {
+  return `stage:${canonicalizeStage(stage)}`;
+}
+function canonicalizeLink(link) {
+  const prefix = "stage:";
+  return link.startsWith(prefix) ? canonicalStageLink(link.slice(prefix.length)) : link;
+}
+function gatingObligations(decisions, state) {
+  const stage = state?.current_stage;
+  if (!stage) return [];
+  const wanted = canonicalStageLink(stage);
+  const obligations = [];
+  for (const d of sortDecisions(decisions)) {
+    if (d.status === "approved") continue;
+    if (d.links.some((l) => canonicalizeLink(l) === wanted)) {
+      obligations.push({ decisionId: d.id, blockedStage: stage });
+    }
+  }
+  return obligations;
+}
+
+// src/core/receipt-signing.ts
+var import_node_crypto5 = require("node:crypto");
+var fs8 = __toESM(require("node:fs"));
+var SIGNATURE_BASE64 = /^[A-Za-z0-9+/]{86}==$/;
+function verifyCanonical(canonicalText3, signature, publicKey) {
+  try {
+    if (publicKey.type !== "public" || publicKey.asymmetricKeyType !== "ed25519") return false;
+    if (typeof signature !== "string" || !SIGNATURE_BASE64.test(signature)) return false;
+    const bytes = Buffer.from(signature, "base64");
+    if (bytes.length !== 64) return false;
+    return (0, import_node_crypto5.verify)(null, Buffer.from(canonicalText3, "utf8"), publicKey, bytes);
+  } catch {
+    return false;
+  }
+}
+function loadExternalPublicKey() {
+  const file = process.env.TH_RECEIPT_PUBLIC_KEYFILE;
+  if (typeof file !== "string" || file === "") return null;
+  try {
+    const raw = fs8.readFileSync(file);
+    try {
+      (0, import_node_crypto5.createPrivateKey)(raw);
+      return null;
+    } catch {
+    }
+    const key = (0, import_node_crypto5.createPublicKey)(raw);
+    if (key.asymmetricKeyType !== "ed25519") return null;
+    return key;
+  } catch {
+    return null;
+  }
+}
+function externalKeyId(publicKey) {
+  if (publicKey.type !== "public" || publicKey.asymmetricKeyType !== "ed25519") {
+    throw new TypeError("externalKeyId requires an Ed25519 public key");
+  }
+  const der = publicKey.export({ type: "spki", format: "der" });
+  return (0, import_node_crypto5.createHash)("sha256").update(der).digest("hex").slice(0, 8);
+}
+
+// src/core/receipts.ts
+var CANONICAL_FIELD_ORDER2 = [
+  "kind",
+  "refId",
+  "target_resolves_in_source",
+  "snapshot_coord",
+  "producer_identity",
+  // Slice-1b — `producer_kind` + `key_id` join the canonical (and therefore signature-
+  // bound) input AFTER producer_identity, BEFORE legacy. `signature` is DELIBERATELY
+  // absent here: like `recordHash`, it is a TRAILER excluded from canonicalText, so
+  // both the recordHash and the signature are computed over the IDENTICAL bytes.
+  // canonicalText() skips undefined keys, so a slice-1a receipt (all three new fields
+  // absent) produces the byte-identical canonical text — and recordHash — as before.
+  "producer_kind",
+  "key_id",
+  "legacy",
+  "prevHash"
+];
+var TARGET_FIELD_ORDER = ["path", "digest"];
+var SNAPSHOT_FIELD_ORDER = ["gitHead", "treeDigest"];
+function reorder(obj, order) {
+  const out = {};
+  for (const key of order) out[key] = obj[key];
+  return out;
+}
+function canonicalText2(receipt) {
+  const ordered = {};
+  for (const key of CANONICAL_FIELD_ORDER2) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "target_resolves_in_source") {
+      ordered[key] = reorder(val, TARGET_FIELD_ORDER);
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder(val, SNAPSHOT_FIELD_ORDER);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeRecordHash2(receipt) {
+  return hashContent(canonicalText2(receipt));
+}
+function terminalReceiptsPath(paths) {
+  return path7.join(paths.stateDir, "terminal-receipts.jsonl");
+}
+function externalReceiptsPath(paths) {
+  return path7.join(paths.stateDir, "external-receipts.jsonl");
+}
+var KIND_VALUES = /* @__PURE__ */ new Set(["drift-resolve", "sim-retire", "decision-approve"]);
+var ED25519_SIGNATURE_BASE64 = /^[A-Za-z0-9+/]{86}==$/;
+function isValidReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (typeof r.kind !== "string" || !KIND_VALUES.has(r.kind)) return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
+  if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
+  if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE64.test(r.signature))) {
+    return false;
+  }
+  const tgt = r.target_resolves_in_source;
+  if (typeof tgt !== "object" || tgt === null) return false;
+  const t = tgt;
+  if (typeof t.path !== "string" || typeof t.digest !== "string") return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readTerminalReceipts(paths) {
+  return readJsonlValues(terminalReceiptsPath(paths), isValidReceipt);
+}
+function readExternalReceipts(paths) {
+  return readJsonlValues(externalReceiptsPath(paths), isValidReceipt);
+}
+function readLastReceiptRecordHash(paths) {
+  const last = scanTailValid(terminalReceiptsPath(paths), isValidReceipt);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function verifyReceiptChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeRecordHash2(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+function computeTargetDigest(root, relPath2) {
+  if (relPath2 === "") return null;
+  const abs = resolveWithinRoot(root, relPath2);
+  if (abs === null) return null;
+  try {
+    if (!fs9.existsSync(abs) || !fs9.statSync(abs).isFile()) return null;
+    return hashContent(fs9.readFileSync(abs, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function currentReceiptSnapshotCoord(paths) {
+  const excludePaths = [paths.stateDir, paths.driftLog].map((p) => path7.relative(paths.root, p)).filter((p) => p !== "" && !path7.isAbsolute(p) && p !== ".." && !p.startsWith(`..${path7.sep}`));
+  return {
+    gitHead: gitHead(paths.root),
+    treeDigest: dirtyTreeDigest(paths.root, excludePaths)
+  };
+}
+var TargetUnresolvedError = class extends Error {
+  constructor(message, target) {
+    super(message);
+    this.target = target;
+    this.name = "TargetUnresolvedError";
+  }
+  target;
+  /** Stable machine token for the CLI failure envelope. */
+  code = "receipt_target_unresolved";
+};
+function appendTerminalReceipt(paths, input) {
+  let targetPath = "";
+  let digest = "";
+  if (input.targetPath !== void 0 && input.targetPath !== "") {
+    const d = computeTargetDigest(paths.root, input.targetPath);
+    if (d === null) {
+      throw new TargetUnresolvedError(
+        `Refusing to mint a ${input.kind} receipt for ${input.refId}: target "${input.targetPath}" does not resolve in source.`,
+        input.targetPath
+      );
+    }
+    targetPath = input.targetPath;
+    digest = d;
+  }
+  return sealAndAppend(paths, {
+    kind: input.kind,
+    refId: input.refId,
+    target_resolves_in_source: { path: targetPath, digest },
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: input.producerIdentity
+  });
+}
+function appendLegacyReceipt(paths, kind, refId) {
+  return sealAndAppend(paths, {
+    kind,
+    refId,
+    target_resolves_in_source: { path: "", digest: "" },
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: "legacy-backfill",
+    legacy: true
+  });
+}
+function sealAndAppend(paths, receipt) {
+  assertGovernedWriteSurface(paths.root, terminalReceiptsPath(paths));
+  fs9.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastReceiptRecordHash(paths);
+  const withPrev = { ...receipt, prevHash };
+  const recordHash = computeRecordHash2(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs9.appendFileSync(terminalReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function snapshotStaleReasons(recorded, current) {
+  const reasons = [];
+  if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
+    reasons.push("gitHead");
+  }
+  if (recorded.treeDigest !== null && current.treeDigest !== null && recorded.treeDigest !== current.treeDigest) {
+    reasons.push("treeDigest");
+  }
+  return reasons;
+}
+function classifyReceiptContent(paths, kind, receipt, passStatus) {
+  if (kind === "decision-approve") return { status: passStatus, receipt };
+  const recordedPath = receipt.target_resolves_in_source.path;
+  const recordedDigest = receipt.target_resolves_in_source.digest;
+  const currentDigest = computeTargetDigest(paths.root, recordedPath);
+  if (currentDigest === null) return { status: "target_missing", receipt };
+  if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt };
+  const staleReasons = snapshotStaleReasons(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
+  if (staleReasons.length > 0) return { status: "stale", receipt, staleReasons };
+  return { status: passStatus, receipt };
+}
+function readReceiptValidated(paths, kind, refId) {
+  const matches = (r) => r.kind === kind && r.refId === refId;
+  const inProcessReceipts = readTerminalReceipts(paths);
+  if (!verifyReceiptChain(inProcessReceipts).ok) return { status: "tampered" };
+  let inProcess;
+  for (const r of inProcessReceipts) {
+    if (matches(r)) inProcess = r;
+  }
+  const externalCandidates = readExternalReceipts(paths).filter(
+    (r) => matches(r) && r.producer_kind === "external"
+  );
+  if (externalCandidates.length > 0) {
+    const publicKey = loadExternalPublicKey();
+    if (publicKey !== null) {
+      const configuredKeyId = externalKeyId(publicKey);
+      let verified;
+      for (const cand of externalCandidates) {
+        if (typeof cand.signature !== "string") continue;
+        if (cand.key_id !== configuredKeyId) continue;
+        const { recordHash: _rh, signature: _sig, ...signedView } = cand;
+        if (verifyCanonical(canonicalText2(signedView), cand.signature, publicKey)) verified = cand;
+      }
+      if (verified) {
+        if (verified.legacy === true) return { status: "legacy", receipt: verified };
+        return classifyReceiptContent(paths, kind, verified, "valid-grounded");
+      }
+    }
+    return { status: "forged", receipt: externalCandidates[externalCandidates.length - 1] };
+  }
+  if (!inProcess) {
+    if (!receiptMigrationDone(paths)) return { status: "legacy" };
+    if (grandfatheredBaseline(paths).has(baselineKey(kind, refId))) return { status: "legacy" };
+    return { status: "absent" };
+  }
+  if (inProcess.legacy === true) return { status: "legacy", receipt: inProcess };
+  return classifyReceiptContent(paths, kind, inProcess, "valid");
+}
+function migrationMarkerPath(paths) {
+  return path7.join(paths.stateDir, ".terminal-receipts-migration");
+}
+function baselineKey(kind, refId) {
+  return `${kind}:${refId}`;
+}
+function readMigrationMarker(paths) {
+  const file = migrationMarkerPath(paths);
+  if (!fs9.existsSync(file)) return void 0;
+  let raw;
+  try {
+    raw = fs9.readFileSync(file, "utf8");
+  } catch {
+    return void 0;
+  }
+  const parsed = safeParseJson(raw);
+  if (typeof parsed !== "object" || parsed === null) return void 0;
+  const m = parsed;
+  if (typeof m.migratedAt !== "string") return void 0;
+  if (!Array.isArray(m.baseline) || !m.baseline.every((x) => typeof x === "string")) return void 0;
+  return { migratedAt: m.migratedAt, baseline: m.baseline };
+}
+function receiptMigrationDone(paths) {
+  return readMigrationMarker(paths) !== void 0;
+}
+function grandfatheredBaseline(paths) {
+  const marker = readMigrationMarker(paths);
+  return new Set(marker ? marker.baseline : []);
+}
+function readRetiredSimIds(paths) {
+  const file = path7.join(paths.stateDir, "simulation-ledger.json");
+  if (!fs9.existsSync(file)) return [];
+  let raw;
+  try {
+    raw = fs9.readFileSync(file, "utf8");
+  } catch {
+    return [];
+  }
+  const parsed = safeParseJson(raw);
+  if (!Array.isArray(parsed)) return [];
+  const ids = [];
+  for (const row of parsed) {
+    if (typeof row !== "object" || row === null) continue;
+    const r = row;
+    if (typeof r.id === "string" && r.id !== "" && r.status === "retired") ids.push(r.id);
+  }
+  return ids;
+}
+function collectTerminalEntities(paths) {
+  const out = [];
+  let driftText = "";
+  try {
+    driftText = fs9.readFileSync(paths.driftLog, "utf8");
+  } catch {
+    driftText = "";
+  }
+  if (driftText !== "") {
+    const blockingDriftIds = new Set(
+      parseDriftEntries(driftText).filter((e) => e.layer === "requirement").map((e) => e.id)
+    );
+    const seen = /* @__PURE__ */ new Set();
+    for (const line of driftText.split(/\r?\n/)) {
+      const m = /^##\s+(DRIFT-\d+)\s+—\s+resolved\s*$/.exec(line.trim());
+      if (!m) continue;
+      const id = m[1];
+      if (blockingDriftIds.has(id) && !seen.has(id)) {
+        seen.add(id);
+        out.push({ kind: "drift-resolve", refId: id });
+      }
+    }
+  }
+  for (const id of readRetiredSimIds(paths)) {
+    out.push({ kind: "sim-retire", refId: id });
+  }
+  for (const d of reduceDecisions(readDecisionEvents(paths))) {
+    if (d.status === "approved") out.push({ kind: "decision-approve", refId: d.id });
+  }
+  return out;
+}
+function ensureReceiptMigration(paths) {
+  if (receiptMigrationDone(paths)) return;
+  const terminalEntities = collectTerminalEntities(paths);
+  const existing = /* @__PURE__ */ new Set();
+  for (const r of readTerminalReceipts(paths)) existing.add(baselineKey(r.kind, r.refId));
+  for (const ent of terminalEntities) {
+    const key = baselineKey(ent.kind, ent.refId);
+    if (existing.has(key)) continue;
+    appendLegacyReceipt(paths, ent.kind, ent.refId);
+    existing.add(key);
+  }
+  const baseline = terminalEntities.map((e) => baselineKey(e.kind, e.refId));
+  const marker = { migratedAt: (/* @__PURE__ */ new Date()).toISOString(), baseline };
+  assertGovernedWriteSurface(paths.root, migrationMarkerPath(paths));
+  fs9.mkdirSync(paths.stateDir, { recursive: true });
+  fs9.writeFileSync(migrationMarkerPath(paths), JSON.stringify(marker), "utf8");
+}
+var TASK_BRIEF_RELPATH = "docs/00-task-brief.md";
+function computeBriefDigest(root) {
+  return computeTargetDigest(root, TASK_BRIEF_RELPATH);
+}
+var TIER_CORR_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "refId",
+  "claimed_tier",
+  "computed_min_tier",
+  "brief_digest",
+  "current_stage_at_mint",
+  "snapshot_coord",
+  "producer_identity",
+  "legacy",
+  "prevHash"
+];
+function tierCorrespondenceCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of TIER_CORR_CANONICAL_FIELD_ORDER) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "snapshot_coord") {
+      ordered[key] = reorder(val, SNAPSHOT_FIELD_ORDER);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeTierCorrespondenceRecordHash(receipt) {
+  return hashContent(tierCorrespondenceCanonicalText(receipt));
+}
+function tierCorrespondenceReceiptsPath(paths) {
+  return path7.join(paths.stateDir, "tier-correspondence-receipts.jsonl");
+}
+var TIER_CORR_KIND = "tier-correspondence";
+function isValidTierCorrespondenceReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== TIER_CORR_KIND) return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.claimed_tier !== "string" || r.claimed_tier === "") return false;
+  if (typeof r.computed_min_tier !== "string" || r.computed_min_tier === "") return false;
+  if (!(r.brief_digest === null || typeof r.brief_digest === "string")) return false;
+  if (r.current_stage_at_mint !== void 0 && typeof r.current_stage_at_mint !== "string") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readTierCorrespondenceReceipts(paths) {
+  return readJsonlValues(tierCorrespondenceReceiptsPath(paths), isValidTierCorrespondenceReceipt);
+}
+function readLastTierCorrespondenceRecordHash(paths) {
+  const last = scanTailValid(tierCorrespondenceReceiptsPath(paths), isValidTierCorrespondenceReceipt);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function verifyTierCorrespondenceChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    if (computeTierCorrespondenceRecordHash(rest) !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+function appendTierCorrespondenceReceipt(paths, input) {
+  assertGovernedWriteSurface(paths.root, tierCorrespondenceReceiptsPath(paths));
+  fs9.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastTierCorrespondenceRecordHash(paths);
+  const withPrev = {
+    kind: TIER_CORR_KIND,
+    refId: input.refId,
+    claimed_tier: input.claimedTier,
+    computed_min_tier: input.computedMinTier,
+    brief_digest: input.briefDigest,
+    // omit-when-absent: a `undefined` witness is dropped from the canonical text.
+    ...input.currentStageAtMint !== void 0 ? { current_stage_at_mint: input.currentStageAtMint } : {},
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: input.producerIdentity,
+    prevHash
+  };
+  const recordHash = computeTierCorrespondenceRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs9.appendFileSync(tierCorrespondenceReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+var COVERAGE_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "refId",
+  "declared_set_digest",
+  "declared_set",
+  "observed_set",
+  "covered",
+  "snapshot_coord",
+  "producer_identity",
+  "prevHash"
+];
+var COVERAGE_SNAPSHOT_FIELD_ORDER = ["gitHead", "treeDigest"];
+function coverageCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of COVERAGE_CANONICAL_FIELD_ORDER) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "declared_set" || key === "observed_set") {
+      ordered[key] = [...new Set(val)].sort();
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder(val, COVERAGE_SNAPSHOT_FIELD_ORDER);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeCoverageRecordHash(receipt) {
+  return hashContent(coverageCanonicalText(receipt));
+}
+function coverageReceiptsPath(paths) {
+  return path7.join(paths.stateDir, "dimension-coverage-receipts.jsonl");
+}
+function isValidCoverageReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "dimension-set-coverage") return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.declared_set_digest !== "string" || !HEX64.test(r.declared_set_digest)) return false;
+  if (!Array.isArray(r.declared_set) || !r.declared_set.every((d) => typeof d === "string")) return false;
+  if (!Array.isArray(r.observed_set) || !r.observed_set.every((d) => typeof d === "string")) return false;
+  if (typeof r.covered !== "boolean") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readCoverageReceipts(paths) {
+  return readJsonlValues(coverageReceiptsPath(paths), isValidCoverageReceipt);
+}
+function verifyCoverageChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const { recordHash, ...rest } = receipts[i];
+    const recomputed = computeCoverageRecordHash(rest);
+    if (recomputed !== recordHash) return { ok: false, brokenAt: i, reason: "edited" };
+    if (rest.prevHash !== expectedPrev) return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    expectedPrev = recordHash;
+  }
+  return { ok: true };
+}
+function validateCoverageContent(receipt, liveDeclaredDigest, liveDeclaredSet, liveObservedSet) {
+  if (receipt.declared_set_digest !== liveDeclaredDigest) {
+    return { status: "declared_set_diverged", digests: { stored: receipt.declared_set_digest, live: liveDeclaredDigest } };
+  }
+  const observed = new Set(liveObservedSet);
+  const missing = [...new Set(liveDeclaredSet)].sort().filter((d) => !observed.has(d));
+  if (missing.length > 0) return { status: "uncovered", missing };
+  return { status: "covered" };
+}
+
+// src/core/brief.ts
+var fs10 = __toESM(require("node:fs"));
+function isPlainObject4(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+function validateBrief(value) {
+  const issues = [];
+  if (!isPlainObject4(value)) {
+    return { ok: false, issues: [{ path: "$", message: "brief must be a JSON object" }] };
+  }
+  const v = value;
+  if (!(v.description === void 0 || typeof v.description === "string")) {
+    issues.push({ path: "description", message: "must be a string if present" });
+  }
+  for (const key of [
+    "single_file_or_local",
+    "changes_public_interface",
+    "adds_dependency",
+    "obvious_testable_answer"
+  ]) {
+    if (typeof v[key] !== "boolean") {
+      issues.push({ path: key, message: "must be a boolean" });
+    }
+  }
+  if (!Array.isArray(v.blast_radius_flags)) {
+    issues.push({ path: "blast_radius_flags", message: "must be an array" });
+  } else {
+    v.blast_radius_flags.forEach((f, i) => {
+      if (typeof f !== "string" || !BLAST_RADIUS_FLAGS.includes(f)) {
+        issues.push({ path: `blast_radius_flags[${i}]`, message: `invalid flag "${String(f)}"` });
+      }
+    });
+  }
+  if (issues.length > 0) return { ok: false, issues };
+  return { ok: true, issues: [], brief: value };
+}
+function loadBriefFromFile(filePath) {
+  if (!fs10.existsSync(filePath)) {
+    return { ok: false, issues: [{ path: "$", message: `brief file not found: ${filePath}` }] };
+  }
+  let raw;
+  try {
+    raw = fs10.readFileSync(filePath, "utf8");
+  } catch (e) {
+    return { ok: false, issues: [{ path: "$", message: `could not read brief: ${e.message}` }] };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return { ok: false, issues: [{ path: "$", message: `invalid JSON: ${e.message}` }] };
+  }
+  return validateBrief(parsed);
+}
+
+// src/core/tier-classify.ts
+function classifyBrief(brief) {
+  const reasons = [];
+  if (!brief.single_file_or_local) reasons.push("not a single file / tightly local area");
+  if (brief.changes_public_interface) reasons.push("changes a public interface, schema, or contract");
+  if (brief.adds_dependency) reasons.push("adds a new dependency");
+  if (!brief.obvious_testable_answer) reasons.push("no obvious, testable correct answer");
+  const blocked_by_veto = brief.blast_radius_flags.length > 0;
+  if (blocked_by_veto) {
+    reasons.push(`blast-radius flag(s) force \u2265T1 (\xA75 veto): ${brief.blast_radius_flags.join(", ")}`);
+  }
+  const tier0_eligible = brief.single_file_or_local && !brief.changes_public_interface && !brief.adds_dependency && brief.obvious_testable_answer && brief.blast_radius_flags.length === 0;
+  return { tier0_eligible, blocked_by_veto, reasons };
+}
+
 // src/commands/state.ts
 var UNSAFE_KEY_SEGMENTS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constructor"]);
 function isRecord(v) {
@@ -16809,6 +17774,9 @@ ${formatIssues(validation.issues)}`,
     for (const [key, value] of Object.entries(effective)) {
       appendLedger(paths, { event: "gate-state-change", key, value, source });
     }
+    if (Object.prototype.hasOwnProperty.call(effective, "tier")) {
+      mintTierCorrespondenceReceipt(paths, validation.state.tier, validation.state.current_stage);
+    }
     appendHighWater(paths);
     return success({
       data: { source, fields: effective },
@@ -16834,116 +17802,26 @@ function tierUpgradeBackfillStage(oldTier, newTierRaw, currentStage) {
   }
   return null;
 }
-
-// src/commands/drift.ts
-var fs7 = __toESM(require("node:fs"));
-
-// src/core/md-ledger.ts
-function formatLedgerEntry(entry, config2) {
-  const heading = `## ${entry.id}  (${entry.head}, ${entry.source})  \u2014 ${config2.headingTail(entry)}`;
-  const lines = [heading];
-  for (const field of config2.fields) {
-    lines.push(`${field.label}: ${field.value(entry)}`);
-  }
-  lines.push("");
-  return lines.join("\n");
-}
-function extractHead(paren) {
-  const lastComma = paren.lastIndexOf(",");
-  if (lastComma < 0) return paren.trim();
-  return paren.slice(0, lastComma).trim();
-}
-function parseLedgerEntries(text, headingRe, fieldRe, make, assign) {
-  const entries = [];
-  const lines = text.split(/\r?\n/);
-  let current;
-  for (const line of lines) {
-    const head = headingRe.exec(line);
-    if (head) {
-      if (current) entries.push(current);
-      current = make({ id: head[1], head: extractHead(head[2]), tag: head[3] });
-      continue;
-    }
-    if (line.startsWith("## ")) {
-      if (current) {
-        entries.push(current);
-        current = void 0;
-      }
-      continue;
-    }
-    if (current) {
-      const field = fieldRe.exec(line);
-      if (field) {
-        assign(current, field[1], field[2]);
-      }
-    }
-  }
-  if (current) entries.push(current);
-  return entries;
-}
-function nextLedgerId(text, prefix) {
-  let max = 0;
-  const re = new RegExp(`${prefix}-(\\d+)`, "g");
-  for (const m of text.matchAll(re)) {
-    const n = Number(m[1]);
-    if (n > max) max = n;
-  }
-  return `${prefix}-${String(max + 1).padStart(3, "0")}`;
-}
-
-// src/core/drift-log.ts
-function actionTag(layer) {
-  return layer === "requirement" ? "BLOCKING" : "auto-applied";
-}
-var DRIFT_LEDGER = {
-  headingTail: (e) => `${e.layer} layer, ${actionTag(e.layer)}`,
-  fields: [
-    { label: "Discovery ", value: (e) => e.discovery },
-    { label: "Action    ", value: (e) => e.action },
-    { label: "Escalation", value: (e) => e.escalation }
-  ]
-};
-function formatDriftEntry(entry) {
-  return formatLedgerEntry(
-    {
-      id: entry.id,
-      head: entry.ref,
-      source: entry.source ?? "Builder",
-      layer: entry.layer,
-      discovery: entry.discovery,
-      action: entry.action,
-      escalation: entry.escalation
-    },
-    DRIFT_LEDGER
-  );
-}
-var HEADING_RE = /^##\s+(DRIFT-\d+)\s*\(([^)]+)\)\s*—\s*(derived|requirement)\s+layer/;
-var FIELD_RE = /^(Discovery|Action|Escalation)\s*:\s*(.*)$/;
-function parseDriftEntries(text) {
-  return parseLedgerEntries(
-    text,
-    HEADING_RE,
-    FIELD_RE,
-    (h) => ({
-      id: h.id,
-      ref: h.head,
-      layer: h.tag,
-      discovery: "",
-      action: "",
-      escalation: ""
-    }),
-    (entry, key, value) => {
-      if (key === "Discovery") entry.discovery = value;
-      else if (key === "Action") entry.action = value;
-      else entry.escalation = value;
-    }
-  );
-}
-function nextDriftId(text) {
-  return nextLedgerId(text, "DRIFT");
+function mintTierCorrespondenceReceipt(paths, claimedTier, currentStage) {
+  if (claimedTier === null) return;
+  const briefFile = path8.resolve(paths.root, TASK_BRIEF_RELPATH);
+  const loaded = loadBriefFromFile(briefFile);
+  const minTier = loaded.ok && loaded.brief && classifyBrief(loaded.brief).tier0_eligible ? "T0" : "T1";
+  const computedMinTier = loaded.ok && loaded.brief ? minTier : "T0";
+  appendTierCorrespondenceReceipt(paths, {
+    refId: gitHead(paths.root) ?? "no-git",
+    claimedTier,
+    computedMinTier,
+    briefDigest: computeBriefDigest(paths.root),
+    // The POST-rewind current_stage (the rewind already folded into the write) — the gate's
+    // upgrade witness for the stage-invalidation check (BSC-8b).
+    currentStageAtMint: canonicalizeStage(currentStage),
+    producerIdentity: "th tier record (in-process)"
+  });
 }
 
 // src/commands/drift.ts
+var fs11 = __toESM(require("node:fs"));
 var DRIFT_LOG_HEADER = `# Drift Log
 
 Append-only record of implementation discoveries (spec \xA710). Each entry records the
@@ -16960,17 +17838,17 @@ Escalation: ...
 \`\`\`
 `;
 function readDriftLog(paths) {
-  if (!fs7.existsSync(paths.driftLog)) {
+  if (!fs11.existsSync(paths.driftLog)) {
     atomicWriteFile(paths.driftLog, DRIFT_LOG_HEADER, { root: paths.root });
     return DRIFT_LOG_HEADER;
   }
-  return fs7.readFileSync(paths.driftLog, "utf8");
+  return fs11.readFileSync(paths.driftLog, "utf8");
 }
 function appendDriftLog(paths, block) {
   readDriftLog(paths);
   assertGovernedWriteSurface(paths.root, paths.driftLog);
-  const sep18 = endsWithNewline(paths.driftLog) ? "" : "\n";
-  fs7.appendFileSync(paths.driftLog, `${sep18}${block}`, "utf8");
+  const sep26 = endsWithNewline(paths.driftLog) ? "" : "\n";
+  fs11.appendFileSync(paths.driftLog, `${sep26}${block}`, "utf8");
 }
 function runDriftAdd(paths, opts) {
   return withStateLock(paths, () => runDriftAddLocked(paths, opts));
@@ -17028,16 +17906,16 @@ ${formatIssues(r.issues)}`,
       data: { error: "invalid_state", issues: r.issues }
     });
   }
-  const text = fs7.existsSync(paths.driftLog) ? fs7.readFileSync(paths.driftLog, "utf8") : "";
+  const text = fs11.existsSync(paths.driftLog) ? fs11.readFileSync(paths.driftLog, "utf8") : "";
   const entries = parseDriftEntries(text);
   const openBlocking = r.state.drift_open_blocking;
   const human = entries.length ? entries.map((e) => `${e.id}  (${e.ref})  ${e.layer} layer${e.layer === "requirement" ? " [BLOCKING]" : ""}`).join("\n") : "(no drift entries)";
   return success({ data: { entries, open_blocking: openBlocking }, human });
 }
-function runDriftResolve(paths, id) {
-  return withStateLock(paths, () => runDriftResolveLocked(paths, id));
+function runDriftResolve(paths, id, opts) {
+  return withStateLock(paths, () => runDriftResolveLocked(paths, id, opts));
 }
-function runDriftResolveLocked(paths, id) {
+function runDriftResolveLocked(paths, id, opts) {
   if (!id) return failure({ human: "usage: th drift resolve <DRIFT-NNN>" });
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
@@ -17048,7 +17926,7 @@ ${formatIssues(r.issues)}`,
       data: { error: "invalid_state", issues: r.issues }
     });
   }
-  const text = fs7.existsSync(paths.driftLog) ? fs7.readFileSync(paths.driftLog, "utf8") : "";
+  const text = fs11.existsSync(paths.driftLog) ? fs11.readFileSync(paths.driftLog, "utf8") : "";
   const entries = parseDriftEntries(text);
   const entry = entries.find((e) => e.id === id);
   if (!entry) {
@@ -17064,16 +17942,48 @@ ${formatIssues(r.issues)}`,
       data: { error: "already_resolved", id }
     });
   }
+  const isBlocking = entry.layer === "requirement";
+  const target = opts?.target;
+  ensureReceiptMigration(paths);
+  if (isBlocking) {
+    if (target === void 0 || target === "") {
+      return failure({
+        human: `Resolving the requirement-layer (BLOCKING) drift ${id} now requires grounding: th drift resolve ${id} --target <path>`,
+        data: { error: "drift_resolve_target_required", id }
+      });
+    }
+    try {
+      appendTerminalReceipt(paths, {
+        kind: "drift-resolve",
+        refId: id,
+        targetPath: target,
+        producerIdentity: "cli:th drift resolve"
+      });
+    } catch (e) {
+      if (e instanceof TargetUnresolvedError) {
+        return failure({
+          human: `Refusing to resolve ${id}: target "${target}" does not resolve in source.`,
+          data: { error: e.code, id, target: e.target }
+        });
+      }
+      throw e;
+    }
+  }
   appendDriftLog(paths, `## ${id} \u2014 resolved
 `);
-  const isBlocking = entry.layer === "requirement";
   let driftOpenBlocking = r.state.drift_open_blocking;
   if (isBlocking) {
     driftOpenBlocking = Math.max(0, driftOpenBlocking - 1);
     writeState(paths, { ...r.state, drift_open_blocking: driftOpenBlocking });
     appendLedger(paths, { event: "drift-blocking-resolved", id, drift_open_blocking: driftOpenBlocking });
   }
-  structuredLog({ cmd: "drift resolve", id, layer: entry.layer, drift_open_blocking: driftOpenBlocking });
+  structuredLog({
+    cmd: "drift resolve",
+    id,
+    layer: entry.layer,
+    drift_open_blocking: driftOpenBlocking,
+    ...isBlocking ? { target } : {}
+  });
   const human = isBlocking ? `${id} marked resolved (requirement layer, blocking cleared). Open blocking drift: ${driftOpenBlocking}.` : `${id} marked resolved (derived layer \u2014 no blocking counter change). Open blocking drift: ${driftOpenBlocking}.`;
   return success({
     data: { id, layer: entry.layer, drift_open_blocking: driftOpenBlocking },
@@ -17082,8 +17992,8 @@ ${formatIssues(r.issues)}`,
 }
 
 // src/commands/sim.ts
-var fs8 = __toESM(require("node:fs"));
-var path6 = __toESM(require("node:path"));
+var fs13 = __toESM(require("node:fs"));
+var path10 = __toESM(require("node:path"));
 
 // src/core/simulation.ts
 var SIMULATION_CLASSIFICATIONS = [
@@ -17129,16 +18039,99 @@ var SIMULATION_SCAN_TOKENS = [
   "hardcoded"
 ];
 
+// src/core/scan-completeness.ts
+var fs12 = __toESM(require("node:fs"));
+var path9 = __toESM(require("node:path"));
+var ED25519_SIGNATURE_BASE642 = /^[A-Za-z0-9+/]{86}==$/;
+function scanCompletenessPath(paths) {
+  return path9.join(paths.stateDir, "scan-completeness.jsonl");
+}
+function appendScanCompletenessReceipt(paths, unobserved) {
+  assertGovernedWriteSurface(paths.root, scanCompletenessPath(paths));
+  fs12.mkdirSync(paths.stateDir, { recursive: true });
+  const limits_reached = [...new Set(unobserved.map((u) => u.reason))].sort();
+  const unproven_dimensions = unobserved.map((u) => `simulation-token-coverage:${u.path}`);
+  const receipt = {
+    unobserved,
+    limits_reached,
+    unproven_dimensions,
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    recordedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  fs12.appendFileSync(scanCompletenessPath(paths), JSON.stringify(receipt) + "\n", "utf8");
+  return receipt;
+}
+function scanExceptionsPath(paths) {
+  return path9.join(paths.stateDir, "scan-exceptions.jsonl");
+}
+var ACK_CANONICAL_FIELD_ORDER = ["path", "digest", "snapshot_coord", "producer_kind", "key_id", "prevHash"];
+var SNAPSHOT_FIELD_ORDER2 = ["gitHead", "treeDigest"];
+function scanExceptionCanonicalText(ack) {
+  const ordered = {};
+  for (const key of ACK_CANONICAL_FIELD_ORDER) {
+    const val = ack[key];
+    if (val === void 0) continue;
+    if (key === "snapshot_coord") {
+      const snap = val;
+      const reordered = {};
+      for (const k of SNAPSHOT_FIELD_ORDER2) reordered[k] = snap[k];
+      ordered[key] = reordered;
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function isValidScanExceptionAck(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (typeof r.path !== "string" || r.path === "") return false;
+  if (typeof r.digest !== "string" || !HEX64.test(r.digest)) return false;
+  if (r.producer_kind !== "external") return false;
+  if (typeof r.key_id !== "string" || r.key_id === "") return false;
+  if (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE642.test(r.signature)) return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readScanExceptions(paths) {
+  return readJsonlValues(scanExceptionsPath(paths), isValidScanExceptionAck);
+}
+function readScanExceptionValidated(paths, targetPath, targetDigest) {
+  const candidates = readScanExceptions(paths).filter((a) => a.path === targetPath);
+  if (candidates.length === 0) return { status: "absent" };
+  const publicKey = loadExternalPublicKey();
+  if (publicKey !== null) {
+    const configuredKeyId = externalKeyId(publicKey);
+    let verified;
+    for (const cand of candidates) {
+      if (cand.key_id !== configuredKeyId) continue;
+      const { recordHash: _rh, signature, ...signedView } = cand;
+      if (verifyCanonical(scanExceptionCanonicalText(signedView), signature, publicKey)) verified = cand;
+    }
+    if (verified) {
+      if (verified.digest === targetDigest) return { status: "accepted", ack: verified };
+      return { status: "stale", ack: verified };
+    }
+  }
+  return { status: "forged", ack: candidates[candidates.length - 1] };
+}
+
 // src/commands/sim.ts
 function simulationLedgerPath(paths) {
-  return path6.join(paths.stateDir, "simulation-ledger.json");
+  return path10.join(paths.stateDir, "simulation-ledger.json");
 }
 var SimulationLedgerCorruptError = class extends Error {
   code = "simulation_ledger_corrupt";
 };
 function readSimulationLedger(paths) {
   const file = simulationLedgerPath(paths);
-  if (!fs8.existsSync(file)) return [];
+  if (!fs13.existsSync(file)) return [];
   let raw;
   try {
     raw = readFileWithRetry(file);
@@ -17260,7 +18253,7 @@ function runSimRetire(paths, id, opts = {}) {
   return withStateLock(paths, () => runSimRetireLocked(paths, id, opts));
 }
 function runSimRetireLocked(paths, id, opts) {
-  if (!id) return failure({ human: "usage: th sim retire <SIM-NNN> [--retire-slice ...]" });
+  if (!id) return failure({ human: "usage: th sim retire <SIM-NNN> [--retire-slice ...] [--target <path>]" });
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
   if (!r.state) {
@@ -17283,6 +18276,31 @@ function runSimRetireLocked(paths, id, opts) {
   if (entry.status === "retired") {
     return failure({ human: `${id} is already retired.`, data: { error: "already_retired", id } });
   }
+  if (blocksProductionReality(entry)) {
+    ensureReceiptMigration(paths);
+    if (opts.target === void 0 || opts.target === "") {
+      return failure({
+        human: "th sim retire <id> --target <path> is required for a user-visible simulation",
+        data: { error: "sim_retire_target_required", id }
+      });
+    }
+    try {
+      appendTerminalReceipt(paths, {
+        kind: "sim-retire",
+        refId: id,
+        targetPath: opts.target,
+        producerIdentity: "cli:th sim retire"
+      });
+    } catch (e) {
+      if (e instanceof TargetUnresolvedError) {
+        return failure({
+          human: `Refusing to retire ${id}: target "${opts.target}" does not resolve in source.`,
+          data: { error: e.code, id, target: e.target }
+        });
+      }
+      throw e;
+    }
+  }
   const updated = {
     ...entry,
     status: "retired",
@@ -17299,12 +18317,33 @@ function runSimRetireLocked(paths, id, opts) {
   });
 }
 var SCAN_HIT_TEXT_MAX = 200;
-var SCAN_MAX_FILES = 5e3;
-var SCAN_MAX_BYTES = 16 * 1024 * 1024;
-var SCAN_FILE_MAX_BYTES = 2 * 1024 * 1024;
-var SCAN_DIRS = ["dist", "tests"];
+var DEEP_INSPECT_FILE_MAX_BYTES = 8 * 1024 * 1024;
+var DEEP_INSPECT_AGGREGATE_MAX_BYTES = 64 * 1024 * 1024;
+var SCAN_WATCHDOG_MS = 3e4;
+var ENUMERATION_FILE_SANITY_MAX = 5e4;
 var SCAN_EXTENSIONS = /* @__PURE__ */ new Set([".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"]);
 var SCAN_SKIP_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git"]);
+var DEFAULT_SCAN_LIMITS = {
+  deepInspectFileMaxBytes: DEEP_INSPECT_FILE_MAX_BYTES,
+  deepInspectAggregateMaxBytes: DEEP_INSPECT_AGGREGATE_MAX_BYTES,
+  watchdogMs: SCAN_WATCHDOG_MS,
+  enumerationFileSanityMax: ENUMERATION_FILE_SANITY_MAX
+};
+function envScanLimitOverrides() {
+  const out = {};
+  const num = (v) => {
+    if (v === void 0 || v === "") return void 0;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : void 0;
+  };
+  const f = num(process.env.TH_SCAN_FILE_MAX_BYTES);
+  if (f !== void 0) out.deepInspectFileMaxBytes = f;
+  const a = num(process.env.TH_SCAN_AGGREGATE_MAX_BYTES);
+  if (a !== void 0) out.deepInspectAggregateMaxBytes = a;
+  const w = num(process.env.TH_SCAN_WATCHDOG_MS);
+  if (w !== void 0) out.watchdogMs = w;
+  return out;
+}
 var SCAN_TOKENS_LC = SIMULATION_SCAN_TOKENS.map((t) => t.toLowerCase());
 function runSimScan(paths, _opts = {}) {
   const r = readState(paths);
@@ -17315,94 +18354,208 @@ function runSimScan(paths, _opts = {}) {
   } catch (e) {
     return ledgerCorruptFailure(e);
   }
-  const result = scanForSimulationHits(paths);
-  const unledgeredDistHits = computeUnledgeredDistHits(entries, result.distHits);
+  const coverage = scanForSimulationHits(paths);
+  const unledgeredDistHits = computeUnledgeredDistHitsReceiptAware(paths, entries, coverage.distHits);
+  const uncovered = uncoveredAfterExceptions(paths, coverage.unobserved);
+  if (uncovered.length > 0) {
+    try {
+      withStateLock(paths, () => appendScanCompletenessReceipt(paths, uncovered));
+    } catch {
+    }
+  }
   structuredLog({
     cmd: "sim scan",
-    distHits: result.distHits.length,
-    testHits: result.testHits.length,
+    distHits: coverage.distHits.length,
+    testHits: coverage.testHits.length,
     unledgered: unledgeredDistHits.length,
-    capHit: result.capHit
+    enumerated: coverage.enumerated.length,
+    unobserved: uncovered.length,
+    limitHit: coverage.limitHit
   });
-  const human = unledgeredDistHits.length > 0 ? `Found ${unledgeredDistHits.length} UNLEDGERED simulation pattern(s) in dist/ (declare them with \`th sim add\` or remove them):
-` + unledgeredDistHits.slice(0, 50).map((h) => `  ${h.file}:${h.line}  [${h.token}]`).join("\n") : result.distHits.length > 0 ? `Found ${result.distHits.length} simulation pattern(s) in dist/, all covered by active ledger entries.` : "No simulation patterns found in dist/.";
+  const hitsLine = unledgeredDistHits.length > 0 ? `Found ${unledgeredDistHits.length} UNLEDGERED simulation pattern(s) in dist/ (declare them with \`th sim add\` or remove them):
+` + unledgeredDistHits.slice(0, 50).map((h) => `  ${h.file}:${h.line}  [${h.token}]`).join("\n") : coverage.distHits.length > 0 ? `Found ${coverage.distHits.length} simulation pattern(s) in dist/, all covered by active ledger entries.` : "No simulation patterns found in dist/.";
+  const coverageLine = uncovered.length > 0 ? `
+SCAN COVERAGE INCOMPLETE \u2014 ${uncovered.length} dist/ file(s) could not be deep-inspected (the gate BLOCKS on these):
+` + uncovered.slice(0, 50).map((u) => `  ${u.path}  [${u.reason}]`).join("\n") : "";
+  const human = hitsLine + coverageLine;
   return success({
     data: {
-      distHits: result.distHits,
-      testHits: result.testHits,
+      distHits: coverage.distHits,
+      testHits: coverage.testHits,
       unledgeredDistHits,
-      capHit: result.capHit
+      enumerated: coverage.enumerated,
+      deepInspected: coverage.deepInspected,
+      unobserved: uncovered,
+      limitHit: coverage.limitHit
     },
     human
   });
 }
-function scanForSimulationHits(paths) {
-  const distHits = [];
-  const testHits = [];
-  let filesSeen = 0;
-  let bytesSeen = 0;
-  let capHit = false;
-  for (const top of SCAN_DIRS) {
-    const absTop = resolveWithinRoot(paths.root, top);
-    if (!absTop || !fs8.existsSync(absTop)) continue;
-    const sink = top === "dist" ? distHits : testHits;
-    const stack = [absTop];
-    while (stack.length > 0) {
-      if (capHit) break;
-      const dir = stack.pop();
-      let dirents;
-      try {
-        dirents = fs8.readdirSync(dir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      for (const d of dirents) {
-        if (capHit) break;
-        if (d.isDirectory()) {
-          if (SCAN_SKIP_DIRS.has(d.name)) continue;
-          stack.push(path6.join(dir, d.name));
-          continue;
-        }
-        if (!d.isFile()) continue;
-        if (!SCAN_EXTENSIONS.has(path6.extname(d.name))) continue;
-        if (filesSeen >= SCAN_MAX_FILES || bytesSeen >= SCAN_MAX_BYTES) {
-          capHit = true;
-          break;
-        }
-        const abs = path6.join(dir, d.name);
-        let size = 0;
-        try {
-          size = fs8.statSync(abs).size;
-        } catch {
-          continue;
-        }
-        if (size > SCAN_FILE_MAX_BYTES) continue;
-        filesSeen += 1;
-        bytesSeen += size;
-        let content;
-        try {
-          content = fs8.readFileSync(abs, "utf8");
-        } catch {
-          continue;
-        }
-        const rel = path6.relative(paths.root, abs).split(path6.sep).join("/");
-        const lines = content.split(/\r?\n/);
-        for (let i = 0; i < lines.length; i++) {
-          const lc = lines[i].toLowerCase();
-          for (let t = 0; t < SCAN_TOKENS_LC.length; t++) {
-            if (lc.includes(SCAN_TOKENS_LC[t])) {
-              sink.push({ file: rel, line: i + 1, token: SIMULATION_SCAN_TOKENS[t], text: lines[i].trim().slice(0, SCAN_HIT_TEXT_MAX) });
-              break;
-            }
-          }
-        }
+function relPath(root, abs) {
+  return path10.relative(root, abs).split(path10.sep).join("/");
+}
+function collectHits(rel, content, sink) {
+  const lines = content.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const lc = lines[i].toLowerCase();
+    for (let t = 0; t < SCAN_TOKENS_LC.length; t++) {
+      if (lc.includes(SCAN_TOKENS_LC[t])) {
+        sink.push({ file: rel, line: i + 1, token: SIMULATION_SCAN_TOKENS[t], text: lines[i].trim().slice(0, SCAN_HIT_TEXT_MAX) });
+        break;
       }
     }
   }
-  return { distHits, testHits, capHit };
 }
-function activeSimulatedEntries(entries) {
-  return entries.filter((e) => e.status !== "retired" && isSimulatedClassification(e.classification));
+function walkFiles(absTop) {
+  const files = [];
+  const dirReadErrors = [];
+  const stack = [absTop];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    let dirents;
+    try {
+      dirents = fs13.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      dirReadErrors.push(dir);
+      continue;
+    }
+    for (const d of dirents) {
+      if (d.isDirectory()) {
+        if (!SCAN_SKIP_DIRS.has(d.name)) stack.push(path10.join(dir, d.name));
+        continue;
+      }
+      if (!d.isFile()) continue;
+      if (!SCAN_EXTENSIONS.has(path10.extname(d.name))) continue;
+      files.push(path10.join(dir, d.name));
+    }
+  }
+  return { files, dirReadErrors };
+}
+function enumerateAndHash(paths, limits) {
+  const absTop = resolveWithinRoot(paths.root, "dist");
+  const enumerated = [];
+  const readErrors = [];
+  if (!absTop || !fs13.existsSync(absTop)) return { enumerated, readErrors };
+  const walked = walkFiles(absTop);
+  for (const dir of walked.dirReadErrors) {
+    readErrors.push({ path: relPath(paths.root, dir), digest: null, reason: "read_error" });
+  }
+  const files = walked.files.map((abs) => ({ abs, rel: relPath(paths.root, abs) })).sort((a, b) => a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
+  let count = 0;
+  for (const { abs, rel } of files) {
+    count += 1;
+    if (count > limits.enumerationFileSanityMax) {
+      readErrors.push({ path: rel, digest: null, reason: "aggregate_limit" });
+      continue;
+    }
+    try {
+      enumerated.push({ path: rel, digest: hashFileStreaming(abs) });
+    } catch {
+      readErrors.push({ path: rel, digest: null, reason: "read_error" });
+    }
+  }
+  return { enumerated, readErrors };
+}
+function deepInspect(paths, enumerated, limits, opts) {
+  const distHits = [];
+  const deepInspected = [];
+  const unobserved = [];
+  let aggregateBytes = 0;
+  let limitHit = false;
+  const clockNow = opts.now ?? Date.now;
+  const start = clockNow();
+  const delay = opts.deepInspectDelayMs ?? 0;
+  let synthetic = 0;
+  const elapsed = () => clockNow() - start + synthetic;
+  for (let i = 0; i < enumerated.length; i++) {
+    const e = enumerated[i];
+    if (elapsed() >= limits.watchdogMs) {
+      for (let j = i; j < enumerated.length; j++) unobserved.push({ ...enumerated[j], reason: "watchdog" });
+      limitHit = true;
+      break;
+    }
+    const abs = resolveWithinRoot(paths.root, e.path);
+    if (abs === null) {
+      unobserved.push({ ...e, reason: "read_error" });
+      limitHit = true;
+      continue;
+    }
+    let size = 0;
+    try {
+      size = fs13.statSync(abs).size;
+    } catch {
+      unobserved.push({ ...e, reason: "read_error" });
+      limitHit = true;
+      continue;
+    }
+    if (size > limits.deepInspectFileMaxBytes) {
+      unobserved.push({ ...e, reason: "file_limit" });
+      limitHit = true;
+      continue;
+    }
+    if (aggregateBytes + size > limits.deepInspectAggregateMaxBytes) {
+      for (let j = i; j < enumerated.length; j++) unobserved.push({ ...enumerated[j], reason: "aggregate_limit" });
+      limitHit = true;
+      break;
+    }
+    let content;
+    try {
+      content = fs13.readFileSync(abs, "utf8");
+    } catch {
+      unobserved.push({ ...e, reason: "read_error" });
+      limitHit = true;
+      continue;
+    }
+    aggregateBytes += size;
+    synthetic += delay;
+    deepInspected.push(e.path);
+    collectHits(e.path, content, distHits);
+  }
+  return { distHits, deepInspected, unobserved, limitHit };
+}
+function scanTestsAdvisory(paths, limits) {
+  const absTop = resolveWithinRoot(paths.root, "tests");
+  const testHits = [];
+  if (!absTop || !fs13.existsSync(absTop)) return testHits;
+  for (const abs of walkFiles(absTop).files) {
+    let size = 0;
+    try {
+      size = fs13.statSync(abs).size;
+    } catch {
+      continue;
+    }
+    if (size > limits.deepInspectFileMaxBytes) continue;
+    let content;
+    try {
+      content = fs13.readFileSync(abs, "utf8");
+    } catch {
+      continue;
+    }
+    collectHits(relPath(paths.root, abs), content, testHits);
+  }
+  return testHits;
+}
+function scanForSimulationHits(paths, opts = {}) {
+  const limits = { ...DEFAULT_SCAN_LIMITS, ...envScanLimitOverrides(), ...opts.limits ?? {} };
+  const { enumerated, readErrors } = enumerateAndHash(paths, limits);
+  const inspected = deepInspect(paths, enumerated, limits, opts);
+  const unobserved = [...readErrors, ...inspected.unobserved].sort(
+    (a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0
+  );
+  return {
+    enumerated,
+    deepInspected: inspected.deepInspected,
+    distHits: inspected.distHits,
+    testHits: scanTestsAdvisory(paths, limits),
+    unobserved,
+    limitHit: inspected.limitHit || readErrors.length > 0
+  };
+}
+function uncoveredAfterExceptions(paths, unobserved) {
+  return unobserved.filter((u) => {
+    if (u.digest === null) return true;
+    return readScanExceptionValidated(paths, u.path, u.digest).status !== "accepted";
+  });
 }
 function distHitLedgered(hit, active) {
   const hay = `${hit.file}
@@ -17413,8 +18566,23 @@ ${hit.text}`.toLowerCase();
   }
   return false;
 }
-function computeUnledgeredDistHits(entries, distHits) {
-  const active = activeSimulatedEntries(entries);
+function retirementGrounded(paths, entry) {
+  if (entry.status !== "retired") return true;
+  const s = readReceiptValidated(paths, "sim-retire", entry.id).status;
+  return s === "valid" || s === "valid-grounded" || s === "legacy";
+}
+function simEntryBlocksProductionReality(paths, entry) {
+  if (!entry.userVisible || !isSimulatedClassification(entry.classification)) return false;
+  if (entry.status !== "retired") return true;
+  return !retirementGrounded(paths, entry);
+}
+function activeOrUngroundedSimulatedEntries(paths, entries) {
+  return entries.filter(
+    (e) => isSimulatedClassification(e.classification) && (e.status !== "retired" || !retirementGrounded(paths, e))
+  );
+}
+function computeUnledgeredDistHitsReceiptAware(paths, entries, distHits) {
+  const active = activeOrUngroundedSimulatedEntries(paths, entries);
   if (active.length === 0) return distHits.slice();
   return distHits.filter((h) => !distHitLedgered(h, active));
 }
@@ -17429,17 +18597,17 @@ function ledgerCorruptFailure(e) {
 }
 
 // src/core/gate-preconditions.ts
-var fs19 = __toESM(require("node:fs"));
-var path19 = __toESM(require("node:path"));
+var fs30 = __toESM(require("node:fs"));
+var path29 = __toESM(require("node:path"));
 
 // src/core/health.ts
-var fs9 = __toESM(require("node:fs"));
-var path7 = __toESM(require("node:path"));
+var fs14 = __toESM(require("node:fs"));
+var path11 = __toESM(require("node:path"));
 var DEFAULT_REVISE_CAP = 3;
 function artifactIntegrity(paths, state) {
   return state.approved_artifacts.map((a) => {
-    const abs = path7.resolve(paths.root, a.file);
-    if (!fs9.existsSync(abs)) return { file: a.file, status: "missing" };
+    const abs = path11.resolve(paths.root, a.file);
+    if (!fs14.existsSync(abs)) return { file: a.file, status: "missing" };
     try {
       return { file: a.file, status: shortHashPath(abs) === a.hash ? "ok" : "changed" };
     } catch {
@@ -17467,12 +18635,12 @@ function reviseEscalations(state, cap = DEFAULT_REVISE_CAP) {
 }
 
 // src/core/coverage.ts
-var fs11 = __toESM(require("node:fs"));
-var path9 = __toESM(require("node:path"));
+var fs16 = __toESM(require("node:fs"));
+var path13 = __toESM(require("node:path"));
 
 // src/core/anchors.ts
-var fs10 = __toESM(require("node:fs"));
-var path8 = __toESM(require("node:path"));
+var fs15 = __toESM(require("node:fs"));
+var path12 = __toESM(require("node:path"));
 var REQ_ID_PATTERN = "REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*";
 function extractReqIds(text) {
   const re = new RegExp(REQ_ID_PATTERN, "g");
@@ -17503,12 +18671,12 @@ function scanDirForReqIdsCapped(dir, optsOrPredicate) {
   const skipDirs = opts.skipDirs ?? SCAN_SKIP_DIRS2;
   const out = /* @__PURE__ */ new Map();
   const result = { anchors: out, bytesRead: 0, filesRead: 0, capHit: null };
-  if (!fs10.existsSync(dir) || !fs10.statSync(dir).isDirectory()) return result;
+  if (!fs15.existsSync(dir) || !fs15.statSync(dir).isDirectory()) return result;
   const walk = (abs) => {
     if (result.capHit) return;
     let entries;
     try {
-      entries = fs10.readdirSync(abs, { withFileTypes: true });
+      entries = fs15.readdirSync(abs, { withFileTypes: true });
     } catch {
       return;
     }
@@ -17516,13 +18684,13 @@ function scanDirForReqIdsCapped(dir, optsOrPredicate) {
       if (result.capHit) return;
       if (entry.isDirectory()) {
         if (skipDirs.has(entry.name)) continue;
-        walk(path8.join(abs, entry.name));
+        walk(path12.join(abs, entry.name));
       } else if (entry.isFile()) {
         if (extPredicate && !extPredicate(entry.name)) continue;
-        const filePath = path8.join(abs, entry.name);
+        const filePath = path12.join(abs, entry.name);
         let size;
         try {
-          size = fs10.statSync(filePath).size;
+          size = fs15.statSync(filePath).size;
         } catch {
           continue;
         }
@@ -17537,13 +18705,13 @@ function scanDirForReqIdsCapped(dir, optsOrPredicate) {
         }
         let content;
         try {
-          content = fs10.readFileSync(filePath, "utf8");
+          content = fs15.readFileSync(filePath, "utf8");
         } catch {
           continue;
         }
         result.bytesRead += size;
         result.filesRead++;
-        const rel = path8.relative(dir, filePath).split(path8.sep).join("/");
+        const rel = path12.relative(dir, filePath).split(path12.sep).join("/");
         for (const id of extractReqIds(content)) {
           const files = out.get(id);
           if (files) {
@@ -17561,8 +18729,8 @@ function scanDirForReqIdsCapped(dir, optsOrPredicate) {
 
 // src/core/coverage.ts
 function readFileOrUndefined(abs) {
-  if (!fs11.existsSync(abs) || !fs11.statSync(abs).isFile()) return void 0;
-  return fs11.readFileSync(abs, "utf8");
+  if (!fs16.existsSync(abs) || !fs16.statSync(abs).isFile()) return void 0;
+  return fs16.readFileSync(abs, "utf8");
 }
 function extractMvpScopeReqIds(scopeContent) {
   const lines = scopeContent.split(/\r?\n/);
@@ -17617,14 +18785,14 @@ function resolveReqSet(reqsContent, scopeContent) {
   return { allReqIds, reqSet: allReqIds, filterDescription: "MVP filter: none \u2014 checking all REQ-IDs" };
 }
 function computeBreakdown(root, opts = {}) {
-  const reqsAbs = path9.resolve(root, opts.reqsFile ?? "docs/01-requirements.md");
-  const planAbs = path9.resolve(root, opts.planFile ?? "docs/09-implementation-plan.md");
-  const testsAbs = path9.resolve(root, opts.testsDir ?? "tests");
-  const scopeAbs = path9.resolve(root, opts.scopeFile ?? "docs/02-scope.md");
-  const codeAbs = path9.resolve(root, opts.codeDir ?? "src");
+  const reqsAbs = path13.resolve(root, opts.reqsFile ?? "docs/01-requirements.md");
+  const planAbs = path13.resolve(root, opts.planFile ?? "docs/09-implementation-plan.md");
+  const testsAbs = path13.resolve(root, opts.testsDir ?? "tests");
+  const scopeAbs = path13.resolve(root, opts.scopeFile ?? "docs/02-scope.md");
+  const codeAbs = path13.resolve(root, opts.codeDir ?? "src");
   const reqsContent = readFileOrUndefined(reqsAbs);
   if (reqsContent === void 0) {
-    return { error: "reqs_file_not_found", reqsFile: path9.relative(root, reqsAbs).split(path9.sep).join("/") };
+    return { error: "reqs_file_not_found", reqsFile: path13.relative(root, reqsAbs).split(path13.sep).join("/") };
   }
   const { reqSet, filterDescription } = resolveReqSet(reqsContent, readFileOrUndefined(scopeAbs));
   const planContent = readFileOrUndefined(planAbs);
@@ -17648,61 +18816,24 @@ function computeBreakdown(root, opts = {}) {
 }
 
 // src/core/verify.ts
-var fs12 = __toESM(require("node:fs"));
-var path10 = __toESM(require("node:path"));
+var fs17 = __toESM(require("node:fs"));
+var path14 = __toESM(require("node:path"));
 var import_node_child_process2 = require("node:child_process");
-var import_node_crypto4 = require("node:crypto");
-
-// src/core/git-revision.ts
-var import_node_child_process = require("node:child_process");
-var import_node_crypto3 = require("node:crypto");
-function git(cwd, args) {
-  try {
-    const out = (0, import_node_child_process.spawnSync)("git", args, {
-      cwd,
-      encoding: "utf8",
-      // A generous-but-bounded buffer: `git diff` on a large dirty tree can be big,
-      // but the digest only needs the bytes — overflow falls through to null (the
-      // honest "unbound" posture) rather than throwing.
-      maxBuffer: 32 * 1024 * 1024,
-      windowsHide: true
-    });
-    if (out.error) return null;
-    if (typeof out.status === "number" && out.status !== 0) return null;
-    return (out.stdout ?? "").trim();
-  } catch {
-    return null;
-  }
-}
-function gitHead(root) {
-  const head = git(root, ["rev-parse", "HEAD"]);
-  if (head === null || head === "") return null;
-  return head;
-}
-function dirtyTreeDigest(root) {
-  const status = git(root, ["status", "--porcelain"]);
-  if (status === null) return null;
-  if (status === "") return CLEAN_TREE_DIGEST;
-  const diff = git(root, ["diff", "HEAD"]) ?? "";
-  return (0, import_node_crypto3.createHash)("sha256").update(status + "\n\0\n" + diff, "utf8").digest("hex");
-}
-var CLEAN_TREE_DIGEST = "clean";
-
-// src/core/verify.ts
+var import_node_crypto6 = require("node:crypto");
 var OUTPUT_TAIL_CHARS = 2e3;
 var DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60 * 1e3;
 function verifyConfigPath(paths) {
-  return path10.join(paths.stateDir, "verify.json");
+  return path14.join(paths.stateDir, "verify.json");
 }
 function verifyReportPath(paths) {
-  return path10.join(paths.stateDir, "verify-report.json");
+  return path14.join(paths.stateDir, "verify-report.json");
 }
 function commandSetHash(commands) {
-  return (0, import_node_crypto4.createHash)("sha256").update(JSON.stringify(commands), "utf8").digest("hex");
+  return (0, import_node_crypto6.createHash)("sha256").update(JSON.stringify(commands), "utf8").digest("hex");
 }
 function loadVerifyConfig(paths) {
   const file = verifyConfigPath(paths);
-  if (!fs12.existsSync(file)) return { status: "absent", config: { commands: [] } };
+  if (!fs17.existsSync(file)) return { status: "absent", config: { commands: [] } };
   let raw;
   try {
     raw = readFileWithRetry(file);
@@ -17734,7 +18865,7 @@ function writeVerifyConfig(paths, config2) {
   atomicWriteFile(verifyConfigPath(paths), JSON.stringify(config2, null, 2) + "\n", { root: paths.root });
 }
 function verifyApprovalsPath(paths) {
-  return path10.join(paths.stateDir, "verify-approvals.jsonl");
+  return path14.join(paths.stateDir, "verify-approvals.jsonl");
 }
 var APPROVAL_FIELD_ORDER = [
   "approvedHash",
@@ -17804,7 +18935,7 @@ function latestApprovalFor(paths, commands) {
 }
 function readVerifyReport(paths) {
   const file = verifyReportPath(paths);
-  if (!fs12.existsSync(file)) return null;
+  if (!fs17.existsSync(file)) return null;
   let raw;
   try {
     raw = readFileWithRetry(file);
@@ -17830,7 +18961,7 @@ function writeVerifyReportEnvelope(paths, report, commands) {
     gitHead: binding.gitHead,
     dirtyTreeDigest: binding.dirtyTreeDigest
   };
-  fs12.mkdirSync(paths.stateDir, { recursive: true });
+  fs17.mkdirSync(paths.stateDir, { recursive: true });
   atomicWriteFile(verifyReportPath(paths), JSON.stringify(envelope, null, 2) + "\n", { root: paths.root });
 }
 var VERIFY_REPORT_SCHEMA_VERSION = 2;
@@ -17847,7 +18978,7 @@ function currentVerifyBinding(paths, commands) {
 }
 function readVerifyReportValidated(paths) {
   const file = verifyReportPath(paths);
-  if (!fs12.existsSync(file)) return { status: "absent" };
+  if (!fs17.existsSync(file)) return { status: "absent" };
   let raw;
   try {
     raw = readFileWithRetry(file);
@@ -18171,205 +19302,19 @@ function runCommands(root, commands, nowOrOpts = () => /* @__PURE__ */ new Date(
   };
 }
 
-// src/core/decisions.ts
-var fs13 = __toESM(require("node:fs"));
-var path11 = __toESM(require("node:path"));
-var import_node_crypto5 = require("node:crypto");
-var APPROVAL_TRANSITIONS = /* @__PURE__ */ new Set(["approved", "rejected", "superseded"]);
-function decisionsPath(paths) {
-  return path11.join(paths.stateDir, "decisions.jsonl");
-}
-var CANONICAL_FIELD_ORDER = [
-  "id",
-  "event",
-  "title",
-  "rationale",
-  "links",
-  "supersededBy",
-  "proposer",
-  "proposedAt",
-  "approver",
-  "approvedAt",
-  "provenance",
-  "prevHash"
-];
-var PROVENANCE_FIELD_ORDER = [
-  "isTTY",
-  "ppid",
-  "parentComm",
-  "hostname",
-  "pid",
-  "attributionSuspect"
-];
-function canonicalProvenance(p) {
-  const out = {};
-  for (const key of PROVENANCE_FIELD_ORDER) out[key] = p[key];
-  return out;
-}
-function canonicalText(event) {
-  const ordered = {};
-  for (const key of CANONICAL_FIELD_ORDER) {
-    const val = event[key];
-    if (val === void 0) continue;
-    if (key === "links") {
-      ordered[key] = [...val].sort();
-    } else if (key === "provenance") {
-      ordered[key] = canonicalProvenance(val);
-    } else {
-      ordered[key] = val;
-    }
-  }
-  return JSON.stringify(ordered);
-}
-function computeRecordHash(event) {
-  return hashContent(canonicalText(event));
-}
-function computeKeyedHash(event, key) {
-  return (0, import_node_crypto5.createHmac)("sha256", key).update(canonicalText(event)).digest("hex");
-}
-var ID_RE = /^DECISION-\d{3,}$/;
-var EVENT_TYPES = /* @__PURE__ */ new Set(["proposed", "approved", "rejected", "superseded"]);
-function isValidEvent(parsed) {
-  if (typeof parsed !== "object" || parsed === null) return false;
-  const e = parsed;
-  if (typeof e.id !== "string" || !ID_RE.test(e.id)) return false;
-  if (typeof e.event !== "string" || !EVENT_TYPES.has(e.event)) return false;
-  if (typeof e.prevHash !== "string" || !HEX64.test(e.prevHash)) return false;
-  if (typeof e.recordHash !== "string" || !HEX64.test(e.recordHash)) return false;
-  if (e.links !== void 0 && !Array.isArray(e.links)) return false;
-  if (e.keyedHash !== void 0 && typeof e.keyedHash !== "string") return false;
-  if (e.provenance !== void 0 && (typeof e.provenance !== "object" || e.provenance === null)) return false;
-  return true;
-}
-function readDecisionEvents(paths) {
-  return readJsonlValues(decisionsPath(paths), isValidEvent);
-}
-function readLastDecisionRecordHash(paths) {
-  const last = scanTailValid(decisionsPath(paths), isValidEvent);
-  return last ? last.recordHash : GENESIS_PREV_HASH;
-}
-function numericSuffix(id) {
-  const m = /^DECISION-(\d+)$/.exec(id);
-  if (!m) return null;
-  return Number(m[1]);
-}
-function formatDecisionId(n) {
-  return `DECISION-${String(n).padStart(3, "0")}`;
-}
-function mintNextId(events) {
-  let max = 0;
-  for (const e of events) {
-    const n = numericSuffix(e.id);
-    if (n !== null && n > max) max = n;
-  }
-  return formatDecisionId(max + 1);
-}
-function appendDecisionEvent(paths, event, key) {
-  assertGovernedWriteSurface(paths.root, decisionsPath(paths));
-  fs13.mkdirSync(paths.stateDir, { recursive: true });
-  const prevHash = readLastDecisionRecordHash(paths);
-  const withPrev = { ...event, prevHash };
-  const recordHash = computeRecordHash(withPrev);
-  const sealed = { ...withPrev, recordHash };
-  if (key && APPROVAL_TRANSITIONS.has(event.event)) {
-    sealed.keyedHash = computeKeyedHash(withPrev, key);
-  }
-  fs13.appendFileSync(decisionsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
-  return sealed;
-}
-function verifyChain(events) {
-  let expectedPrev = GENESIS_PREV_HASH;
-  for (let i = 0; i < events.length; i++) {
-    const e = events[i];
-    const { recordHash, ...rest } = e;
-    const recomputed = computeRecordHash(rest);
-    if (recomputed !== recordHash) {
-      return { ok: false, brokenAt: i, reason: "edited" };
-    }
-    if (e.prevHash !== expectedPrev) {
-      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
-    }
-    expectedPrev = e.recordHash;
-  }
-  return { ok: true };
-}
-function verifyApprovalSeals(events, key) {
-  const mismatches = [];
-  for (let i = 0; i < events.length; i++) {
-    const e = events[i];
-    if (!APPROVAL_TRANSITIONS.has(e.event)) continue;
-    if (e.keyedHash === void 0) continue;
-    const { recordHash: _rh, keyedHash, ...rest } = e;
-    if (computeKeyedHash(rest, key) !== keyedHash) {
-      mismatches.push({ index: i, id: e.id });
-    }
-  }
-  return { ok: mismatches.length === 0, mismatches };
-}
-function reduceDecisions(events) {
-  const byId = /* @__PURE__ */ new Map();
-  for (const e of events) {
-    let d = byId.get(e.id);
-    if (!d) {
-      d = {
-        id: e.id,
-        title: e.title ?? "",
-        rationale: e.rationale ?? "",
-        status: e.event,
-        links: e.links ? [...e.links] : []
-      };
-      byId.set(e.id, d);
-    }
-    if (e.title !== void 0) d.title = e.title;
-    if (e.rationale !== void 0) d.rationale = e.rationale;
-    if (e.links !== void 0) d.links = [...e.links];
-    d.status = e.event;
-    if (e.proposer !== void 0) d.proposer = e.proposer;
-    if (e.proposedAt !== void 0) d.proposedAt = e.proposedAt;
-    if (e.approver !== void 0) d.approver = e.approver;
-    if (e.approvedAt !== void 0) d.approvedAt = e.approvedAt;
-    if (e.supersededBy !== void 0) d.supersededBy = e.supersededBy;
-    if (e.provenance !== void 0) d.provenance = e.provenance;
-  }
-  return [...byId.values()];
-}
-function sortDecisions(decisions) {
-  return [...decisions].sort((a, b) => (numericSuffix(a.id) ?? 0) - (numericSuffix(b.id) ?? 0));
-}
-function canonicalStageLink(stage) {
-  return `stage:${canonicalizeStage(stage)}`;
-}
-function canonicalizeLink(link) {
-  const prefix = "stage:";
-  return link.startsWith(prefix) ? canonicalStageLink(link.slice(prefix.length)) : link;
-}
-function gatingObligations(decisions, state) {
-  const stage = state?.current_stage;
-  if (!stage) return [];
-  const wanted = canonicalStageLink(stage);
-  const obligations = [];
-  for (const d of sortDecisions(decisions)) {
-    if (d.status === "approved") continue;
-    if (d.links.some((l) => canonicalizeLink(l) === wanted)) {
-      obligations.push({ decisionId: d.id, blockedStage: stage });
-    }
-  }
-  return obligations;
-}
-
 // src/commands/repo.ts
-var fs16 = __toESM(require("node:fs"));
-var path17 = __toESM(require("node:path"));
+var fs20 = __toESM(require("node:fs"));
+var path20 = __toESM(require("node:path"));
 
 // src/core/artifact-guard.ts
-var path12 = __toESM(require("node:path"));
+var path15 = __toESM(require("node:path"));
 var APPROVED_ARTIFACT_CLOBBER_CODE = "approved_artifact_clobber";
 function toArtifactKey(root, target) {
   const contained = resolveWithinRoot(root, target);
   if (contained === null) return null;
-  const rel = path12.relative(path12.resolve(root), contained);
-  if (rel === "" || rel.startsWith("..") || path12.isAbsolute(rel)) return null;
-  return rel.split(path12.sep).join("/");
+  const rel = path15.relative(path15.resolve(root), contained);
+  if (rel === "" || rel.startsWith("..") || path15.isAbsolute(rel)) return null;
+  return rel.split(path15.sep).join("/");
 }
 function matchApprovedArtifact(approved, root, target) {
   if (approved.length === 0) return null;
@@ -18383,8 +19328,8 @@ function matchApprovedArtifact(approved, root, target) {
 }
 
 // src/core/repo-map/scanner.ts
-var fs14 = __toESM(require("node:fs"));
-var path14 = __toESM(require("node:path"));
+var fs18 = __toESM(require("node:fs"));
+var path17 = __toESM(require("node:path"));
 
 // src/core/repo-map/schema.ts
 var REPO_MAP_SCHEMA_VERSION = 3;
@@ -18568,7 +19513,7 @@ function serializeRepoMap(map) {
   };
   return JSON.stringify(ordered, null, 2) + "\n";
 }
-function isPlainObject4(v) {
+function isPlainObject5(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 function isStringArray(v) {
@@ -18600,12 +19545,12 @@ var EDGE_BASES = ["parsed", "alias", "unresolved"];
 function isValidSymbols(v) {
   if (v === void 0) return true;
   return Array.isArray(v) && v.every(
-    (s) => isPlainObject4(s) && typeof s.name === "string" && typeof s.kind === "string" && SYMBOL_KINDS.includes(s.kind)
+    (s) => isPlainObject5(s) && typeof s.name === "string" && typeof s.kind === "string" && SYMBOL_KINDS.includes(s.kind)
   );
 }
 function isValidProvenance(v) {
   if (v === void 0) return true;
-  return isPlainObject4(v) && typeof v.basis === "string" && PROVENANCE_BASES.includes(v.basis) && typeof v.confidence === "string" && CONFIDENCE_TIERS.includes(v.confidence);
+  return isPlainObject5(v) && typeof v.basis === "string" && PROVENANCE_BASES.includes(v.basis) && typeof v.confidence === "string" && CONFIDENCE_TIERS.includes(v.confidence);
 }
 function parseRepoMap(raw) {
   if (raw === null || raw === void 0) {
@@ -18617,7 +19562,7 @@ function parseRepoMap(raw) {
   } catch {
     return { ok: false, error: "map_invalid-json" };
   }
-  if (!isPlainObject4(parsed)) {
+  if (!isPlainObject5(parsed)) {
     return { ok: false, error: "map_schema" };
   }
   const ver = parsed.schema_version;
@@ -18662,36 +19607,36 @@ function parseRepoMap(raw) {
 function validateRepoMapShape(v) {
   if (v.capHit !== void 0 && !SCAN_CAPS.includes(v.capHit)) return false;
   if (v.partial !== void 0 && typeof v.partial !== "boolean") return false;
-  if (!Array.isArray(v.languages) || !v.languages.every((l) => isPlainObject4(l) && typeof l.name === "string" && isStringArray(l.evidence) && typeof l.source === "string" && LANGUAGE_SOURCES.includes(l.source))) return false;
-  if (!Array.isArray(v.package_managers) || !v.package_managers.every((pm) => isPlainObject4(pm) && typeof pm.name === "string" && isStringArray(pm.manifest_paths))) return false;
-  if (!Array.isArray(v.candidate_commands) || !v.candidate_commands.every((c) => isPlainObject4(c) && typeof c.label === "string" && typeof c.raw === "string" && typeof c.source_file === "string" && typeof c.kind === "string" && COMMAND_KINDS.includes(c.kind))) return false;
+  if (!Array.isArray(v.languages) || !v.languages.every((l) => isPlainObject5(l) && typeof l.name === "string" && isStringArray(l.evidence) && typeof l.source === "string" && LANGUAGE_SOURCES.includes(l.source))) return false;
+  if (!Array.isArray(v.package_managers) || !v.package_managers.every((pm) => isPlainObject5(pm) && typeof pm.name === "string" && isStringArray(pm.manifest_paths))) return false;
+  if (!Array.isArray(v.candidate_commands) || !v.candidate_commands.every((c) => isPlainObject5(c) && typeof c.label === "string" && typeof c.raw === "string" && typeof c.source_file === "string" && typeof c.kind === "string" && COMMAND_KINDS.includes(c.kind))) return false;
   if (!isStringArray(v.source_roots)) return false;
   if (!isStringArray(v.test_roots)) return false;
   if (!isStringArray(v.docs_roots)) return false;
   if (!isStringArray(v.generated_paths)) return false;
-  if (!Array.isArray(v.components) || !v.components.every((c) => isPlainObject4(c) && typeof c.name === "string" && typeof c.path === "string" && typeof c.file_count === "number" && Number.isInteger(c.file_count) && c.file_count >= 0 && isValidProvenance(c.provenance))) return false;
-  if (!Array.isArray(v.entrypoints) || !v.entrypoints.every((e) => isPlainObject4(e) && typeof e.name === "string" && typeof e.path === "string" && typeof e.source === "string" && isValidProvenance(e.provenance))) return false;
+  if (!Array.isArray(v.components) || !v.components.every((c) => isPlainObject5(c) && typeof c.name === "string" && typeof c.path === "string" && typeof c.file_count === "number" && Number.isInteger(c.file_count) && c.file_count >= 0 && isValidProvenance(c.provenance))) return false;
+  if (!Array.isArray(v.entrypoints) || !v.entrypoints.every((e) => isPlainObject5(e) && typeof e.name === "string" && typeof e.path === "string" && typeof e.source === "string" && isValidProvenance(e.provenance))) return false;
   if (v.public_api !== null && v.public_api !== void 0) {
     const pa = v.public_api;
-    if (!isPlainObject4(pa)) return false;
+    if (!isPlainObject5(pa)) return false;
     if (pa.confidence !== "heuristic") return false;
     if (!isValidProvenance(pa.provenance)) return false;
-    if (!Array.isArray(pa.hints) || !pa.hints.every((h) => isPlainObject4(h) && typeof h.name === "string" && typeof h.source === "string")) return false;
+    if (!Array.isArray(pa.hints) || !pa.hints.every((h) => isPlainObject5(h) && typeof h.name === "string" && typeof h.source === "string")) return false;
   }
-  if (!Array.isArray(v.ownership_hints) || !v.ownership_hints.every((o) => isPlainObject4(o) && typeof o.path_prefix === "string" && typeof o.component === "string" && isValidProvenance(o.provenance))) return false;
-  if (!Array.isArray(v.files) || !v.files.every((f) => isPlainObject4(f) && typeof f.path === "string" && (f.component === null || typeof f.component === "string") && (f.language === null || typeof f.language === "string") && typeof f.is_test === "boolean" && isStringArray(f.req_ids) && isValidSymbols(f.symbols))) return false;
+  if (!Array.isArray(v.ownership_hints) || !v.ownership_hints.every((o) => isPlainObject5(o) && typeof o.path_prefix === "string" && typeof o.component === "string" && isValidProvenance(o.provenance))) return false;
+  if (!Array.isArray(v.files) || !v.files.every((f) => isPlainObject5(f) && typeof f.path === "string" && (f.component === null || typeof f.component === "string") && (f.language === null || typeof f.language === "string") && typeof f.is_test === "boolean" && isStringArray(f.req_ids) && isValidSymbols(f.symbols))) return false;
   if (v.edges !== void 0 && v.edges !== null) {
-    if (!Array.isArray(v.edges) || !v.edges.every((e) => isPlainObject4(e) && typeof e.from === "string" && typeof e.to === "string" && e.kind === "import" && typeof e.basis === "string" && EDGE_BASES.includes(e.basis) && (e.external === void 0 || typeof e.external === "boolean"))) return false;
+    if (!Array.isArray(v.edges) || !v.edges.every((e) => isPlainObject5(e) && typeof e.from === "string" && typeof e.to === "string" && e.kind === "import" && typeof e.basis === "string" && EDGE_BASES.includes(e.basis) && (e.external === void 0 || typeof e.external === "boolean"))) return false;
   }
   const reqIdRe = new RegExp(`^${REQ_ID_PATTERN}$`);
-  if (!Array.isArray(v.req_anchors) || !v.req_anchors.every((r) => isPlainObject4(r) && typeof r.req_id === "string" && reqIdRe.test(r.req_id) && isStringArray(r.locations))) return false;
+  if (!Array.isArray(v.req_anchors) || !v.req_anchors.every((r) => isPlainObject5(r) && typeof r.req_id === "string" && reqIdRe.test(r.req_id) && isStringArray(r.locations))) return false;
   const flags = BLAST_RADIUS_FLAGS;
-  if (!Array.isArray(v.blast_radius_signals) || !v.blast_radius_signals.every((s) => isPlainObject4(s) && typeof s.flag === "string" && flags.includes(s.flag) && isStringArray(s.matching_paths) && isStringArray(s.trigger_patterns) && isValidProvenance(s.provenance))) return false;
+  if (!Array.isArray(v.blast_radius_signals) || !v.blast_radius_signals.every((s) => isPlainObject5(s) && typeof s.flag === "string" && flags.includes(s.flag) && isStringArray(s.matching_paths) && isStringArray(s.trigger_patterns) && isValidProvenance(s.provenance))) return false;
   if (v.coverage !== void 0 && v.coverage !== null) {
     if (!isStringArray(v.coverage)) return false;
   }
   if (v.fileHashes !== void 0 && v.fileHashes !== null) {
-    if (!isPlainObject4(v.fileHashes)) return false;
+    if (!isPlainObject5(v.fileHashes)) return false;
     const hexRe = /^[0-9a-f]{64}$/;
     for (const val of Object.values(v.fileHashes)) {
       if (typeof val !== "string" || !hexRe.test(val)) return false;
@@ -18745,7 +19690,7 @@ function renderRepoMapMarkdown(map) {
 }
 
 // src/core/repo-map/extract.ts
-var path13 = __toESM(require("node:path"));
+var path16 = __toESM(require("node:path"));
 function looksBinary(buf) {
   const n = Math.min(buf.length, 8192);
   for (let i = 0; i < n; i++) {
@@ -19013,8 +19958,8 @@ var TS_RESOLVE_EXTS = [
 function resolveRelativeTsJs(fromRel, specifier, fileSet) {
   if (!specifier.startsWith(".")) return null;
   const spec = specifier.replace(/\\/g, "/");
-  const dir = path13.posix.dirname(fromRel);
-  const base = path13.posix.normalize(path13.posix.join(dir, spec));
+  const dir = path16.posix.dirname(fromRel);
+  const base = path16.posix.normalize(path16.posix.join(dir, spec));
   if (base.startsWith("..")) return null;
   if (fileSet.has(base)) return base;
   for (const suf of TS_RESOLVE_EXTS) {
@@ -19120,12 +20065,12 @@ function resolveExtendsTarget(fromConfigDir, ref) {
   if (typeof ref !== "string" || ref.length === 0) return null;
   const withJson = (p) => p.endsWith(".json") ? p : `${p}.json`;
   const normPosix = (p) => {
-    const j = path13.posix.normalize(p);
-    if (j.startsWith("..") || j === ".." || path13.posix.isAbsolute(j)) return null;
+    const j = path16.posix.normalize(p);
+    if (j.startsWith("..") || j === ".." || path16.posix.isAbsolute(j)) return null;
     return j;
   };
   if (ref.startsWith("./") || ref.startsWith("../") || ref === "." || ref === "..") {
-    const joined = path13.posix.join(fromConfigDir === "" ? "." : fromConfigDir, withJson(ref));
+    const joined = path16.posix.join(fromConfigDir === "" ? "." : fromConfigDir, withJson(ref));
     return normPosix(joined);
   }
   if (ref.startsWith("/") || /^[A-Za-z]:[\\/]/.test(ref)) return null;
@@ -19137,11 +20082,11 @@ function resolveExtendsChain(configPath, parsed, readFile) {
     return typeof co === "object" && co !== null && !Array.isArray(co) ? co : {};
   };
   const dirOf = (p) => {
-    const d = path13.posix.dirname(p);
+    const d = path16.posix.dirname(p);
     return d === "." ? "" : d;
   };
   const joinPosix = (dir, rel) => {
-    const j = path13.posix.normalize(path13.posix.join(dir === "" ? "." : dir, rel));
+    const j = path16.posix.normalize(path16.posix.join(dir === "" ? "." : dir, rel));
     return j === "." ? "" : j;
   };
   let effBaseUrlVal;
@@ -19194,12 +20139,12 @@ function resolveExtendsChain(configPath, parsed, readFile) {
 }
 function resolveAliasTsJs(fromRel, specifier, tables, fileSet) {
   if (specifier.startsWith(".")) return null;
-  const fromDir = path13.posix.dirname(fromRel);
+  const fromDir = path16.posix.dirname(fromRel);
   const governs = (configDir) => configDir === "" || fromDir === configDir || fromDir.startsWith(configDir + "/");
   const candidates = [];
   const probe = (baseDir, relTarget) => {
-    const joined = path13.posix.normalize(
-      path13.posix.join(baseDir === "" ? "." : baseDir, relTarget)
+    const joined = path16.posix.normalize(
+      path16.posix.join(baseDir === "" ? "." : baseDir, relTarget)
     );
     const norm = joined === "." ? "" : joined;
     if (norm.startsWith("..")) return null;
@@ -19296,7 +20241,7 @@ function resolveWorkspaceBare(specifier, pkgMap, fileSet) {
     (a, b) => b.name.length - a.name.length || (a.root < b.root ? -1 : a.root > b.root ? 1 : 0)
   );
   const joinPosix = (dir, rel) => {
-    const j = path13.posix.normalize(path13.posix.join(dir === "" ? "." : dir, rel));
+    const j = path16.posix.normalize(path16.posix.join(dir === "" ? "." : dir, rel));
     return j === "." ? "" : j;
   };
   const probe = (cand) => {
@@ -19329,9 +20274,9 @@ function resolveRelativePython(fromRel, specifier, fileSet) {
   if (!specifier.startsWith(".")) return null;
   const dots = /^\.+/.exec(specifier)[0].length;
   const rest = specifier.slice(dots).replace(/\./g, "/");
-  let dir = path13.posix.dirname(fromRel);
-  for (let i = 1; i < dots; i++) dir = path13.posix.dirname(dir);
-  const base = rest ? path13.posix.normalize(path13.posix.join(dir, rest)) : dir;
+  let dir = path16.posix.dirname(fromRel);
+  for (let i = 1; i < dots; i++) dir = path16.posix.dirname(dir);
+  const base = rest ? path16.posix.normalize(path16.posix.join(dir, rest)) : dir;
   if (base.startsWith("..")) return null;
   for (const cand of [`${base}.py`, `${base}/__init__.py`]) {
     if (fileSet.has(cand)) return cand;
@@ -19527,7 +20472,7 @@ function isTestPath(relPosix2) {
   return false;
 }
 function relPosix(root, abs) {
-  return path14.relative(root, abs).split(path14.sep).join("/");
+  return path17.relative(root, abs).split(path17.sep).join("/");
 }
 function safeParseJson2(text) {
   try {
@@ -19545,13 +20490,13 @@ function classifyCommand(name) {
   return "other";
 }
 function scanRepo(root, opts = {}) {
-  const absRoot = path14.resolve(root);
+  const absRoot = path17.resolve(root);
   const map = emptyRepoMap(absRoot);
   const fileCountCap = opts.fileCountCap ?? FILE_COUNT_CAP;
   const totalBytesCap = opts.totalBytesCap ?? TOTAL_BYTES_CAP;
   const maxTotalSymbols = opts.maxTotalSymbols ?? MAX_TOTAL_SYMBOLS;
   const maxTotalEdges = opts.maxTotalEdges ?? MAX_TOTAL_EDGES;
-  if (!fs14.existsSync(absRoot) || !fs14.statSync(absRoot).isDirectory()) {
+  if (!fs18.existsSync(absRoot) || !fs18.statSync(absRoot).isDirectory()) {
     return map;
   }
   const st = { filesScanned: 0, filesSkipped: 0, totalBytes: 0, capHit: null };
@@ -19621,7 +20566,7 @@ function scanRepo(root, opts = {}) {
     if (st.capHit) return;
     let entries;
     try {
-      entries = fs14.readdirSync(absDir, { withFileTypes: true });
+      entries = fs18.readdirSync(absDir, { withFileTypes: true });
     } catch {
       return;
     }
@@ -19642,7 +20587,7 @@ function scanRepo(root, opts = {}) {
     if (dirHasManifest) packageRoots.add(dirRelKey);
     for (const entry of entries) {
       if (st.capHit) return;
-      const abs = path14.join(absDir, entry.name);
+      const abs = path17.join(absDir, entry.name);
       const rel = relPosix(absRoot, abs);
       if (entry.isDirectory()) {
         if (PRODUCER_DIRS.has(entry.name)) {
@@ -19678,7 +20623,7 @@ function scanRepo(root, opts = {}) {
       }
       let size = 0;
       try {
-        size = fs14.statSync(abs).size;
+        size = fs18.statSync(abs).size;
       } catch {
         st.filesSkipped++;
         continue;
@@ -19690,7 +20635,7 @@ function scanRepo(root, opts = {}) {
       st.totalBytes += size;
       st.filesScanned++;
       const nameLower = entry.name.toLowerCase();
-      const ext = path14.extname(entry.name).toLowerCase();
+      const ext = path17.extname(entry.name).toLowerCase();
       const langName = EXT_LANG[ext];
       if (langName) recordLang(langName, rel, "extension");
       const manifestLang = MANIFEST_LANG[nameLower];
@@ -19718,7 +20663,7 @@ function scanRepo(root, opts = {}) {
       let content;
       if (size <= MAX_READ_BYTES) {
         try {
-          const buf = fs14.readFileSync(abs);
+          const buf = fs18.readFileSync(abs);
           if (!looksBinary(buf)) content = buf.toString("utf8");
         } catch {
           content = void 0;
@@ -19768,9 +20713,9 @@ function scanRepo(root, opts = {}) {
             }
           }
           const bin = json.bin;
-          const dir = path14.dirname(rel) === "." ? "" : path14.dirname(rel) + "/";
+          const dir = path17.dirname(rel) === "." ? "" : path17.dirname(rel) + "/";
           if (typeof bin === "string") {
-            entrypoints.push({ name: path14.basename(rel, ".json"), path: dir + bin, source: "package.json:bin" });
+            entrypoints.push({ name: path17.basename(rel, ".json"), path: dir + bin, source: "package.json:bin" });
           } else if (typeof bin === "object" && bin !== null && !Array.isArray(bin)) {
             for (const [bname, bpath] of Object.entries(bin)) {
               if (typeof bpath === "string") {
@@ -19785,7 +20730,7 @@ function scanRepo(root, opts = {}) {
             entrypoints.push({ name: "module", path: dir + json.module, source: "package.json:module" });
           }
           if (json.exports !== void 0) {
-            apiHints.push({ name: path14.basename(rel), source: "package.json:exports" });
+            apiHints.push({ name: path17.basename(rel), source: "package.json:exports" });
           }
           const pkgRoot = dir.endsWith("/") ? dir.slice(0, -1) : dir;
           if (typeof json.name === "string" && json.name.length > 0) {
@@ -19810,7 +20755,7 @@ function scanRepo(root, opts = {}) {
           }
         }
       } else if ((nameLower === "pnpm-workspace.yaml" || nameLower === "pnpm-workspace.yml") && content !== void 0) {
-        const dir = path14.posix.dirname(rel);
+        const dir = path17.posix.dirname(rel);
         const base = dir === "." ? "" : dir;
         let inPackages = false;
         for (const line of content.split(/\r?\n/)) {
@@ -19826,7 +20771,7 @@ function scanRepo(root, opts = {}) {
         }
       } else if (nameLower === "lerna.json" && content !== void 0) {
         const json = safeParseJson2(content);
-        const dir = path14.posix.dirname(rel);
+        const dir = path17.posix.dirname(rel);
         const base = dir === "." ? "" : dir;
         if (json && Array.isArray(json.packages)) {
           for (const p of json.packages) {
@@ -19874,8 +20819,8 @@ function scanRepo(root, opts = {}) {
     if (extendsReadCache.has(posixKey)) return extendsReadCache.get(posixKey);
     let text;
     try {
-      const abs = path14.join(absRoot, ...posixKey.split("/"));
-      const buf = fs14.readFileSync(abs);
+      const abs = path17.join(absRoot, ...posixKey.split("/"));
+      const buf = fs18.readFileSync(abs);
       text = looksBinary(buf) ? void 0 : buf.toString("utf8");
     } catch {
       text = void 0;
@@ -20004,19 +20949,19 @@ function scanRepo(root, opts = {}) {
 }
 
 // src/core/repo-map/lcov.ts
-var path15 = __toESM(require("node:path"));
+var path18 = __toESM(require("node:path"));
 function containLcovPath(absRoot, lcovDirRel, sfPath) {
   if (sfPath.length === 0) return null;
   const norm = sfPath.replace(/\\/g, "/");
-  const isAbsolute7 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
+  const isAbsolute8 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
   let abs;
-  if (isAbsolute7) {
-    abs = path15.resolve(norm);
+  if (isAbsolute8) {
+    abs = path18.resolve(norm);
   } else {
-    abs = path15.resolve(absRoot, lcovDirRel, norm);
+    abs = path18.resolve(absRoot, lcovDirRel, norm);
   }
-  const rel = path15.relative(absRoot, abs).split(path15.sep).join("/");
-  if (rel === "" || rel.startsWith("../") || rel === ".." || path15.isAbsolute(rel)) {
+  const rel = path18.relative(absRoot, abs).split(path18.sep).join("/");
+  if (rel === "" || rel.startsWith("../") || rel === ".." || path18.isAbsolute(rel)) {
     return null;
   }
   return rel;
@@ -20662,16 +21607,16 @@ function diffHashes(stored, current) {
 }
 
 // src/core/repo-map/freshness-cache.ts
-var fs15 = __toESM(require("node:fs"));
-var path16 = __toESM(require("node:path"));
+var fs19 = __toESM(require("node:fs"));
+var path19 = __toESM(require("node:path"));
 var CACHE = /* @__PURE__ */ new Map();
 var SKIP_DIRS = /* @__PURE__ */ new Set([...GENERATED_DIRS, ".twinharness"]);
 function cheapSignature(paths) {
   const root = paths.root;
-  const mapAbs = path16.join(paths.stateDir, "repo-map.json");
+  const mapAbs = path19.join(paths.stateDir, "repo-map.json");
   let mapStat = "absent";
   try {
-    const st = fs15.statSync(mapAbs);
+    const st = fs19.statSync(mapAbs);
     mapStat = `${st.mtimeMs}\0${st.size}`;
   } catch {
     mapStat = "absent";
@@ -20682,24 +21627,24 @@ function cheapSignature(paths) {
   const walk = (abs) => {
     let entries;
     try {
-      entries = fs15.readdirSync(abs, { withFileTypes: true });
+      entries = fs19.readdirSync(abs, { withFileTypes: true });
     } catch {
       return true;
     }
     for (const e of entries) {
       if (e.isDirectory()) {
         if (SKIP_DIRS.has(e.name)) continue;
-        if (!walk(path16.join(abs, e.name))) return false;
+        if (!walk(path19.join(abs, e.name))) return false;
       } else if (e.isFile()) {
         if (++count > CEILING) return false;
-        const p = path16.join(abs, e.name);
+        const p = path19.join(abs, e.name);
         let st;
         try {
-          st = fs15.statSync(p);
+          st = fs19.statSync(p);
         } catch {
           continue;
         }
-        const rel = path16.relative(root, p).split(path16.sep).join("/");
+        const rel = path19.relative(root, p).split(path19.sep).join("/");
         lines.push(`${rel}\0${st.mtimeMs}\0${st.size}`);
       }
     }
@@ -20714,7 +21659,7 @@ function sigEqual(a, b) {
 }
 function cachedFreshness(paths, fullCheck) {
   const sig = cheapSignature(paths);
-  const key = path16.resolve(paths.root);
+  const key = path19.resolve(paths.root);
   if (sig !== null) {
     const hit = CACHE.get(key);
     if (hit && sigEqual(hit.sig, sig)) {
@@ -20755,7 +21700,7 @@ function runRepoMap(paths, opts = {}) {
   {
     const hashes = {};
     for (const f of map.files) {
-      const abs = path17.join(paths.root, f.path);
+      const abs = path20.join(paths.root, f.path);
       try {
         hashes[f.path] = hashFileBytes(abs);
       } catch {
@@ -20768,16 +21713,16 @@ function runRepoMap(paths, opts = {}) {
   {
     const knownFiles = new Set(map.files.map((f) => f.path));
     for (const candidate of LCOV_CANDIDATES) {
-      const abs = path17.join(paths.root, candidate);
+      const abs = path20.join(paths.root, candidate);
       let text;
       try {
-        if (!fs16.statSync(abs).isFile()) continue;
-        text = fs16.readFileSync(abs, "utf8");
+        if (!fs20.statSync(abs).isFile()) continue;
+        text = fs20.readFileSync(abs, "utf8");
       } catch {
         continue;
       }
-      const lcovDirRel = path17.posix.dirname(candidate) === "." ? "" : path17.posix.dirname(candidate);
-      const contained = parseLcovContained(text, path17.resolve(paths.root), lcovDirRel, knownFiles);
+      const lcovDirRel = path20.posix.dirname(candidate) === "." ? "" : path20.posix.dirname(candidate);
+      const contained = parseLcovContained(text, path20.resolve(paths.root), lcovDirRel, knownFiles);
       if (contained.length > 0) {
         const sorted = [...contained].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
         map.coverage = sorted.length > MAX_COVERAGE_FILES ? sorted.slice(0, MAX_COVERAGE_FILES) : sorted;
@@ -20804,8 +21749,8 @@ function runRepoMap(paths, opts = {}) {
   const blastRadiusFlags = [...new Set(map.blast_radius_signals.map((s) => s.flag))].sort();
   let artifacts = [];
   if (write) {
-    const jsonAbs = path17.join(paths.stateDir, "repo-map.json");
-    const mdAbs = path17.join(paths.docsDir, "00-repo-map.md");
+    const jsonAbs = path20.join(paths.stateDir, "repo-map.json");
+    const mdAbs = path20.join(paths.docsDir, "00-repo-map.md");
     if (!opts.force) {
       const sr = readState(paths);
       const approved = sr.state?.approved_artifacts ?? [];
@@ -20877,10 +21822,10 @@ function runRepoMap(paths, opts = {}) {
 }
 var REPO_MAP_REL = "repo-map.json";
 function loadPersistedMap(paths, cmd) {
-  const mapJsonPath = path17.join(paths.stateDir, REPO_MAP_REL);
+  const mapJsonPath = path20.join(paths.stateDir, REPO_MAP_REL);
   let rawMap = null;
   try {
-    rawMap = fs16.readFileSync(mapJsonPath, "utf8");
+    rawMap = fs20.readFileSync(mapJsonPath, "utf8");
   } catch {
     rawMap = null;
   }
@@ -21128,14 +22073,14 @@ REQ anchors in scope: ${result.reqAnchors.join(", ")}`);
   return lines.join("\n");
 }
 function runRepoCheck(paths, opts = {}) {
-  const REPO_MAP_JSON = path17.join(paths.stateDir, "repo-map.json");
+  const REPO_MAP_JSON = path20.join(paths.stateDir, "repo-map.json");
   const emit2 = (outcome) => {
     structuredLog(outcome.log);
     return { ok: outcome.ok, exitCode: outcome.exitCode, data: outcome.data, human: outcome.human };
   };
   let rawMap = null;
   try {
-    rawMap = fs16.readFileSync(REPO_MAP_JSON, "utf8");
+    rawMap = fs20.readFileSync(REPO_MAP_JSON, "utf8");
   } catch {
     return emit2(computeFreshness({ kind: "no-map" }));
   }
@@ -21151,7 +22096,7 @@ function runRepoCheck(paths, opts = {}) {
   const currentMap = scanRepo(paths.root, opts.scanOptions ?? {});
   const currentHashes = {};
   for (const f of currentMap.files) {
-    const abs = path17.join(paths.root, f.path);
+    const abs = path20.join(paths.root, f.path);
     try {
       currentHashes[f.path] = hashFileBytes(abs);
     } catch {
@@ -21240,8 +22185,8 @@ function runRepoSearch(paths, opts = {}) {
     const abs = resolveWithinRoot(paths.root, rel);
     if (abs === null) return null;
     try {
-      if (fs16.statSync(abs).size > MAX_SEARCH_FILE_BYTES) return null;
-      return fs16.readFileSync(abs, "utf8");
+      if (fs20.statSync(abs).size > MAX_SEARCH_FILE_BYTES) return null;
+      return fs20.readFileSync(abs, "utf8");
     } catch {
       return null;
     }
@@ -21360,7 +22305,7 @@ function runRepoSearch(paths, opts = {}) {
       if (!t.name.toLowerCase().includes(needle)) continue;
       citations.push({ path: t.rel, line: 0, text: `template "${t.name}" (${t.source})` });
       try {
-        const content = fs16.readFileSync(t.abs, "utf8");
+        const content = fs20.readFileSync(t.abs, "utf8");
         filesScanned++;
         if (!receiptByFile.has(t.rel)) receiptByFile.set(t.rel, { file: t.rel, hash: hashContent(content) });
       } catch {
@@ -21395,15 +22340,15 @@ function clampSearchMax(n) {
 function collectTemplateNames(root) {
   const out = [];
   const seen = /* @__PURE__ */ new Set();
-  const pluginRoot3 = path17.resolve(__dirname, "..", "..");
+  const pluginRoot3 = path20.resolve(__dirname, "..", "..");
   const dirs = [
-    { dir: path17.join(root, ".twinharness", "templates"), source: "project-override", relPrefix: ".twinharness/templates" },
-    { dir: path17.join(pluginRoot3, "templates"), source: "plugin-bundled", relPrefix: "templates" }
+    { dir: path20.join(root, ".twinharness", "templates"), source: "project-override", relPrefix: ".twinharness/templates" },
+    { dir: path20.join(pluginRoot3, "templates"), source: "plugin-bundled", relPrefix: "templates" }
   ];
   for (const { dir, source, relPrefix } of dirs) {
     let entries;
     try {
-      entries = fs16.readdirSync(dir, { withFileTypes: true });
+      entries = fs20.readdirSync(dir, { withFileTypes: true });
     } catch {
       continue;
     }
@@ -21411,14 +22356,227 @@ function collectTemplateNames(root) {
       if (!e.isFile()) continue;
       if (seen.has(e.name)) continue;
       seen.add(e.name);
-      out.push({ name: e.name, rel: `${relPrefix}/${e.name}`, abs: path17.join(dir, e.name), source });
+      out.push({ name: e.name, rel: `${relPrefix}/${e.name}`, abs: path20.join(dir, e.name), source });
     }
   }
   return out;
 }
 
 // src/commands/interview.ts
-var fs17 = __toESM(require("node:fs"));
+var fs22 = __toESM(require("node:fs"));
+var path22 = __toESM(require("node:path"));
+
+// src/core/interview-readiness.ts
+var fs21 = __toESM(require("node:fs"));
+var path21 = __toESM(require("node:path"));
+function computeReadinessGround(confidence, cutoff) {
+  return { confidence, cutoff, ready: confidence !== null && confidence >= cutoff };
+}
+var CANONICAL_FIELD_ORDER3 = [
+  "kind",
+  "refId",
+  "ground",
+  "store_coord",
+  "snapshot_coord",
+  "producer_identity",
+  "producer_kind",
+  "key_id",
+  "legacy",
+  "prevHash"
+];
+var GROUND_FIELD_ORDER = ["confidence", "cutoff", "ready"];
+var STORE_FIELD_ORDER = ["path", "digest"];
+var SNAPSHOT_FIELD_ORDER3 = ["gitHead", "treeDigest"];
+function reorder2(obj, order) {
+  const out = {};
+  for (const key of order) out[key] = obj[key];
+  return out;
+}
+function readinessCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of CANONICAL_FIELD_ORDER3) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "ground") {
+      ordered[key] = reorder2(val, GROUND_FIELD_ORDER);
+    } else if (key === "store_coord") {
+      ordered[key] = reorder2(val, STORE_FIELD_ORDER);
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder2(val, SNAPSHOT_FIELD_ORDER3);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeReadinessRecordHash(receipt) {
+  return hashContent(readinessCanonicalText(receipt));
+}
+function readinessReceiptsPath(paths) {
+  return path21.join(paths.stateDir, "interview-readiness-receipts.jsonl");
+}
+function externalReadinessReceiptsPath(paths) {
+  return path21.join(paths.stateDir, "external-interview-readiness-receipts.jsonl");
+}
+var ED25519_SIGNATURE_BASE643 = /^[A-Za-z0-9+/]{86}==$/;
+function isValidReadinessReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "interview-readiness") return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
+  if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
+  if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE643.test(r.signature))) {
+    return false;
+  }
+  const g = r.ground;
+  if (typeof g !== "object" || g === null) return false;
+  const gr = g;
+  if (!(gr.confidence === null || typeof gr.confidence === "number" && Number.isFinite(gr.confidence))) return false;
+  if (typeof gr.cutoff !== "number" || !Number.isFinite(gr.cutoff)) return false;
+  if (typeof gr.ready !== "boolean") return false;
+  const sc = r.store_coord;
+  if (typeof sc !== "object" || sc === null) return false;
+  const s2 = sc;
+  if (typeof s2.path !== "string" || typeof s2.digest !== "string") return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readReadinessReceipts(paths) {
+  return readJsonlValues(readinessReceiptsPath(paths), isValidReadinessReceipt);
+}
+function readExternalReadinessReceipts(paths) {
+  return readJsonlValues(externalReadinessReceiptsPath(paths), isValidReadinessReceipt);
+}
+function readLastReadinessRecordHash(paths) {
+  const last = scanTailValid(readinessReceiptsPath(paths), isValidReadinessReceipt);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function verifyReadinessChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeReadinessRecordHash(rest);
+    if (recomputed !== recordHash) return { ok: false, brokenAt: i, reason: "edited" };
+    if (r.prevHash !== expectedPrev) return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+function readinessRefId(paths) {
+  return currentReceiptSnapshotCoord(paths).gitHead ?? "no-git";
+}
+var StoreUnresolvedError = class extends Error {
+  constructor(message, store) {
+    super(message);
+    this.store = store;
+    this.name = "StoreUnresolvedError";
+  }
+  store;
+  /** Stable machine token for the CLI failure envelope. */
+  code = "readiness_store_unresolved";
+};
+function appendReadinessReceipt(paths, input) {
+  const digest = computeTargetDigest(paths.root, input.storePath);
+  if (digest === null) {
+    throw new StoreUnresolvedError(
+      `Refusing to mint an interview-readiness receipt for ${input.refId}: store "${input.storePath}" does not resolve in source.`,
+      input.storePath
+    );
+  }
+  return sealAndAppend2(paths, {
+    kind: "interview-readiness",
+    refId: input.refId,
+    ground: computeReadinessGround(input.confidence, input.cutoff),
+    store_coord: { path: input.storePath, digest },
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: input.producerIdentity,
+    producer_kind: "in-process"
+  });
+}
+function sealAndAppend2(paths, receipt) {
+  assertGovernedWriteSurface(paths.root, readinessReceiptsPath(paths));
+  fs21.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastReadinessRecordHash(paths);
+  const withPrev = { ...receipt, prevHash };
+  const recordHash = computeReadinessRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs21.appendFileSync(readinessReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function snapshotStaleReasons2(recorded, current) {
+  const reasons = [];
+  if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
+    reasons.push("gitHead");
+  }
+  if (recorded.treeDigest !== null && current.treeDigest !== null && recorded.treeDigest !== current.treeDigest) {
+    reasons.push("treeDigest");
+  }
+  return reasons;
+}
+function classifyReadinessContent(paths, receipt, passStatus) {
+  const recordedPath = receipt.store_coord.path;
+  const recordedDigest = receipt.store_coord.digest;
+  const currentDigest = computeTargetDigest(paths.root, recordedPath);
+  if (currentDigest === null) return { status: "store_missing", receipt };
+  if (currentDigest !== recordedDigest) return { status: "store_mismatch", receipt };
+  const staleReasons = snapshotStaleReasons2(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
+  if (staleReasons.length > 0) return { status: "stale", receipt, staleReasons };
+  const reground = computeReadinessGround(receipt.ground.confidence, receipt.ground.cutoff);
+  if (!reground.ready) return { status: "not-ready", receipt };
+  return { status: passStatus, receipt };
+}
+function claimsExternal(r) {
+  return typeof r.signature === "string" || typeof r.key_id === "string";
+}
+function signatureVerifies(receipt) {
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return false;
+  if (typeof receipt.signature !== "string") return false;
+  if (receipt.key_id !== externalKeyId(publicKey)) return false;
+  const { recordHash: _rh, signature: _sig, ...signedView } = receipt;
+  return verifyCanonical(readinessCanonicalText(signedView), receipt.signature, publicKey);
+}
+function readReadinessReceiptValidated(paths, refId) {
+  const matches = (r) => r.refId === refId;
+  const inProcessReceipts = readReadinessReceipts(paths);
+  if (!verifyReadinessChain(inProcessReceipts).ok) return { status: "tampered" };
+  let inProcess;
+  for (const r of inProcessReceipts) {
+    if (matches(r)) inProcess = r;
+  }
+  const externalReceipts = readExternalReadinessReceipts(paths);
+  const externalChainOk = verifyReadinessChain(externalReceipts).ok;
+  const externalCandidates = externalReceipts.filter((r) => matches(r) && claimsExternal(r));
+  if (externalCandidates.length > 0) {
+    const publicKey = loadExternalPublicKey();
+    if (publicKey !== null && externalChainOk) {
+      let verified;
+      for (const cand of externalCandidates) {
+        if (signatureVerifies(cand)) verified = cand;
+      }
+      if (verified) {
+        if (verified.legacy === true) return { status: "legacy", receipt: verified };
+        return classifyReadinessContent(paths, verified, "valid-grounded");
+      }
+    }
+    return { status: "forged", receipt: externalCandidates[externalCandidates.length - 1] };
+  }
+  if (!inProcess) return { status: "absent" };
+  if (inProcess.legacy === true) return { status: "legacy", receipt: inProcess };
+  return classifyReadinessContent(paths, inProcess, "valid");
+}
+
+// src/commands/interview.ts
 var DEFAULT_INTERVIEW_CUTOFF = 0.8;
 function isUnit(n) {
   return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
@@ -21465,8 +22623,8 @@ function upgradeLegacy(o) {
 function readInterview(paths, opts = {}) {
   const persist = opts.persist !== false;
   try {
-    if (!fs17.existsSync(paths.interviewFile)) return null;
-    const raw = fs17.readFileSync(paths.interviewFile, "utf8");
+    if (!fs22.existsSync(paths.interviewFile)) return null;
+    const raw = fs22.readFileSync(paths.interviewFile, "utf8");
     const parsed = JSON.parse(raw);
     if (!isInterviewState(parsed)) return null;
     const o = parsed;
@@ -21475,7 +22633,7 @@ function readInterview(paths, opts = {}) {
       if (!persist) return upgraded;
       const bak = paths.interviewFile + ".bak";
       try {
-        if (!fs17.existsSync(bak)) fs17.writeFileSync(bak, raw, "utf8");
+        if (!fs22.existsSync(bak)) fs22.writeFileSync(bak, raw, "utf8");
       } catch {
       }
       writeInterview(paths, upgraded);
@@ -21579,6 +22737,19 @@ function runInterviewRecord(paths, opts = {}) {
   };
   writeInterview(paths, next);
   const ready = computeReady(confidence, next.cutoff);
+  if (ready) {
+    const storePath = path22.relative(paths.root, paths.interviewFile).split(path22.sep).join("/");
+    withStateLock(
+      paths,
+      () => appendReadinessReceipt(paths, {
+        refId: readinessRefId(paths),
+        confidence,
+        cutoff: next.cutoff,
+        storePath,
+        producerIdentity: "in-process:interview-record"
+      })
+    );
+  }
   structuredLog({ cmd: "interview record", rounds: next.rounds.length });
   return success({
     data: { rounds: next.rounds.length, confidence, cutoff: next.cutoff, ready },
@@ -21615,21 +22786,21 @@ function runInterviewStatus(paths) {
 }
 
 // src/core/tester.ts
-var fs18 = __toESM(require("node:fs"));
-var path18 = __toESM(require("node:path"));
+var fs23 = __toESM(require("node:fs"));
+var path23 = __toESM(require("node:path"));
 function testerRecordPath(paths) {
-  return path18.join(paths.stateDir, "tester-record.json");
+  return path23.join(paths.stateDir, "tester-record.json");
 }
 function isRemoteEvidenceRef(ref) {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(ref);
 }
 function resolveEvidencePath(root, ref) {
-  return path18.isAbsolute(ref) ? ref : path18.resolve(root, ref);
+  return path23.isAbsolute(ref) ? ref : path23.resolve(root, ref);
 }
 function localEvidenceReadable(root, ref) {
   const abs = resolveEvidencePath(root, ref);
   try {
-    return fs18.existsSync(abs) && fs18.statSync(abs).isFile();
+    return fs23.existsSync(abs) && fs23.statSync(abs).isFile();
   } catch {
     return false;
   }
@@ -21639,8 +22810,8 @@ function computeReceiptDigest(root, parts) {
   if (parts.evidenceRef && !isRemoteEvidenceRef(parts.evidenceRef)) {
     const abs = resolveEvidencePath(root, parts.evidenceRef);
     try {
-      if (fs18.existsSync(abs) && fs18.statSync(abs).isFile()) {
-        evidenceContent = fs18.readFileSync(abs, "utf8");
+      if (fs23.existsSync(abs) && fs23.statSync(abs).isFile()) {
+        evidenceContent = fs23.readFileSync(abs, "utf8");
       }
     } catch {
     }
@@ -21656,10 +22827,10 @@ function computeReceiptDigest(root, parts) {
 }
 function readTesterRecord(paths) {
   const file = testerRecordPath(paths);
-  if (!fs18.existsSync(file)) return null;
+  if (!fs23.existsSync(file)) return null;
   let raw;
   try {
-    raw = fs18.readFileSync(file, "utf8");
+    raw = fs23.readFileSync(file, "utf8");
   } catch {
     return null;
   }
@@ -21721,6 +22892,1990 @@ function readTesterRecordValidated(paths) {
 }
 function testerRecordPresent(paths) {
   return readTesterRecordValidated(paths).status === "valid";
+}
+
+// src/core/bsc8-flag.ts
+function bsc8EnforcementEnabled() {
+  const raw = process.env.TH_BSC8_ENFORCE;
+  if (raw === void 0) return true;
+  const normalized = raw.trim().toLowerCase();
+  return !(normalized === "0" || normalized === "false");
+}
+
+// src/core/verification-driver.ts
+var fs24 = __toESM(require("node:fs"));
+var path24 = __toESM(require("node:path"));
+var SEED_DIMENSIONS = [
+  // `tests-executed` — a test runner command actually ran and passed.
+  { name: "tests-executed", commandMarkers: ["test", "vitest", "jest", "mocha"] },
+  // `typecheck` — a no-emit type check ran and passed.
+  { name: "typecheck", commandMarkers: ["typecheck", "tsc", "type-check"] },
+  // `build` — a build/compile command ran and passed. NOT the committed-`dist/` digest
+  // (that would be circular with the dist invariant); the runner's verify exit is the ground.
+  { name: "build", commandMarkers: ["build", "compile", "esbuild"] }
+];
+var SEED_DIMENSION_NAMES = SEED_DIMENSIONS.map((d) => d.name);
+function commandMatchesDimension(command, markers) {
+  const lc = command.toLowerCase();
+  return markers.some((m) => lc.includes(m));
+}
+function observedDimensionsFromReport(report) {
+  const observed = /* @__PURE__ */ new Set();
+  if (report === null || !Array.isArray(report.results)) return observed;
+  for (const dim of SEED_DIMENSIONS) {
+    const hit = report.results.some(
+      (r) => r.ok === true && typeof r.command === "string" && commandMatchesDimension(r.command, dim.commandMarkers)
+    );
+    if (hit) observed.add(dim.name);
+  }
+  return observed;
+}
+var DRIVER_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "refId",
+  "dimensions",
+  "snapshot_coord",
+  "producer_identity",
+  "producer_kind",
+  "key_id",
+  "legacy",
+  // BSC-10 (C4a) evidence-spine BINDING OPT-IN: IN the canonical order just BEFORE `manifest_digest`
+  // so a PRESENT `grounding_bound` is signature/hash-bound. Omit-when-absent ⇒ a pre-BSC-10 / un-
+  // enrolled receipt (the field absent) is byte-identical, so shipped BSC-3 probes + parity hold.
+  "grounding_bound",
+  // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
+  // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
+  // receipt (the field absent) is byte-identical, so shipped BSC-3 probes + receipts-parity hold.
+  "manifest_digest",
+  "prevHash"
+];
+var DIMENSION_FIELD_ORDER = ["name", "observed", "evidenceRef"];
+var SNAPSHOT_FIELD_ORDER4 = ["gitHead", "treeDigest"];
+function reorder3(obj, order) {
+  const out = {};
+  for (const key of order) out[key] = obj[key];
+  return out;
+}
+function driverCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of DRIVER_CANONICAL_FIELD_ORDER) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "dimensions") {
+      ordered[key] = val.map((d) => reorder3(d, DIMENSION_FIELD_ORDER));
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder3(val, SNAPSHOT_FIELD_ORDER4);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeDriverRecordHash(receipt) {
+  return hashContent(driverCanonicalText(receipt));
+}
+function driverReceiptsPath(paths) {
+  return path24.join(paths.stateDir, "driver-receipts.jsonl");
+}
+function externalDriverReceiptsPath(paths) {
+  return path24.join(paths.stateDir, "external-driver-receipts.jsonl");
+}
+var ED25519_SIGNATURE_BASE644 = /^[A-Za-z0-9+/]{86}==$/;
+function isValidDriverReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "driver-dimension") return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (r.grounding_bound !== void 0 && typeof r.grounding_bound !== "boolean") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
+  if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
+  if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE644.test(r.signature))) {
+    return false;
+  }
+  if (!Array.isArray(r.dimensions)) return false;
+  for (const d of r.dimensions) {
+    if (typeof d !== "object" || d === null) return false;
+    const dim = d;
+    if (typeof dim.name !== "string" || dim.name === "") return false;
+    if (dim.observed !== true) return false;
+    if (typeof dim.evidenceRef !== "string" || dim.evidenceRef === "") return false;
+  }
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readDriverReceipts(paths) {
+  return readJsonlValues(driverReceiptsPath(paths), isValidDriverReceipt);
+}
+function readExternalDriverReceipts(paths) {
+  return readJsonlValues(externalDriverReceiptsPath(paths), isValidDriverReceipt);
+}
+function readLastDriverRecordHash(paths) {
+  const last = scanTailValid(driverReceiptsPath(paths), isValidDriverReceipt);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function verifyDriverChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeDriverRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+var DimensionUnobservedError = class extends Error {
+  constructor(message, unobserved) {
+    super(message);
+    this.unobserved = unobserved;
+    this.name = "DimensionUnobservedError";
+  }
+  unobserved;
+  /** Stable machine token for the CLI failure envelope. */
+  code = "driver_dimension_unobserved";
+};
+var EvidenceUnresolvedError = class extends Error {
+  constructor(message, evidenceRef) {
+    super(message);
+    this.evidenceRef = evidenceRef;
+    this.name = "EvidenceUnresolvedError";
+  }
+  evidenceRef;
+  /** Stable machine token for the CLI failure envelope. */
+  code = "driver_evidence_unresolved";
+};
+function observeDriverDimensions(paths) {
+  const evidenceRef = path24.relative(paths.root, verifyReportPath(paths)).split(path24.sep).join("/");
+  const observed = observedDimensionsFromReport(readVerifyReport(paths));
+  const out = [];
+  for (const name of SEED_DIMENSION_NAMES) {
+    if (observed.has(name)) out.push({ name, observed: true, evidenceRef });
+  }
+  return out;
+}
+function appendDriverReceipt(paths, input) {
+  const evidenceRef = path24.relative(paths.root, verifyReportPath(paths)).split(path24.sep).join("/");
+  if (computeTargetDigest(paths.root, evidenceRef) === null) {
+    throw new EvidenceUnresolvedError(
+      `Refusing to mint a driver-dimension receipt: evidence artifact "${evidenceRef}" does not resolve in source.`,
+      evidenceRef
+    );
+  }
+  const observed = observeDriverDimensions(paths);
+  const observedNames = new Set(observed.map((d) => d.name));
+  if (input.dimensionNames !== void 0) {
+    const unobserved = input.dimensionNames.filter((n) => !observedNames.has(n));
+    if (unobserved.length > 0) {
+      throw new DimensionUnobservedError(
+        `Refusing to record driver dimension(s) not observed in verify-report.json: ${unobserved.join(", ")}.`,
+        unobserved
+      );
+    }
+  }
+  const dimensions = input.dimensionNames === void 0 ? observed : observed.filter((d) => input.dimensionNames.includes(d.name));
+  return sealAndAppend3(paths, {
+    kind: "driver-dimension",
+    refId: driverRefId(paths),
+    dimensions,
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: input.producerIdentity,
+    producer_kind: "in-process"
+  });
+}
+function driverRefId(paths) {
+  return currentReceiptSnapshotCoord(paths).gitHead ?? "no-git";
+}
+function sealAndAppend3(paths, receipt) {
+  assertGovernedWriteSurface(paths.root, driverReceiptsPath(paths));
+  fs24.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastDriverRecordHash(paths);
+  const withPrev = { ...receipt, prevHash };
+  const recordHash = computeDriverRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs24.appendFileSync(driverReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function snapshotStaleReasons3(recorded, current) {
+  const reasons = [];
+  if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
+    reasons.push("gitHead");
+  }
+  if (recorded.treeDigest !== null && current.treeDigest !== null && recorded.treeDigest !== current.treeDigest) {
+    reasons.push("treeDigest");
+  }
+  return reasons;
+}
+function validateDriverReceiptContent(paths, receipt) {
+  for (const dim of receipt.dimensions) {
+    if (computeTargetDigest(paths.root, dim.evidenceRef) === null) {
+      return { status: "evidence_missing" };
+    }
+  }
+  const observed = observedDimensionsFromReport(readVerifyReport(paths));
+  const unobserved = receipt.dimensions.filter((d) => !observed.has(d.name)).map((d) => d.name);
+  if (unobserved.length > 0) {
+    return { status: "dimension_unobserved", unobservedDimensions: unobserved };
+  }
+  const staleReasons = snapshotStaleReasons3(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
+  if (staleReasons.length > 0) return { status: "stale", staleReasons };
+  return { status: "valid" };
+}
+
+// src/core/declared-dimensions.ts
+var DECLARED_DIMENSION_SET = ["tests-executed", "typecheck", "build"];
+function declaredDimensionSetCanonical() {
+  return [...new Set(DECLARED_DIMENSION_SET)].sort().join("\n");
+}
+function declaredDimensionSetDigest() {
+  return hashContent(declaredDimensionSetCanonical());
+}
+function declaredDimensionSet() {
+  return [...DECLARED_DIMENSION_SET];
+}
+function assertDeclaredDimensionsObservable() {
+  const seed = new Set(SEED_DIMENSION_NAMES);
+  const unobservable = DECLARED_DIMENSION_SET.filter((d) => !seed.has(d));
+  if (unobservable.length > 0) {
+    throw new Error(
+      `DECLARED_DIMENSION_SET contains dimension(s) the BSC-3 sensor cannot observe (not in SEED_DIMENSION_NAMES): ${unobservable.join(", ")}. A declared dimension must be observable, or it is an always-absent always-blocking mis-declaration.`
+    );
+  }
+}
+assertDeclaredDimensionsObservable();
+
+// src/core/bsc5-flag.ts
+function bsc5EnforcementEnabled() {
+  const raw = process.env.TH_BSC5_ENFORCE;
+  if (raw === void 0) return true;
+  const normalized = raw.trim().toLowerCase();
+  return !(normalized === "0" || normalized === "false");
+}
+
+// src/core/approvals.ts
+var fs25 = __toESM(require("node:fs"));
+var path25 = __toESM(require("node:path"));
+var HUMAN_GATE_STAGES = new Set(
+  STAGE_PIPELINE.filter((s) => s.humanGate).map((s) => s.stage)
+);
+function isHumanGateStage(stage) {
+  return HUMAN_GATE_STAGES.has(stage);
+}
+var APPROVAL_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "stage",
+  "approval_of",
+  "producer_identity",
+  "producer_kind",
+  "key_id",
+  "legacy",
+  // BSC-10 (C4a) evidence-spine BINDING OPT-IN: IN the canonical order just BEFORE `manifest_digest`
+  // so a PRESENT `grounding_bound` is signature/hash-bound. Omit-when-absent ⇒ a pre-BSC-10 / un-
+  // enrolled approval (the field absent) is byte-identical, so shipped BSC-7 probes + parity hold.
+  "grounding_bound",
+  // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
+  // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
+  // approval (the field absent) is byte-identical, so shipped BSC-7 probes + receipts-parity hold.
+  "manifest_digest",
+  "prevHash"
+];
+var GROUND_FIELD_ORDER2 = [
+  "snapshot_coord",
+  "governing_artifact_digest"
+];
+var SNAPSHOT_FIELD_ORDER5 = ["gitHead", "treeDigest"];
+function reorder4(obj, order) {
+  const out = {};
+  for (const key of order) out[key] = obj[key];
+  return out;
+}
+function approvalCanonicalText2(receipt) {
+  const ordered = {};
+  for (const key of APPROVAL_CANONICAL_FIELD_ORDER) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "approval_of") {
+      const g = val;
+      const normalized = {
+        snapshot_coord: reorder4(g.snapshot_coord, SNAPSHOT_FIELD_ORDER5),
+        governing_artifact_digest: g.governing_artifact_digest
+      };
+      ordered[key] = reorder4(normalized, GROUND_FIELD_ORDER2);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeApprovalRecordHash(receipt) {
+  return hashContent(approvalCanonicalText2(receipt));
+}
+function approvalReceiptsPath(paths) {
+  return path25.join(paths.stateDir, "approval-receipts.jsonl");
+}
+function externalApprovalsPath(paths) {
+  return path25.join(paths.stateDir, "external-approvals.jsonl");
+}
+var ED25519_SIGNATURE_BASE645 = /^[A-Za-z0-9+/]{86}==$/;
+function isValidApproval(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "human-approval") return false;
+  if (typeof r.stage !== "string" || r.stage === "") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (r.grounding_bound !== void 0 && typeof r.grounding_bound !== "boolean") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
+  if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
+  if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE645.test(r.signature))) {
+    return false;
+  }
+  const ground = r.approval_of;
+  if (typeof ground !== "object" || ground === null) return false;
+  const g = ground;
+  if (typeof g.governing_artifact_digest !== "string") return false;
+  const snap = g.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readApprovalReceipts(paths) {
+  return readJsonlValues(approvalReceiptsPath(paths), isValidApproval);
+}
+function readExternalApprovals(paths) {
+  return readJsonlValues(externalApprovalsPath(paths), isValidApproval);
+}
+function readLastApprovalRecordHash(paths) {
+  const last = scanTailValid(approvalReceiptsPath(paths), isValidApproval);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function verifyApprovalChain2(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeApprovalRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+var ApprovalUnmintableError = class extends Error {
+  constructor(message, code, stage, artifact) {
+    super(message);
+    this.stage = stage;
+    this.artifact = artifact;
+    this.name = "ApprovalUnmintableError";
+    this.code = code;
+  }
+  stage;
+  artifact;
+  /** Stable machine token for the CLI failure envelope. */
+  code;
+};
+function appendApprovalReceipt(paths, input) {
+  const contract = stageContract(input.stage);
+  if (!contract || !contract.humanGate) {
+    throw new ApprovalUnmintableError(
+      `Refusing to mint an approval for "${input.stage}": not a humanGate stage.`,
+      "approval_stage_not_human_gate",
+      input.stage
+    );
+  }
+  const artifact = contract.produces;
+  const digest = computeTargetDigest(paths.root, artifact);
+  if (digest === null) {
+    throw new ApprovalUnmintableError(
+      `Refusing to mint an approval for "${input.stage}": governing artifact "${artifact}" does not resolve in source.`,
+      "approval_artifact_unresolved",
+      input.stage,
+      artifact
+    );
+  }
+  return sealAndAppend4(paths, {
+    kind: "human-approval",
+    stage: input.stage,
+    approval_of: {
+      snapshot_coord: currentReceiptSnapshotCoord(paths),
+      governing_artifact_digest: digest
+    },
+    producer_identity: input.producerIdentity,
+    producer_kind: "in-process"
+  });
+}
+function sealAndAppend4(paths, receipt) {
+  assertGovernedWriteSurface(paths.root, approvalReceiptsPath(paths));
+  fs25.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastApprovalRecordHash(paths);
+  const withPrev = { ...receipt, prevHash };
+  const recordHash = computeApprovalRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs25.appendFileSync(approvalReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function snapshotStaleReasons4(recorded, current) {
+  const reasons = [];
+  if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
+    reasons.push("gitHead");
+  }
+  if (recorded.treeDigest !== null && current.treeDigest !== null && recorded.treeDigest !== current.treeDigest) {
+    reasons.push("treeDigest");
+  }
+  return reasons;
+}
+function classifyApprovalContent(paths, receipt, passStatus) {
+  const contract = stageContract(receipt.stage);
+  if (!contract || !contract.humanGate) return { status: "target_missing", receipt };
+  const recordedDigest = receipt.approval_of.governing_artifact_digest;
+  const currentDigest = computeTargetDigest(paths.root, contract.produces);
+  if (currentDigest === null) return { status: "target_missing", receipt };
+  if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt };
+  const staleReasons = snapshotStaleReasons4(
+    receipt.approval_of.snapshot_coord,
+    currentReceiptSnapshotCoord(paths)
+  );
+  if (staleReasons.length > 0) return { status: "stale", receipt, staleReasons };
+  return { status: passStatus, receipt };
+}
+function readApprovalValidated(paths, stage) {
+  const canonicalStage = stage;
+  const matches = (r) => r.stage === canonicalStage;
+  const externalAll = readExternalApprovals(paths);
+  const externalCandidates = externalAll.filter(
+    (r) => matches(r) && r.producer_kind === "external"
+  );
+  if (externalCandidates.length > 0) {
+    if (!verifyApprovalChain2(externalAll).ok) {
+      return { status: "tampered", receipt: externalCandidates[externalCandidates.length - 1] };
+    }
+    const verified = verifyExternalApproval(externalCandidates);
+    if (verified) {
+      if (verified.legacy === true) return { status: "legacy", receipt: verified };
+      return classifyApprovalContent(paths, verified, "valid-grounded");
+    }
+    return { status: "forged", receipt: externalCandidates[externalCandidates.length - 1] };
+  }
+  const inProcessReceipts = readApprovalReceipts(paths);
+  if (!verifyApprovalChain2(inProcessReceipts).ok) return { status: "tampered" };
+  let inProcess;
+  for (const r of inProcessReceipts) {
+    if (matches(r)) inProcess = r;
+  }
+  if (!inProcess) {
+    if (grandfatheredBaseline2(paths).has(stage)) return { status: "legacy" };
+    return { status: "absent" };
+  }
+  if (inProcess.legacy === true) return { status: "legacy", receipt: inProcess };
+  return classifyApprovalContent(paths, inProcess, "valid");
+}
+function verifyExternalApproval(candidates) {
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return void 0;
+  const configuredKeyId = externalKeyId(publicKey);
+  let verified;
+  for (const cand of candidates) {
+    if (typeof cand.signature !== "string") continue;
+    if (cand.key_id !== configuredKeyId) continue;
+    const { recordHash: _rh, signature: _sig, ...signedView } = cand;
+    if (verifyCanonical(approvalCanonicalText2(signedView), cand.signature, publicKey)) {
+      verified = cand;
+    }
+  }
+  return verified;
+}
+function migrationMarkerPath2(paths) {
+  return path25.join(paths.stateDir, ".approval-receipts-migration");
+}
+function readMigrationMarker2(paths) {
+  const file = migrationMarkerPath2(paths);
+  if (!fs25.existsSync(file)) return void 0;
+  let raw;
+  try {
+    raw = fs25.readFileSync(file, "utf8");
+  } catch {
+    return void 0;
+  }
+  const parsed = safeParseJson(raw);
+  if (typeof parsed !== "object" || parsed === null) return void 0;
+  const m = parsed;
+  if (typeof m.migratedAt !== "string") return void 0;
+  if (!Array.isArray(m.baseline) || !m.baseline.every((x) => typeof x === "string")) return void 0;
+  return { migratedAt: m.migratedAt, baseline: m.baseline };
+}
+function grandfatheredBaseline2(paths) {
+  const marker = readMigrationMarker2(paths);
+  if (!marker) return /* @__PURE__ */ new Set();
+  const receipts = readApprovalReceipts(paths);
+  if (!verifyApprovalChain2(receipts).ok) return /* @__PURE__ */ new Set();
+  const stampedLegacy = /* @__PURE__ */ new Set();
+  for (const r of receipts) {
+    if (r.legacy === true) stampedLegacy.add(r.stage);
+  }
+  return new Set(marker.baseline.filter((s) => stampedLegacy.has(s)));
+}
+
+// src/core/realization.ts
+var fs26 = __toESM(require("node:fs"));
+var path26 = __toESM(require("node:path"));
+var CANONICAL_FIELD_ORDER4 = [
+  "kind",
+  "req_id",
+  "owning_slice",
+  "referent",
+  "snapshot_coord",
+  "producer_identity",
+  "producer_kind",
+  "key_id",
+  "legacy",
+  // BSC-10 (C4a) evidence-spine BINDING OPT-IN: IN the canonical order just BEFORE `manifest_digest`
+  // so a PRESENT `grounding_bound` is signature/hash-bound. Omit-when-absent ⇒ a pre-BSC-10 / un-
+  // enrolled receipt (the field absent) is byte-identical, so shipped BSC-1 probes + parity hold.
+  "grounding_bound",
+  // BSC-10 evidence-spine thread: IN the canonical order (just before `prevHash`) so a PRESENT
+  // `manifest_digest` is signature/hash-bound (tamper-evident). Omit-when-absent ⇒ a pre-BSC-10
+  // receipt (the field absent) is byte-identical, so shipped BSC-1 probes + receipts-parity hold.
+  "manifest_digest",
+  "prevHash"
+];
+var REFERENT_FIELD_ORDER = ["path", "digest"];
+var SNAPSHOT_FIELD_ORDER6 = ["gitHead", "treeDigest"];
+function reorder5(obj, order) {
+  const out = {};
+  for (const key of order) out[key] = obj[key];
+  return out;
+}
+function realizationCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of CANONICAL_FIELD_ORDER4) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "referent") {
+      ordered[key] = reorder5(val, REFERENT_FIELD_ORDER);
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder5(val, SNAPSHOT_FIELD_ORDER6);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeRealizationRecordHash(receipt) {
+  return hashContent(realizationCanonicalText(receipt));
+}
+function realizationReceiptsPath(paths) {
+  return path26.join(paths.stateDir, "realization-receipts.jsonl");
+}
+function externalRealizationReceiptsPath(paths) {
+  return path26.join(paths.stateDir, "external-realization-receipts.jsonl");
+}
+var ED25519_SIGNATURE_BASE646 = /^[A-Za-z0-9+/]{86}==$/;
+function isValidRealizationReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "realization") return false;
+  if (typeof r.req_id !== "string" || r.req_id === "") return false;
+  if (typeof r.owning_slice !== "string") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (r.grounding_bound !== void 0 && typeof r.grounding_bound !== "boolean") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
+  if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
+  if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE646.test(r.signature))) {
+    return false;
+  }
+  const ref = r.referent;
+  if (typeof ref !== "object" || ref === null) return false;
+  const f = ref;
+  if (typeof f.path !== "string" || typeof f.digest !== "string") return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readRealizationReceipts(paths) {
+  return readJsonlValues(realizationReceiptsPath(paths), isValidRealizationReceipt);
+}
+function readExternalRealizationReceipts(paths) {
+  return readJsonlValues(externalRealizationReceiptsPath(paths), isValidRealizationReceipt);
+}
+function readLastRealizationRecordHash(paths) {
+  const last = scanTailValid(realizationReceiptsPath(paths), isValidRealizationReceipt);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function verifyRealizationChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeRealizationRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+function normalizeComponentToken(token) {
+  const trimmed = token.trim().replace(/[\\/]+$/, "");
+  if (trimmed === "") return "";
+  const segs = trimmed.split(/[\\/]+/);
+  return (segs[segs.length - 1] ?? "").toLowerCase();
+}
+function doneSlices(state) {
+  return state.slices.filter((s) => s.status === "done");
+}
+function doneSliceComponentIndex(done) {
+  const index = /* @__PURE__ */ new Map();
+  for (const slice of done) {
+    for (const comp of slice.components) {
+      const norm = normalizeComponentToken(comp);
+      if (norm === "") continue;
+      const owners = index.get(norm) ?? [];
+      if (!owners.includes(slice.id)) owners.push(slice.id);
+      index.set(norm, owners);
+    }
+  }
+  return index;
+}
+function ownedReqsForDoneSlices(map, state) {
+  const done = doneSlices(state);
+  if (done.length === 0) return [];
+  const compIndex = doneSliceComponentIndex(done);
+  const owners = /* @__PURE__ */ new Map();
+  for (const file of map.files) {
+    if (file.req_ids.length === 0) continue;
+    const norm = file.component === null ? "" : normalizeComponentToken(file.component);
+    const sliceIds = norm === "" ? void 0 : compIndex.get(norm);
+    if (sliceIds === void 0) continue;
+    for (const reqId of file.req_ids) {
+      const set = owners.get(reqId) ?? /* @__PURE__ */ new Set();
+      for (const id of sliceIds) set.add(id);
+      owners.set(reqId, set);
+    }
+  }
+  const out = [];
+  for (const [reqId, set] of owners) {
+    out.push({ reqId, owningSlices: [...set].sort(), unresolved: false });
+  }
+  out.sort((a, b) => a.reqId < b.reqId ? -1 : a.reqId > b.reqId ? 1 : 0);
+  return out;
+}
+function unresolvedDoneSliceReqs(map, state) {
+  const done = doneSlices(state);
+  if (done.length === 0) return [];
+  const resolved = new Set(ownedReqsForDoneSlices(map, state).map((o) => o.reqId));
+  const unresolved = /* @__PURE__ */ new Set();
+  for (const file of map.files) {
+    if (file.req_ids.length === 0) continue;
+    if (file.component !== null) continue;
+    for (const reqId of file.req_ids) {
+      if (!resolved.has(reqId)) unresolved.add(reqId);
+    }
+  }
+  return [...unresolved].sort();
+}
+function loadRepoMapForRealization(paths) {
+  const mapJsonPath = path26.join(paths.stateDir, "repo-map.json");
+  let raw = null;
+  try {
+    raw = fs26.readFileSync(mapJsonPath, "utf8");
+  } catch {
+    return null;
+  }
+  const parsed = parseRepoMap(raw);
+  return parsed.ok && parsed.map ? parsed.map : null;
+}
+var ReferentUnresolvedError = class extends Error {
+  constructor(message, referent) {
+    super(message);
+    this.referent = referent;
+    this.name = "ReferentUnresolvedError";
+  }
+  referent;
+  /** Stable machine token for the CLI failure envelope. */
+  code = "realization_referent_unresolved";
+};
+function appendRealizationReceipt(paths, input) {
+  const digest = computeTargetDigest(paths.root, input.artifactPath);
+  if (digest === null) {
+    throw new ReferentUnresolvedError(
+      `Refusing to mint a realization receipt for ${input.reqId}: artifact "${input.artifactPath}" does not resolve in source.`,
+      input.artifactPath
+    );
+  }
+  return sealAndAppend5(paths, {
+    kind: "realization",
+    req_id: input.reqId,
+    owning_slice: input.owningSlice,
+    referent: { path: input.artifactPath, digest },
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: input.producerIdentity,
+    producer_kind: "in-process"
+  });
+}
+function appendLegacyRealizationReceipt(paths, reqId, owningSlice) {
+  return sealAndAppend5(paths, {
+    kind: "realization",
+    req_id: reqId,
+    owning_slice: owningSlice,
+    referent: { path: "", digest: "" },
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: "legacy-backfill",
+    legacy: true
+  });
+}
+function sealAndAppend5(paths, receipt) {
+  assertGovernedWriteSurface(paths.root, realizationReceiptsPath(paths));
+  fs26.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastRealizationRecordHash(paths);
+  const withPrev = { ...receipt, prevHash };
+  const recordHash = computeRealizationRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs26.appendFileSync(realizationReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function snapshotStaleReasons5(recorded, current) {
+  const reasons = [];
+  if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
+    reasons.push("gitHead");
+  }
+  if (recorded.treeDigest !== null && current.treeDigest !== null && recorded.treeDigest !== current.treeDigest) {
+    reasons.push("treeDigest");
+  }
+  return reasons;
+}
+function classifyRealizationContent(paths, receipt, passStatus) {
+  const recordedPath = receipt.referent.path;
+  const recordedDigest = receipt.referent.digest;
+  const currentDigest = computeTargetDigest(paths.root, recordedPath);
+  if (currentDigest === null) return { status: "target_missing", receipt };
+  if (currentDigest !== recordedDigest) return { status: "target_mismatch", receipt };
+  const staleReasons = snapshotStaleReasons5(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
+  if (staleReasons.length > 0) return { status: "stale", receipt, staleReasons };
+  return { status: passStatus, receipt };
+}
+function claimsExternal2(r) {
+  return typeof r.signature === "string" || typeof r.key_id === "string";
+}
+function signatureVerifies2(receipt) {
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return false;
+  if (typeof receipt.signature !== "string") return false;
+  if (receipt.key_id !== externalKeyId(publicKey)) return false;
+  const { recordHash: _rh, signature: _sig, ...signedView } = receipt;
+  return verifyCanonical(realizationCanonicalText(signedView), receipt.signature, publicKey);
+}
+function readRealizationReceiptValidated(paths, reqId) {
+  const matches = (r) => r.req_id === reqId;
+  const inProcessReceipts = readRealizationReceipts(paths);
+  if (!verifyRealizationChain(inProcessReceipts).ok) return { status: "tampered" };
+  let inProcess;
+  for (const r of inProcessReceipts) {
+    if (matches(r)) inProcess = r;
+  }
+  const externalReceipts = readExternalRealizationReceipts(paths);
+  const externalChainOk = verifyRealizationChain(externalReceipts).ok;
+  const externalCandidates = externalReceipts.filter((r) => matches(r) && claimsExternal2(r));
+  if (externalCandidates.length > 0) {
+    const publicKey = loadExternalPublicKey();
+    if (publicKey !== null && externalChainOk) {
+      let verified;
+      for (const cand of externalCandidates) {
+        if (signatureVerifies2(cand)) verified = cand;
+      }
+      if (verified) {
+        if (verified.legacy === true) return { status: "legacy", receipt: verified };
+        return classifyRealizationContent(paths, verified, "valid-grounded");
+      }
+    }
+    return { status: "forged", receipt: externalCandidates[externalCandidates.length - 1] };
+  }
+  if (!inProcess) {
+    if (!realizationMigrationDone(paths)) return { status: "legacy" };
+    if (grandfatheredRealizationBaseline(paths).has(reqId)) return { status: "legacy" };
+    return { status: "absent" };
+  }
+  if (inProcess.legacy === true) return { status: "legacy", receipt: inProcess };
+  return classifyRealizationContent(paths, inProcess, "valid");
+}
+function migrationMarkerPath3(paths) {
+  return path26.join(paths.stateDir, ".realization-receipts-migration");
+}
+function readMigrationMarker3(paths) {
+  const file = migrationMarkerPath3(paths);
+  if (!fs26.existsSync(file)) return void 0;
+  let raw;
+  try {
+    raw = fs26.readFileSync(file, "utf8");
+  } catch {
+    return void 0;
+  }
+  const parsed = safeParseJson(raw);
+  if (typeof parsed !== "object" || parsed === null) return void 0;
+  const m = parsed;
+  if (typeof m.migratedAt !== "string") return void 0;
+  if (!Array.isArray(m.baseline) || !m.baseline.every((x) => typeof x === "string")) return void 0;
+  return { migratedAt: m.migratedAt, baseline: m.baseline };
+}
+function realizationMigrationDone(paths) {
+  return readMigrationMarker3(paths) !== void 0;
+}
+function grandfatheredRealizationBaseline(paths) {
+  const marker = readMigrationMarker3(paths);
+  return new Set(marker ? marker.baseline : []);
+}
+function ensureRealizationMigration(paths, state, map) {
+  if (realizationMigrationDone(paths)) return;
+  const owned = map === null ? [] : ownedReqsForDoneSlices(map, state);
+  const existing = /* @__PURE__ */ new Set();
+  for (const r of readRealizationReceipts(paths)) existing.add(r.req_id);
+  for (const o of owned) {
+    if (existing.has(o.reqId)) continue;
+    appendLegacyRealizationReceipt(paths, o.reqId, o.owningSlices[0] ?? "");
+    existing.add(o.reqId);
+  }
+  const baseline = owned.map((o) => o.reqId);
+  const marker = { migratedAt: (/* @__PURE__ */ new Date()).toISOString(), baseline };
+  assertGovernedWriteSurface(paths.root, migrationMarkerPath3(paths));
+  fs26.mkdirSync(paths.stateDir, { recursive: true });
+  fs26.writeFileSync(migrationMarkerPath3(paths), JSON.stringify(marker), "utf8");
+}
+function ensureRealizationMigrationOpportunistic(paths) {
+  if (realizationMigrationDone(paths)) return;
+  const r = readState(paths);
+  if (!r.exists || !r.state) return;
+  const state = r.state;
+  if (doneSlices(state).length === 0) return;
+  try {
+    withStateLock(paths, () => {
+      if (realizationMigrationDone(paths)) return;
+      const fresh = readState(paths);
+      if (!fresh.exists || !fresh.state) return;
+      if (doneSlices(fresh.state).length === 0) return;
+      ensureRealizationMigration(paths, fresh.state, loadRepoMapForRealization(paths));
+    });
+  } catch {
+  }
+}
+
+// src/core/bsc3-flag.ts
+function bsc3EnforcementEnabled() {
+  const raw = process.env.TH_BSC3_ENFORCE;
+  if (raw === void 0) return true;
+  const normalized = raw.trim().toLowerCase();
+  return !(normalized === "0" || normalized === "false");
+}
+
+// src/core/bsc1-flag.ts
+function realizationEnforcementEnabled() {
+  const raw = process.env.TH_BSC1_ENFORCE;
+  if (raw === void 0) return true;
+  const normalized = raw.trim().toLowerCase();
+  return !(normalized === "0" || normalized === "false");
+}
+
+// src/core/bsc2-flag.ts
+function bsc2EnforcementEnabled() {
+  const raw = process.env.TH_BSC2_ENFORCE;
+  if (raw === void 0) return true;
+  const normalized = raw.trim().toLowerCase();
+  return !(normalized === "0" || normalized === "false");
+}
+
+// src/core/bsc9-flag.ts
+function bsc9EnforcementEnabled() {
+  const raw = process.env.TH_BSC9_ENFORCE;
+  if (raw === void 0) return true;
+  const normalized = raw.trim().toLowerCase();
+  return !(normalized === "0" || normalized === "false");
+}
+
+// src/core/projection-oracle.ts
+var fs27 = __toESM(require("node:fs"));
+function referenceProjection(result) {
+  const text = result.human !== void 0 ? result.human : result.data !== void 0 ? JSON.stringify(result.data, null, 2) : result.ok ? "OK" : "FAILED";
+  return {
+    isError: !result.ok,
+    text,
+    // `exitCode` is spread LAST so the envelope's exitCode deterministically WINS over any
+    // `exitCode` nested inside `result.data` (the reserved-key precedence invariant).
+    structuredContent: { ...result.data ?? {}, exitCode: result.exitCode }
+  };
+}
+function projectionFidelity(tool, result, projected) {
+  const ref = referenceProjection(result);
+  const out = [];
+  if (projected.isError !== ref.isError) {
+    out.push({ tool, axis: "isError", detail: `expected isError=${ref.isError}, got ${projected.isError}` });
+  }
+  if (projected.structuredContent?.exitCode !== ref.structuredContent.exitCode) {
+    out.push({
+      tool,
+      axis: "exitCode",
+      detail: `expected exitCode=${String(ref.structuredContent.exitCode)}, got ${String(projected.structuredContent?.exitCode)}`
+    });
+  }
+  for (const [k, v] of Object.entries(ref.structuredContent)) {
+    if (k === "exitCode") continue;
+    if (JSON.stringify(projected.structuredContent?.[k]) !== JSON.stringify(v)) {
+      out.push({ tool, axis: "data", detail: `data.${k}: expected ${JSON.stringify(v)}, got ${JSON.stringify(projected.structuredContent?.[k])}` });
+    }
+  }
+  if (projected.text !== ref.text) {
+    out.push({ tool, axis: "text", detail: `text rendering diverged` });
+  }
+  return out;
+}
+function isValidFixtureSet(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const fx = parsed.fixtures;
+  if (!Array.isArray(fx)) return false;
+  return fx.every((f) => {
+    if (typeof f !== "object" || f === null) return false;
+    const r = f;
+    if (typeof r.tool !== "string" || r.tool === "") return false;
+    if (typeof r.result !== "object" || r.result === null) return false;
+    if (typeof r.projected !== "object" || r.projected === null) return false;
+    const proj = r.projected;
+    if (typeof proj.isError !== "boolean") return false;
+    if (typeof proj.text !== "string") return false;
+    if (typeof proj.structuredContent !== "object" || proj.structuredContent === null) return false;
+    return true;
+  });
+}
+function loadProjectionFixtures(absPath) {
+  try {
+    if (!fs27.existsSync(absPath)) return null;
+    const parsed = JSON.parse(fs27.readFileSync(absPath, "utf8"));
+    return isValidFixtureSet(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function runProjectionOracle(set) {
+  const out = [];
+  for (const f of set.fixtures) {
+    out.push(...projectionFidelity(f.tool, f.result, f.projected));
+  }
+  return out;
+}
+
+// src/core/assertion-presence.ts
+var fs28 = __toESM(require("node:fs"));
+var path27 = __toESM(require("node:path"));
+var PARSEABLE_TEST_EXTENSIONS = /* @__PURE__ */ new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mts",
+  ".cts",
+  ".mjs",
+  ".cjs"
+]);
+function isParseableTestFile(relPosix2) {
+  const lower = relPosix2.toLowerCase();
+  const dot = lower.lastIndexOf(".");
+  if (dot < 0) return false;
+  return PARSEABLE_TEST_EXTENSIONS.has(lower.slice(dot));
+}
+function isLiteral(s) {
+  const t = s.trim();
+  if (t === "") return false;
+  if (/^-?\d+(?:\.\d+)?$/.test(t)) return true;
+  if (/^(['"`]).*\1$/.test(t)) return true;
+  if (/^(true|false|null|undefined|NaN)$/.test(t)) return true;
+  return false;
+}
+function nextExpectOpenParen(text, from) {
+  let i = from;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "'" || c === '"' || c === "`") {
+      i = skipString(text, i, c);
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "/") {
+      const nl = text.indexOf("\n", i + 2);
+      i = nl < 0 ? text.length : nl;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 2;
+      continue;
+    }
+    if (c === "/") {
+      i = skipRegexOrSlash(text, i);
+      continue;
+    }
+    if (text.startsWith("expect", i) && !/[A-Za-z0-9_$]/.test(i === 0 ? "" : text[i - 1]) && !/[A-Za-z0-9_$]/.test(text[i + 6] ?? "")) {
+      let j = i + 6;
+      while (j < text.length && /\s/.test(text[j])) j++;
+      if (text[j] === "(") return j;
+    }
+    i++;
+  }
+  return -1;
+}
+function skipRegexOrSlash(text, start) {
+  let i = start + 1;
+  let inClass = false;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "\\") {
+      i += 2;
+      continue;
+    }
+    if (c === "\n") return start + 1;
+    if (c === "[") inClass = true;
+    else if (c === "]") inClass = false;
+    else if (c === "/" && !inClass) return i + 1;
+    i++;
+  }
+  return start + 1;
+}
+function matchingParen(text, openIdx) {
+  let depth = 0;
+  let i = openIdx;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "'" || c === '"' || c === "`") {
+      i = skipString(text, i, c);
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "/") {
+      const nl = text.indexOf("\n", i + 2);
+      i = nl < 0 ? text.length : nl;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 2;
+      continue;
+    }
+    if (c === "(") depth++;
+    else if (c === ")") {
+      depth--;
+      if (depth === 0) return i;
+    }
+    i++;
+  }
+  return -1;
+}
+function skipString(text, start, quote) {
+  let i = start + 1;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "\\") {
+      i += 2;
+      continue;
+    }
+    if (c === quote) return i + 1;
+    i++;
+  }
+  return text.length;
+}
+var MATCHER_MODIFIERS = /* @__PURE__ */ new Set(["not", "resolves", "rejects"]);
+function firstMatcherArg(text, afterExpect) {
+  let i = afterExpect;
+  for (; ; ) {
+    while (i < text.length && /\s/.test(text[i])) i++;
+    if (text[i] !== ".") return void 0;
+    i++;
+    while (i < text.length && /\s/.test(text[i])) i++;
+    const nameStart = i;
+    while (i < text.length && /[A-Za-z0-9_$]/.test(text[i])) i++;
+    const name = text.slice(nameStart, i).toLowerCase();
+    if (name === "") return void 0;
+    while (i < text.length && /\s/.test(text[i])) i++;
+    if (MATCHER_MODIFIERS.has(name) && text[i] !== "(") {
+      continue;
+    }
+    if (text[i] === "(") {
+      const close = matchingParen(text, i);
+      if (close < 0) return void 0;
+      return text.slice(i + 1, close);
+    }
+    return void 0;
+  }
+}
+function countAssertionsInText(text) {
+  let total = 0;
+  let trivial = 0;
+  let cursor = 0;
+  for (; ; ) {
+    const open = nextExpectOpenParen(text, cursor);
+    if (open < 0) break;
+    const close = matchingParen(text, open);
+    if (close < 0) break;
+    total++;
+    const argA = text.slice(open + 1, close).trim();
+    const argBraw = firstMatcherArg(text, close + 1);
+    const argB = argBraw === void 0 ? void 0 : argBraw.trim();
+    const literalCase = isLiteral(argA) && (argB === void 0 || isLiteral(argB));
+    const tautologyCase = argA !== "" && argB !== void 0 && argA === argB;
+    if (literalCase || tautologyCase) trivial++;
+    cursor = close + 1;
+  }
+  return { total, trivial };
+}
+function computeAssertionPresenceGround(paths, opts = {}) {
+  const testsDir = opts.testsDir ?? path27.resolve(paths.root, "tests");
+  const anchors = scanDirForReqIds(testsDir);
+  const summaries = [];
+  for (const [reqId, files] of anchors) {
+    const testFiles = files.filter((f) => isRecognizedTestFile(f)).sort();
+    if (testFiles.length === 0) continue;
+    let assertionCount = 0;
+    let trivial = 0;
+    for (const rel of testFiles) {
+      if (!isParseableTestFile(rel)) continue;
+      const abs = resolveWithinRoot(testsDir, rel);
+      if (abs === null) continue;
+      let content;
+      try {
+        if (!fs28.existsSync(abs) || !fs28.statSync(abs).isFile()) continue;
+        content = fs28.readFileSync(abs, "utf8");
+      } catch {
+        continue;
+      }
+      const counts = countAssertionsInText(content);
+      assertionCount += counts.total;
+      trivial += counts.trivial;
+    }
+    const nonTrivialAssertions = assertionCount - trivial;
+    summaries.push({
+      reqId,
+      testFiles,
+      assertionCount,
+      nonTrivialAssertions,
+      assertionFree: nonTrivialAssertions === 0
+    });
+  }
+  summaries.sort((a, b) => a.reqId < b.reqId ? -1 : a.reqId > b.reqId ? 1 : 0);
+  return summaries;
+}
+var SUMMARY_FIELD_ORDER = [
+  "reqId",
+  "testFiles",
+  "assertionCount",
+  "nonTrivialAssertions",
+  "assertionFree"
+];
+var MUTATION_GROUND_FIELD_ORDER = [
+  "mutants_generated",
+  "mutants_killed",
+  "mutants_survived",
+  "score",
+  "scope"
+];
+var SNAPSHOT_FIELD_ORDER7 = ["gitHead", "treeDigest"];
+function reorder6(obj, order) {
+  const out = {};
+  for (const key of order) out[key] = obj[key];
+  return out;
+}
+function reorderSummary(summary) {
+  return reorder6(summary, SUMMARY_FIELD_ORDER);
+}
+function serializeAssertionGround(ground) {
+  return JSON.stringify(ground.map(reorderSummary));
+}
+function assertionGroundDigest(ground) {
+  return hashContent(serializeAssertionGround(ground));
+}
+var ASSERTION_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "refId",
+  "ground",
+  "snapshot_coord",
+  "producer_identity",
+  "legacy",
+  "prevHash"
+];
+function assertionPresenceCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of ASSERTION_CANONICAL_FIELD_ORDER) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "ground") {
+      ordered[key] = val.map(reorderSummary);
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder6(val, SNAPSHOT_FIELD_ORDER7);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeAssertionPresenceRecordHash(receipt) {
+  return hashContent(assertionPresenceCanonicalText(receipt));
+}
+function assertionPresenceReceiptsPath(paths) {
+  return path27.join(paths.stateDir, "assertion-presence-receipts.jsonl");
+}
+function isValidAssertionPresenceReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "assertion-presence") return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
+  if (!Array.isArray(r.ground)) return false;
+  for (const s2 of r.ground) {
+    if (typeof s2 !== "object" || s2 === null) return false;
+    const sm = s2;
+    if (typeof sm.reqId !== "string" || sm.reqId === "") return false;
+    if (!Array.isArray(sm.testFiles) || !sm.testFiles.every((f) => typeof f === "string")) return false;
+    if (typeof sm.assertionCount !== "number" || !Number.isFinite(sm.assertionCount)) return false;
+    if (typeof sm.nonTrivialAssertions !== "number" || !Number.isFinite(sm.nonTrivialAssertions)) return false;
+    if (typeof sm.assertionFree !== "boolean") return false;
+  }
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readAssertionPresenceReceipts(paths) {
+  return readJsonlValues(assertionPresenceReceiptsPath(paths), isValidAssertionPresenceReceipt);
+}
+function readLastAssertionPresenceRecordHash(paths) {
+  const last = scanTailValid(assertionPresenceReceiptsPath(paths), isValidAssertionPresenceReceipt);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function verifyAssertionPresenceChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeAssertionPresenceRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+function appendAssertionPresenceReceipt(paths, input) {
+  const ground = computeAssertionPresenceGround(paths, { testsDir: input.testsDir });
+  return sealAndAppendAssertion(paths, {
+    kind: "assertion-presence",
+    refId: assertionRefId(paths),
+    ground,
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: input.producerIdentity
+  });
+}
+function assertionRefId(paths) {
+  return currentReceiptSnapshotCoord(paths).gitHead ?? "no-git";
+}
+function sealAndAppendAssertion(paths, receipt) {
+  assertGovernedWriteSurface(paths.root, assertionPresenceReceiptsPath(paths));
+  fs28.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastAssertionPresenceRecordHash(paths);
+  const withPrev = { ...receipt, prevHash };
+  const recordHash = computeAssertionPresenceRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs28.appendFileSync(assertionPresenceReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function snapshotStaleReasons6(recorded, current) {
+  const reasons = [];
+  if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
+    reasons.push("gitHead");
+  }
+  if (recorded.treeDigest !== null && current.treeDigest !== null && recorded.treeDigest !== current.treeDigest) {
+    reasons.push("treeDigest");
+  }
+  return reasons;
+}
+function assertionFreeOffenders(ground) {
+  return ground.filter((s) => s.assertionFree).map((s) => s.reqId).sort();
+}
+function validateAssertionPresenceContent(paths, receipt) {
+  const recomputed = computeAssertionPresenceGround(paths);
+  const offenders = assertionFreeOffenders(recomputed);
+  if (assertionGroundDigest(recomputed) !== assertionGroundDigest(receipt.ground)) {
+    return { status: "target_mismatch", offenders };
+  }
+  const staleReasons = snapshotStaleReasons6(receipt.snapshot_coord, currentReceiptSnapshotCoord(paths));
+  if (staleReasons.length > 0) return { status: "stale", staleReasons, offenders };
+  return { status: "valid", offenders };
+}
+var MUTATION_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "refId",
+  "ground",
+  "snapshot_coord",
+  "producer_kind",
+  "key_id",
+  "prevHash"
+];
+function mutationKillCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of MUTATION_CANONICAL_FIELD_ORDER) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "ground") {
+      ordered[key] = reorder6(val, MUTATION_GROUND_FIELD_ORDER);
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder6(val, SNAPSHOT_FIELD_ORDER7);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeMutationKillRecordHash(receipt) {
+  return hashContent(mutationKillCanonicalText(receipt));
+}
+function externalMutationReceiptsPath(paths) {
+  return path27.join(paths.stateDir, "external-mutation-receipts.jsonl");
+}
+var ED25519_SIGNATURE_BASE647 = /^[A-Za-z0-9+/]{86}==$/;
+function isValidMutationKillReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "mutation-kill") return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (r.producer_kind !== "controlled-runner") return false;
+  if (typeof r.key_id !== "string" || r.key_id === "") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE647.test(r.signature))) {
+    return false;
+  }
+  const g = r.ground;
+  if (typeof g !== "object" || g === null) return false;
+  const gm = g;
+  for (const k of ["mutants_generated", "mutants_killed", "mutants_survived", "score"]) {
+    if (typeof gm[k] !== "number" || !Number.isFinite(gm[k])) return false;
+  }
+  if (typeof gm.scope !== "string") return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readExternalMutationReceipts(paths) {
+  return readJsonlValues(externalMutationReceiptsPath(paths), isValidMutationKillReceipt);
+}
+function verifyMutationChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, ...rest } = r;
+    const recomputed = computeMutationKillRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+function signatureVerifies3(receipt) {
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return false;
+  if (typeof receipt.signature !== "string") return false;
+  if (receipt.key_id !== externalKeyId(publicKey)) return false;
+  const { recordHash: _rh, signature: _sig, ...signedView } = receipt;
+  return verifyCanonical(mutationKillCanonicalText(signedView), receipt.signature, publicKey);
+}
+function readMutationKillValidated(paths) {
+  const receipts = readExternalMutationReceipts(paths);
+  const candidates = receipts.filter((r) => r.producer_kind === "controlled-runner");
+  if (candidates.length === 0) return { status: "absent" };
+  const chainOk = verifyMutationChain(receipts).ok;
+  const publicKey = loadExternalPublicKey();
+  if (publicKey !== null && chainOk) {
+    let verified;
+    for (const cand of candidates) {
+      if (signatureVerifies3(cand)) verified = cand;
+    }
+    if (verified) return { status: "valid-grounded", receipt: verified };
+  }
+  return { status: "forged", receipt: candidates[candidates.length - 1] };
+}
+function assertionWaiversPath(paths) {
+  return path27.join(paths.stateDir, "assertion-waivers.jsonl");
+}
+var ASSERTION_WAIVER_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "reqId",
+  "groundDigest",
+  "snapshot_coord",
+  "producer_kind",
+  "key_id",
+  "prevHash"
+];
+function assertionWaiverCanonicalText(waiver) {
+  const ordered = {};
+  for (const key of ASSERTION_WAIVER_CANONICAL_FIELD_ORDER) {
+    const val = waiver[key];
+    if (val === void 0) continue;
+    if (key === "snapshot_coord") {
+      ordered[key] = reorder6(val, SNAPSHOT_FIELD_ORDER7);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeAssertionWaiverRecordHash(waiver) {
+  return hashContent(assertionWaiverCanonicalText(waiver));
+}
+function isValidAssertionWaiver(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "assertion-waiver") return false;
+  if (typeof r.reqId !== "string" || r.reqId === "") return false;
+  if (typeof r.groundDigest !== "string" || !HEX64.test(r.groundDigest)) return false;
+  if (r.producer_kind !== "external") return false;
+  if (typeof r.key_id !== "string" || r.key_id === "") return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE647.test(r.signature))) {
+    return false;
+  }
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readAssertionWaivers(paths) {
+  return readJsonlValues(assertionWaiversPath(paths), isValidAssertionWaiver);
+}
+function verifyAssertionWaiverChain(waivers) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < waivers.length; i++) {
+    const w = waivers[i];
+    const { recordHash, signature: _sig, ...rest } = w;
+    const recomputed = computeAssertionWaiverRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (w.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = w.recordHash;
+  }
+  return { ok: true };
+}
+function waiverSignatureVerifies(waiver, publicKey) {
+  if (typeof waiver.signature !== "string") return false;
+  if (waiver.key_id !== externalKeyId(publicKey)) return false;
+  const { recordHash: _rh, signature, ...signedView } = waiver;
+  return verifyCanonical(assertionWaiverCanonicalText(signedView), signature, publicKey);
+}
+function currentReqGroundDigest(paths, reqId) {
+  const ground = computeAssertionPresenceGround(paths);
+  const summary = ground.find((s) => s.reqId === reqId);
+  if (summary === void 0) return null;
+  return assertionGroundDigest([summary]);
+}
+function validWaivedReqs(paths) {
+  const waivers = readAssertionWaivers(paths);
+  if (waivers.length === 0) return /* @__PURE__ */ new Set();
+  if (!verifyAssertionWaiverChain(waivers).ok) return /* @__PURE__ */ new Set();
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return /* @__PURE__ */ new Set();
+  const exempt = /* @__PURE__ */ new Set();
+  for (const w of waivers) {
+    if (!waiverSignatureVerifies(w, publicKey)) continue;
+    const current = currentReqGroundDigest(paths, w.reqId);
+    if (current === null || current !== w.groundDigest) continue;
+    exempt.add(w.reqId);
+  }
+  return exempt;
+}
+
+// src/core/grounding.ts
+var fs29 = __toESM(require("node:fs"));
+var path28 = __toESM(require("node:path"));
+var ED25519_SIGNATURE_BASE648 = /^[A-Za-z0-9+/]{86}==$/;
+var WORK_CLASS_GROUND_MATRIX = {
+  redesign: ["digest-manifest", "visual-hash"],
+  recreation: ["digest-manifest", "visual-hash", "version-pin"],
+  integration: ["digest-manifest", "version-pin"],
+  migration: ["version-pin", "digest-manifest"],
+  "greenfield+dep": ["version-pin"],
+  greenfield: []
+};
+var UX_SURFACE_LABELS = /* @__PURE__ */ new Set(["ux", "ui", "tui", "screen", "interactive", "visual"]);
+function hasUxSurface(surfaces) {
+  return surfaces.some((s) => UX_SURFACE_LABELS.has(s.trim().toLowerCase()));
+}
+function requiredGroundKindsForWorkClass(workClass, surfaces = [], derivedClass) {
+  const set = new Set(WORK_CLASS_GROUND_MATRIX[workClass] ?? []);
+  if (hasUxSurface(surfaces)) set.add("visual-hash");
+  let crossCheckFlag;
+  if (derivedClass !== void 0 && derivedClass !== "" && derivedClass !== workClass) {
+    for (const k of WORK_CLASS_GROUND_MATRIX[derivedClass] ?? []) set.add(k);
+    crossCheckFlag = "class-cross-check-mismatch";
+  }
+  const required2 = [...set].sort();
+  return crossCheckFlag ? { required: required2, crossCheckFlag } : { required: required2 };
+}
+var SNAPSHOT_FIELD_ORDER8 = ["gitHead", "treeDigest"];
+function reorder7(obj, order) {
+  const out = {};
+  for (const key of order) out[key] = obj[key];
+  return out;
+}
+function toPosix3(p) {
+  return p.replace(/\\/g, "/");
+}
+function serializeGroundingGround(ground) {
+  switch (ground.groundKind) {
+    case "digest-manifest": {
+      const ordered = {
+        groundKind: ground.groundKind,
+        manifestDigest: ground.manifestDigest
+      };
+      if (ground.entries !== void 0) {
+        ordered.entries = [...ground.entries].map((e) => ({ path: toPosix3(e.path), digest: e.digest })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+      }
+      return JSON.stringify(ordered);
+    }
+    case "version-pin": {
+      return JSON.stringify({ groundKind: ground.groundKind, pkg: ground.pkg, version: ground.version });
+    }
+    case "visual-hash": {
+      const ordered = {
+        groundKind: ground.groundKind,
+        perceptualHash: ground.perceptualHash
+      };
+      if (ground.renderer !== void 0) ordered.renderer = ground.renderer;
+      return JSON.stringify(ordered);
+    }
+  }
+}
+var CONFORMANCE_FIELD_ORDER = ["metric", "observed", "status"];
+function serializeConformance(conformance) {
+  return [...conformance].sort((a, b) => a.metric < b.metric ? -1 : a.metric > b.metric ? 1 : 0).map((m) => reorder7(m, CONFORMANCE_FIELD_ORDER));
+}
+var GROUNDING_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "refId",
+  "workClass",
+  "ground",
+  "conformance",
+  "snapshot_coord",
+  "producer_identity",
+  "fidelityTier",
+  "diffBand",
+  "legacy",
+  "producer_kind",
+  "key_id",
+  "prevHash"
+];
+function groundingCanonicalText(receipt) {
+  const ordered = {};
+  for (const key of GROUNDING_CANONICAL_FIELD_ORDER) {
+    const val = receipt[key];
+    if (val === void 0) continue;
+    if (key === "ground") {
+      ordered[key] = JSON.parse(serializeGroundingGround(val));
+    } else if (key === "conformance") {
+      ordered[key] = serializeConformance(val);
+    } else if (key === "snapshot_coord") {
+      ordered[key] = reorder7(val, SNAPSHOT_FIELD_ORDER8);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function computeGroundingRecordHash(receipt) {
+  return hashContent(groundingCanonicalText(receipt));
+}
+function groundingReceiptsPath(paths) {
+  return path28.join(paths.stateDir, "grounding-receipts.jsonl");
+}
+function externalGroundingReceiptsPath(paths) {
+  return path28.join(paths.stateDir, "external-grounding-receipts.jsonl");
+}
+function groundingBudgetsPath(paths) {
+  return path28.join(paths.stateDir, "grounding-budgets.jsonl");
+}
+function groundingExceptionsPath(paths) {
+  return path28.join(paths.stateDir, "grounding-exceptions.jsonl");
+}
+function isValidGround(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const g = parsed;
+  switch (g.groundKind) {
+    case "digest-manifest": {
+      if (typeof g.manifestDigest !== "string" || g.manifestDigest === "") return false;
+      if (g.entries !== void 0) {
+        if (!Array.isArray(g.entries)) return false;
+        for (const e of g.entries) {
+          if (typeof e !== "object" || e === null) return false;
+          const em = e;
+          if (typeof em.path !== "string" || typeof em.digest !== "string") return false;
+        }
+      }
+      return true;
+    }
+    case "version-pin":
+      return typeof g.pkg === "string" && g.pkg !== "" && typeof g.version === "string" && g.version !== "";
+    case "visual-hash":
+      return typeof g.perceptualHash === "string" && g.perceptualHash !== "" && (g.renderer === void 0 || typeof g.renderer === "string");
+    default:
+      return false;
+  }
+}
+function isValidConformanceMetric(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const m = parsed;
+  if (m.metric !== "version" && m.metric !== "api" && m.metric !== "visual" && m.metric !== "a11y") return false;
+  if (typeof m.observed === "number") {
+    if (!Number.isFinite(m.observed)) return false;
+  } else if (typeof m.observed !== "string") return false;
+  if (m.status !== "within-budget" && m.status !== "over-budget" && m.status !== "unobserved") return false;
+  return true;
+}
+function isValidGroundingReceipt(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "grounding") return false;
+  if (typeof r.refId !== "string" || r.refId === "") return false;
+  if (typeof r.workClass !== "string" || r.workClass === "") return false;
+  if (typeof r.producer_identity !== "string") return false;
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  if (!isValidGround(r.ground)) return false;
+  if (!Array.isArray(r.conformance) || !r.conformance.every(isValidConformanceMetric)) return false;
+  if (r.fidelityTier !== void 0 && typeof r.fidelityTier !== "string") return false;
+  if (r.diffBand !== void 0 && typeof r.diffBand !== "string") return false;
+  if (r.legacy !== void 0 && typeof r.legacy !== "boolean") return false;
+  if (r.producer_kind !== void 0 && r.producer_kind !== "external" && r.producer_kind !== "in-process") return false;
+  if (r.key_id !== void 0 && typeof r.key_id !== "string") return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE648.test(r.signature))) {
+    return false;
+  }
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function readGroundingReceipts(paths) {
+  return readJsonlValues(groundingReceiptsPath(paths), isValidGroundingReceipt);
+}
+function readExternalGroundingReceipts(paths) {
+  return readJsonlValues(externalGroundingReceiptsPath(paths), isValidGroundingReceipt);
+}
+function readLastGroundingRecordHash(paths) {
+  const last = scanTailValid(groundingReceiptsPath(paths), isValidGroundingReceipt);
+  return last ? last.recordHash : GENESIS_PREV_HASH;
+}
+function verifyGroundingChain(receipts) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < receipts.length; i++) {
+    const r = receipts[i];
+    const { recordHash, signature: _sig, ...rest } = r;
+    const recomputed = computeGroundingRecordHash(rest);
+    if (recomputed !== recordHash) {
+      return { ok: false, brokenAt: i, reason: "edited" };
+    }
+    if (r.prevHash !== expectedPrev) {
+      return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    }
+    expectedPrev = r.recordHash;
+  }
+  return { ok: true };
+}
+function appendGroundingReceipt(paths, input) {
+  const receipt = {
+    kind: "grounding",
+    refId: groundingRefId(paths),
+    workClass: input.workClass,
+    ground: input.ground,
+    conformance: input.conformance ?? [],
+    snapshot_coord: currentReceiptSnapshotCoord(paths),
+    producer_identity: input.producerIdentity,
+    ...input.fidelityTier !== void 0 ? { fidelityTier: input.fidelityTier } : {},
+    ...input.diffBand !== void 0 ? { diffBand: input.diffBand } : {}
+  };
+  assertGovernedWriteSurface(paths.root, groundingReceiptsPath(paths));
+  fs29.mkdirSync(paths.stateDir, { recursive: true });
+  const prevHash = readLastGroundingRecordHash(paths);
+  const withPrev = { ...receipt, prevHash };
+  const recordHash = computeGroundingRecordHash(withPrev);
+  const sealed = { ...withPrev, recordHash };
+  fs29.appendFileSync(groundingReceiptsPath(paths), JSON.stringify(sealed) + "\n", "utf8");
+  return sealed;
+}
+function groundingRefId(paths) {
+  return currentReceiptSnapshotCoord(paths).gitHead ?? "no-git";
+}
+function snapshotStaleReasons7(recorded, current) {
+  const reasons = [];
+  if (recorded.gitHead !== null && current.gitHead !== null && recorded.gitHead !== current.gitHead) {
+    reasons.push("gitHead");
+  }
+  if (recorded.treeDigest !== null && current.treeDigest !== null && recorded.treeDigest !== current.treeDigest) {
+    reasons.push("treeDigest");
+  }
+  return reasons;
+}
+function validateGroundingContent(paths, receipt) {
+  const unobservedMetrics = receipt.conformance.filter((m) => m.status === "unobserved").map((m) => m.metric).sort();
+  const overBudgetMetrics = receipt.conformance.filter((m) => m.status === "over-budget").map((m) => m.metric).sort();
+  if (unobservedMetrics.length > 0) return { status: "unobserved", unobservedMetrics };
+  if (overBudgetMetrics.length > 0) return { status: "over-budget", overBudgetMetrics };
+  const recorded = receipt.snapshot_coord;
+  const hasRecordedCoord = recorded != null && (recorded.gitHead != null || recorded.treeDigest != null);
+  if (hasRecordedCoord) {
+    const staleReasons = snapshotStaleReasons7(recorded, currentReceiptSnapshotCoord(paths));
+    if (staleReasons.length > 0) return { status: "stale", staleReasons };
+  }
+  return { status: "valid" };
+}
+function groundingSignatureVerifies(receipt, publicKey) {
+  if (typeof receipt.signature !== "string") return false;
+  if (receipt.key_id !== externalKeyId(publicKey)) return false;
+  const { recordHash: _rh, signature, ...signedView } = receipt;
+  return verifyCanonical(groundingCanonicalText(signedView), signature, publicKey);
+}
+function readGroundingValidated(paths) {
+  const inProcess = readGroundingReceipts(paths);
+  const inProcessChainOk = verifyGroundingChain(inProcess).ok;
+  const external = readExternalGroundingReceipts(paths);
+  const externalChainOk = verifyGroundingChain(external).ok;
+  const byKind = /* @__PURE__ */ new Map();
+  if (inProcessChainOk) {
+    for (const r of inProcess) {
+      byKind.set(r.ground.groundKind, { receipt: r, trustLabel: "valid" });
+    }
+  }
+  const publicKey = loadExternalPublicKey();
+  if (externalChainOk && publicKey !== null) {
+    for (const r of external) {
+      if (r.producer_kind !== "external") continue;
+      if (!groundingSignatureVerifies(r, publicKey)) continue;
+      byKind.set(r.ground.groundKind, { receipt: r, trustLabel: "valid-grounded" });
+    }
+  }
+  return { byKind, inProcessChainOk, externalChainOk };
+}
+function hasValidExternalTrailer(r) {
+  if (r.producer_kind !== "external") return false;
+  if (typeof r.key_id !== "string" || r.key_id === "") return false;
+  if (r.signature !== void 0 && (typeof r.signature !== "string" || !ED25519_SIGNATURE_BASE648.test(r.signature))) {
+    return false;
+  }
+  if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
+  if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
+  const snap = r.snapshot_coord;
+  if (typeof snap !== "object" || snap === null) return false;
+  const s = snap;
+  if (!(s.gitHead === null || typeof s.gitHead === "string")) return false;
+  if (!(s.treeDigest === null || typeof s.treeDigest === "string")) return false;
+  return true;
+}
+function isGroundKindValue(g) {
+  return g === "digest-manifest" || g === "version-pin" || g === "visual-hash";
+}
+function isValidGroundingBudget(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "grounding-budget") return false;
+  if (typeof r.workClass !== "string" || r.workClass === "") return false;
+  if (!isGroundKindValue(r.groundKind)) return false;
+  if (r.metric !== "version" && r.metric !== "api" && r.metric !== "visual" && r.metric !== "a11y") return false;
+  if (typeof r.threshold !== "number" || !Number.isFinite(r.threshold)) return false;
+  return hasValidExternalTrailer(r);
+}
+function isValidGroundingException(parsed) {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const r = parsed;
+  if (r.kind !== "grounding-exception") return false;
+  if (typeof r.workClass !== "string" || r.workClass === "") return false;
+  if (!isGroundKindValue(r.groundKind)) return false;
+  if (typeof r.reason !== "string") return false;
+  return hasValidExternalTrailer(r);
+}
+function readGroundingBudgets(paths) {
+  return readJsonlValues(groundingBudgetsPath(paths), isValidGroundingBudget);
+}
+function readGroundingExceptions(paths) {
+  return readJsonlValues(groundingExceptionsPath(paths), isValidGroundingException);
+}
+var GROUNDING_BUDGET_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "workClass",
+  "groundKind",
+  "metric",
+  "threshold",
+  "snapshot_coord",
+  "producer_kind",
+  "key_id",
+  "prevHash"
+];
+var GROUNDING_EXCEPTION_CANONICAL_FIELD_ORDER = [
+  "kind",
+  "workClass",
+  "groundKind",
+  "reason",
+  "snapshot_coord",
+  "producer_kind",
+  "key_id",
+  "prevHash"
+];
+function siblingCanonicalText(line, order) {
+  const ordered = {};
+  for (const key of order) {
+    const val = line[key];
+    if (val === void 0) continue;
+    if (key === "snapshot_coord") {
+      ordered[key] = reorder7(val, SNAPSHOT_FIELD_ORDER8);
+    } else {
+      ordered[key] = val;
+    }
+  }
+  return JSON.stringify(ordered);
+}
+function groundingBudgetCanonicalText(budget) {
+  return siblingCanonicalText(budget, GROUNDING_BUDGET_CANONICAL_FIELD_ORDER);
+}
+function groundingExceptionCanonicalText(exception) {
+  return siblingCanonicalText(
+    exception,
+    GROUNDING_EXCEPTION_CANONICAL_FIELD_ORDER
+  );
+}
+function verifySiblingChain(lines, canonical) {
+  let expectedPrev = GENESIS_PREV_HASH;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const recomputed = hashContent(canonical(line));
+    if (recomputed !== line.recordHash) return { ok: false, brokenAt: i, reason: "edited" };
+    if (line.prevHash !== expectedPrev) return { ok: false, brokenAt: i, reason: "prev_mismatch" };
+    expectedPrev = line.recordHash;
+  }
+  return { ok: true };
+}
+function siblingSignatureVerifies(line, publicKey, canonical) {
+  const signature = line.signature;
+  if (typeof signature !== "string") return false;
+  if (line.key_id !== externalKeyId(publicKey)) return false;
+  return verifyCanonical(canonical(line), signature, publicKey);
+}
+function validGroundingExemptions(paths) {
+  const exempt = /* @__PURE__ */ new Map();
+  const exceptions = readGroundingExceptions(paths);
+  if (exceptions.length === 0) return exempt;
+  if (!verifySiblingChain(exceptions, groundingExceptionCanonicalText).ok) return exempt;
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return exempt;
+  for (const ex of exceptions) {
+    if (!siblingSignatureVerifies(ex, publicKey, groundingExceptionCanonicalText)) continue;
+    exempt.set(groundingExemptionKey(ex.workClass, ex.groundKind), {
+      workClass: ex.workClass,
+      groundKind: ex.groundKind,
+      reason: ex.reason
+    });
+  }
+  return exempt;
+}
+function groundingExemptionKey(workClass, groundKind) {
+  return `${workClass}::${groundKind}`;
+}
+function validGroundingBudgets(paths) {
+  const valid = /* @__PURE__ */ new Map();
+  const budgets = readGroundingBudgets(paths);
+  if (budgets.length === 0) return valid;
+  if (!verifySiblingChain(budgets, groundingBudgetCanonicalText).ok) return valid;
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return valid;
+  for (const b of budgets) {
+    if (!siblingSignatureVerifies(b, publicKey, groundingBudgetCanonicalText)) continue;
+    valid.set(`${b.workClass}::${b.groundKind}::${b.metric}`, b);
+  }
+  return valid;
+}
+var TOLERANCE_METRICS = /* @__PURE__ */ new Set(["visual", "a11y"]);
+function toleranceThresholdVerdicts(receipt, validBudgets) {
+  if (receipt.ground.groundKind !== "visual-hash") return [];
+  const verdicts = [];
+  for (const m of receipt.conformance) {
+    if (!TOLERANCE_METRICS.has(m.metric)) continue;
+    if (m.observed === "unobserved" || typeof m.observed !== "number") {
+      verdicts.push({ metric: m.metric, observed: "unobserved", threshold: null, status: "unobserved" });
+      continue;
+    }
+    const observed = m.observed;
+    const budget = validBudgets.get(`${receipt.workClass}::visual-hash::${m.metric}`);
+    if (budget === void 0) {
+      verdicts.push({ metric: m.metric, observed, threshold: null, status: "unpinned" });
+      continue;
+    }
+    verdicts.push({
+      metric: m.metric,
+      observed,
+      threshold: budget.threshold,
+      status: observed > budget.threshold ? "over-budget" : "within-budget"
+    });
+  }
+  return verdicts.sort((a, b) => a.metric.localeCompare(b.metric));
+}
+
+// src/core/bsc10-flag.ts
+var ENFORCED_GROUND_KINDS = /* @__PURE__ */ new Set(["digest-manifest", "version-pin", "visual-hash"]);
+function bsc10EnforcementEnabled() {
+  const raw = process.env.TH_BSC10_ENFORCE;
+  if (raw === void 0) return true;
+  const normalized = raw.trim().toLowerCase();
+  return !(normalized === "0" || normalized === "false");
+}
+function bsc10KindEnforced(kind) {
+  return bsc10EnforcementEnabled() && ENFORCED_GROUND_KINDS.has(kind);
 }
 
 // src/core/gate-preconditions.ts
@@ -21802,7 +24957,7 @@ function checkGoverningArtifact(paths, state) {
     const produced = contract.produces.replace(/\/$/, "");
     const registered = state.approved_artifacts.some((a) => a.file === produced);
     if (!registered) {
-      const exists = fs19.existsSync(path19.resolve(paths.root, produced));
+      const exists = fs30.existsSync(path29.resolve(paths.root, produced));
       if (!exists) {
         return { ok: false, error: "artifact_not_produced", detail: { stage: current, produces: contract.produces } };
       }
@@ -21842,6 +24997,19 @@ function checkImplementationSettled(state) {
   }
   return PASS;
 }
+function checkHumanApprovalAdvance(paths, state) {
+  const current = canonicalizeStage(state.current_stage);
+  if (!isHumanGateStage(current)) return PASS;
+  const validated = readApprovalValidated(paths, current);
+  if (validated.status === "valid" || validated.status === "valid-grounded" || validated.status === "legacy") {
+    return PASS;
+  }
+  return {
+    ok: false,
+    error: "human_approval_unverified",
+    detail: { stage: current, status: validated.status }
+  };
+}
 function checkFinalVerification(paths, state) {
   const prog = sliceProgress(state);
   if (!prog.allSettled && prog.total > 0) {
@@ -21863,14 +25031,923 @@ function checkFinalVerification(paths, state) {
     const produced = contract.produces.replace(/\/$/, "");
     const registered = state.approved_artifacts.some((a) => a.file === produced);
     if (!registered) {
-      const exists = fs19.existsSync(path19.resolve(paths.root, produced));
+      const exists = fs30.existsSync(path29.resolve(paths.root, produced));
       return exists ? { ok: false, error: "report_not_registered", detail: { file: produced } } : { ok: false, error: "report_not_produced", detail: { produces: produced } };
     }
   }
   const pr = checkProductionReality(paths, state);
   if (!pr.ok) return pr;
-  return PASS;
+  return pr;
 }
+function driverReceiptClaimsExternal(r) {
+  return typeof r.signature === "string" || typeof r.key_id === "string";
+}
+function summarizeDriverDimensions(paths, receipt, trustLabel) {
+  const content = validateDriverReceiptContent(paths, receipt);
+  const unobserved = new Set(content.unobservedDimensions ?? []);
+  const evidenceMissing = content.status === "evidence_missing";
+  const recorded = receipt.dimensions.map((d) => d.name);
+  const ordered = [
+    ...SEED_DIMENSION_NAMES.filter((n) => recorded.includes(n)),
+    ...recorded.filter((n) => !SEED_DIMENSION_NAMES.includes(n))
+  ];
+  return ordered.map((name) => ({
+    name,
+    observed: !evidenceMissing && !unobserved.has(name),
+    trustLabel
+  }));
+}
+function driverSignatureVerifies(receipt) {
+  const publicKey = loadExternalPublicKey();
+  if (publicKey === null) return false;
+  if (typeof receipt.signature !== "string") return false;
+  if (receipt.key_id !== externalKeyId(publicKey)) return false;
+  const { recordHash: _rh, signature: _sig, ...signedView } = receipt;
+  return verifyCanonical(driverCanonicalText(signedView), receipt.signature, publicKey);
+}
+function evaluateDriverDimensions(paths) {
+  const inProcess = readDriverReceipts(paths);
+  const external = readExternalDriverReceipts(paths);
+  const inChain = verifyDriverChain(inProcess);
+  if (!inChain.ok) {
+    return { ok: false, reason: "chain", dimensions: [], detail: { store: "in-process", brokenAt: inChain.brokenAt, chainReason: inChain.reason } };
+  }
+  const exChain = verifyDriverChain(external);
+  if (!exChain.ok) {
+    return { ok: false, reason: "chain", dimensions: [], detail: { store: "external", brokenAt: exChain.brokenAt, chainReason: exChain.reason } };
+  }
+  const externalClaims = external.filter(driverReceiptClaimsExternal);
+  if (externalClaims.length > 0) {
+    let verified;
+    for (const cand of externalClaims) {
+      if (driverSignatureVerifies(cand)) verified = cand;
+    }
+    if (verified) {
+      const dims = summarizeDriverDimensions(paths, verified, "valid-grounded");
+      const content = validateDriverReceiptContent(paths, verified);
+      if (content.status === "dimension_unobserved" || content.status === "evidence_missing") {
+        return { ok: false, reason: "unobserved", dimensions: dims, detail: { trustLabel: "valid-grounded", contentStatus: content.status, ...content.unobservedDimensions ? { unobservedDimensions: content.unobservedDimensions } : {} } };
+      }
+      return { ok: true, dimensions: dims };
+    }
+    const forged = externalClaims[externalClaims.length - 1];
+    return { ok: false, reason: "forged", dimensions: summarizeDriverDimensions(paths, forged, "forged"), detail: { trustLabel: "forged", store: "external", key_id: forged.key_id ?? null } };
+  }
+  const latest = inProcess.length > 0 ? inProcess[inProcess.length - 1] : void 0;
+  if (latest) {
+    if (driverReceiptClaimsExternal(latest)) {
+      if (driverSignatureVerifies(latest)) {
+        const dims2 = summarizeDriverDimensions(paths, latest, "valid-grounded");
+        const content2 = validateDriverReceiptContent(paths, latest);
+        if (content2.status === "dimension_unobserved" || content2.status === "evidence_missing") {
+          return { ok: false, reason: "unobserved", dimensions: dims2, detail: { trustLabel: "valid-grounded", contentStatus: content2.status, ...content2.unobservedDimensions ? { unobservedDimensions: content2.unobservedDimensions } : {} } };
+        }
+        return { ok: true, dimensions: dims2 };
+      }
+      const forged = latest;
+      return { ok: false, reason: "forged", dimensions: summarizeDriverDimensions(paths, forged, "forged"), detail: { trustLabel: "forged", store: "in-process", key_id: forged.key_id ?? null } };
+    }
+    const dims = summarizeDriverDimensions(paths, latest, "valid");
+    const content = validateDriverReceiptContent(paths, latest);
+    if (content.status === "dimension_unobserved" || content.status === "evidence_missing") {
+      return { ok: false, reason: "unobserved", dimensions: dims, detail: { trustLabel: "valid", contentStatus: content.status, ...content.unobservedDimensions ? { unobservedDimensions: content.unobservedDimensions } : {} } };
+    }
+    return { ok: true, dimensions: dims };
+  }
+  return { ok: true, dimensions: [] };
+}
+function checkDriverDimensions(paths) {
+  const verdict = evaluateDriverDimensions(paths);
+  if (verdict.ok) return verdict.dimensions.length === 0 ? PASS : { ok: true, dimensions: verdict.dimensions };
+  if (!bsc3EnforcementEnabled()) {
+    return {
+      ok: true,
+      dimensions: verdict.dimensions,
+      notice: { token: "driver_dimension_unverified", detail: { reason: verdict.reason, ...verdict.detail } }
+    };
+  }
+  return {
+    ok: false,
+    error: "driver_dimension_unverified",
+    detail: { reason: verdict.reason, ...verdict.detail },
+    dimensions: verdict.dimensions
+  };
+}
+function checkDimensionSetCoverage(paths) {
+  const liveDeclaredDigest = declaredDimensionSetDigest();
+  const liveDeclaredSet = declaredDimensionSet();
+  const liveObservedSet = [...observedDimensionsFromReport(readVerifyReport(paths))].sort();
+  const receipts = readCoverageReceipts(paths);
+  if (receipts.length === 0) return PASS;
+  let status;
+  let detail;
+  const chain = verifyCoverageChain(receipts);
+  if (!chain.ok) {
+    status = "chain";
+    detail = { reason: "chain", brokenAt: chain.brokenAt, chainReason: chain.reason };
+  } else {
+    const latest = receipts[receipts.length - 1];
+    const content = validateCoverageContent(latest, liveDeclaredDigest, liveDeclaredSet, liveObservedSet);
+    status = content.status;
+    detail = {
+      reason: content.status,
+      ...content.missing ? { missing: content.missing } : {},
+      ...content.digests ? { digests: content.digests } : {}
+    };
+  }
+  const coverage = {
+    declared: liveDeclaredSet,
+    observed: liveObservedSet,
+    declaredSetDigest: liveDeclaredDigest,
+    status
+  };
+  if (status === "covered") {
+    return { ok: true, coverage };
+  }
+  if (!bsc5EnforcementEnabled()) {
+    return { ok: true, coverage, notice: { token: "dimension_set_uncovered", detail } };
+  }
+  return { ok: false, error: "dimension_set_uncovered", detail, coverage };
+}
+function checkRealization(paths, state) {
+  ensureRealizationMigrationOpportunistic(paths);
+  const map = loadRepoMapForRealization(paths);
+  if (map === null) return PASS;
+  const failures = [];
+  for (const reqId of unresolvedDoneSliceReqs(map, state)) {
+    failures.push({ reqId, status: "unresolved" });
+  }
+  for (const owned of ownedReqsForDoneSlices(map, state)) {
+    const v = readRealizationReceiptValidated(paths, owned.reqId);
+    if (v.status !== "valid" && v.status !== "valid-grounded" && v.status !== "legacy") {
+      failures.push({ reqId: owned.reqId, status: v.status, owningSlices: owned.owningSlices });
+    }
+  }
+  if (failures.length === 0) return PASS;
+  const detail = {
+    failures: failures.slice(0, 20),
+    total: failures.length,
+    statuses: [...new Set(failures.map((f) => f.status))].sort()
+  };
+  if (!realizationEnforcementEnabled()) {
+    return { ok: true, notice: { token: "realization_unverified", detail } };
+  }
+  return { ok: false, error: "realization_unverified", detail };
+}
+function evaluateAssertionPresence(paths) {
+  const bd = computeBreakdown(paths.root);
+  if ("error" in bd) return null;
+  const checkedTested = new Set(bd.rows.filter((r) => r.tested).map((r) => r.req));
+  if (checkedTested.size === 0) return null;
+  const mutation = readMutationKillValidated(paths);
+  const mutationEfficacy = mutation.status === "valid-grounded" && mutation.receipt ? { status: "valid-grounded", scope: mutation.receipt.ground.scope, score: mutation.receipt.ground.score } : void 0;
+  const ground = computeAssertionPresenceGround(paths);
+  const byReq = new Map(ground.map((s) => [s.reqId, s]));
+  const waived = validWaivedReqs(paths);
+  const summary = [...checkedTested].sort().map((reqId) => {
+    const s = byReq.get(reqId);
+    const nonTrivialAssertions = s ? s.nonTrivialAssertions : 0;
+    const assertionFree = s ? s.assertionFree : true;
+    const isWaived = waived.has(reqId);
+    const trustLabel = !assertionFree ? "attested-presence" : "valid";
+    return { reqId, nonTrivialAssertions, assertionFree, trustLabel, waived: isWaived };
+  });
+  if (mutation.status === "forged") {
+    return {
+      ok: false,
+      reason: "mutation_kill_forged",
+      summary,
+      detail: { scope: mutation.receipt?.ground.scope ?? null, key_id: mutation.receipt?.key_id ?? null }
+    };
+  }
+  const receipts = readAssertionPresenceReceipts(paths);
+  const chain = verifyAssertionPresenceChain(receipts);
+  if (!chain.ok) {
+    return {
+      ok: false,
+      reason: "assertion_presence_unverified",
+      summary,
+      mutationEfficacy,
+      detail: { contentStatus: "chain", brokenAt: chain.brokenAt, chainReason: chain.reason }
+    };
+  }
+  const latest = receipts.length > 0 ? receipts[receipts.length - 1] : void 0;
+  if (latest === void 0) {
+    return {
+      ok: false,
+      reason: "assertion_unobserved",
+      summary,
+      mutationEfficacy,
+      detail: { contentStatus: "assertion_unobserved", tested: checkedTested.size }
+    };
+  }
+  const content = validateAssertionPresenceContent(paths, latest);
+  if (content.status === "target_mismatch" || content.status === "stale") {
+    return {
+      ok: false,
+      reason: "assertion_presence_unverified",
+      summary,
+      mutationEfficacy,
+      detail: {
+        contentStatus: content.status,
+        ...content.staleReasons ? { staleReasons: content.staleReasons } : {}
+      }
+    };
+  }
+  const offenders = [...checkedTested].filter((reqId) => {
+    const s = byReq.get(reqId);
+    const assertionFree = s ? s.assertionFree : true;
+    return assertionFree && !waived.has(reqId);
+  }).sort();
+  if (offenders.length === 0) return { ok: true, summary, mutationEfficacy };
+  return {
+    ok: false,
+    reason: "assertion_presence_unverified",
+    summary,
+    mutationEfficacy,
+    detail: { contentStatus: content.status, offenders: offenders.slice(0, 20), total: offenders.length }
+  };
+}
+function checkAssertionPresence(paths) {
+  const verdict = evaluateAssertionPresence(paths);
+  if (verdict === null) return PASS;
+  if (verdict.ok) {
+    const noteworthy = verdict.summary.some((s) => s.assertionFree || s.waived) || verdict.mutationEfficacy !== void 0;
+    if (!noteworthy) return PASS;
+    const res2 = { ok: true, assertionPresence: verdict.summary };
+    if (verdict.mutationEfficacy) res2.mutationEfficacy = verdict.mutationEfficacy;
+    return res2;
+  }
+  if (!bsc2EnforcementEnabled()) {
+    const res2 = {
+      ok: true,
+      assertionPresence: verdict.summary,
+      notice: { token: verdict.reason, detail: verdict.detail }
+    };
+    if (verdict.mutationEfficacy) res2.mutationEfficacy = verdict.mutationEfficacy;
+    return res2;
+  }
+  const res = {
+    ok: false,
+    error: verdict.reason,
+    detail: verdict.detail,
+    assertionPresence: verdict.summary
+  };
+  if (verdict.mutationEfficacy) res.mutationEfficacy = verdict.mutationEfficacy;
+  return res;
+}
+function groundingConformanceOf(paths, receipt) {
+  const v = validateGroundingContent(paths, receipt);
+  if (v.status === "unobserved") return "unobserved";
+  if (v.status === "over-budget" || v.status === "stale" || v.status === "target_mismatch") return "over-budget";
+  return "within-budget";
+}
+function worseGroundingConformance(selfConformance, tolerance) {
+  const rank = { unobserved: 2, "over-budget": 1, "within-budget": 0 };
+  let worst = selfConformance;
+  const consider = (c) => {
+    if (rank[c] > rank[worst]) worst = c;
+  };
+  for (const t of tolerance) {
+    if (t.status === "unobserved" || t.status === "unpinned") consider("unobserved");
+    else if (t.status === "over-budget") consider("over-budget");
+  }
+  return worst;
+}
+function groundingManifestDigest(validated) {
+  const entry = validated.byKind.get("digest-manifest");
+  if (entry === void 0) return null;
+  const ground = entry.receipt.ground;
+  return ground.groundKind === "digest-manifest" ? ground.manifestDigest : null;
+}
+function threadedManifestDigests(paths) {
+  const digests = /* @__PURE__ */ new Set();
+  const add = (d) => {
+    if (typeof d === "string" && d !== "") digests.add(d);
+  };
+  for (const r of readRealizationReceipts(paths)) add(r.manifest_digest);
+  for (const r of readExternalRealizationReceipts(paths)) add(r.manifest_digest);
+  for (const r of readDriverReceipts(paths)) add(r.manifest_digest);
+  for (const r of readExternalDriverReceipts(paths)) add(r.manifest_digest);
+  for (const r of readApprovalReceipts(paths)) add(r.manifest_digest);
+  for (const r of readExternalApprovals(paths)) add(r.manifest_digest);
+  return digests;
+}
+function hasUnboundGroundingReceipt(paths) {
+  const unbound = (r) => r.grounding_bound === true && (typeof r.manifest_digest !== "string" || r.manifest_digest.trim() === "");
+  return readRealizationReceipts(paths).some(unbound) || readExternalRealizationReceipts(paths).some(unbound) || readDriverReceipts(paths).some(unbound) || readExternalDriverReceipts(paths).some(unbound) || readApprovalReceipts(paths).some(unbound) || readExternalApprovals(paths).some(unbound);
+}
+function evaluateGrounding(paths, state) {
+  const validated = readGroundingValidated(paths);
+  if (validated.inProcessChainOk === false || validated.externalChainOk === false) {
+    return { ok: false, reason: "tampered", required: [], summary: [], offenders: [] };
+  }
+  const declaredClasses = [
+    ...new Set([...validated.byKind.values()].map((e) => e.receipt.workClass))
+  ].sort();
+  if (declaredClasses.length === 0) return null;
+  const surfaces = state.has_ui !== false ? ["ui"] : [];
+  const requiredSet = /* @__PURE__ */ new Set();
+  let crossCheckFlag;
+  for (const wc of declaredClasses) {
+    const req = requiredGroundKindsForWorkClass(wc, surfaces);
+    for (const k of req.required) requiredSet.add(k);
+    if (req.crossCheckFlag) crossCheckFlag = req.crossCheckFlag;
+  }
+  const required2 = [...requiredSet].sort();
+  if (required2.length === 0) return null;
+  const exemptions = validGroundingExemptions(paths);
+  const isExempt = (kind) => declaredClasses.some((wc) => exemptions.has(groundingExemptionKey(wc, kind)));
+  const validBudgets = validGroundingBudgets(paths);
+  const summary = [];
+  const offenders = [];
+  let worstReason = null;
+  const bump = (r) => {
+    const rank = {
+      chain_mismatch: 5,
+      manifest_digest_absent: 4,
+      missing: 3,
+      unobserved: 2,
+      over_budget: 1,
+      tampered: 0
+    };
+    if (worstReason === null || rank[r] > rank[worstReason]) worstReason = r;
+  };
+  for (const kind of required2) {
+    const exemptCovered = isExempt(kind);
+    const entry = validated.byKind.get(kind);
+    if (entry === void 0) {
+      summary.push({ groundKind: kind, grounded: false, trustLabel: "ungrounded", conformance: "missing", exceptionCovered: exemptCovered });
+      if (!exemptCovered) {
+        offenders.push(kind);
+        bump("missing");
+      }
+      continue;
+    }
+    const selfConformance = groundingConformanceOf(paths, entry.receipt);
+    const tolerance = toleranceThresholdVerdicts(entry.receipt, validBudgets);
+    let conformance = worseGroundingConformance(selfConformance, tolerance);
+    if (kind === "visual-hash" && tolerance.length === 0) conformance = "unobserved";
+    const summaryRow = {
+      groundKind: kind,
+      grounded: true,
+      trustLabel: entry.trustLabel,
+      conformance,
+      exceptionCovered: exemptCovered
+    };
+    if (tolerance.length > 0) summaryRow.toleranceDiff = tolerance;
+    summary.push(summaryRow);
+    if (exemptCovered) continue;
+    if (conformance === "unobserved") {
+      offenders.push(kind);
+      bump("unobserved");
+    } else if (conformance === "over-budget") {
+      offenders.push(kind);
+      bump("over_budget");
+    }
+  }
+  const manifestDigest = groundingManifestDigest(validated);
+  if (manifestDigest !== null) {
+    const threaded = threadedManifestDigests(paths);
+    const mismatched = [...threaded].some((d) => d !== manifestDigest);
+    if (mismatched) {
+      if (!offenders.includes("digest-manifest")) offenders.push("digest-manifest");
+      const entry = validated.byKind.get("digest-manifest");
+      const existing = summary.find((s) => s.groundKind === "digest-manifest");
+      if (existing) {
+        existing.conformance = "chain_mismatch";
+      } else {
+        summary.push({
+          groundKind: "digest-manifest",
+          grounded: true,
+          trustLabel: entry?.trustLabel ?? "valid",
+          conformance: "chain_mismatch",
+          exceptionCovered: false
+        });
+      }
+      bump("chain_mismatch");
+    }
+  }
+  if (hasUnboundGroundingReceipt(paths)) {
+    if (!offenders.includes("digest-manifest")) offenders.push("digest-manifest");
+    bump("manifest_digest_absent");
+  }
+  if (worstReason === null) {
+    return crossCheckFlag ? { ok: true, required: required2, summary, crossCheckFlag } : { ok: true, required: required2, summary };
+  }
+  return crossCheckFlag ? { ok: false, reason: worstReason, required: required2, summary, offenders, crossCheckFlag } : { ok: false, reason: worstReason, required: required2, summary, offenders };
+}
+function groundingDetail(verdict) {
+  const detail = {
+    reason: verdict.reason,
+    offenders: verdict.offenders,
+    required: verdict.required
+  };
+  if (verdict.crossCheckFlag) detail.crossCheck = verdict.crossCheckFlag;
+  return detail;
+}
+function groundingVerdictBlocks(verdict) {
+  if (verdict.reason === "tampered") return bsc10EnforcementEnabled();
+  return verdict.offenders.some((kind) => bsc10KindEnforced(kind));
+}
+function checkGrounding(verdict) {
+  if (verdict === null) return PASS;
+  if (verdict.ok) {
+    if (verdict.summary.length === 0 && verdict.crossCheckFlag === void 0) return PASS;
+    return { ok: true, grounding: verdict.summary };
+  }
+  const detail = groundingDetail(verdict);
+  if (!groundingVerdictBlocks(verdict)) {
+    return { ok: true, grounding: verdict.summary, notice: { token: "grounding_unverified", detail } };
+  }
+  return { ok: false, error: "grounding_unverified", detail, grounding: verdict.summary };
+}
+function computeMinTierFromBrief(root) {
+  const briefFile = path29.resolve(root, TASK_BRIEF_RELPATH);
+  const loaded = loadBriefFromFile(briefFile);
+  if (!loaded.ok || !loaded.brief) return { minTier: "T0", briefPresent: false };
+  const { tier0_eligible } = classifyBrief(loaded.brief);
+  return { minTier: tier0_eligible ? "T0" : "T1", briefPresent: true };
+}
+function unrewoundUpgradeStage(state) {
+  const currentOrdinal = STAGE_PIPELINE.findIndex(
+    (s) => s.stage === canonicalizeStage(state.current_stage)
+  );
+  if (currentOrdinal < 0) return null;
+  const engaged = new Set(engagedStagesFor(state).map((s) => s.stage));
+  for (let i = 0; i < currentOrdinal; i++) {
+    const contract = STAGE_PIPELINE[i];
+    if (!engaged.has(contract.stage)) continue;
+    if (contract.produces === "") continue;
+    const produced = contract.produces.replace(/\/$/, "");
+    const registered = state.approved_artifacts.some((a) => a.file === produced);
+    if (!registered) return contract.stage;
+  }
+  return null;
+}
+function evaluateTierCorrespondence(paths, state) {
+  const { minTier } = computeMinTierFromBrief(paths.root);
+  const claimedTier = state.tier;
+  const receipts = readTierCorrespondenceReceipts(paths);
+  if (!verifyTierCorrespondenceChain(receipts).ok) {
+    return {
+      ok: false,
+      reason: "tampered",
+      claimedTier,
+      computedMinTier: minTier,
+      detail: {}
+    };
+  }
+  if (claimedTier === null) {
+    return { ok: true, claimedTier, computedMinTier: minTier };
+  }
+  const latest = receipts.length > 0 ? receipts[receipts.length - 1] : void 0;
+  const witness = latest && latest.legacy !== true ? latest : void 0;
+  const claimedIdx = TIERS.indexOf(claimedTier);
+  const minIdx = TIERS.indexOf(minTier);
+  if (claimedIdx >= 0 && minIdx >= 0 && claimedIdx < minIdx) {
+    return {
+      ok: false,
+      reason: "under_declared",
+      claimedTier,
+      computedMinTier: minTier,
+      detail: { claimedTier, computedMinTier: minTier }
+    };
+  }
+  const skipped = unrewoundUpgradeStage(state);
+  if (skipped !== null && witness !== void 0) {
+    const skippedOrdinal = STAGE_PIPELINE.findIndex((s) => s.stage === skipped);
+    const witnessTierIdx = TIERS.indexOf(witness.claimed_tier);
+    const upgradeWithoutRemint = witnessTierIdx >= 0 && claimedIdx >= 0 && witnessTierIdx < claimedIdx;
+    const mintOrdinal = witness.current_stage_at_mint !== void 0 ? STAGE_PIPELINE.findIndex((s) => s.stage === canonicalizeStage(witness.current_stage_at_mint)) : -1;
+    const rewindAbsent = witness.claimed_tier === claimedTier && mintOrdinal >= skippedOrdinal;
+    if (upgradeWithoutRemint || rewindAbsent) {
+      return {
+        ok: false,
+        reason: "stage_unrewound",
+        claimedTier,
+        computedMinTier: minTier,
+        detail: {
+          stage: skipped,
+          claimedTier,
+          witness: upgradeWithoutRemint ? "upgrade_without_remint" : "rewind_absent"
+        }
+      };
+    }
+  }
+  if (witness) {
+    const currentDigest = computeBriefDigest(paths.root);
+    if (witness.brief_digest !== null && currentDigest !== null && witness.brief_digest !== currentDigest) {
+      return {
+        ok: false,
+        reason: "stale_brief",
+        claimedTier,
+        computedMinTier: minTier,
+        detail: { recordedDigest: witness.brief_digest, currentDigest }
+      };
+    }
+  }
+  return { ok: true, claimedTier, computedMinTier: minTier };
+}
+function checkTierCorrespondence(paths, state) {
+  const verdict = evaluateTierCorrespondence(paths, state);
+  if (verdict.ok) return PASS;
+  if (!bsc8EnforcementEnabled()) {
+    return {
+      ok: true,
+      notice: {
+        token: "tier_correspondence_unverified",
+        detail: { reason: verdict.reason, ...verdict.detail }
+      }
+    };
+  }
+  return {
+    ok: false,
+    error: "tier_correspondence_unverified",
+    detail: { reason: verdict.reason, ...verdict.detail }
+  };
+}
+function projectionFixturesPath(paths) {
+  return path29.join(paths.root, ".omc", "audit", "probes", "bsc9", "projection-fixtures.json");
+}
+function checkBsc9(paths, state) {
+  const fixtures = loadProjectionFixtures(projectionFixturesPath(paths));
+  const infidelities = fixtures ? runProjectionOracle(fixtures) : [];
+  let readinessStatus = null;
+  if (interviewRequired(state) && interviewReady(paths)) {
+    readinessStatus = readReadinessReceiptValidated(paths, readinessRefId(paths)).status;
+  }
+  const readinessAccepted = readinessStatus === null || readinessStatus === "valid" || readinessStatus === "valid-grounded" || readinessStatus === "legacy";
+  if (infidelities.length === 0 && readinessAccepted) return PASS;
+  const detail = {
+    ...infidelities.length > 0 ? { projectionInfidelities: infidelities } : {},
+    ...readinessStatus !== null && !readinessAccepted ? { readinessStatus } : {}
+  };
+  if (!bsc9EnforcementEnabled()) {
+    return { ok: true, notice: { token: "bsc9_unverified", detail } };
+  }
+  return { ok: false, error: "bsc9_unverified", detail };
+}
+var PRODUCTION_REALITY_RUNGS = [
+  {
+    // 1. A user-visible simulation still blocks. BSC-4 receipt-aware: an entry blocks
+    // when it is active+user-visible+simulated (the original rule) OR when it is marked
+    // `retired` but that retirement is NOT grounded by a valid/legacy sim-retire receipt
+    // (a retire-by-attestation with no source replacement — no double-exoneration). The
+    // SAME `simEntryBlocksProductionReality` predicate backs `th sim`, so reporting agrees.
+    id: "simulation-unretired",
+    check: (paths, _state, ctx) => {
+      const blocking = ctx.entries.filter((e) => simEntryBlocksProductionReality(paths, e));
+      if (blocking.length > 0) {
+        return {
+          ok: false,
+          error: "simulation_unretired",
+          detail: { ids: blocking.map((e) => e.id), classifications: blocking.map((e) => e.classification) }
+        };
+      }
+      return null;
+    }
+  },
+  {
+    // 1b. Terminal-flip grounding (BSC-4). Every drift-resolution and decision-approval
+    // in force must carry a VALID (or grandfathered-`legacy`) TerminalTransitionReceipt.
+    // A resolve/approve done via a bypass (no receipt) — or whose recorded source target
+    // was deleted (`target_missing`) / changed (`target_mismatch`), or whose snapshot is
+    // forged/stale (`stale`) — is ungrounded and blocks. `sim-retire` grounding is owned
+    // by rung 1 (excluded here to avoid a duplicate token). Pre-upgrade projects carry no
+    // migration marker, so an absent receipt classifies `legacy` and this is a NO-OP until
+    // the receipt regime is active — it never reds an existing complete run.
+    id: "terminal-receipt",
+    check: (paths) => {
+      for (const ent of collectTerminalEntities(paths)) {
+        if (ent.kind === "sim-retire") continue;
+        const v = readReceiptValidated(paths, ent.kind, ent.refId);
+        if (v.status !== "valid" && v.status !== "valid-grounded" && v.status !== "legacy") {
+          return {
+            ok: false,
+            error: "terminal_receipt_unverified",
+            detail: {
+              kind: ent.kind,
+              refId: ent.refId,
+              status: v.status,
+              ...v.staleReasons ? { staleReasons: v.staleReasons } : {}
+            }
+          };
+        }
+      }
+      return null;
+    }
+  },
+  {
+    // 1b-grounding. HOIST the BSC-10 external-reference grounding verdict (Axis-B slice-BSC10a,
+    // C1/PCC-1). It is computed ONCE here — BEFORE the human-approval leg — because it depends ONLY
+    // on the grounding receipts + sibling stores + the matrix (NO dependency on verify/tester/dist/
+    // scan/driver/realization/assertion), so it can be resolved first with no ordering hazard. The
+    // SAME verdict is consumed by (i) the SPLIT approval-ACCEPTANCE leg just below and (ii) the thin
+    // grounding summary rung among the reality rungs — a single live recompute, never attached-but-
+    // stale (Principle 1). A late standalone rung after the reality rungs could never inform the 1c
+    // approval leg, which early-`return`s on the happy path — so hoist-evaluate-once is the only
+    // sound control flow. This rung does not terminate (returns null): it only populates `ctx`.
+    id: "bsc10-grounding-hoist",
+    check: (paths, state, ctx) => {
+      ctx.groundingVerdict = evaluateGrounding(paths, state);
+      ctx.groundingBlocksAcceptance = ctx.groundingVerdict !== null && ctx.groundingVerdict.ok === false && (ctx.groundingVerdict.reason === "over_budget" || ctx.groundingVerdict.reason === "unobserved") && groundingVerdictBlocks(ctx.groundingVerdict);
+      return null;
+    }
+  },
+  {
+    // 1c. Human-approval grounding over the CLOSED required-set (BSC-7 / Axis-B slice-3a,
+    // R1) — the COMPLETION rung, the L1 backstop. `humanGate` was a declarative-only flag
+    // with ZERO predicate consumers (pure gate theater); this re-validates that EVERY
+    // engaged-and-not-future humanGate stage carries an approval bound to the current
+    // snapshot + governing-artifact digest. The required-set is recomputed FRESH from
+    // `requiredHumanGateStages` (humanGate ∩ engagedStagesFor ∩ ordinal-≤-current) — we do
+    // NOT trust a persisted "approved" summary (the BSC-6 recompute-don't-trust lesson:
+    // presence is the sensed fact). Modeled EXACTLY on the BSC-4 terminal-flip rung above:
+    // for each required stage, `readApprovalValidated` → accept `valid`/`valid-grounded`/
+    // `legacy`, BLOCK on `absent`/`stale`/`target_missing`/`target_mismatch`/`forged`/
+    // `tampered` with the stable token `human_approval_unverified`. Because `engagedStagesFor`
+    // is UI-aware, a `has_ui===false` run does NOT require `ux-design`/`ui-design` (N/A, not
+    // `absent`-blocked); a lower-tier run does not require `security`/`contracts` when not
+    // engaged. This is the backstop the `--emergency`/`state set` jump cannot route around:
+    // jumping `current_stage` to `final-verification` makes every engaged gate ordinal-≤-
+    // current ⇒ required, so the jumped-over stage is re-checked here. The block names the
+    // offending `{stage, status}` (a bounded list — the FIRST failing required stage).
+    //
+    // PCC-1 SPLIT (slice-BSC10a): leg (α) approval-EXISTENCE is the unchanged status check below;
+    // leg (β) approval-ACCEPTANCE additionally refuses to ACCEPT an otherwise-present approval while
+    // `groundingBlocksAcceptance` (a present-but-unconformant BSC-10 ground under enforce). So an
+    // approval that EXISTS but whose reference is unconformant blocks with `grounding_unverified`,
+    // the conformance precondition consumed INSIDE the 1c leg — never bypassed.
+    id: "human-approval",
+    check: (paths, state, ctx) => {
+      for (const stage of requiredHumanGateStages(state)) {
+        const a = readApprovalValidated(paths, stage);
+        if (a.status !== "valid" && a.status !== "valid-grounded" && a.status !== "legacy") {
+          return {
+            ok: false,
+            error: "human_approval_unverified",
+            detail: {
+              stage,
+              status: a.status,
+              ...a.staleReasons ? { staleReasons: a.staleReasons } : {}
+            }
+          };
+        }
+        if (ctx.groundingBlocksAcceptance) {
+          const v = ctx.groundingVerdict;
+          return {
+            ok: false,
+            error: "grounding_unverified",
+            detail: { stage, ...groundingDetail(v) },
+            grounding: v.summary
+          };
+        }
+      }
+      return null;
+    }
+  },
+  {
+    // 2. The verify suite must be green against production-targeted commands, AND the
+    // report must be a CURRENT-binding report (F2/R-30 — not a legacy bare report, not a
+    // stale/copied one). The validated reader classifies the report; only a `valid` GREEN
+    // report passes. A corrupt config still blocks (fail-closed). One stable token
+    // (`production_verify_not_green`) with a `reason` detail naming the divergence.
+    id: "production-verify",
+    check: (paths) => {
+      const verifyLoaded = loadVerifyConfig(paths);
+      if (verifyLoaded.status === "corrupt") {
+        return { ok: false, error: "production_verify_not_green", detail: { reason: "config_corrupt" } };
+      }
+      const verifyCfg = verifyLoaded.config;
+      if (verifyCfg.commands.length > 0) {
+        const validated = readVerifyReportValidated(paths);
+        if (validated.status === "absent") {
+          return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
+        }
+        if (validated.status !== "valid") {
+          return { ok: false, error: "production_verify_not_green", detail: { reason: validated.status, ...validated.staleReasons ? { staleReasons: validated.staleReasons } : {} } };
+        }
+        if (!validated.report.ok) {
+          const failed = validated.report.results.filter((x) => !x.ok).length;
+          return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
+        }
+      }
+      return null;
+    }
+  },
+  {
+    // 3. A live-QA Tester run record must be attached (audit C-08).
+    id: "tester-record",
+    check: (paths) => {
+      if (!testerRecordPresent(paths)) {
+        return { ok: false, error: "tester_record_missing", detail: {} };
+      }
+      return null;
+    }
+  },
+  {
+    // 4. dist/ must not carry unledgered simulation patterns. A dist hit is "ledgered"
+    // only when an ACTIVE simulation entry DECLARES that specific hit — matched
+    // PER-DEPENDENCY (audit P1), so a single unrelated, non-user-visible entry no longer
+    // blanket-suppresses every dist hit. The SAME `computeUnledgeredDistHits` join backs
+    // `th sim scan`, so scan and gate agree. The two-tier scan never throws. The scan is
+    // COMPUTED ONCE here and STASHED on `ctx` for the scan-coverage rung to reuse.
+    id: "unledgered-dist",
+    check: (paths, _state, ctx) => {
+      ctx.scan = scanForSimulationHits(paths);
+      const unledgered = computeUnledgeredDistHitsReceiptAware(paths, ctx.entries, ctx.scan.distHits);
+      if (unledgered.length > 0) {
+        return {
+          ok: false,
+          error: "unledgered_simulation_in_dist",
+          detail: { hits: unledgered.slice(0, 20), total: unledgered.length }
+        };
+      }
+      return null;
+    }
+  },
+  {
+    // 5. (BSC-6 / Axis-B slice-2) SCAN-COVERAGE COMPLETENESS — fail closed on the scan's
+    // OWN incompleteness, INDEPENDENT of and ADDITIONAL to the unledgered-token check
+    // above. The two-tier scan enumerated + streaming-hashed every `dist/` path; any path
+    // it could not deep-inspect (per-file / aggregate / watchdog / read error) is
+    // `unobserved` (≠ clean). This rung RECOMPUTES that set fresh every run (it MUST NOT
+    // read `scan-completeness.jsonl` to decide — trusting a persisted "complete" summary is
+    // the exact bug class BSC-6 is) and BLOCKS with the stable token `scan_coverage_incomplete`
+    // when any `unobserved` path is not exonerated by a valid external-signed exception ack.
+    // The SAME `uncoveredAfterExceptions` residual backs `th sim scan`, so scan and gate
+    // agree (control e). This closes the proven RED of `.omc/audit/probes/new-a-scancap/`:
+    // a >2 MB token-bearing file is now either deep-inspected (→ unledgered block) or
+    // `unobserved{file_limit}` (→ this block), never silently skipped. Consumes the same
+    // `scan` the unledgered-dist rung stashed on `ctx` (single scan per run, as before).
+    id: "scan-coverage",
+    check: (paths, _state, ctx) => {
+      const uncovered = uncoveredAfterExceptions(paths, ctx.scan.unobserved);
+      if (uncovered.length > 0) {
+        return {
+          ok: false,
+          error: "scan_coverage_incomplete",
+          detail: {
+            unobserved: uncovered.slice(0, 20).map((u) => ({ path: u.path, reason: u.reason })),
+            total: uncovered.length,
+            reasons: [...new Set(uncovered.map((u) => u.reason))].sort()
+          }
+        };
+      }
+      return null;
+    }
+  },
+  {
+    // 6. (BSC-3 / Axis-B slice-4a) VERIFICATION-DRIVER DIMENSION GROUNDING — composed LAST.
+    // A run may not be certified complete on a verify-report that merely says "ok" with NO
+    // record of WHICH verification dimensions a trusted runner actually EXERCISED. The
+    // verification-driver receipt is the SENSOR; this re-derives its ground from
+    // `verify-report.json` and enforces by SIGNATURE-derived trust label (valid / valid-
+    // grounded / forged). ABSENCE ≠ FORGERY: a run with no driver receipt is grandfathered
+    // (in-process attested, allowed). Governed by `bsc3EnforcementEnabled()` (defaults ON):
+    // the verdict is ALWAYS computed (so `dimensions` summarizes the trust posture for the
+    // I1 observability hook), but it BLOCKS with `driver_dimension_unverified` only when
+    // enforcement is on. The `dimensions` summary rides on the result whether PASS or BLOCK.
+    // The result is CAPTURED on `ctx` so later rungs' blocks and the final fold can carry
+    // the driver `dimensions` summary forward (the cross-rung observability dependency).
+    id: "driver-dimensions",
+    check: (paths, _state, ctx) => {
+      const driver = checkDriverDimensions(paths);
+      ctx.captured.driver = driver;
+      if (!driver.ok) return driver;
+      return null;
+    }
+  },
+  {
+    // 7. (BSC-1 / Axis-B slice-5) REALIZATION-RECEIPT GROUNDING — composed LAST. A run may not
+    // be certified complete while a REQ-ID owned by a `done` slice lacks a valid, reachable,
+    // digest-fresh realization referent. The CLAIM (`SliceState.status==="done"`) is authored
+    // independently of the REFERENT (recorded by `th realize`); this enumerates done-slice
+    // REQ-IDs from the cached repo-map, recomputes each referent digest, COLLECTS ALL failures,
+    // and blocks on absent/stale/forged/target_*/tampered/unresolved. ABSENCE is grandfathered
+    // (`legacy`) until the migration marker is stamped, so this is a NO-OP on pre-upgrade
+    // projects. Governed by `realizationEnforcementEnabled()` (defaults ON).
+    id: "realization",
+    check: (paths, state, ctx) => {
+      const realization = checkRealization(paths, state);
+      ctx.captured.realization = realization;
+      if (!realization.ok) {
+        const driver = ctx.captured.driver;
+        return driver?.dimensions ? { ...realization, dimensions: driver.dimensions } : realization;
+      }
+      return null;
+    }
+  },
+  {
+    // 8. (BSC-2 / Axis-B slice-6) ASSERTION-PRESENCE GROUNDING — composed LAST (after realization).
+    // A run may not be certified complete while a `tested` REQ-ID lacks a NON-TRIVIAL assertion:
+    // the coverage gate counts a REQ "tested" on anchor presence alone, so a test file with no
+    // cannot-fail-free assertion clears that bar (BSC-2). This recomputes the per-REQ
+    // assertion-presence ground FRESH, requires an F8-bound in-process AssertionPresenceReceipt
+    // for correspondence, subtracts validly-WAIVED REQs, and BLOCKS on a forged MutationKillReceipt.
+    // A signature-verified external MutationKillReceipt is recorded as a DISTINCT module-scoped
+    // `mutationEfficacy` observability signal — it does NOT override the presence rung (presence ≠
+    // efficacy; review HIGH). Governed by `bsc2EnforcementEnabled()` (WARN-first): the verdict is
+    // ALWAYS computed (so `assertionPresence` summarizes the per-REQ posture for the I1 hook), but
+    // it BLOCKS with `assertion_presence_unverified` / `assertion_unobserved` / `mutation_kill_forged`
+    // only when enforcement is on. The summary rides on the result whether PASS or BLOCK.
+    id: "assertion-presence",
+    check: (paths, _state, ctx) => {
+      const assertion = checkAssertionPresence(paths);
+      ctx.captured.assertion = assertion;
+      if (!assertion.ok) {
+        const driver = ctx.captured.driver;
+        return driver?.dimensions ? { ...assertion, dimensions: driver.dimensions } : assertion;
+      }
+      return null;
+    }
+  },
+  {
+    // 8b. (BSC-8 / Axis-B slice-7) TIER-CORRESPONDENCE + STAGE-INVALIDATION — composed among the
+    // gating tail, before the BSC-10 grounding summary/fold (merge-order discipline). A run may not
+    // be certified complete while its declared `tier` does not correspond to the work: the claimed
+    // tier is UNDER-DECLARED vs the brief's mechanically-computed min-tier (`classifyBrief`), a tier
+    // upgrade left a newly-engaged stage un-rewound (skipped artifact), or the brief was edited after
+    // attestation (stale digest). `tier` stays GATE_OWNED (raw `state set tier` reject preserved in
+    // commands/state.ts); the rewind logic (`tierUpgradeBackfillStage`) already FIRES on the producer
+    // side — this is the GATE-ENFORCEMENT side only. Governed by `bsc8EnforcementEnabled()` (defaults
+    // ON): the verdict is ALWAYS computed, but it BLOCKS with `tier_correspondence_unverified` only
+    // when enforcement is on; OFF ⇒ a non-blocking `notice` (ship-dark WARN). The result is captured
+    // on `ctx.captured.tierCorrespondence` so the WARN-phase `notice` rides the post-loop fold (the
+    // last in the notice-precedence chain), mirroring the sibling gating rungs.
+    id: "tier-correspondence",
+    check: (paths, state, ctx) => {
+      const tierCorr = checkTierCorrespondence(paths, state);
+      ctx.captured.tierCorrespondence = tierCorr;
+      if (!tierCorr.ok) return tierCorr;
+      return null;
+    }
+  },
+  {
+    // 8c. (BSC-5 / Axis-B slice-7) DIMENSION-SET-COVERAGE GROUNDING — composed among the gating
+    // tail, AFTER assertion-presence and BEFORE the thin BSC-10 grounding summary. A run may not be
+    // certified complete while a DECLARED required dimension is not OBSERVED. DECLARED is the
+    // COMMITTED `DECLARED_DIMENSION_SET` constant (`core/declared-dimensions.ts`, Interp A —
+    // narrowing it is a reviewable code + `dist/` diff, never a runtime self-attest); OBSERVED is
+    // re-derived from `verify-report.json` at gate time (the SAME `observedDimensionsFromReport` the
+    // BSC-3 sensor uses). The receipt's stored sets/verdict are NEVER trusted — the gate recomputes
+    // declared (live constant) + observed (live report) + the `declared ⊆ observed` verdict, so a
+    // forged "all covered" claim, a stripped report dimension, or a post-mint narrowing of the
+    // committed set is mechanically detectable. Governed by `bsc5EnforcementEnabled()` (defaults ON):
+    // the verdict is ALWAYS computed (so `coverage` summarizes the posture for the I1 hook), but it
+    // BLOCKS with `dimension_set_uncovered` only when enforcement is on; OFF ⇒ a non-blocking notice.
+    id: "dimension-set-coverage",
+    check: (paths, _state, ctx) => {
+      const coverage = checkDimensionSetCoverage(paths);
+      ctx.captured.coverage = coverage;
+      if (!coverage.ok) {
+        const driver = ctx.captured.driver;
+        return driver?.dimensions ? { ...coverage, dimensions: driver.dimensions } : coverage;
+      }
+      return null;
+    }
+  },
+  {
+    // 9. (BSC-10 / Axis-B slice-BSC10a) EXTERNAL-REFERENCE GROUNDING — a THIN summary rung composed
+    // among the reality rungs. It does NOT recompute: it CONSUMES the `groundingVerdict` already
+    // HOISTED before the 1c approval leg (Principle 1 — single live recompute), folding `grounding?`
+    // onto the result exactly like `dimensions?`/`assertionPresence?`. The `missing` reason blocks
+    // HERE (a required input-ground never checked); the present-but-unconformant (`over_budget`/
+    // `unobserved`) reasons already gated the approval-ACCEPTANCE leg above. Governed by
+    // `bsc10EnforcementEnabled()` (slice-BSC10a is the WARN commit, default OFF): the verdict is
+    // ALWAYS computed (so `grounding` summarizes the posture for the I1 hook), but it BLOCKS with
+    // `grounding_unverified` only when enforcement is on; OFF ⇒ a non-blocking `notice` + summary.
+    id: "bsc10-grounding-summary",
+    check: (_paths, _state, ctx) => {
+      const grounding = checkGrounding(ctx.groundingVerdict);
+      ctx.captured.grounding = grounding;
+      if (!grounding.ok) {
+        const driver = ctx.captured.driver;
+        return driver?.dimensions ? { ...grounding, dimensions: driver.dimensions } : grounding;
+      }
+      return null;
+    }
+  },
+  {
+    // 10. (BSC-9 / Axis-B slice-7) MCP `toToolResult` PROJECTION ORACLE + INTERVIEW-READINESS.
+    // The ONLY authentic CLI↔MCP divergence surface is the PROJECTION (every tool closure
+    // delegates to the same `run*` handler the CLI does, guarded by REQ-PCO-070), so this rung
+    // (a) runs the projection oracle over the committed twin-call fixture set — a projection that
+    // drops/alters ok/exitCode/data BLOCKS — and (b) grounds the soft interview gate's
+    // `interviewReady` claim: an asserted readiness must ride a backing InterviewReadinessReceipt
+    // (a no-receipt / sub-cutoff / forged / tampered / stale readiness BLOCKS). Governed by
+    // `bsc9EnforcementEnabled()` (defaults ON): the verdict is ALWAYS computed (a WARN `notice`
+    // when enforcement is off), but it BLOCKS with `bsc9_unverified` only when enforcement is on.
+    // Self-contained: it does not read or write `ctx` (no cross-rung dependency).
+    id: "bsc9-projection-readiness",
+    check: (paths, state, ctx) => {
+      const bsc9 = checkBsc9(paths, state);
+      ctx.captured.bsc9 = bsc9;
+      return bsc9.ok ? null : bsc9;
+    }
+  }
+];
 function checkProductionReality(paths, state) {
   if (!isFinalVerification(state.current_stage)) return PASS;
   let entries;
@@ -21882,49 +25959,42 @@ function checkProductionReality(paths, state) {
     }
     throw e;
   }
-  const blocking = entries.filter(blocksProductionReality);
-  if (blocking.length > 0) {
-    return {
-      ok: false,
-      error: "simulation_unretired",
-      detail: { ids: blocking.map((e) => e.id), classifications: blocking.map((e) => e.classification) }
-    };
+  const ctx = {
+    entries,
+    scan: null,
+    groundingVerdict: null,
+    groundingBlocksAcceptance: false,
+    captured: {}
+  };
+  for (const rung of PRODUCTION_REALITY_RUNGS) {
+    const r = rung.check(paths, state, ctx);
+    if (r !== null) return r;
   }
-  const verifyLoaded = loadVerifyConfig(paths);
-  if (verifyLoaded.status === "corrupt") {
-    return { ok: false, error: "production_verify_not_green", detail: { reason: "config_corrupt" } };
-  }
-  const verifyCfg = verifyLoaded.config;
-  if (verifyCfg.commands.length > 0) {
-    const validated = readVerifyReportValidated(paths);
-    if (validated.status === "absent") {
-      return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
-    }
-    if (validated.status !== "valid") {
-      return { ok: false, error: "production_verify_not_green", detail: { reason: validated.status, ...validated.staleReasons ? { staleReasons: validated.staleReasons } : {} } };
-    }
-    if (!validated.report.ok) {
-      const failed = validated.report.results.filter((x) => !x.ok).length;
-      return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
-    }
-  }
-  if (!testerRecordPresent(paths)) {
-    return { ok: false, error: "tester_record_missing", detail: {} };
-  }
-  const scan = scanForSimulationHits(paths);
-  const unledgered = computeUnledgeredDistHits(entries, scan.distHits);
-  if (unledgered.length > 0) {
-    return {
-      ok: false,
-      error: "unledgered_simulation_in_dist",
-      detail: { hits: unledgered.slice(0, 20), total: unledgered.length }
-    };
-  }
-  return PASS;
+  const driver = ctx.captured.driver;
+  const realization = ctx.captured.realization;
+  const assertion = ctx.captured.assertion;
+  const grounding = ctx.captured.grounding;
+  const tierCorrespondence = ctx.captured.tierCorrespondence;
+  const coverage = ctx.captured.coverage;
+  const merged = { ok: true };
+  const dimensions = driver?.dimensions ?? assertion?.dimensions;
+  if (dimensions) merged.dimensions = dimensions;
+  if (assertion?.assertionPresence) merged.assertionPresence = assertion.assertionPresence;
+  if (assertion?.mutationEfficacy) merged.mutationEfficacy = assertion.mutationEfficacy;
+  if (grounding?.grounding) merged.grounding = grounding.grounding;
+  if (coverage?.coverage) merged.coverage = coverage.coverage;
+  const bsc9 = ctx.captured.bsc9;
+  const notice = driver?.notice ?? realization?.notice ?? assertion?.notice ?? grounding?.notice ?? tierCorrespondence?.notice ?? coverage?.notice ?? bsc9?.notice;
+  if (notice) merged.notice = notice;
+  return merged.dimensions || merged.assertionPresence || merged.mutationEfficacy || merged.grounding || merged.coverage || merged.notice ? merged : PASS;
 }
 function stageOrdinal(stage) {
   const canonical = canonicalizeStage(stage);
   return STAGE_PIPELINE.findIndex((s) => s.stage === canonical);
+}
+function requiredHumanGateStages(state) {
+  const currentOrdinal = stageOrdinal(state.current_stage);
+  return engagedStagesFor(state).filter((s) => s.humanGate && stageOrdinal(s.stage) <= currentOrdinal).map((s) => s.stage);
 }
 var IMPLEMENTATION_PLANNING_ORDINAL = STAGE_PIPELINE.findIndex((s) => s.stage === "implementation-planning");
 var REQUIREMENTS_ORDINAL = STAGE_PIPELINE.findIndex((s) => s.stage === "requirements");
@@ -21956,6 +26026,12 @@ var STAGE_RUNGS = [
   { id: "checkGoverningArtifact", bucket: "forward-only", scope: "stage:non-final-artifact", run: (p, s) => checkGoverningArtifact(p, s) },
   { id: "checkCoverage", bucket: "forward-only", scope: "stage:implementation-planning", run: (p) => checkCoverage(p) },
   { id: "checkImplementationSettled", bucket: "forward-only", scope: "stage:implementation", run: (_p, s) => checkImplementationSettled(s) },
+  // BSC-7 / Axis-B slice-3a — the human-approval advance rung. `forward-only`: it gates
+  // advancing OUT of a humanGate stage (a per-stage forward-progress block), NOT
+  // completion. Completion enforcement over the CLOSED required-set is the separate C-2
+  // rung composed inside checkFinalVerification (`final`), so this entry must NOT be
+  // `final` or it would double-gate at the completion boundary.
+  { id: "checkHumanApprovalAdvance", bucket: "forward-only", scope: "stage:human-approval-advance", run: (p, s) => checkHumanApprovalAdvance(p, s) },
   { id: "checkFinalVerification", bucket: "final", scope: "stage:final", run: (p, s) => checkFinalVerification(p, s) }
 ];
 var CAN_ADVANCE_RUNGS = [...GLOBAL_RUNGS, ...STAGE_RUNGS];
@@ -21969,6 +26045,8 @@ function rungAppliesAtStage(rung, stage) {
       return stage === "implementation-planning";
     case "stage:implementation":
       return stage === "implementation";
+    case "stage:human-approval-advance":
+      return isHumanGateStage(canonicalizeStage(stage));
     case "stage:final":
       return isFinalVerification(stage);
   }
@@ -22032,15 +26110,19 @@ ${formatIssues(r.issues)}`,
   }
   const res = checkProductionReality(paths, r.state);
   structuredLog({ cmd: "gate production-reality", ok: res.ok, error: res.ok ? void 0 : res.error });
+  const hasDimensions = (res.dimensions?.length ?? 0) > 0;
+  const dimensionsLine = hasDimensions ? `
+Verification dimensions: ${res.dimensions.map((d) => `${d.name}=${d.observed ? "observed" : "unobserved"}/${d.trustLabel}`).join(", ")}.` : "";
+  const dimensionsData = hasDimensions ? { dimensions: res.dimensions } : {};
   if (!res.ok) {
     return failure({
-      human: `Production-reality gate BLOCKS (${res.error}).`,
-      data: { ok: false, gate: "production-reality", error: res.error, ...res.detail ?? {} }
+      human: `Production-reality gate BLOCKS (${res.error}).${dimensionsLine}`,
+      data: { ok: false, gate: "production-reality", error: res.error, ...dimensionsData, ...res.detail ?? {} }
     });
   }
   return success({
-    data: { ok: true, gate: "production-reality" },
-    human: "Production-reality gate clear: no unretired user-visible simulation, verify green, Tester record attached, no unledgered simulation in dist/."
+    data: { ok: true, gate: "production-reality", ...dimensionsData },
+    human: "Production-reality gate clear: no unretired user-visible simulation, verify green, Tester record attached, no unledgered simulation in dist/." + dimensionsLine
   });
 }
 
@@ -22111,10 +26193,10 @@ function conflictPairs(slices) {
 }
 
 // src/core/leases.ts
-var fs20 = __toESM(require("node:fs"));
-var path20 = __toESM(require("node:path"));
+var fs31 = __toESM(require("node:fs"));
+var path30 = __toESM(require("node:path"));
 function leasesPath(paths) {
-  return path20.join(paths.stateDir, "build-leases.jsonl");
+  return path30.join(paths.stateDir, "build-leases.jsonl");
 }
 var LEASE_FIELD_ORDER = [
   "ts",
@@ -22134,9 +26216,9 @@ function serializeLeaseEvent(event) {
 }
 function readLeaseEvents(paths) {
   const file = leasesPath(paths);
-  if (!fs20.existsSync(file)) return [];
+  if (!fs31.existsSync(file)) return [];
   const out = [];
-  for (const line of fs20.readFileSync(file, "utf8").split(/\r?\n/)) {
+  for (const line of fs31.readFileSync(file, "utf8").split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
@@ -22154,9 +26236,9 @@ function readLeaseEvents(paths) {
 }
 function appendLeaseEvent(paths, event, now = () => /* @__PURE__ */ new Date()) {
   assertGovernedWriteSurface(paths.root, leasesPath(paths));
-  fs20.mkdirSync(paths.stateDir, { recursive: true });
+  fs31.mkdirSync(paths.stateDir, { recursive: true });
   const line = serializeLeaseEvent({ ts: now().toISOString(), ...event }) + "\n";
-  fs20.appendFileSync(leasesPath(paths), line, "utf8");
+  fs31.appendFileSync(leasesPath(paths), line, "utf8");
 }
 function activeLeases(paths) {
   const byOwner = /* @__PURE__ */ new Map();
@@ -22348,61 +26430,6 @@ function computeRoute(input) {
     return { model: "opus", effort: t3 || blast ? "high" : "medium", rationale: `${agent} default (opus)` };
   }
   return { model: "sonnet", effort: t3 ? "high" : "medium", rationale: "default (sonnet)" };
-}
-
-// src/core/brief.ts
-var fs21 = __toESM(require("node:fs"));
-function isPlainObject5(v) {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-function validateBrief(value) {
-  const issues = [];
-  if (!isPlainObject5(value)) {
-    return { ok: false, issues: [{ path: "$", message: "brief must be a JSON object" }] };
-  }
-  const v = value;
-  if (!(v.description === void 0 || typeof v.description === "string")) {
-    issues.push({ path: "description", message: "must be a string if present" });
-  }
-  for (const key of [
-    "single_file_or_local",
-    "changes_public_interface",
-    "adds_dependency",
-    "obvious_testable_answer"
-  ]) {
-    if (typeof v[key] !== "boolean") {
-      issues.push({ path: key, message: "must be a boolean" });
-    }
-  }
-  if (!Array.isArray(v.blast_radius_flags)) {
-    issues.push({ path: "blast_radius_flags", message: "must be an array" });
-  } else {
-    v.blast_radius_flags.forEach((f, i) => {
-      if (typeof f !== "string" || !BLAST_RADIUS_FLAGS.includes(f)) {
-        issues.push({ path: `blast_radius_flags[${i}]`, message: `invalid flag "${String(f)}"` });
-      }
-    });
-  }
-  if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, issues: [], brief: value };
-}
-function loadBriefFromFile(filePath) {
-  if (!fs21.existsSync(filePath)) {
-    return { ok: false, issues: [{ path: "$", message: `brief file not found: ${filePath}` }] };
-  }
-  let raw;
-  try {
-    raw = fs21.readFileSync(filePath, "utf8");
-  } catch (e) {
-    return { ok: false, issues: [{ path: "$", message: `could not read brief: ${e.message}` }] };
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    return { ok: false, issues: [{ path: "$", message: `invalid JSON: ${e.message}` }] };
-  }
-  return validateBrief(parsed);
 }
 
 // src/commands/tier.ts
@@ -22698,7 +26725,7 @@ function readLeaseEventsForParent(paths, parentSlice) {
 }
 
 // src/commands/coverage.ts
-var path21 = __toESM(require("node:path"));
+var path31 = __toESM(require("node:path"));
 function rejectEscapingPath(paths, opts) {
   const fields = [
     ["reqsFile", opts.reqsFile],
@@ -22717,13 +26744,13 @@ function rejectEscapingPath(paths, opts) {
 function runCoverageCheck(paths, opts = {}) {
   const escaped = rejectEscapingPath(paths, opts);
   if (escaped) return escaped;
-  const reqsAbs = path21.resolve(paths.root, opts.reqsFile ?? "docs/01-requirements.md");
-  const planAbs = path21.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
-  const testsAbs = path21.resolve(paths.root, opts.testsDir ?? "tests");
-  const scopeAbs = path21.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
+  const reqsAbs = path31.resolve(paths.root, opts.reqsFile ?? "docs/01-requirements.md");
+  const planAbs = path31.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  const testsAbs = path31.resolve(paths.root, opts.testsDir ?? "tests");
+  const scopeAbs = path31.resolve(paths.root, opts.scopeFile ?? "docs/02-scope.md");
   const reqsContent = readFileOrUndefined(reqsAbs);
   if (reqsContent === void 0) {
-    const rel = path21.relative(paths.root, reqsAbs).split(path21.sep).join("/");
+    const rel = path31.relative(paths.root, reqsAbs).split(path31.sep).join("/");
     return failure({
       human: `Requirements file not found: ${rel}. Run \`th init\` and author requirements first.`,
       data: { error: "reqs_file_not_found", reqsFile: rel }
@@ -22816,19 +26843,19 @@ function runCoverageReport(paths, opts = {}) {
 }
 
 // src/core/telemetry.ts
-var fs22 = __toESM(require("node:fs"));
-var path22 = __toESM(require("node:path"));
+var fs32 = __toESM(require("node:fs"));
+var path32 = __toESM(require("node:path"));
 function telemetryConfigPath(paths) {
-  return path22.join(paths.stateDir, "telemetry.json");
+  return path32.join(paths.stateDir, "telemetry.json");
 }
 function telemetryLogPath(paths) {
-  return path22.join(paths.stateDir, "telemetry.jsonl");
+  return path32.join(paths.stateDir, "telemetry.jsonl");
 }
 function readTelemetryConfig(paths) {
   const file = telemetryConfigPath(paths);
-  if (!fs22.existsSync(file)) return { enabled: false };
+  if (!fs32.existsSync(file)) return { enabled: false };
   try {
-    const parsed = JSON.parse(fs22.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs32.readFileSync(file, "utf8"));
     if (parsed && typeof parsed === "object" && typeof parsed.enabled === "boolean") {
       return { enabled: parsed.enabled };
     }
@@ -22840,8 +26867,8 @@ function appendTelemetry(paths, record2) {
   if (!readTelemetryConfig(paths).enabled) return;
   try {
     assertGovernedWriteSurface(paths.root, telemetryLogPath(paths));
-    fs22.mkdirSync(paths.stateDir, { recursive: true });
-    fs22.appendFileSync(telemetryLogPath(paths), JSON.stringify(record2) + "\n", "utf8");
+    fs32.mkdirSync(paths.stateDir, { recursive: true });
+    fs32.appendFileSync(telemetryLogPath(paths), JSON.stringify(record2) + "\n", "utf8");
   } catch {
   }
 }
@@ -23222,6 +27249,19 @@ function runNext(paths, opts = {}) {
           explain
         );
       }
+      case "human_approval_unverified": {
+        const stage = fv.detail.stage ?? "";
+        const status = fv.detail.status ?? "";
+        return emit(
+          {
+            kind: "approve-stage",
+            action: `Final verification is blocked \u2014 the human approval for the '${stage}' stage is ${status || "missing/invalid"}. A human must approve it at the current snapshot (\`th approve ${stage}\`) before sign-off; the approval binds the stage's governing artifact, so re-approve after any change to it.`,
+            why: "BSC-7: a `humanGate` stage must carry a snapshot- and artifact-bound human approval before completion. The closed required-set (engaged-and-not-future humanGate stages) is re-validated fresh at the completion gate, so an `--emergency`/`state set` jump cannot route around it.",
+            data: { stage, status }
+          },
+          explain
+        );
+      }
     }
   }
   if (current === "implementation") {
@@ -23337,11 +27377,11 @@ why: ${next.why}` : `next: ${next.action}`;
 }
 
 // src/commands/delegate.ts
-var fs24 = __toESM(require("node:fs"));
+var fs34 = __toESM(require("node:fs"));
 
 // src/commands/context.ts
-var fs23 = __toESM(require("node:fs"));
-var path23 = __toESM(require("node:path"));
+var fs33 = __toESM(require("node:fs"));
+var path33 = __toESM(require("node:path"));
 
 // src/core/summary.ts
 var SUMMARY_HEADING_RE = /^(#{1,3})\s+summary\b/i;
@@ -23422,15 +27462,15 @@ function runContextPack(paths, opts = {}) {
   if (!r.state) return failure({ human: "state.json is invalid.", data: { error: "invalid_state", issues: r.issues } });
   const s = r.state;
   const packed = s.approved_artifacts.map((a) => {
-    const abs = path23.resolve(paths.root, a.file);
+    const abs = path33.resolve(paths.root, a.file);
     let exists = false;
     let isDir = false;
     let content = "";
-    if (fs23.existsSync(abs)) {
-      const stat = fs23.statSync(abs);
+    if (fs33.existsSync(abs)) {
+      const stat = fs33.statSync(abs);
       if (stat.isFile()) {
         exists = true;
-        content = fs23.readFileSync(abs, "utf8");
+        content = fs33.readFileSync(abs, "utf8");
       } else if (stat.isDirectory()) {
         exists = true;
         isDir = true;
@@ -23574,15 +27614,15 @@ function runContextRead(paths, opts = {}) {
   let running = 0;
   let budgetExhausted = false;
   for (const f of files) {
-    const relKey = path23.relative(paths.root, path23.resolve(paths.root, f)).split(path23.sep).join("/");
+    const relKey = path33.relative(paths.root, path33.resolve(paths.root, f)).split(path33.sep).join("/");
     const abs = resolveWithinRoot(paths.root, f);
-    if (abs === null || !fs23.existsSync(abs) || !fs23.statSync(abs).isFile()) {
+    if (abs === null || !fs33.existsSync(abs) || !fs33.statSync(abs).isFile()) {
       results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
       continue;
     }
     let content;
     try {
-      content = fs23.readFileSync(abs, "utf8");
+      content = fs33.readFileSync(abs, "utf8");
     } catch {
       results.push({ file: relKey, exists: false, text: "", tokens: 0, truncated: false, omitted: false });
       continue;
@@ -23902,13 +27942,13 @@ function runDelegateCheck(paths, opts) {
         data: { error: "path_outside_root", file: opts.file }
       });
     }
-    if (!fs24.existsSync(abs) || !fs24.statSync(abs).isFile()) {
+    if (!fs34.existsSync(abs) || !fs34.statSync(abs).isFile()) {
       return failure({
         human: `Capsule file not found: ${opts.file}`,
         data: { error: "capsule_not_found", file: opts.file }
       });
     }
-    text = fs24.readFileSync(abs, "utf8");
+    text = fs34.readFileSync(abs, "utf8");
   }
   const v = validateCapsule(text);
   structuredLog({ cmd: "delegate check", ok: v.ok, missing: v.missing.length });
@@ -24009,10 +28049,10 @@ function runBudgetCheck(paths, opts = {}) {
 }
 
 // src/commands/handoff.ts
-var fs25 = __toESM(require("node:fs"));
-var path24 = __toESM(require("node:path"));
+var fs35 = __toESM(require("node:fs"));
+var path34 = __toESM(require("node:path"));
 function handoffPath(paths) {
-  return path24.join(paths.stateDir, "HANDOFF.md");
+  return path34.join(paths.stateDir, "HANDOFF.md");
 }
 var HANDOFF_STATE_OPEN = "<!-- TH-HANDOFF-STATE";
 var HANDOFF_STATE_CLOSE = "TH-HANDOFF-STATE -->";
@@ -24080,13 +28120,13 @@ function runHandoffWrite(paths) {
     HANDOFF_STATE_CLOSE,
     ""
   ].join("\n");
-  fs25.mkdirSync(paths.stateDir, { recursive: true });
+  fs35.mkdirSync(paths.stateDir, { recursive: true });
   atomicWriteFile(handoffPath(paths), md, { root: paths.root });
-  const relPath = path24.relative(paths.root, handoffPath(paths)).split(path24.sep).join("/");
-  structuredLog({ cmd: "handoff write", path: relPath, slices: slices.length, artifacts: s.approved_artifacts.length });
+  const relPath2 = path34.relative(paths.root, handoffPath(paths)).split(path34.sep).join("/");
+  structuredLog({ cmd: "handoff write", path: relPath2, slices: slices.length, artifacts: s.approved_artifacts.length });
   return success({
     data: {
-      path: relPath,
+      path: relPath2,
       current_stage: s.current_stage,
       slices,
       nextAction,
@@ -24096,7 +28136,7 @@ function runHandoffWrite(paths) {
       sections: ["Run state", "Slices", "Next action", "Open questions", "Artifact Summary blocks"]
     },
     human: [
-      `Wrote ${relPath} (${slices.length} slice(s), ${s.approved_artifacts.length} artifact summary block(s)).`,
+      `Wrote ${relPath2} (${slices.length} slice(s), ${s.approved_artifacts.length} artifact summary block(s)).`,
       `Next action: ${nextAction}`,
       "Resume a fresh session with `th resume`."
     ].join("\n")
@@ -24104,14 +28144,14 @@ function runHandoffWrite(paths) {
 }
 
 // src/commands/inspector.ts
-var path26 = __toESM(require("node:path"));
+var path36 = __toESM(require("node:path"));
 
 // src/commands/artifact.ts
-var fs26 = __toESM(require("node:fs"));
-var path25 = __toESM(require("node:path"));
+var fs36 = __toESM(require("node:fs"));
+var path35 = __toESM(require("node:path"));
 function toRelKey(root, file) {
-  const abs = path25.resolve(root, file);
-  return path25.relative(root, abs).split(path25.sep).join("/");
+  const abs = path35.resolve(root, file);
+  return path35.relative(root, abs).split(path35.sep).join("/");
 }
 function runArtifactRegister(paths, file, version2) {
   return withStateLock(paths, () => runArtifactRegisterLocked(paths, file, version2));
@@ -24125,10 +28165,10 @@ function runArtifactRegisterLocked(paths, file, version2) {
   if (abs === null) {
     return failure({ human: `Path outside project root: ${file}`, data: { error: "path_outside_root", file } });
   }
-  if (!fs26.existsSync(abs)) {
+  if (!fs36.existsSync(abs)) {
     return failure({ human: `File not found: ${file}`, data: { error: "file_not_found", file } });
   }
-  const stat = fs26.statSync(abs);
+  const stat = fs36.statSync(abs);
   if (!stat.isFile() && !stat.isDirectory()) {
     return failure({ human: `Not a file or directory: ${file}`, data: { error: "not_a_file_or_dir", file } });
   }
@@ -24157,7 +28197,7 @@ ${formatIssues(r.issues)}`,
   let summaryWarning = null;
   if (stat.isFile() && /\.(md|markdown)$/i.test(relKey)) {
     try {
-      const { summary } = extractSummary(fs26.readFileSync(abs, "utf8"));
+      const { summary } = extractSummary(fs36.readFileSync(abs, "utf8"));
       if (summary === null) {
         summaryWarning = `no \`## Summary\` block \u2014 \`th context pack\` will fall back to the file head; add a Summary block to keep the handoff tight.`;
       }
@@ -24243,14 +28283,14 @@ function runArtifactSection(paths, opts = {}) {
     structuredLog({ cmd: "artifact section", error: "path_outside_root", file: opts.file });
     return failure({ human: `Path outside project root: ${opts.file}`, data: { error: "path_outside_root", file: opts.file } });
   }
-  if (!fs26.existsSync(abs) || !fs26.statSync(abs).isFile()) {
+  if (!fs36.existsSync(abs) || !fs36.statSync(abs).isFile()) {
     structuredLog({ cmd: "artifact section", error: "file_not_found", file: opts.file });
     return failure({ human: `File not found: ${opts.file}`, data: { error: "file_not_found", file: opts.file } });
   }
   const relKey = toRelKey(paths.root, opts.file);
   let content;
   try {
-    content = fs26.readFileSync(abs, "utf8");
+    content = fs36.readFileSync(abs, "utf8");
   } catch {
     structuredLog({ cmd: "artifact section", error: "read_failed", file: relKey });
     return failure({ human: `Could not read ${relKey}`, data: { error: "read_failed", file: relKey } });
@@ -24350,7 +28390,7 @@ ${formatIssues(r.issues)}`,
   const guard = guardApprovedArtifactReauthor(r.state.approved_artifacts, INSPECTOR_ANALYSIS_FILE, opts.version, `inspector write ${INSPECTOR_ANALYSIS_FILE}`);
   if (!guard.ok) return guard.result;
   const version2 = guard.version;
-  const abs = path26.resolve(paths.root, INSPECTOR_ANALYSIS_FILE);
+  const abs = path36.resolve(paths.root, INSPECTOR_ANALYSIS_FILE);
   atomicWriteFile(abs, content, { root: paths.root });
   const reg = runArtifactRegister(paths, INSPECTOR_ANALYSIS_FILE, version2);
   if (!reg.ok) {
@@ -24365,11 +28405,11 @@ ${formatIssues(r.issues)}`,
   });
 }
 function normalizeRel(p) {
-  return p.split(path26.sep).join("/").replace(/^\.\//, "");
+  return p.split(path36.sep).join("/").replace(/^\.\//, "");
 }
 
 // src/commands/tester.ts
-var path27 = __toESM(require("node:path"));
+var path37 = __toESM(require("node:path"));
 function runTesterRecord(paths, opts) {
   const driver = (opts.driver ?? "").trim();
   if (driver === "") {
@@ -24404,7 +28444,7 @@ Pass --evidence-ref pointing at the live run's saved output (a readable file und
   const body = JSON.stringify(record2, null, 2) + "\n";
   atomicWriteFile(testerRecordPath(paths), body, { root: paths.root });
   const hash = shortHash(body);
-  const rel = path27.relative(paths.root, testerRecordPath(paths)).split(path27.sep).join("/");
+  const rel = path37.relative(paths.root, testerRecordPath(paths)).split(path37.sep).join("/");
   appendLedger(paths, { event: "tester-record", driver: record2.driver, provider: record2.provider ?? null, passed });
   structuredLog({ cmd: "tester record", driver: record2.driver, provider: record2.provider ?? null, passed });
   const gateNote = passed ? "The production-reality gate's Tester condition is now satisfied." : "NOTE: recorded as NOT passed (`--passed` absent) \u2014 the production-reality gate's Tester condition is NOT satisfied. Re-record with `--passed` once the live run is green.";
@@ -24415,9 +28455,369 @@ Pass --evidence-ref pointing at the live run's saved output (a readable file und
   });
 }
 
+// src/commands/approve.ts
+var path38 = __toESM(require("node:path"));
+function runApprove(paths, stage, opts = {}) {
+  return withStateLock(paths, () => runApproveLocked(paths, stage, opts));
+}
+function runApproveLocked(paths, stageArg, opts) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: "state.json is invalid; fix it before approving a stage.",
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const raw = (stageArg ?? r.state.current_stage ?? "").trim();
+  const stage = canonicalizeStage(raw);
+  if (stage === "") {
+    return failure({
+      human: "usage: th approve <stage>  (no stage given and the run has no current_stage to default to)",
+      data: { error: "approval_stage_required" }
+    });
+  }
+  const contract = stageContract(stage);
+  if (!contract || !contract.humanGate) {
+    return failure({
+      human: `Cannot approve "${stage}": it is not a humanGate stage. humanGate stages: requirements, scope, architecture, ux-design, ui-design, contracts, security, final-verification.`,
+      data: { error: "approval_stage_not_human_gate", stage }
+    });
+  }
+  let sealed;
+  try {
+    sealed = appendApprovalReceipt(paths, {
+      stage,
+      producerIdentity: opts.producerIdentity ?? "cli:th approve"
+    });
+  } catch (e) {
+    if (e instanceof ApprovalUnmintableError) {
+      return failure({
+        human: e.code === "approval_artifact_unresolved" ? `Refusing to approve "${stage}": its governing artifact "${e.artifact}" does not resolve in source. Author and register the stage artifact first, then approve.` : `Cannot approve "${stage}": ${e.message}`,
+        data: { error: e.code, stage, ...e.artifact ? { artifact: e.artifact } : {} }
+      });
+    }
+    throw e;
+  }
+  const rel = path38.relative(paths.root, approvalReceiptsPath(paths)).split(path38.sep).join("/");
+  appendLedger(paths, { event: "approve", stage, approvalRecordHash: sealed.recordHash });
+  structuredLog({ cmd: "approve", stage, approvalRecordHash: sealed.recordHash });
+  return success({
+    data: {
+      file: rel,
+      stage,
+      producer_kind: sealed.producer_kind ?? "in-process",
+      governing_artifact_digest: sealed.approval_of.governing_artifact_digest,
+      recordHash: sealed.recordHash
+    },
+    human: `Recorded an in-process human-approval receipt for "${stage}" at ${rel} (governing artifact: ${contract.produces}). NOTE: this in-process record is ATTRIBUTION-ONLY (zero trust weight) \u2014 the agent can mint it; independent grounding requires the slice-3b external-signed producer.`,
+    receipts: [{ file: rel, hash: sealed.recordHash }]
+  });
+}
+
+// src/commands/driver.ts
+var path39 = __toESM(require("node:path"));
+function runDriverRecord(paths, opts = {}) {
+  return withStateLock(paths, () => runDriverRecordLocked(paths, opts));
+}
+function runDriverRecordLocked(paths, opts) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: "state.json is invalid; fix it before recording a driver-dimension receipt.",
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  let sealed;
+  try {
+    sealed = appendDriverReceipt(paths, {
+      ...opts.dimensionNames !== void 0 ? { dimensionNames: opts.dimensionNames } : {},
+      producerIdentity: opts.producerIdentity ?? "cli:th driver record"
+    });
+  } catch (e) {
+    if (e instanceof DimensionUnobservedError) {
+      return failure({
+        human: `Refusing to record driver dimension(s) not observed in verify-report.json: ${e.unobserved.join(", ")}. Run \`th verify run\` so the report evidences the dimension(s) first, then re-record.`,
+        data: { error: e.code, unobserved: e.unobserved }
+      });
+    }
+    if (e instanceof EvidenceUnresolvedError) {
+      return failure({
+        human: `Cannot record a driver-dimension receipt: evidence artifact "${e.evidenceRef}" does not resolve in source. Run \`th verify run\` to produce the report, then re-record.`,
+        data: { error: e.code, evidenceRef: e.evidenceRef }
+      });
+    }
+    throw e;
+  }
+  const rel = path39.relative(paths.root, driverReceiptsPath(paths)).split(path39.sep).join("/");
+  const recorded = sealed.dimensions.map((d) => d.name);
+  appendLedger(paths, { event: "driver-record", dimensions: recorded, driverRecordHash: sealed.recordHash });
+  structuredLog({ cmd: "driver record", dimensions: recorded, driverRecordHash: sealed.recordHash });
+  return success({
+    data: {
+      file: rel,
+      dimensions: recorded,
+      producer_kind: sealed.producer_kind ?? "in-process",
+      recordHash: sealed.recordHash
+    },
+    human: `Recorded an in-process driver-dimension receipt at ${rel} (dimensions observed: ${recorded.length > 0 ? recorded.join(", ") : "(none)"}). NOTE: this in-process record is ATTRIBUTION-ONLY (zero trust weight) \u2014 the agent can mint it; independent grounding requires the slice-4b external-signed producer.`,
+    receipts: [{ file: rel, hash: sealed.recordHash }]
+  });
+}
+
+// src/commands/realize.ts
+var path40 = __toESM(require("node:path"));
+function runRealize(paths, opts = {}) {
+  return withStateLock(paths, () => runRealizeLocked(paths, opts));
+}
+function runRealizeLocked(paths, opts) {
+  const reqId = (opts.reqId ?? "").trim();
+  if (reqId === "") {
+    return failure({
+      human: "Usage: th realize <REQ-ID> --artifact <path>. The REQ-ID positional is required.",
+      data: { error: "realization_req_id_missing" }
+    });
+  }
+  const artifact = (opts.artifact ?? "").trim();
+  if (artifact === "") {
+    return failure({
+      human: `Usage: th realize ${reqId} --artifact <path>. The --artifact referent path is required.`,
+      data: { error: "realization_artifact_missing" }
+    });
+  }
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: "state.json is invalid; fix it before recording a realization receipt.",
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const map = loadRepoMapForRealization(paths);
+  const owning = map === null ? void 0 : ownedReqsForDoneSlices(map, r.state).find((o) => o.reqId === reqId);
+  const owningSlice = owning ? owning.owningSlices[0] ?? "" : "";
+  let sealed;
+  try {
+    sealed = appendRealizationReceipt(paths, {
+      reqId,
+      owningSlice,
+      artifactPath: artifact,
+      producerIdentity: opts.producerIdentity ?? "cli:th realize"
+    });
+  } catch (e) {
+    if (e instanceof ReferentUnresolvedError) {
+      return failure({
+        human: `Cannot record a realization receipt: artifact "${e.referent}" does not resolve in source. Supply a source path that exists, then re-run.`,
+        data: { error: e.code, referent: e.referent }
+      });
+    }
+    throw e;
+  }
+  const rel = path40.relative(paths.root, realizationReceiptsPath(paths)).split(path40.sep).join("/");
+  appendLedger(paths, {
+    event: "realize",
+    reqId,
+    owningSlice,
+    referent: sealed.referent.path,
+    realizationRecordHash: sealed.recordHash
+  });
+  structuredLog({ cmd: "realize", reqId, referent: sealed.referent.path, realizationRecordHash: sealed.recordHash });
+  const unowned = owningSlice === "";
+  return success({
+    data: {
+      file: rel,
+      reqId,
+      owningSlice,
+      ...unowned ? { owningSliceResolved: false } : {},
+      referent: sealed.referent,
+      producer_kind: sealed.producer_kind ?? "in-process",
+      recordHash: sealed.recordHash
+    },
+    human: `Recorded an in-process realization receipt at ${rel} (${reqId} \u2192 ${sealed.referent.path}${owningSlice ? `, owning slice ${owningSlice}` : ""}). ` + (unowned ? `ADVISORY: ${reqId} is not currently owned by any \`done\` slice (the ownership join found no match), so the realization gate rung will not enforce it until its slice is marked done. ` : "") + `NOTE: this in-process record is ATTRIBUTION-ONLY (zero trust weight) \u2014 the agent can mint it; independent (signature-provenance) grounding requires the external-signed producer.`,
+    receipts: [{ file: rel, hash: sealed.recordHash }]
+  });
+}
+
+// src/commands/assertion-presence.ts
+var path41 = __toESM(require("node:path"));
+function runAssertionPresenceRecord(paths, opts = {}) {
+  return withStateLock(paths, () => runAssertionPresenceRecordLocked(paths, opts));
+}
+function runAssertionPresenceRecordLocked(paths, opts) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: "state.json is invalid; fix it before recording an assertion-presence receipt.",
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const sealed = appendAssertionPresenceReceipt(paths, {
+    producerIdentity: opts.producerIdentity ?? "cli:th assertion-presence record"
+  });
+  const rel = path41.relative(paths.root, assertionPresenceReceiptsPath(paths)).split(path41.sep).join("/");
+  const reqs = sealed.ground.length;
+  const assertionFree = sealed.ground.filter((g) => g.assertionFree).length;
+  appendLedger(paths, {
+    event: "assertion-presence-record",
+    reqs,
+    assertionPresenceRecordHash: sealed.recordHash
+  });
+  structuredLog({ cmd: "assertion-presence record", reqs, assertionPresenceRecordHash: sealed.recordHash });
+  return success({
+    data: {
+      file: rel,
+      reqs,
+      assertionFree,
+      recordHash: sealed.recordHash
+    },
+    human: `Recorded an in-process assertion-presence receipt at ${rel} (REQ-IDs measured: ${reqs}; assertion-free: ${assertionFree}). NOTE: this measures assertion PRESENCE / non-triviality, NOT efficacy \u2014 it records whether each REQ's recognized test files carry a non-trivial assertion, not whether the suite catches regressions. It is ATTRIBUTION-ONLY (zero trust weight) \u2014 the agent can mint it, so its status is \`valid\` NEVER \`valid-grounded\`; the only efficacy/independence grade is the external mutation-kill receipt (2b).`,
+    receipts: [{ file: rel, hash: sealed.recordHash }]
+  });
+}
+
+// src/commands/grounding.ts
+var path42 = __toESM(require("node:path"));
+function runGroundingRecord(paths, opts = {}) {
+  return withStateLock(paths, () => runGroundingRecordLocked(paths, opts));
+}
+function runGroundingRecordLocked(paths, opts) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: "state.json is invalid; fix it before recording a grounding receipt.",
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const groundKind = (opts.groundKind ?? "").trim();
+  if (groundKind === "") {
+    return failure({
+      human: "Usage: th grounding record --ground-kind <digest-manifest|version-pin|visual-hash> --work-class <c> [...].\nThe --ground-kind discriminant is required.",
+      data: { error: "grounding_kind_missing" }
+    });
+  }
+  const workClass = (opts.workClass ?? "").trim();
+  if (workClass === "") {
+    return failure({
+      human: "Usage: th grounding record --ground-kind <k> --work-class <c> [...].\nThe --work-class field is required (drives the required-ground matrix).",
+      data: { error: "grounding_work_class_missing" }
+    });
+  }
+  let ground;
+  switch (groundKind) {
+    case "digest-manifest": {
+      const manifestDigest = (opts.manifestDigest ?? "").trim();
+      if (manifestDigest === "") {
+        return failure({
+          human: "Usage: th grounding record --ground-kind digest-manifest --manifest-digest <d> --work-class <c>.\n--manifest-digest is required for ground kind 'digest-manifest'.",
+          data: { error: "grounding_manifest_digest_missing" }
+        });
+      }
+      ground = { groundKind: "digest-manifest", manifestDigest };
+      break;
+    }
+    case "version-pin": {
+      const pkg = (opts.pkg ?? "").trim();
+      const version2 = (opts.pinVersion ?? "").trim();
+      if (pkg === "" || version2 === "") {
+        return failure({
+          human: "Usage: th grounding record --ground-kind version-pin --pkg <p> --pin-version <v> --work-class <c>.\n--pkg and --pin-version are both required for ground kind 'version-pin'.",
+          data: { error: "grounding_version_pin_fields_missing" }
+        });
+      }
+      ground = { groundKind: "version-pin", pkg, version: version2 };
+      break;
+    }
+    case "visual-hash": {
+      const perceptualHash = (opts.perceptualHash ?? "").trim();
+      if (perceptualHash === "") {
+        return failure({
+          human: "Usage: th grounding record --ground-kind visual-hash --perceptual-hash <h> --work-class <c>.\n--perceptual-hash is required for ground kind 'visual-hash'.",
+          data: { error: "grounding_perceptual_hash_missing" }
+        });
+      }
+      const renderer = (opts.renderer ?? "").trim() || void 0;
+      ground = { groundKind: "visual-hash", perceptualHash, ...renderer ? { renderer } : {} };
+      break;
+    }
+    default:
+      return failure({
+        human: `Unknown --ground-kind value: "${groundKind}". Must be one of: digest-manifest, version-pin, visual-hash.`,
+        data: { error: "grounding_kind_unknown", groundKind }
+      });
+  }
+  const sealed = appendGroundingReceipt(paths, {
+    workClass,
+    ground,
+    producerIdentity: opts.producerIdentity ?? "cli:th grounding record"
+  });
+  const rel = path42.relative(paths.root, groundingReceiptsPath(paths)).split(path42.sep).join("/");
+  appendLedger(paths, {
+    event: "grounding-record",
+    groundKind,
+    workClass,
+    groundingRecordHash: sealed.recordHash
+  });
+  structuredLog({ cmd: "grounding record", groundKind, workClass, groundingRecordHash: sealed.recordHash });
+  return success({
+    data: {
+      file: rel,
+      groundKind,
+      workClass,
+      producer_kind: sealed.producer_kind ?? "in-process",
+      recordHash: sealed.recordHash
+    },
+    human: `Recorded an in-process grounding receipt at ${rel} (groundKind: ${groundKind}, workClass: ${workClass}). NOTE: this in-process record is ATTRIBUTION-ONLY (zero trust weight) \u2014 the agent can mint it; independent grounding requires the Slice-B external Ed25519-signed producer.`,
+    receipts: [{ file: rel, hash: sealed.recordHash }]
+  });
+}
+function runGroundingCheck(paths, _opts = {}) {
+  const r = readState(paths);
+  if (!r.exists) return NOT_INIT;
+  if (!r.state) {
+    return failure({
+      human: "state.json is invalid; fix it before checking grounding receipts.",
+      data: { error: "invalid_state", issues: r.issues }
+    });
+  }
+  const rawReceipts = readGroundingReceipts(paths);
+  const chainResult = verifyGroundingChain(rawReceipts);
+  const validated = readGroundingValidated(paths);
+  const total = rawReceipts.length;
+  const chainOk = chainResult.ok;
+  const byKindSummary = Array.from(validated.byKind.entries()).map(([groundKind, entry]) => ({
+    groundKind,
+    recordHash: entry.receipt.recordHash,
+    trustLabel: entry.trustLabel,
+    workClass: entry.receipt.workClass
+  }));
+  structuredLog({
+    cmd: "grounding check",
+    total,
+    chainOk,
+    inProcessChainOk: validated.inProcessChainOk,
+    byKindCount: validated.byKind.size
+  });
+  return success({
+    data: {
+      total,
+      chainOk,
+      inProcessChainOk: validated.inProcessChainOk,
+      ...!chainOk ? {
+        chainBrokenAt: chainResult.brokenAt,
+        chainBreakReason: chainResult.reason
+      } : {},
+      byKind: byKindSummary
+    },
+    human: `Grounding receipts: ${total} total; chain ${chainOk ? "OK" : "BROKEN"}` + (!chainOk ? ` (broken at index ${chainResult.brokenAt}, reason: ${chainResult.reason})` : "") + `; ${validated.byKind.size} trusted kind(s): ${byKindSummary.map((e) => e.groundKind).join(", ") || "(none)"}. (Read-only \u2014 no state written.)`
+  });
+}
+
 // src/commands/decision.ts
-var fs27 = __toESM(require("node:fs"));
-var path28 = __toESM(require("node:path"));
+var fs37 = __toESM(require("node:fs"));
+var path43 = __toESM(require("node:path"));
 
 // src/core/decision-key.ts
 function resolveDecisionKey() {
@@ -24476,14 +28876,14 @@ function firstHeading(body) {
 }
 function runDecisionDetect(paths, _opts = {}) {
   const candidates = [];
-  const adrDir = path28.join(paths.docsDir, "05-adrs");
+  const adrDir = path43.join(paths.docsDir, "05-adrs");
   try {
-    const entries = fs27.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
+    const entries = fs37.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
     for (const f of entries) {
-      const rel = path28.posix.join("docs/05-adrs", f);
+      const rel = path43.posix.join("docs/05-adrs", f);
       let title = f;
       try {
-        const heading = firstHeading(fs27.readFileSync(path28.join(adrDir, f), "utf8"));
+        const heading = firstHeading(fs37.readFileSync(path43.join(adrDir, f), "utf8"));
         if (heading) title = heading;
       } catch {
       }
@@ -24492,7 +28892,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const driftBody = fs27.readFileSync(paths.driftLog, "utf8");
+    const driftBody = fs37.readFileSync(paths.driftLog, "utf8");
     const seen = /* @__PURE__ */ new Set();
     for (const line of driftBody.split(/\r?\n/)) {
       const m = /^##\s+(DRIFT-\d+)\b(.*)$/.exec(line);
@@ -24511,7 +28911,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const scopeBody = fs27.readFileSync(path28.join(paths.docsDir, "02-scope.md"), "utf8");
+    const scopeBody = fs37.readFileSync(path43.join(paths.docsDir, "02-scope.md"), "utf8");
     if (/(^##\s+Changes\b)|(^\s*(ADDED|CHANGED):)/m.test(scopeBody)) {
       candidates.push({
         title: "Scope signal: a post-requirements scope change is recorded",
@@ -24626,15 +29026,15 @@ function sealWarningData(events) {
 }
 
 // src/commands/template.ts
-var fs28 = __toESM(require("node:fs"));
-var path29 = __toESM(require("node:path"));
+var fs38 = __toESM(require("node:fs"));
+var path44 = __toESM(require("node:path"));
 var TEMPLATE_EXT = ".md";
-var PROJECT_TEMPLATE_REL = path29.join(".twinharness", "templates");
+var PROJECT_TEMPLATE_REL = path44.join(".twinharness", "templates");
 var PLUGIN_TEMPLATE_REL = "templates";
 function pluginRoot() {
   const env = process.env.CLAUDE_PLUGIN_ROOT;
-  if (typeof env === "string" && env.length > 0) return path29.resolve(env);
-  return path29.resolve(__dirname, "..", "..");
+  if (typeof env === "string" && env.length > 0) return path44.resolve(env);
+  return path44.resolve(__dirname, "..", "..");
 }
 function normalizeTemplateName(name) {
   const trimmed = name.trim();
@@ -24644,16 +29044,16 @@ function normalizeTemplateName(name) {
   if (trimmed === "." || trimmed === "..") return null;
   return trimmed.toLowerCase().endsWith(TEMPLATE_EXT) ? trimmed : trimmed + TEMPLATE_EXT;
 }
-function resolve17(name, projectRoot, plugin) {
-  const projectPath = path29.join(projectRoot, PROJECT_TEMPLATE_REL, name);
-  const pluginPath = path29.join(plugin, PLUGIN_TEMPLATE_REL, name);
+function resolve19(name, projectRoot, plugin) {
+  const projectPath = path44.join(projectRoot, PROJECT_TEMPLATE_REL, name);
+  const pluginPath = path44.join(plugin, PLUGIN_TEMPLATE_REL, name);
   for (const [abs, source] of [
     [projectPath, "project-override"],
     [pluginPath, "plugin-bundled"]
   ]) {
     try {
-      const st = fs28.statSync(abs);
-      if (st.isFile()) return { path: abs, content: fs28.readFileSync(abs, "utf8"), source };
+      const st = fs38.statSync(abs);
+      if (st.isFile()) return { path: abs, content: fs38.readFileSync(abs, "utf8"), source };
     } catch {
     }
   }
@@ -24672,7 +29072,7 @@ function runTemplateGet(paths, name) {
       data: { error: "invalid_name", name }
     });
   }
-  const r = resolve17(normalized, paths.root, pluginRoot());
+  const r = resolve19(normalized, paths.root, pluginRoot());
   if ("error" in r) {
     structuredLog({ cmd: "template get", name: normalized, error: "template_not_found" });
     return failure({
@@ -24688,17 +29088,17 @@ function runTemplateGet(paths, name) {
   });
 }
 function listTemplateDir(dir) {
-  if (!fs28.existsSync(dir)) return [];
+  if (!fs38.existsSync(dir)) return [];
   try {
-    if (!fs28.statSync(dir).isDirectory()) return [];
-    return fs28.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(TEMPLATE_EXT)).map((e) => e.name);
+    if (!fs38.statSync(dir).isDirectory()) return [];
+    return fs38.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(TEMPLATE_EXT)).map((e) => e.name);
   } catch {
     return [];
   }
 }
 function runTemplateList(paths) {
-  const projectDir = path29.join(paths.root, PROJECT_TEMPLATE_REL);
-  const pluginDir = path29.join(pluginRoot(), PLUGIN_TEMPLATE_REL);
+  const projectDir = path44.join(paths.root, PROJECT_TEMPLATE_REL);
+  const pluginDir = path44.join(pluginRoot(), PLUGIN_TEMPLATE_REL);
   const projectNames = new Set(listTemplateDir(projectDir));
   const pluginNames = new Set(listTemplateDir(pluginDir));
   const byName = /* @__PURE__ */ new Map();
@@ -24796,10 +29196,10 @@ function runArtifactLeases(paths) {
 }
 
 // src/core/collab.ts
-var fs29 = __toESM(require("node:fs"));
-var path30 = __toESM(require("node:path"));
+var fs39 = __toESM(require("node:fs"));
+var path45 = __toESM(require("node:path"));
 function validatePathSegment(segment, label) {
-  if (path30.isAbsolute(segment)) {
+  if (path45.isAbsolute(segment)) {
     throw new PathContainmentError(`collab: ${label} must not be an absolute path: "${segment}"`, segment);
   }
   if (segment === ".." || segment.includes("/") || segment.includes("\\")) {
@@ -24820,16 +29220,16 @@ var FragmentExistsError = class extends Error {
 function collabDir(paths, stage, round) {
   validatePathSegment(stage, "stage");
   if (round !== void 0) validatePathSegment(round, "round");
-  const base = path30.join(paths.stateDir, "collab", stage);
-  return round === void 0 ? base : path30.join(base, round);
+  const base = path45.join(paths.stateDir, "collab", stage);
+  return round === void 0 ? base : path45.join(base, round);
 }
 function writeFragment(paths, input) {
   validatePathSegment(input.name, "name");
   const dir = collabDir(paths, input.stage, input.round);
-  const file = path30.join(dir, input.name);
-  fs29.mkdirSync(dir, { recursive: true });
+  const file = path45.join(dir, input.name);
+  fs39.mkdirSync(dir, { recursive: true });
   try {
-    fs29.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
+    fs39.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
   } catch (e) {
     if (e.code === "EEXIST") throw new FragmentExistsError(file);
     throw e;
@@ -24840,10 +29240,10 @@ function listFragments(paths, stage, round) {
   const out = [];
   const readRound = (r) => {
     const dir = collabDir(paths, stage, r);
-    if (!fs29.existsSync(dir) || !fs29.statSync(dir).isDirectory()) return;
-    const names = fs29.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
+    if (!fs39.existsSync(dir) || !fs39.statSync(dir).isDirectory()) return;
+    const names = fs39.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
     for (const name of names) {
-      out.push({ stage, round: r, name, path: path30.join(dir, name) });
+      out.push({ stage, round: r, name, path: path45.join(dir, name) });
     }
   };
   if (round !== void 0) {
@@ -24851,8 +29251,8 @@ function listFragments(paths, stage, round) {
     return out;
   }
   const stageDir = collabDir(paths, stage);
-  if (!fs29.existsSync(stageDir) || !fs29.statSync(stageDir).isDirectory()) return out;
-  const rounds = fs29.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  if (!fs39.existsSync(stageDir) || !fs39.statSync(stageDir).isDirectory()) return out;
+  const rounds = fs39.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
   for (const r of rounds) readRound(r);
   return out;
 }
@@ -24861,14 +29261,14 @@ function mergeFragments(paths, stage, round) {
   const fragments = listFragments(paths, stage, round);
   const unanchored = [];
   for (const f of fragments) {
-    const content = fs29.readFileSync(f.path, "utf8");
+    const content = fs39.readFileSync(f.path, "utf8");
     if (extractReqIds(content).length === 0) unanchored.push(f.name);
   }
   if (unanchored.length > 0) {
     return { ok: false, merged: "", fragments, unanchored };
   }
   const parts = fragments.map((f) => {
-    const content = fs29.readFileSync(f.path, "utf8");
+    const content = fs39.readFileSync(f.path, "utf8");
     return content.endsWith("\n") ? content : `${content}
 `;
   });
@@ -24981,8 +29381,8 @@ function runCollabMerge(paths, opts) {
 }
 
 // src/commands/debate.ts
-var fs30 = __toESM(require("node:fs"));
-var path31 = __toESM(require("node:path"));
+var fs40 = __toESM(require("node:fs"));
+var path46 = __toESM(require("node:path"));
 
 // src/core/debate-log.ts
 var DEBATE_LEDGER = {
@@ -25050,22 +29450,22 @@ Links      : ...
 \`\`\`
 `;
 function debateLogPath(paths) {
-  return path31.join(paths.root, "debate-log.md");
+  return path46.join(paths.root, "debate-log.md");
 }
 function readDebateLog(paths) {
   const file = debateLogPath(paths);
-  if (!fs30.existsSync(file)) {
+  if (!fs40.existsSync(file)) {
     atomicWriteFile(file, DEBATE_LOG_HEADER, { root: paths.root });
     return DEBATE_LOG_HEADER;
   }
-  return fs30.readFileSync(file, "utf8");
+  return fs40.readFileSync(file, "utf8");
 }
 function appendDebateLog(paths, block) {
   const file = debateLogPath(paths);
   readDebateLog(paths);
   assertGovernedWriteSurface(paths.root, file);
-  const sep18 = endsWithNewline(file) ? "" : "\n";
-  fs30.appendFileSync(file, `${sep18}${block}`, "utf8");
+  const sep26 = endsWithNewline(file) ? "" : "\n";
+  fs40.appendFileSync(file, `${sep26}${block}`, "utf8");
 }
 function runDebateAdd(paths, opts) {
   const locked = assertFeatureUnlocked(paths, "debate");
@@ -25128,7 +29528,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs30.existsSync(file) ? fs30.readFileSync(file, "utf8") : "";
+  const text = fs40.existsSync(file) ? fs40.readFileSync(file, "utf8") : "";
   const entries = sortById(effectiveEntries(parseDebateEntries(text)));
   const openBlocking = r.state.debate_open_blocking ?? 0;
   const human = entries.length ? entries.map((e) => `${e.id}  (${e.topic})  ${e.status}`).join("\n") : "(no debate entries)";
@@ -25164,7 +29564,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs30.existsSync(file) ? fs30.readFileSync(file, "utf8") : "";
+  const text = fs40.existsSync(file) ? fs40.readFileSync(file, "utf8") : "";
   const entries = parseDebateEntries(text);
   const entry = entries.find((e) => e.id === id);
   if (!entry) {
@@ -25210,7 +29610,7 @@ ${formatIssues(r.issues)}`,
 }
 
 // src/commands/init.ts
-var fs31 = __toESM(require("node:fs"));
+var fs41 = __toESM(require("node:fs"));
 var DRIFT_LOG_HEADER2 = `# Drift Log
 
 Append-only record of implementation discoveries (spec \xA710). Each entry records the
@@ -25245,11 +29645,11 @@ function runInit(paths, opts) {
   const created = [];
   const skipped = [];
   const maxTokens = opts.maxTokens !== void 0 && Number.isFinite(opts.maxTokens) && opts.maxTokens > 0 ? kToTokens(opts.maxTokens) : void 0;
-  if (!fs31.existsSync(paths.docsDir)) {
-    fs31.mkdirSync(paths.docsDir, { recursive: true });
+  if (!fs41.existsSync(paths.docsDir)) {
+    fs41.mkdirSync(paths.docsDir, { recursive: true });
     created.push("docs/");
   }
-  fs31.mkdirSync(paths.stateDir, { recursive: true });
+  fs41.mkdirSync(paths.stateDir, { recursive: true });
   const existing = readState(paths);
   if (existing.exists && !opts.force) {
     if (maxTokens !== void 0 && existing.state) {
@@ -25275,7 +29675,7 @@ ${formatIssues(validation.issues)}`,
     writeState(paths, state);
     created.push(".twinharness/state.json");
   }
-  if (!fs31.existsSync(paths.driftLog)) {
+  if (!fs41.existsSync(paths.driftLog)) {
     atomicWriteFile(paths.driftLog, DRIFT_LOG_HEADER2, { root: paths.root });
     created.push("drift-log.md");
   } else {
@@ -25319,7 +29719,7 @@ function runInitMcp(paths, opts = {}) {
 }
 
 // src/commands/research.ts
-var path32 = __toESM(require("node:path"));
+var path47 = __toESM(require("node:path"));
 var WINDOWS_RESERVED = /* @__PURE__ */ new Set([
   "con",
   "prn",
@@ -25348,7 +29748,7 @@ function sanitizeTopic(topic) {
   const raw = topic.trim();
   if (raw === "") return { error: "empty topic" };
   if (raw.includes("/") || raw.includes("\\")) return { error: "topic must not contain a path separator" };
-  if (path32.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) return { error: "topic must not be an absolute or drive path" };
+  if (path47.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) return { error: "topic must not be an absolute or drive path" };
   if (raw.includes("..")) return { error: "topic must not contain `..`" };
   const stem = raw.replace(/\.(md|markdown)$/i, "");
   if (stem === "") return { error: "empty topic" };
@@ -25374,8 +29774,8 @@ function runResearchWrite(paths, opts) {
     return failure({ human: `Refusing research write: ${sanitized.error}: ${topic}`, data: { error: "invalid_topic", reason: sanitized.error, topic } });
   }
   const relTarget = `${RESEARCH_DIR}/${sanitized.stem}.md`;
-  const absTarget = path32.resolve(paths.root, relTarget);
-  const reRel = path32.relative(paths.root, absTarget).split(path32.sep).join("/");
+  const absTarget = path47.resolve(paths.root, relTarget);
+  const reRel = path47.relative(paths.root, absTarget).split(path47.sep).join("/");
   if (reRel !== relTarget) {
     return failure({ human: `Refusing research write outside ${RESEARCH_DIR}/: ${reRel}`, data: { error: "path_not_pinned", expected: relTarget, got: reRel } });
   }
@@ -25566,11 +29966,11 @@ function runStageCurrent(paths) {
 }
 
 // src/commands/doctor.ts
-var fs32 = __toESM(require("node:fs"));
-var path33 = __toESM(require("node:path"));
+var fs42 = __toESM(require("node:fs"));
+var path48 = __toESM(require("node:path"));
 var DOCTOR_STRICT_KEY_ALLOWLIST = /* @__PURE__ */ new Set([]);
 function pluginRoot2() {
-  return path33.resolve(__dirname, "..", "..");
+  return path48.resolve(__dirname, "..", "..");
 }
 function packagingCheck(root, files) {
   if (files.length === 0) {
@@ -25579,10 +29979,10 @@ function packagingCheck(root, files) {
   const missing = [];
   const counts = [];
   for (const entry of files) {
-    const abs = path33.join(root, entry);
+    const abs = path48.join(root, entry);
     let st;
     try {
-      st = fs32.statSync(abs);
+      st = fs42.statSync(abs);
     } catch {
       missing.push(entry);
       continue;
@@ -25590,7 +29990,7 @@ function packagingCheck(root, files) {
     if (st.isDirectory()) {
       let n = 0;
       try {
-        n = fs32.readdirSync(abs).length;
+        n = fs42.readdirSync(abs).length;
       } catch {
       }
       counts.push(`${entry}/ (${n})`);
@@ -25612,12 +30012,12 @@ function nodeMajor() {
   return m ? Number(m[1]) : 0;
 }
 function templateShadowCheck(root, pluginDir) {
-  const projectDir = path33.join(root, ".twinharness", "templates");
+  const projectDir = path48.join(root, ".twinharness", "templates");
   const mdFiles = (dir) => {
     try {
-      if (!fs32.statSync(dir).isDirectory()) return /* @__PURE__ */ new Set();
+      if (!fs42.statSync(dir).isDirectory()) return /* @__PURE__ */ new Set();
       return new Set(
-        fs32.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => e.name)
+        fs42.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => e.name)
       );
     } catch {
       return /* @__PURE__ */ new Set();
@@ -25639,7 +30039,7 @@ function templateShadowCheck(root, pluginDir) {
   };
 }
 function ledgerChecks(paths, opts) {
-  if (!fs32.existsSync(ledgerPath(paths))) return [];
+  if (!fs42.existsSync(ledgerPath(paths))) return [];
   const ledgerEntries = readLedger(paths);
   const ledgerCount = ledgerEntries.length;
   const anchors = ledgerEntries.filter((e) => e.event === "high-water").length;
@@ -25683,23 +30083,23 @@ function runDoctor(paths, opts = {}) {
     detail: major >= 20 ? `${process.version} (>= 20)` : `${process.version} \u2014 TwinHarness requires Node >= 20`
   });
   const root = pluginRoot2();
-  const distCli = path33.join(root, "dist", "cli.js");
+  const distCli = path48.join(root, "dist", "cli.js");
   checks.push({
     name: "plugin cli",
-    status: fs32.existsSync(distCli) ? "ok" : "warn",
-    detail: fs32.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary"
+    status: fs42.existsSync(distCli) ? "ok" : "warn",
+    detail: fs42.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary"
   });
   let version2 = "unknown";
   let pkgFiles = [];
   try {
-    const pkg = JSON.parse(fs32.readFileSync(path33.join(root, "package.json"), "utf8"));
+    const pkg = JSON.parse(fs42.readFileSync(path48.join(root, "package.json"), "utf8"));
     if (typeof pkg.version === "string") version2 = pkg.version;
     if (Array.isArray(pkg.files)) pkgFiles = pkg.files.filter((f) => typeof f === "string");
   } catch {
   }
   checks.push({ name: "version", status: "ok", detail: version2 });
   checks.push(packagingCheck(root, pkgFiles));
-  checks.push(templateShadowCheck(paths.root, path33.join(root, "templates")));
+  checks.push(templateShadowCheck(paths.root, path48.join(root, "templates")));
   checks.push({
     name: "claude code",
     status: "warn",
@@ -25735,11 +30135,11 @@ function runDoctor(paths, opts = {}) {
       status: "ok",
       detail: `mode: ${writeMode} \u2014 GUARDRAIL for a compliant agent, NOT a security sandbox. The Bash heuristic is conservative and fail-open (unparsed here-docs/subshells/variable indirection and program-mediated writes like \`python -c\`/\`node -e\` bypass it). Do not run TwinHarness against untrusted repos and review \`th verify list\` before \`th verify run\`.`
     });
-    const lockDir = path33.join(paths.stateDir, ".state.lock");
-    if (fs32.existsSync(lockDir)) {
+    const lockDir = path48.join(paths.stateDir, ".state.lock");
+    if (fs42.existsSync(lockDir)) {
       let age = 0;
       try {
-        age = Date.now() - fs32.statSync(lockDir).mtimeMs;
+        age = Date.now() - fs42.statSync(lockDir).mtimeMs;
       } catch {
       }
       checks.push({
@@ -25868,7 +30268,7 @@ function runDoctor(paths, opts = {}) {
 }
 
 // src/commands/scorecard.ts
-var fs33 = __toESM(require("node:fs"));
+var fs43 = __toESM(require("node:fs"));
 function summarizeRouting(paths) {
   const models = {};
   let events = 0;
@@ -25958,8 +30358,8 @@ function runScorecard(paths, opts) {
   const suiteFailures = report ? report.results.filter((x) => !x.ok).length : 0;
   let driftEntries = 0;
   try {
-    if (fs33.existsSync(paths.driftLog)) {
-      driftEntries = parseDriftEntries(fs33.readFileSync(paths.driftLog, "utf8")).length;
+    if (fs43.existsSync(paths.driftLog)) {
+      driftEntries = parseDriftEntries(fs43.readFileSync(paths.driftLog, "utf8")).length;
     }
   } catch {
   }
@@ -26023,8 +30423,8 @@ function renderScorecard(d) {
 }
 
 // src/commands/slices.ts
-var fs34 = __toESM(require("node:fs"));
-var path34 = __toESM(require("node:path"));
+var fs44 = __toESM(require("node:fs"));
+var path49 = __toESM(require("node:path"));
 function parseComponentTokens(raw) {
   const quoted = [];
   for (const m of raw.matchAll(/`([^`]+)`/g)) {
@@ -26075,15 +30475,15 @@ function runSlicesSync(paths, opts = {}) {
   return withStateLock(paths, () => runSlicesSyncLocked(paths, opts));
 }
 function runSlicesSyncLocked(paths, opts = {}) {
-  const planAbs = path34.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
-  if (!fs34.existsSync(planAbs) || !fs34.statSync(planAbs).isFile()) {
-    const rel = path34.relative(paths.root, planAbs).split(path34.sep).join("/");
+  const planAbs = path49.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  if (!fs44.existsSync(planAbs) || !fs44.statSync(planAbs).isFile()) {
+    const rel = path49.relative(paths.root, planAbs).split(path49.sep).join("/");
     return failure({
       human: `Plan file not found: ${rel}. Provide the path with --plan or author the implementation plan first.`,
       data: { error: "plan_file_not_found", planFile: rel }
     });
   }
-  const planContent = fs34.readFileSync(planAbs, "utf8");
+  const planContent = fs44.readFileSync(planAbs, "utf8");
   const planSlices = parsePlanSlices(planContent);
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
@@ -26186,6 +30586,9 @@ ${formatIssues(validation.issues)}`,
     });
   }
   writeState(paths, validation.state);
+  if (status === "done") {
+    ensureRealizationMigration(paths, validation.state, loadRepoMapForRealization(paths));
+  }
   let releasedLease;
   if (status === "done" || status === "blocked") {
     const held = activeLeases(paths).find((l) => l.slice === sliceId);
@@ -26495,14 +30898,17 @@ var TOOL_DEFS = [
   },
   {
     name: "th_drift_resolve",
-    description: "Resolve an open drift entry by id; decrements the open-blocking counter when it was a requirement-layer (blocking) entry. Errors if the id is unknown or already resolved. Serialized under the state lock.",
+    description: "Resolve an open drift entry by id; decrements the open-blocking counter when it was a requirement-layer (blocking) entry. A requirement-layer (blocking) resolution REQUIRES `target` \u2014 a repo-relative source path that resolves in source \u2014 and records a BSC-4 terminal-transition receipt the completion gate re-validates. Errors if the id is unknown, already resolved, or (requirement-layer) the target is missing or does not resolve in source. Serialized under the state lock.",
     inputSchema: {
       type: "object",
-      properties: { id: stringProp("The DRIFT-NNN id to resolve.") },
+      properties: {
+        id: stringProp("The DRIFT-NNN id to resolve."),
+        target: stringProp("Repo-relative source path the resolution resolves in \u2014 REQUIRED for requirement-layer (blocking) entries (the BSC-4 receipt ground).")
+      },
       required: ["id"],
       additionalProperties: false
     },
-    run: (paths, args) => runDriftResolve(paths, optString(args, "id"))
+    run: (paths, args) => runDriftResolve(paths, optString(args, "id"), { target: optString(args, "target") })
   },
   {
     name: "th_build_next_wave",
@@ -27398,27 +31804,28 @@ var TOOL_DEFS = [
   },
   {
     name: "th_sim_retire",
-    description: "Mark a simulation entry retired by id (status transition active\u2192retired; entries are never deleted). Optional retireSlice records who/what replaced it with reality. Errors on an unknown id or a double-retire. Serialized under the state lock.",
+    description: "Mark a simulation entry retired by id (status transition active\u2192retired; entries are never deleted). A user-visible simulation REQUIRES `target` \u2014 a repo-relative source path that resolves in source \u2014 and records a BSC-4 terminal-transition receipt; an ungrounded retirement does NOT exonerate the entry (it still blocks the production-reality gate and the dist-scan join). Optional retireSlice records who/what replaced it with reality. Errors on an unknown id, a double-retire, or (user-visible) a missing/unresolving target. Serialized under the state lock.",
     inputSchema: {
       type: "object",
       properties: {
         id: stringProp("The SIM-NNN id to retire."),
-        retireSlice: stringProp("Slice/owner that replaced the simulation with reality.")
+        retireSlice: stringProp("Slice/owner that replaced the simulation with reality."),
+        target: stringProp("Repo-relative source path the retirement resolves in \u2014 REQUIRED for a user-visible simulation (the BSC-4 receipt ground).")
       },
       required: ["id"],
       additionalProperties: false
     },
-    run: (paths, args) => runSimRetire(paths, optString(args, "id"), { retireSlice: optString(args, "retireSlice") })
+    run: (paths, args) => runSimRetire(paths, optString(args, "id"), { retireSlice: optString(args, "retireSlice"), target: optString(args, "target") })
   },
   {
     name: "th_sim_scan",
-    description: "Grep dist/ and tests/ for simulation patterns (mock|fake|stub|fixture|placeholder|demo|TODO|canned|hardcoded) and flag any hit in dist/ that has no active ledger entry. Advisory/read-only (exit 0); the production-reality GATE \u2014 not scan \u2014 refuses advance.",
+    description: "Two-tier scan of dist/ for simulation patterns (mock|fake|stub|fixture|placeholder|demo|TODO|canned|hardcoded): enumerate + streaming-hash EVERY dist/ path, deep-inspect within a layered budget (per-file/aggregate/watchdog), and report both unledgered dist/ hits AND `unobserved` dist/ files the scan could not deep-inspect (file_limit|aggregate_limit|watchdog|read_error) \u2014 the coverage gaps the production-reality GATE blocks on (scan_coverage_incomplete). Advisory (exit 0; the gate refuses, not scan); records an incomplete-scan receipt under the state lock when coverage is incomplete. tests/ hits stay advisory.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runSimScan(paths, {})
   },
   {
     name: "th_gate_production_reality",
-    description: "Reader: report the production-reality gate (checkProductionReality). FOUR conditions, each a stable error token: simulation_unretired (a non-retired user-visible simulation), production_verify_not_green, tester_record_missing, unledgered_simulation_in_dist. The SAME predicate canAdvanceStage/canUnlockImplementation/checkFinalVerification compose, so a blocked th_stage_advance/th_implementation_unlock returns the IDENTICAL token. Read-only.",
+    description: "Reader: report the production-reality gate (checkProductionReality). SIX conditions, each a stable error token: simulation_unretired (a non-retired user-visible simulation), production_verify_not_green, tester_record_missing, unledgered_simulation_in_dist, scan_coverage_incomplete (a dist/ file the two-tier scan could not deep-inspect, not exonerated by a signed exception), human_approval_unverified (an engaged-and-not-future humanGate stage lacks a valid snapshot+artifact-bound human approval). The SAME predicate canAdvanceStage/canUnlockImplementation/checkFinalVerification compose, so a blocked th_stage_advance/th_implementation_unlock returns the IDENTICAL token. Read-only.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (paths) => runGateProductionReality(paths)
   },
@@ -27468,6 +31875,125 @@ var TOOL_DEFS = [
       provider: optString(args, "provider"),
       evidenceRef: optString(args, "evidenceRef")
     })
+  },
+  // Axis-B slice-4a (BSC-3) — in-process driver-dimension receipt writer. The SENSOR
+  // that records which verification dimensions verify-report.json observed, grounding the
+  // production-reality verification-driver rung. Registration is ALWAYS-ON (parity with
+  // the CLI `th driver record`); the TH_BSC3_ENFORCE flag governs ENFORCEMENT only.
+  {
+    name: "th_driver_record",
+    description: "Axis-B/BSC-3: mint the IN-PROCESS driver-dimension receipt the production-reality verification-driver rung reads (<stateDir>/driver-receipts.jsonl, hash-chained, under the state lock). Records which seed dimensions (tests-executed, typecheck, build) `verify-report.json` actually OBSERVED. SENSOR + refuse-at-creation: optional `dimension` (comma-separated) is INTERSECTED with the observed set \u2014 a claimed dimension the report does not evidence is refused (driver_dimension_unobserved), and a missing/unresolving report is refused (driver_evidence_unresolved). Omit `dimension` to record every observed seed dimension. ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its trust label is `valid` NEVER `valid-grounded` \u2014 independent grounding is the slice-4b external Ed25519-signed producer. Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dimension: stringProp(
+          "Comma-separated dimension name(s) to record as observed (tests-executed | typecheck | build). Intersected with what verify-report.json observes; omit to record every observed seed dimension."
+        ),
+        identity: stringProp("Producer identity to record (attribution-only, zero trust weight; defaults to cli:th driver record).")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => {
+      const raw = optString(args, "dimension");
+      const dimensionNames = raw === void 0 ? void 0 : raw.split(",").map((s) => s.trim()).filter(Boolean);
+      return runDriverRecord(paths, { dimensionNames, producerIdentity: optString(args, "identity") });
+    }
+  },
+  {
+    name: "th_approve",
+    description: "Axis-B/BSC-7: mint the IN-PROCESS human-approval receipt the humanGate precondition reads (<stateDir>/approval-receipts.jsonl, hash-chained, under the state lock). `stage` defaults to the run's current stage; it MUST be a humanGate stage (requirements, scope, architecture, ux-design, ui-design, contracts, security, final-verification) and its governing `produces` artifact MUST resolve in source \u2014 else refused at creation. The approval is bound to {stage, snapshot_coord, governing_artifact_digest}. ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its validated status is `valid` NEVER `valid-grounded` \u2014 independent grounding is the slice-3b external Ed25519-signed producer. Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        stage: stringProp("The humanGate stage to approve (defaults to the run's current_stage when omitted).")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runApprove(paths, optString(args, "stage"))
+  },
+  // Axis-B slice-5 (BSC-1) — in-process realization receipt writer. Binds a REQ-ID to a
+  // content digest of the source artifact it is realized in, grounding the production-reality
+  // realization rung. Registration is ALWAYS-ON (parity with the CLI `th realize`); the
+  // TH_BSC1_ENFORCE flag governs ENFORCEMENT only.
+  {
+    name: "th_realize",
+    description: 'Axis-B/BSC-1: mint the IN-PROCESS realization receipt the production-reality realization rung reads (<stateDir>/realization-receipts.jsonl, hash-chained, under the state lock). Binds `req_id` to a content digest of `artifact` (the source file the REQ-ID is realized in). The gate BLOCKS a `done` slice whose owned REQ-ID has no valid, reachable, digest-fresh referent. SEPARABILITY: this does NOT set slice status \u2014 the done-claim (SliceState.status==="done") and this referent stay separately authored (co-authoring would be self-grounding). Refuse-at-creation: `artifact` MUST resolve in source (realization_referent_unresolved). ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its trust label is `valid` NEVER `valid-grounded` \u2014 independent (signature-provenance) grounding is the external Ed25519-signed producer. Returns a {file, hash} receipt.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        req_id: stringProp("The REQ-ID being realized (required, non-empty)."),
+        artifact: stringProp("The source path the REQ-ID is realized in \u2014 the referent the receipt binds a content digest of (required; must resolve in source)."),
+        identity: stringProp("Producer identity to record (attribution-only, zero trust weight; defaults to cli:th realize).")
+      },
+      required: ["req_id", "artifact"],
+      additionalProperties: false
+    },
+    run: (paths, args) => runRealize(paths, {
+      reqId: optString(args, "req_id"),
+      artifact: optString(args, "artifact"),
+      producerIdentity: optString(args, "identity")
+    })
+  },
+  // Axis-B slice-6 (BSC-2 2a) — in-process assertion-PRESENCE receipt writer. The SENSOR
+  // that records, per REQ-ID, whether its recognized test files carry a non-trivial assertion,
+  // grounding the production-reality assertion rung. Registration is ALWAYS-ON (parity with the
+  // CLI `th assertion-presence record`).
+  {
+    name: "th_assertion_presence_record",
+    description: "Axis-B/BSC-2 (2a): mint the IN-PROCESS assertion-PRESENCE receipt the production-reality assertion rung reads (<stateDir>/assertion-presence-receipts.jsonl, hash-chained, under the state lock). Records, per REQ-ID, whether the recognized test files anchoring it carry a NON-TRIVIAL assertion that can fail (an empty `it()`, a smoke-only test, or a tautology like `expect(true).toBe(true)` is assertion-free). MEASURES PRESENCE / non-triviality, NOT efficacy \u2014 it does NOT prove the suite catches regressions. ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its in-process status is `valid` NEVER `valid-grounded` \u2014 the only efficacy/independence grade is the EXTERNAL Ed25519-signed mutation-kill receipt (2b). Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        identity: stringProp("Producer identity to record (attribution-only, zero trust weight; defaults to cli:th assertion-presence record).")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runAssertionPresenceRecord(paths, { producerIdentity: optString(args, "identity") })
+  },
+  // Axis-B slice-A (BSC-10) — in-process external-reference grounding producer. The SENSOR
+  // that records a GroundingReceipt (digest-manifest / version-pin / visual-hash) grounding
+  // the BSC-10 rung. Registration is ALWAYS-ON (parity with the CLI `th grounding record`);
+  // the TH_BSC10_ENFORCE flag governs ENFORCEMENT only (default OFF in Slice A / WARN).
+  {
+    name: "th_grounding_record",
+    description: "Axis-B/BSC-10 (Slice A): mint the IN-PROCESS external-reference grounding receipt the production-reality grounding rung reads (<stateDir>/grounding-receipts.jsonl, hash-chained, under the state lock). `groundKind` is required and must be one of `digest-manifest`, `version-pin`, or `visual-hash`; supply the matching kind-specific fields (manifestDigest / pkg+version / perceptualHash+renderer). ATTRIBUTION-ONLY (zero trust weight): the agent can mint it, so its trust label is `valid` NEVER `valid-grounded` \u2014 independent grounding arrives only with the Slice-B external Ed25519-signed producer. Returns a {file, hash} receipt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        groundKind: stringProp("Ground kind discriminant: 'digest-manifest' | 'version-pin' | 'visual-hash'. Required."),
+        workClass: stringProp("Work-class this receipt is minted for (drives the required-ground matrix). Required."),
+        manifestDigest: stringProp("For digest-manifest: the manifest digest string."),
+        pkg: stringProp("For version-pin: the package name."),
+        pinVersion: stringProp("For version-pin: the pinned version string (named pinVersion to avoid collision with the numeric artifact --version flag)."),
+        perceptualHash: stringProp("For visual-hash: the perceptual hash string."),
+        renderer: stringProp("For visual-hash: optional renderer identifier."),
+        identity: stringProp("Producer identity to record (attribution-only, zero trust weight; defaults to cli:th grounding record).")
+      },
+      additionalProperties: false
+    },
+    run: (paths, args) => runGroundingRecord(paths, {
+      groundKind: optString(args, "groundKind"),
+      workClass: optString(args, "workClass"),
+      manifestDigest: optString(args, "manifestDigest"),
+      pkg: optString(args, "pkg"),
+      pinVersion: optString(args, "pinVersion"),
+      perceptualHash: optString(args, "perceptualHash"),
+      renderer: optString(args, "renderer"),
+      producerIdentity: optString(args, "identity")
+    })
+  },
+  // Axis-B slice-A (BSC-10) — read-only grounding chain validator. Recomputes and validates
+  // the grounding receipt chain; appends NOTHING and leaves NO breadcrumb file. This is a
+  // pure read: the write-surface snapshot must show zero delta for this tool.
+  {
+    name: "th_grounding_check",
+    description: "Axis-B/BSC-10 (Slice A): READ-ONLY validator \u2014 recompute and validate the grounding receipt chain (<stateDir>/grounding-receipts.jsonl) and return a summary ({total, chainStatus, receipts[]}). Appends NOTHING; leaves NO breadcrumb file; the write-surface snapshot shows zero delta for this tool. Use `th_grounding_record` to append receipts. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false
+    },
+    run: (paths, _args) => runGroundingCheck(paths, {})
   }
 ];
 var ro = (category) => ({ category, readOnlyHint: true, destructiveHint: false, idempotentHint: true });
@@ -27495,7 +32021,10 @@ var TOOL_ANNOTATIONS = {
   th_sim_add: wr("simulation", { idempotent: false }),
   th_sim_list: ro("simulation"),
   th_sim_retire: wr("simulation", { idempotent: false }),
-  th_sim_scan: ro("simulation"),
+  // th_sim_scan now APPENDS an incomplete-scan receipt under the state lock when dist/
+  // coverage is incomplete (BSC-6), so its honest hint is NOT read-only; append-per-call
+  // ⇒ not idempotent (mirrors the other append/ledger tools).
+  th_sim_scan: wr("simulation", { idempotent: false }),
   th_gate_production_reality: ro("gate"),
   // build oracles (read-only) + leases (mutating)
   th_build_next_wave: ro("oracle"),
@@ -27587,7 +32116,24 @@ var TOOL_ANNOTATIONS = {
   th_inspector_write: wr("artifact", { idempotent: true }),
   // SG3 P2-C — live-QA Tester record writer (overwriting the marker with a fresh run is
   // an idempotent overwrite of the single tester-record.json under the state dir).
-  th_tester_record: wr("tester", { idempotent: true })
+  th_tester_record: wr("tester", { idempotent: true }),
+  // Axis-B/BSC-3 — in-process driver-dimension producer. NOT idempotent: each call appends a
+  // fresh hash-chained driver receipt to driver-receipts.jsonl under the state dir.
+  th_driver_record: wr("driver", { idempotent: false }),
+  // Axis-B/BSC-7 — in-process human-approval producer. NOT idempotent: each call appends a
+  // fresh hash-chained approval record to approval-receipts.jsonl under the state dir.
+  th_approve: wr("stage", { idempotent: false }),
+  // Axis-B/BSC-1 — in-process realization producer. NOT idempotent: each call appends a
+  // fresh hash-chained realization receipt to realization-receipts.jsonl under the state dir.
+  th_realize: wr("slices", { idempotent: false }),
+  // Axis-B/BSC-2 (2a) — in-process assertion-presence producer. NOT idempotent: each call appends
+  // a fresh hash-chained receipt to assertion-presence-receipts.jsonl under the state dir.
+  th_assertion_presence_record: wr("coverage", { idempotent: false }),
+  // Axis-B/BSC-10 (Slice A) — in-process external-reference grounding producer. NOT idempotent:
+  // each call appends a fresh hash-chained grounding receipt to grounding-receipts.jsonl.
+  th_grounding_record: wr("grounding", { idempotent: false }),
+  // Axis-B/BSC-10 (Slice A) — read-only grounding chain validator. Appends nothing; pure read.
+  th_grounding_check: ro("grounding")
 };
 function toolAnnotations(name) {
   return TOOL_ANNOTATIONS[name];
@@ -27707,6 +32253,12 @@ var CLI_COMMAND_LEAVES = [
   "sim retire",
   "sim scan",
   "tester record",
+  "driver record",
+  "approve",
+  "realize",
+  "assertion-presence record",
+  "grounding record",
+  "grounding check",
   "gate production-reality",
   "collab init",
   "collab fragment",
@@ -27787,13 +32339,13 @@ function listTools() {
 var SERVER_NAME = "twinharness-th";
 function readServerVersion() {
   const candidates = [
-    path35.join(__dirname, "..", "package.json"),
-    path35.join(__dirname, "..", "..", "package.json")
+    path50.join(__dirname, "..", "package.json"),
+    path50.join(__dirname, "..", "..", "package.json")
   ];
   for (const candidate of candidates) {
     try {
-      if (fs35.existsSync(candidate)) {
-        const json = JSON.parse(fs35.readFileSync(candidate, "utf8"));
+      if (fs45.existsSync(candidate)) {
+        const json = JSON.parse(fs45.readFileSync(candidate, "utf8"));
         if (typeof json === "object" && json !== null && "version" in json) {
           const v = json.version;
           if (typeof v === "string") return v;

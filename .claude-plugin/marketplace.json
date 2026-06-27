@@ -1,6 +1,6 @@
 {
-  "name": "twinharness",
-  "description": "Single-plugin marketplace for TwinHarness, the Agentic SDLC Orchestrator.",
+  "name": "twinharness-dev",
+  "description": "Development/preview channel for TwinHarness, the Agentic SDLC Orchestrator. Tracks the `dev` branch; install side-by-side with the stable `twinharness` marketplace.",
   "owner": {
     "name": "JrSneed28",
     "url": "https://github.com/JrSneed28"

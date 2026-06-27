@@ -6,7 +6,7 @@
  * the predicate is the seam both this reader and the typed MCP gate tools consume,
  * so they can never disagree about what "ready" means).
  *
- *   runGateProductionReality — reports `checkProductionReality` (4 stable tokens).
+ *   runGateProductionReality — reports `checkProductionReality` (7 stable tokens).
  */
 
 import type { ProjectPaths } from "../core/paths";
@@ -38,14 +38,29 @@ export function runGateProductionReality(paths: ProjectPaths): CommandResult {
   const res = checkProductionReality(paths, r.state);
   structuredLog({ cmd: "gate production-reality", ok: res.ok, error: res.ok ? undefined : res.error });
 
+  // BSC-3 / Axis-B slice-4a (I1 observability) — surface the per-dimension verification-
+  // driver trust-label summary `checkProductionReality` attaches when there is something to
+  // observe (a clean grandfathered/absence PASS carries NO `dimensions` field, so render
+  // nothing then). PURE rendering of Lane B's existing field; this reader never recomputes
+  // the verdict. Identical on the MCP twin, which calls this same function.
+  const hasDimensions = (res.dimensions?.length ?? 0) > 0;
+  const dimensionsLine = hasDimensions
+    ? `\nVerification dimensions: ${res.dimensions!
+        .map((d) => `${d.name}=${d.observed ? "observed" : "unobserved"}/${d.trustLabel}`)
+        .join(", ")}.`
+    : "";
+  const dimensionsData = hasDimensions ? { dimensions: res.dimensions } : {};
+
   if (!res.ok) {
     return failure({
-      human: `Production-reality gate BLOCKS (${res.error}).`,
-      data: { ok: false, gate: "production-reality", error: res.error, ...(res.detail ?? {}) },
+      human: `Production-reality gate BLOCKS (${res.error}).${dimensionsLine}`,
+      data: { ok: false, gate: "production-reality", error: res.error, ...dimensionsData, ...(res.detail ?? {}) },
     });
   }
   return success({
-    data: { ok: true, gate: "production-reality" },
-    human: "Production-reality gate clear: no unretired user-visible simulation, verify green, Tester record attached, no unledgered simulation in dist/.",
+    data: { ok: true, gate: "production-reality", ...dimensionsData },
+    human:
+      "Production-reality gate clear: no unretired user-visible simulation, verify green, Tester record attached, no unledgered simulation in dist/." +
+      dimensionsLine,
   });
 }

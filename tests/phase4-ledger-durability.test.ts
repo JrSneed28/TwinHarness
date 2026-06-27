@@ -63,7 +63,10 @@ describe("R-15: drift appends are append-only — prior blocks survive every lat
     const afterFirst = driftLog(tp);
     runDriftAdd(tp.paths, { layer: "derived", ref: "SLICE-2 / TASK-002", discovery: "second discovery", action: "a2" });
     const afterSecond = driftLog(tp);
-    runDriftResolve(tp.paths, "DRIFT-001");
+    // DRIFT-001 is requirement-layer — its resolve now requires a grounding target
+    // (BSC-4). The target is a separate file; the drift-log append stays append-only.
+    fs.writeFileSync(path.join(tp.paths.root, "grounding.ts"), "export const g = 1;\n", "utf8");
+    runDriftResolve(tp.paths, "DRIFT-001", { target: "grounding.ts" });
     const afterResolve = driftLog(tp);
 
     // Append-only: every earlier state is a strict PREFIX of the next (true append —

@@ -55,7 +55,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CAN_ADVANCE_RUNGS = void 0;
+exports.CAN_ADVANCE_RUNGS = exports.PRODUCTION_REALITY_RUNGS = void 0;
 exports.checkBlockingDrift = checkBlockingDrift;
 exports.checkReviseEscalation = checkReviseEscalation;
 exports.checkVerifySuite = checkVerifySuite;
@@ -68,8 +68,10 @@ exports.checkGoverningArtifact = checkGoverningArtifact;
 exports.checkCoverage = checkCoverage;
 exports.implementationRequiresSlices = implementationRequiresSlices;
 exports.checkImplementationSettled = checkImplementationSettled;
+exports.checkHumanApprovalAdvance = checkHumanApprovalAdvance;
 exports.checkFinalVerification = checkFinalVerification;
 exports.checkProductionReality = checkProductionReality;
+exports.requiredHumanGateStages = requiredHumanGateStages;
 exports.interviewRequired = interviewRequired;
 exports.checkInterview = checkInterview;
 exports.canAdvanceStage = canAdvanceStage;
@@ -87,8 +89,27 @@ const decisions_1 = require("./decisions");
 const repo_1 = require("../commands/repo");
 const interview_1 = require("../commands/interview");
 const sim_1 = require("../commands/sim");
-const simulation_1 = require("./simulation");
 const tester_1 = require("./tester");
+const receipts_1 = require("./receipts");
+const brief_1 = require("./brief");
+const tier_classify_1 = require("./tier-classify");
+const bsc8_flag_1 = require("./bsc8-flag");
+const declared_dimensions_1 = require("./declared-dimensions");
+const bsc5_flag_1 = require("./bsc5-flag");
+const approvals_1 = require("./approvals");
+const realization_1 = require("./realization");
+const verification_driver_1 = require("./verification-driver");
+const receipt_signing_1 = require("./receipt-signing");
+const bsc3_flag_1 = require("./bsc3-flag");
+const bsc1_flag_1 = require("./bsc1-flag");
+const bsc2_flag_1 = require("./bsc2-flag");
+const bsc9_flag_1 = require("./bsc9-flag");
+const interview_readiness_1 = require("./interview-readiness");
+const projection_oracle_1 = require("./projection-oracle");
+const assertion_presence_1 = require("./assertion-presence");
+const realization_2 = require("./realization");
+const grounding_1 = require("./grounding");
+const bsc10_flag_1 = require("./bsc10-flag");
 const PASS = { ok: true };
 // ---------------------------------------------------------------------------
 // Global rungs (stage-independent) — checked before any stage-specific work, in
@@ -287,6 +308,54 @@ function checkImplementationSettled(state) {
     return PASS;
 }
 /**
+ * Rung (NEW — BSC-7 / Axis-B slice-3a, WARN PHASE) — the human-approval stage-advance
+ * rung. `humanGate` was a declarative-only flag with ZERO predicate consumers (pure
+ * gate theater): this is the missing sensor. It fires when advancing OUT of a
+ * `humanGate` stage — that stage must carry a `valid`/`valid-grounded`/`legacy`
+ * approval bound to the current snapshot + governing-artifact digest
+ * ({@link readApprovalValidated}).
+ *
+ * WARN PHASE (this commit, slice-3a C-1): the rung is registered + invoked but blocks
+ * NOTHING — it ALWAYS returns `ok:true`. When the approval is missing/invalid it
+ * attaches a NON-blocking {@link GateResult.notice} carrying the stable token
+ * `human_approval_unverified` plus `{ stage, status }`, so the soft anomaly is
+ * observable on the result without reding any fixture that previously advanced freely.
+ *
+ * WARN→ENFORCE SEAM (slice-3a C-3): the flip to a hard block is a ONE-LINE change at
+ * the marked return below — swap the `notice` payload into `error`/`detail` and set
+ * `ok:false`. The completion rung (C-2) reuses the SAME token over the closed
+ * required-set; this advance rung gates only the single stage being crossed.
+ */
+function checkHumanApprovalAdvance(paths, state) {
+    const current = (0, stages_1.canonicalizeStage)(state.current_stage);
+    // Only applies when advancing OUT of a humanGate stage (mirrors rungAppliesAtStage's
+    // arm). A non-humanGate current stage carries no approval obligation.
+    if (!(0, approvals_1.isHumanGateStage)(current))
+        return PASS;
+    const validated = (0, approvals_1.readApprovalValidated)(paths, current);
+    // Accept set: a `valid` (in-process attested), `valid-grounded` (external keyed,
+    // slice-3b), or `legacy` (grandfathered) approval clears the rung. Anything else —
+    // absent / stale / target_missing / target_mismatch / forged / tampered — is a
+    // missing/invalid approval.
+    if (validated.status === "valid" ||
+        validated.status === "valid-grounded" ||
+        validated.status === "legacy") {
+        return PASS;
+    }
+    // ENFORCE PHASE (slice-3a C-3) — advancing OUT of a humanGate stage without a
+    // snapshot+governing-artifact-digest-bound approval is a hard block. The warn baseline
+    // (e1de8fd) attached the SAME token as a non-blocking `notice`; this is the one-line
+    // warn→enforce flip (move the payload into `error`/`detail` and set `ok:false`), so a
+    // reviewer can `git revert` this commit and land back on the green warn state. The
+    // {ok:false, error, detail} field shape mirrors the sibling blocking rungs in this file
+    // (e.g. checkGoverningArtifact / the BSC-4 terminal rung in checkProductionReality).
+    return {
+        ok: false,
+        error: "human_approval_unverified",
+        detail: { stage: current, status: validated.status },
+    };
+}
+/**
  * Rung l (next.ts:258-314) — the final-verification ladder, returning the FIRST
  * failing sub-rung in order: slices unsettled → verify suite never run → coverage
  * failing → report not produced/registered. When every gate clears, the only thing
@@ -332,12 +401,15 @@ function checkFinalVerification(paths, state) {
     const pr = checkProductionReality(paths, state);
     if (!pr.ok)
         return pr;
-    return PASS;
+    // Propagate the PASS result (not a bare PASS) so the BSC-3 `dimensions` trust-label
+    // summary (and any non-blocking `notice`) checkProductionReality attaches rides up to
+    // `canCompleteRun`/`th next` for the I1 observability hook.
+    return pr;
 }
 /**
  * Rung m (NEW — SG3 P2-C, audit C-05..C-08) — the PRODUCTION-REALITY rung. A run may
  * not be certified complete while its user-visible production path still depends on
- * unresolved simulated behavior. FOUR sub-checks, each a DISTINCT stable error token
+ * unresolved simulated behavior. SEVEN sub-checks, each a DISTINCT stable error token
  * (the order is the short-circuit order; the first failing one is returned):
  *
  *   1. `simulation_unretired`         — a non-retired simulation ledger entry maps to
@@ -349,6 +421,37 @@ function checkFinalVerification(paths, state) {
  *                                       (`tester.ts` — the audit's mandatory live QA).
  *   4. `unledgered_simulation_in_dist`— `dist/` carries simulation patterns
  *                                       (mock/fake/stub/…) with no active ledger entry.
+ *   5. `scan_coverage_incomplete`     — the two-tier dist scan could not deep-inspect
+ *                                       some enumerated `dist/` path (file_limit /
+ *                                       aggregate_limit / watchdog / read_error) and it
+ *                                       is not exonerated by a valid external-signed
+ *                                       exception ack (BSC-6 — fail closed on the scan's
+ *                                       own incompleteness; recomputed fresh every run).
+ *   6. `human_approval_unverified`    — (BSC-7 / Axis-B slice-3a) some stage in the
+ *                                       CLOSED required-set (`requiredHumanGateStages`:
+ *                                       humanGate ∩ engaged ∩ ordinal-≤-current) lacks a
+ *                                       `valid`/`valid-grounded`/`legacy` approval bound
+ *                                       to the current snapshot + governing-artifact
+ *                                       digest (`absent`/`stale`/`target_*`/`forged`/
+ *                                       `tampered`). Re-validated FRESH; the L1 backstop
+ *                                       the `--emergency`/`state set` jump cannot route
+ *                                       around (the jumped-over gate is engaged-and-not-
+ *                                       future ⇒ required).
+ *   7. `grounding_unverified`         — (BSC-10 / Axis-B slice-BSC10a) a REQUIRED external-
+ *                                       reference ground-kind (per the work-class matrix +
+ *                                       the UX-surface force-rule) is `missing` /
+ *                                       `over_budget` / `unobserved` and not exonerated.
+ *                                       WARN-first (`bsc10EnforcementEnabled()`, default OFF
+ *                                       in slice-BSC10a): the verdict is hoisted once before
+ *                                       the BSC-7 approval leg (a present-but-unconformant
+ *                                       ground also blocks approval ACCEPTANCE, PCC-1) and
+ *                                       re-used by a thin summary rung — never recomputed.
+ *
+ * Two further fail-closed tokens are NOT sub-checks of the production path but guard the
+ * rung's own inputs: `terminal_receipt_unverified` (BSC-4 terminal-flip grounding — every
+ * in-force drift-resolution/decision-approval must carry a valid/legacy receipt) and
+ * `simulation_ledger_corrupt` (an unreadable ledger fails closed). Together the rung can
+ * emit NINE distinct stable tokens; the seven above are the production-reality sub-checks.
  *
  * This is the mechanical form of the audit's required invariant — a COMPLETION gate.
  * It is now COMPOSED into `checkFinalVerification` (and, via it, `canAdvanceStage`'s
@@ -366,7 +469,1569 @@ function checkFinalVerification(paths, state) {
  *
  * A corrupt simulation ledger fails CLOSED with `simulation_ledger_corrupt` (the same
  * fail-closed posture `checkFinalVerification` takes on a corrupt verify config).
+ *
+ * BSC-3 / Axis-B slice-4a — the SEVENTH production-reality sub-check (the
+ * verification-driver dimension grounding) is composed LAST, governed by the
+ * `bsc3EnforcementEnabled()` rollout flag (defaults ON). See {@link evaluateDriverDimensions}
+ * for the verdict logic and {@link checkDriverDimensions} for the enforcement+observability
+ * wiring. It can emit the stable token `driver_dimension_unverified`.
  */
+/**
+ * True iff a driver-dimension receipt CLAIMS to be external/signed — i.e. it carries
+ * EITHER a `signature` trailer OR a `key_id`. Such a receipt MUST prove itself with a
+ * verifying Ed25519 signature; a claim that fails verification is `forged` (BSC-3 B2/B4).
+ * A receipt with neither field is an in-process attested receipt (no external claim).
+ */
+function driverReceiptClaimsExternal(r) {
+    return typeof r.signature === "string" || typeof r.key_id === "string";
+}
+/**
+ * Build the per-dimension observability summary for a selected receipt under a single
+ * trust label. `observed` is re-derived against `verify-report.json` via the shared
+ * {@link validateDriverReceiptContent} ground (a recorded dimension the current report no
+ * longer evidences reads `observed:false`). The seed-name order is preserved so the
+ * rendered list is deterministic.
+ */
+function summarizeDriverDimensions(paths, receipt, trustLabel) {
+    const content = (0, verification_driver_1.validateDriverReceiptContent)(paths, receipt);
+    const unobserved = new Set(content.unobservedDimensions ?? []);
+    // `evidence_missing` invalidates the whole ground — no recorded dimension re-derives.
+    const evidenceMissing = content.status === "evidence_missing";
+    const recorded = receipt.dimensions.map((d) => d.name);
+    const ordered = [
+        ...verification_driver_1.SEED_DIMENSION_NAMES.filter((n) => recorded.includes(n)),
+        ...recorded.filter((n) => !verification_driver_1.SEED_DIMENSION_NAMES.includes(n)),
+    ];
+    return ordered.map((name) => ({
+        name,
+        observed: !evidenceMissing && !unobserved.has(name),
+        trustLabel,
+    }));
+}
+/**
+ * Verify a driver receipt's Ed25519 signature against the loaded external public key —
+ * the SOLE basis for the `valid-grounded` trust label (BSC-3 B2). Mirrors
+ * `approvals.verifyExternalApproval` / `receipts.readReceiptValidated` EXACTLY: load the
+ * verifier's public key ({@link loadExternalPublicKey}, env `TH_RECEIPT_PUBLIC_KEYFILE`);
+ * with NO key (the default fork/local/test path) verification is impossible ⇒ `false` ⇒ a
+ * receipt that claimed external classifies `forged`. The candidate's `key_id` must match
+ * {@link externalKeyId} of the loaded key, then {@link verifyCanonical} the `signature`
+ * over the receipt's canonical text with the `recordHash`/`signature` trailers stripped
+ * ({@link driverCanonicalText} drops `recordHash`; we also drop `signature`). The crypto
+ * is REUSED, never reinvented.
+ */
+function driverSignatureVerifies(receipt) {
+    const publicKey = (0, receipt_signing_1.loadExternalPublicKey)();
+    if (publicKey === null)
+        return false;
+    if (typeof receipt.signature !== "string")
+        return false;
+    if (receipt.key_id !== (0, receipt_signing_1.externalKeyId)(publicKey))
+        return false;
+    const { recordHash: _rh, signature: _sig, ...signedView } = receipt;
+    return (0, receipt_signing_1.verifyCanonical)((0, verification_driver_1.driverCanonicalText)(signedView), receipt.signature, publicKey);
+}
+/**
+ * Evaluate the verification-driver dimension grounding for the current run (BSC-3 B1–B4),
+ * reading BOTH the in-process store (`readDriverReceipts`) and the external store
+ * (`readExternalDriverReceipts`). The verdict drives BOTH enforcement (when the flag is
+ * on) AND the always-computed observability summary; see {@link DriverVerdict}.
+ *
+ * Order (fail-closed, mirroring readReceiptValidated):
+ *   0. Tamper walk BOTH chains first ({@link verifyDriverChain}). A broken chain ⇒
+ *      `blocked:"chain"` (no receipt from a tampered store can be trusted).
+ *   1. An EXTERNAL claim is DECISIVE: gather every external-store receipt that claims
+ *      external/signed; the LAST whose signature verifies (file order, so a re-mint wins)
+ *      ⇒ `valid-grounded` and is run through the content check. If an external claim exists
+ *      but NONE verifies ⇒ `forged` ⇒ BLOCK (never downgraded to the in-process verdict).
+ *   2. Else the in-process path: the LATEST in-process receipt (file order). A line that
+ *      CLAIMS external/signed in the in-process store is still held to the signature bar
+ *      (`forged` if it does not verify) — the trust label keys on the claim, not the store.
+ *   3. ABSENCE: no receipt anywhere ⇒ grandfathered in-process attested (`valid`, allowed,
+ *      EMPTY dimensions) — NEVER `forged`.
+ *
+ * For the SELECTED receipt the content ground is re-derived ({@link validateDriverReceiptContent}):
+ * `dimension_unobserved`/`evidence_missing` ⇒ `blocked:"unobserved"`. A `stale` content
+ * status is NON-blocking here (the snapshot-staleness block is owned by the verify-report
+ * and terminal/approval rungs; a re-run at a new HEAD mints a fresh driver receipt, and a
+ * stale driver receipt simply is not the current run's receipt — blocking on it would red
+ * an otherwise-clean re-run). The receipt's dimensions still summarize for observability.
+ */
+function evaluateDriverDimensions(paths) {
+    const inProcess = (0, verification_driver_1.readDriverReceipts)(paths);
+    const external = (0, verification_driver_1.readExternalDriverReceipts)(paths);
+    // 0. Tamper walk BOTH chains before trusting any line from them.
+    const inChain = (0, verification_driver_1.verifyDriverChain)(inProcess);
+    if (!inChain.ok) {
+        return { ok: false, reason: "chain", dimensions: [], detail: { store: "in-process", brokenAt: inChain.brokenAt, chainReason: inChain.reason } };
+    }
+    const exChain = (0, verification_driver_1.verifyDriverChain)(external);
+    if (!exChain.ok) {
+        return { ok: false, reason: "chain", dimensions: [], detail: { store: "external", brokenAt: exChain.brokenAt, chainReason: exChain.reason } };
+    }
+    // 1. EXTERNAL claim is decisive. Gather every external-store receipt that claims
+    //    external/signed; the LAST whose signature verifies wins (file order ⇒ re-mint wins).
+    const externalClaims = external.filter(driverReceiptClaimsExternal);
+    if (externalClaims.length > 0) {
+        let verified;
+        for (const cand of externalClaims) {
+            if (driverSignatureVerifies(cand))
+                verified = cand;
+        }
+        if (verified) {
+            const dims = summarizeDriverDimensions(paths, verified, "valid-grounded");
+            const content = (0, verification_driver_1.validateDriverReceiptContent)(paths, verified);
+            if (content.status === "dimension_unobserved" || content.status === "evidence_missing") {
+                return { ok: false, reason: "unobserved", dimensions: dims, detail: { trustLabel: "valid-grounded", contentStatus: content.status, ...(content.unobservedDimensions ? { unobservedDimensions: content.unobservedDimensions } : {}) } };
+            }
+            return { ok: true, dimensions: dims };
+        }
+        // External claim present but no signature verifies ⇒ forged ⇒ BLOCK.
+        const forged = externalClaims[externalClaims.length - 1];
+        return { ok: false, reason: "forged", dimensions: summarizeDriverDimensions(paths, forged, "forged"), detail: { trustLabel: "forged", store: "external", key_id: forged.key_id ?? null } };
+    }
+    // 2. In-process path. The LATEST in-process receipt; a line that CLAIMS external/signed
+    //    in this store is still held to the signature bar (forged if it does not verify).
+    const latest = inProcess.length > 0 ? inProcess[inProcess.length - 1] : undefined;
+    if (latest) {
+        if (driverReceiptClaimsExternal(latest)) {
+            if (driverSignatureVerifies(latest)) {
+                const dims = summarizeDriverDimensions(paths, latest, "valid-grounded");
+                const content = (0, verification_driver_1.validateDriverReceiptContent)(paths, latest);
+                if (content.status === "dimension_unobserved" || content.status === "evidence_missing") {
+                    return { ok: false, reason: "unobserved", dimensions: dims, detail: { trustLabel: "valid-grounded", contentStatus: content.status, ...(content.unobservedDimensions ? { unobservedDimensions: content.unobservedDimensions } : {}) } };
+                }
+                return { ok: true, dimensions: dims };
+            }
+            const forged = latest;
+            return { ok: false, reason: "forged", dimensions: summarizeDriverDimensions(paths, forged, "forged"), detail: { trustLabel: "forged", store: "in-process", key_id: forged.key_id ?? null } };
+        }
+        // In-process attested receipt (no external claim) ⇒ trust label `valid`.
+        const dims = summarizeDriverDimensions(paths, latest, "valid");
+        const content = (0, verification_driver_1.validateDriverReceiptContent)(paths, latest);
+        if (content.status === "dimension_unobserved" || content.status === "evidence_missing") {
+            return { ok: false, reason: "unobserved", dimensions: dims, detail: { trustLabel: "valid", contentStatus: content.status, ...(content.unobservedDimensions ? { unobservedDimensions: content.unobservedDimensions } : {}) } };
+        }
+        return { ok: true, dimensions: dims };
+    }
+    // 3. ABSENCE ≠ FORGERY: no receipt anywhere ⇒ grandfathered in-process attested.
+    return { ok: true, dimensions: [] };
+}
+/**
+ * The BSC-3 driver-dimension sub-check (Axis-B slice-4a) — the SEVENTH production-reality
+ * sub-check, composed LAST inside {@link checkProductionReality}. It ALWAYS computes the
+ * verification-driver verdict (so the per-dimension trust-label `dimensions` summary is
+ * available on the result for the observability hook, I1), then BLOCKS on a failing verdict
+ * ONLY when enforcement is enabled ({@link bsc3EnforcementEnabled}, defaults ON).
+ *
+ * When enforcement is OFF the rung still attaches `dimensions` and returns PASS (the
+ * rollout flag governs ENFORCEMENT only — never observation). When ON, a failing verdict
+ * returns the stable token `driver_dimension_unverified` with the verdict's `reason`
+ * (`chain`/`forged`/`unobserved`) + detail, AND still carries `dimensions` so the block is
+ * fully diagnosable. The PASS result carries `dimensions` too.
+ */
+function checkDriverDimensions(paths) {
+    const verdict = evaluateDriverDimensions(paths);
+    // A clean PASS with NO observed dimensions (the grandfathered/absence case) carries an
+    // EMPTY summary, which conveys nothing — so return a BARE PASS to preserve the prior
+    // `{ ok: true }` gate contract every downstream rung composes. Only attach `dimensions`
+    // when there is something to observe (the observability hook still fires for any
+    // non-empty summary).
+    if (verdict.ok)
+        return verdict.dimensions.length === 0 ? PASS : { ok: true, dimensions: verdict.dimensions };
+    if (!(0, bsc3_flag_1.bsc3EnforcementEnabled)()) {
+        // Flag OFF: observe but do not block. Surface the would-be block as a non-blocking
+        // notice so the warn posture is visible without weakening the gate.
+        return {
+            ok: true,
+            dimensions: verdict.dimensions,
+            notice: { token: "driver_dimension_unverified", detail: { reason: verdict.reason, ...verdict.detail } },
+        };
+    }
+    return {
+        ok: false,
+        error: "driver_dimension_unverified",
+        detail: { reason: verdict.reason, ...verdict.detail },
+        dimensions: verdict.dimensions,
+    };
+}
+/**
+ * The BSC-5 dimension-SET-coverage sub-check (Axis-B slice-7) — composed among the gating tail of
+ * {@link checkProductionReality}, after assertion-presence and before the BSC-10 grounding summary.
+ * A run may not be certified complete while a DECLARED required dimension is not OBSERVED.
+ *
+ * GROUND (`declared ⊆ observed`), recomputed ENTIRELY from live inputs (Principle 1 — the receipt
+ * is never trusted):
+ *   - DECLARED = the COMMITTED `DECLARED_DIMENSION_SET` constant ({@link declaredDimensionSet} /
+ *     {@link declaredDimensionSetDigest}). Interp A: narrowing it is a reviewable code + `dist/`
+ *     diff, never a runtime self-attest.
+ *   - OBSERVED = re-derived from `verify-report.json` via {@link observedDimensionsFromReport} — the
+ *     SAME shared derivation the BSC-3 sensor uses (a dimension is observed iff a matching command
+ *     exists AND `ok===true`). So a stored "all observed" claim cannot survive evidence being
+ *     stripped from the report after mint (negative-control b).
+ *
+ * Fail-closed posture (on a PRESENT coverage receipt — the claim under test):
+ *   - The coverage chain is tamper-walked first ({@link verifyCoverageChain}); a broken chain BLOCKS
+ *     with reason `chain` (no line from a tampered store is trusted).
+ *   - The receipt's `declared_set_digest` is compared to the LIVE committed digest; a mismatch
+ *     BLOCKS with reason `declared_set_diverged` (the committed set was narrowed/changed after mint
+ *     — negative-control d's runtime tripwire, complementing the reviewable-diff guard).
+ *   - `declared ⊄ observed` (a live-declared dimension absent from the live-observed set, recomputed
+ *     — the receipt's stored `covered`/`observed` are NEVER trusted) BLOCKS with reason `uncovered`
+ *     (negative-controls a/b/c). So a receipt that SELF-ATTESTS `covered:true` over a stripped report
+ *     is recomputed and blocked — the claim is grounded in the live re-derivation, not the receipt.
+ *
+ * ABSENCE ≠ FORGERY (the BSC-1/2/3 grandfather posture, so this rung is ADDITIVE — it never reds an
+ * in-flight run that simply has not minted a coverage claim yet): NO coverage receipt ⇒ PASS. The
+ * coverage requirement bites on a PRESENT claim (the F8 correspondence artifact) recomputed against
+ * the live committed set + live observed set; a run that never asserts coverage is not blocked here.
+ *
+ * Governed by `bsc5EnforcementEnabled()` (defaults ON): the verdict is ALWAYS computed (so the
+ * `coverage` summary is available for observability), but it BLOCKS with `dimension_set_uncovered`
+ * only when enforcement is on; OFF ⇒ the would-be block is surfaced as a non-blocking `notice`.
+ */
+function checkDimensionSetCoverage(paths) {
+    const liveDeclaredDigest = (0, declared_dimensions_1.declaredDimensionSetDigest)();
+    const liveDeclaredSet = (0, declared_dimensions_1.declaredDimensionSet)();
+    // OBSERVED re-derived from the LIVE verify-report (never the receipt's stored set).
+    const liveObservedSet = [...(0, verification_driver_1.observedDimensionsFromReport)((0, verify_1.readVerifyReport)(paths))].sort();
+    const receipts = (0, receipts_1.readCoverageReceipts)(paths);
+    // ABSENCE ≠ FORGERY: no coverage claim ⇒ grandfathered PASS (mirrors the BSC-1/2/3 driver/
+    // realization/assertion grandfather, so adding this rung is ADDITIVE and never reds an in-flight
+    // run that has not minted a coverage receipt). The requirement bites on a PRESENT claim below.
+    if (receipts.length === 0)
+        return PASS;
+    // The verdict + its observability summary, computed regardless of enforcement.
+    let status;
+    let detail;
+    const chain = (0, receipts_1.verifyCoverageChain)(receipts);
+    if (!chain.ok) {
+        status = "chain";
+        detail = { reason: "chain", brokenAt: chain.brokenAt, chainReason: chain.reason };
+    }
+    else {
+        // The LATEST in-process receipt is the coverage CLAIM under test. Its ground is RE-DERIVED
+        // (live declared digest + live observed set) — the stored `covered`/`observed` are never trusted.
+        const latest = receipts[receipts.length - 1];
+        const content = (0, receipts_1.validateCoverageContent)(latest, liveDeclaredDigest, liveDeclaredSet, liveObservedSet);
+        status = content.status;
+        detail = {
+            reason: content.status,
+            ...(content.missing ? { missing: content.missing } : {}),
+            ...(content.digests ? { digests: content.digests } : {}),
+        };
+    }
+    const coverage = {
+        declared: liveDeclaredSet,
+        observed: liveObservedSet,
+        declaredSetDigest: liveDeclaredDigest,
+        status,
+    };
+    if (status === "covered") {
+        // Clean PASS: attach the coverage summary for the I1 observability hook.
+        return { ok: true, coverage };
+    }
+    if (!(0, bsc5_flag_1.bsc5EnforcementEnabled)()) {
+        // Flag OFF: observe but do not block. Surface the would-be block as a non-blocking notice.
+        return { ok: true, coverage, notice: { token: "dimension_set_uncovered", detail } };
+    }
+    return { ok: false, error: "dimension_set_uncovered", detail, coverage };
+}
+/**
+ * The BSC-1 realization sub-check (Axis-B slice-5) — the EIGHTH production-reality
+ * sub-check, composed LAST inside {@link checkProductionReality}. A run may not be certified
+ * complete while a REQ-ID owned by a `done` slice lacks a valid, reachable, digest-fresh
+ * realization referent.
+ *
+ * GROUND (consensus §0.2): the CLAIM is `SliceState.status==="done"` (authored
+ * independently, at a different time, than the referent); the REFERENT is a digest-bound
+ * source anchor recorded by `th realize`. The enumerator ranges over REQ-IDs owned by
+ * `done` slices (INDEPENDENT of receipt presence, so "absent receipt blocks" is reachable),
+ * recomputes the referent digest from the CACHED repo-map ({@link loadRepoMapForRealization}),
+ * COLLECTS ALL failures, and blocks on absent/stale/forged/target_missing/target_mismatch/
+ * tampered. A done-slice REQ that the ownership join cannot place under a known component is
+ * REPORTED as `unresolved` and blocks (fail-closed name-fidelity guard, control 11f).
+ *
+ * Governed by `realizationEnforcementEnabled()` (defaults ON): the verdict is ALWAYS
+ * computed (so the would-be block is surfaced as a non-blocking `notice` when enforcement is
+ * off), but it BLOCKS with `realization_unverified` only when enforcement is on. The
+ * repo-map is loaded once; an absent map means no owned REQs to enforce (the brownfield
+ * `checkRepoMap` rung already owns repo-map freshness — we do not double-block here).
+ */
+function checkRealization(paths, state) {
+    // FAIL-OPEN CLOSURE (team-fix #8): stamp the grandfather baseline the FIRST time the gate
+    // observes a `done` slice, regardless of how that slice became done. Without this, a `done`
+    // slice reached via `--emergency state set` / an imported state never stamps the marker
+    // (the slice→done CLI trigger is the only other writer), so readRealizationReceiptValidated
+    // grandfathers EVERY REQ as `legacy` and this rung silently never enforces. The opportunistic
+    // stamp is self-locking + fail-soft (never throws into the gate) and is a one-time write.
+    (0, realization_2.ensureRealizationMigrationOpportunistic)(paths);
+    const map = (0, realization_2.loadRepoMapForRealization)(paths);
+    if (map === null)
+        return PASS; // no map ⇒ no owned-REQ obligation (freshness owned elsewhere)
+    const failures = [];
+    // Fail-closed name-fidelity guard (control 11f): a done-slice REQ the join cannot place
+    // under a known component is reported, never silently dropped ("unobserved ≠ clean").
+    for (const reqId of (0, realization_2.unresolvedDoneSliceReqs)(map, state)) {
+        failures.push({ reqId, status: "unresolved" });
+    }
+    // The enumerator: every REQ owned by a `done` slice must carry a valid, digest-fresh
+    // realization referent. ACCEPT set: `valid` (in-process attested), `valid-grounded`
+    // (external keyed + verified), `legacy` (grandfathered). Everything else BLOCKS.
+    for (const owned of (0, realization_2.ownedReqsForDoneSlices)(map, state)) {
+        const v = (0, realization_2.readRealizationReceiptValidated)(paths, owned.reqId);
+        if (v.status !== "valid" && v.status !== "valid-grounded" && v.status !== "legacy") {
+            failures.push({ reqId: owned.reqId, status: v.status, owningSlices: owned.owningSlices });
+        }
+    }
+    if (failures.length === 0)
+        return PASS;
+    const detail = {
+        failures: failures.slice(0, 20),
+        total: failures.length,
+        statuses: [...new Set(failures.map((f) => f.status))].sort(),
+    };
+    if (!(0, bsc1_flag_1.realizationEnforcementEnabled)()) {
+        // Flag OFF: observe but do not block. Surface the would-be block as a non-blocking notice.
+        return { ok: true, notice: { token: "realization_unverified", detail } };
+    }
+    return { ok: false, error: "realization_unverified", detail };
+}
+/**
+ * Evaluate the BSC-2 assertion-presence grounding for the current run (recompute-don't-trust +
+ * fail-closed + F8 grounding). The verdict drives BOTH enforcement (when the flag is on) AND the
+ * always-computed observability summary; see {@link AssertionVerdict}.
+ *
+ * Order:
+ *   1. The CHECKED `tested` REQ set comes from `computeBreakdown`. No req file ⇒ PASS (the
+ *      coverage rung owns that). No tested REQ ⇒ PASS (nothing to attest).
+ *   2. MutationKill EFFICACY axis (2b) — a DISTINCT observability axis, NEVER a presence
+ *      pass-override (review HIGH; presence ≠ efficacy — the plan treats 2a/2b as
+ *      COMPLEMENTARY, never substitutes): `readMutationKillValidated` → `forged` ⇒ BLOCK
+ *      `mutation_kill_forged` (an unprovable controlled-runner claim blocks — mirrors the
+ *      driver `forged` path); `valid-grounded` ⇒ record the MODULE-scoped {@link
+ *      MutationEfficacySignal} for the receipt's `scope` ONLY (observability) and CONTINUE to
+ *      the presence checks — it does NOT excuse any REQ's presence gap and is NOT propagated
+ *      onto per-REQ trust labels; `absent` ⇒ no-op (the common 2a path).
+ *   3. Receipt correspondence (F8): read the in-process AssertionPresenceReceipt store; a
+ *      tampered chain ⇒ BLOCK `assertion_presence_unverified` (reason `chain`). The LATEST
+ *      receipt is selected. NO receipt at all ⇒ fail-closed `assertion_unobserved` (there ARE
+ *      tested REQs but no recorded correspondence). A receipt's `target_mismatch`/`stale`
+ *      content status ⇒ BLOCK `assertion_presence_unverified`. This runs ALWAYS, regardless of
+ *      any mutation receipt.
+ *   4. Offenders = recompute the ground FRESH; the offenders are the checked-tested REQs whose
+ *      recomputed summary has `assertionFree===true` (recompute — do NOT trust the receipt's
+ *      stored ground for the offender decision: the receipt is the correspondence artifact, the
+ *      live recompute is the verdict). Subtract validly-WAIVED REQs. This runs ALWAYS.
+ *   5. Verdict: no remaining offenders + receipt correspondence OK ⇒ PASS. Else BLOCK
+ *      `assertion_presence_unverified` naming the offenders + content status. The module-scoped
+ *      `mutationEfficacy` signal rides on EVERY outcome for the I1 hook.
+ *
+ * The `summary` is ALWAYS computed (every checked-tested REQ, sorted by reqId) so the I1 hook
+ * fires on PASS / WARN / BLOCK. Trust labeling (honesty): a 2a-only REQ is `valid`
+ * (receipt-grounded) or `attested-presence` (presence sensed) — there is NO `valid-grounded`
+ * per-REQ presence label; module-scoped efficacy is carried separately by `mutationEfficacy`.
+ */
+function evaluateAssertionPresence(paths) {
+    const bd = (0, coverage_1.computeBreakdown)(paths.root);
+    if ("error" in bd)
+        return null; // no req file ⇒ the coverage rung owns that; nothing to attest
+    const checkedTested = new Set(bd.rows.filter((r) => r.tested).map((r) => r.req));
+    if (checkedTested.size === 0)
+        return null; // no tested REQ ⇒ nothing to attest
+    // The efficacy axis (2b) — a DISTINCT observability axis, NEVER a presence pass-override
+    // (review HIGH; presence ≠ efficacy). A forged controlled-runner claim BLOCKS; a verified one
+    // records a MODULE-scoped efficacy signal for its `scope` only; absence is a no-op.
+    const mutation = (0, assertion_presence_1.readMutationKillValidated)(paths);
+    const mutationEfficacy = mutation.status === "valid-grounded" && mutation.receipt
+        ? { status: "valid-grounded", scope: mutation.receipt.ground.scope, score: mutation.receipt.ground.score }
+        : undefined;
+    // Recompute the ground FRESH — the verdict is the live recompute, never the receipt's stored
+    // ground (mirrors the BSC-6 recompute-don't-trust lesson). Build a per-REQ lookup for the
+    // checked-tested set so the offender decision + the observability summary share one source.
+    const ground = (0, assertion_presence_1.computeAssertionPresenceGround)(paths);
+    const byReq = new Map(ground.map((s) => [s.reqId, s]));
+    const waived = (0, assertion_presence_1.validWaivedReqs)(paths);
+    // The always-computed observability summary (seed-order deterministic). A checked-tested REQ
+    // with no recomputed summary (anchored only in a non-test file, etc.) is treated as
+    // assertion-free with zero non-trivial assertions (fail-closed: unobserved ≠ asserted).
+    // PRESENCE trust label ONLY — the module-scoped mutation efficacy NEVER lands on a per-REQ
+    // presence label (review HIGH/MEDIUM): `attested-presence` when a non-trivial assertion is
+    // sensed, else `valid` (in-process receipt attribution only).
+    const summary = [...checkedTested]
+        .sort()
+        .map((reqId) => {
+        const s = byReq.get(reqId);
+        const nonTrivialAssertions = s ? s.nonTrivialAssertions : 0;
+        const assertionFree = s ? s.assertionFree : true;
+        const isWaived = waived.has(reqId);
+        const trustLabel = !assertionFree ? "attested-presence" : "valid";
+        return { reqId, nonTrivialAssertions, assertionFree, trustLabel, waived: isWaived };
+    });
+    // 2. Efficacy axis: a forged controlled-runner claim BLOCKS (unprovable independence claim).
+    // A `valid-grounded` receipt does NOT short-circuit — it is recorded as `mutationEfficacy`
+    // (module-scoped observability) and we CONTINUE to the presence checks below (presence ≠
+    // efficacy; the module-scoped efficacy spike cannot excuse an unrelated REQ's presence gap).
+    if (mutation.status === "forged") {
+        return {
+            ok: false,
+            reason: "mutation_kill_forged",
+            summary,
+            detail: { scope: mutation.receipt?.ground.scope ?? null, key_id: mutation.receipt?.key_id ?? null },
+        };
+    }
+    // 3. Receipt correspondence (F8). Runs ALWAYS, regardless of any mutation receipt. A tampered
+    // chain is fail-closed.
+    const receipts = (0, assertion_presence_1.readAssertionPresenceReceipts)(paths);
+    const chain = (0, assertion_presence_1.verifyAssertionPresenceChain)(receipts);
+    if (!chain.ok) {
+        return {
+            ok: false,
+            reason: "assertion_presence_unverified",
+            summary,
+            mutationEfficacy,
+            detail: { contentStatus: "chain", brokenAt: chain.brokenAt, chainReason: chain.reason },
+        };
+    }
+    const latest = receipts.length > 0 ? receipts[receipts.length - 1] : undefined;
+    if (latest === undefined) {
+        // There ARE tested REQs but NO recorded correspondence ⇒ fail-closed unobserved.
+        return {
+            ok: false,
+            reason: "assertion_unobserved",
+            summary,
+            mutationEfficacy,
+            detail: { contentStatus: "assertion_unobserved", tested: checkedTested.size },
+        };
+    }
+    const content = (0, assertion_presence_1.validateAssertionPresenceContent)(paths, latest);
+    if (content.status === "target_mismatch" || content.status === "stale") {
+        return {
+            ok: false,
+            reason: "assertion_presence_unverified",
+            summary,
+            mutationEfficacy,
+            detail: {
+                contentStatus: content.status,
+                ...(content.staleReasons ? { staleReasons: content.staleReasons } : {}),
+            },
+        };
+    }
+    // 4. Offenders = checked-tested REQs that are assertion-free in the FRESH recompute, minus
+    //    validly-waived REQs. Runs ALWAYS — a module-scoped mutation efficacy spike does NOT
+    //    excuse an unrelated REQ's presence gap (review HIGH; presence ≠ efficacy).
+    const offenders = [...checkedTested]
+        .filter((reqId) => {
+        const s = byReq.get(reqId);
+        const assertionFree = s ? s.assertionFree : true;
+        return assertionFree && !waived.has(reqId);
+    })
+        .sort();
+    if (offenders.length === 0)
+        return { ok: true, summary, mutationEfficacy };
+    return {
+        ok: false,
+        reason: "assertion_presence_unverified",
+        summary,
+        mutationEfficacy,
+        detail: { contentStatus: content.status, offenders: offenders.slice(0, 20), total: offenders.length },
+    };
+}
+/**
+ * The BSC-2 assertion-presence sub-check (Axis-B slice-6) — the NINTH production-reality
+ * sub-check, composed LAST inside {@link checkProductionReality} (after realization). A run may
+ * not be certified complete while a `tested` REQ-ID lacks a NON-TRIVIAL assertion (the
+ * completion gate counts a REQ "tested" on anchor presence alone; a test file with no
+ * cannot-fail-free assertion clears that bar — BSC-2). It ALWAYS computes the per-REQ
+ * observability summary (the I1 hook), then BLOCKS on a failing verdict ONLY when enforcement
+ * is enabled ({@link bsc2EnforcementEnabled} — WARN-first, defaults OFF in commit 1 / ON in
+ * commit 2).
+ *
+ * When the verdict is null (no req file / no tested REQ) ⇒ bare PASS. When the verdict PASSES
+ * with NO actionable summary anomaly the result still carries `assertionPresence` (the I1 hook
+ * fires for any non-empty summary); a fully-empty summary degrades to a bare PASS to preserve
+ * the `{ ok: true }` contract every downstream rung composes. When enforcement is OFF and the
+ * verdict fails, the would-be block rides up as a non-blocking `notice` (warn posture) WITH the
+ * summary. When ON, a failing verdict returns the stable token (`assertion_presence_unverified`
+ * / `assertion_unobserved` / `mutation_kill_forged`) WITH the summary so the block is diagnosable.
+ */
+function checkAssertionPresence(paths) {
+    const verdict = evaluateAssertionPresence(paths);
+    if (verdict === null)
+        return PASS; // no req file / no tested REQ ⇒ nothing to attest
+    if (verdict.ok) {
+        // Attach observability on PASS only when there is a NOTEWORTHY signal — any offender (an
+        // assertion-free REQ), any validly-waived REQ, or a module-scoped mutation efficacy signal.
+        // A fully-clean, all-`attested-presence` run with no efficacy signal degrades to the shared
+        // bare `PASS` so the `{ ok: true }` contract every downstream rung composes is preserved
+        // (mirrors checkDriverDimensions' empty-summary bare-PASS). On BLOCK/WARN they always ride.
+        const noteworthy = verdict.summary.some((s) => s.assertionFree || s.waived) || verdict.mutationEfficacy !== undefined;
+        if (!noteworthy)
+            return PASS;
+        const res = { ok: true, assertionPresence: verdict.summary };
+        if (verdict.mutationEfficacy)
+            res.mutationEfficacy = verdict.mutationEfficacy;
+        return res;
+    }
+    if (!(0, bsc2_flag_1.bsc2EnforcementEnabled)()) {
+        // Flag OFF (WARN): observe but do not block. Surface the would-be block as a non-blocking
+        // notice + the summary so the warn posture is visible without weakening the gate.
+        const res = {
+            ok: true,
+            assertionPresence: verdict.summary,
+            notice: { token: verdict.reason, detail: verdict.detail },
+        };
+        if (verdict.mutationEfficacy)
+            res.mutationEfficacy = verdict.mutationEfficacy;
+        return res;
+    }
+    const res = {
+        ok: false,
+        error: verdict.reason,
+        detail: verdict.detail,
+        assertionPresence: verdict.summary,
+    };
+    if (verdict.mutationEfficacy)
+        res.mutationEfficacy = verdict.mutationEfficacy;
+    return res;
+}
+/**
+ * Map a grounding receipt's content-validation status to the per-kind conformance + offender
+ * verdict precedence (fail-closed, `unobserved` outranks `over-budget`): a trusted receipt whose
+ * content is `unobserved` ⇒ `unobserved`; `over-budget`/`stale` ⇒ `over_budget` (a diverged
+ * snapshot is treated as a budget failure for the grounding axis); else `within-budget`.
+ *
+ * SIGNED-BUDGET THRESHOLD COMPARISON IS NOT YET CONSUMED (MED-1, deferred to Slice C). The
+ * over-budget verdict here comes from the receipt's OWN externally-signed `conformance[].status`;
+ * the signed budget THRESHOLD (`validGroundingBudgets`) is validated for AUTHENTICITY (3-party
+ * authority, E4) but its `threshold` is NEVER compared against the metric's `observed` value yet.
+ * This is correct sequencing: budgets express TOLERANCES, meaningful only for the runner-sensitive
+ * kinds (visual perceptual-diff, a11y scan-count) that Slice C actually measures. The Slice-B
+ * deterministic kinds (`digest-manifest`, `version-pin`) are binary match/no-match, so the signed
+ * receipt status fully decides them. Observed-vs-threshold evaluation lands in Slice C alongside
+ * the tolerance-based visual/a11y measurement.
+ */
+function groundingConformanceOf(paths, receipt) {
+    const v = (0, grounding_1.validateGroundingContent)(paths, receipt);
+    if (v.status === "unobserved")
+        return "unobserved";
+    if (v.status === "over-budget" || v.status === "stale" || v.status === "target_mismatch")
+        return "over-budget";
+    return "within-budget";
+}
+/**
+ * Combine the receipt's OWN content verdict (`selfConformance`) with the INDEPENDENT gate-side
+ * tolerance-threshold verdicts (C4c) and return the WORST — fail-closed, NEVER the laxer of the
+ * two, so a generous self-reported `status` cannot mask a breached signed budget. Precedence:
+ * `unobserved` (unmeasured / unpinned-tolerance — cannot be gated as passing) > `over-budget`
+ * (measured but out of tolerance) > `within-budget`. A tolerance `unpinned` (observed but NO signed
+ * budget) collapses to `unobserved` — it is the same "cannot be confirmed within tolerance" fail-
+ * closed class. An EMPTY `tolerance` (deterministic kind, or a visual-hash with no tolerance
+ * metric) leaves `selfConformance` unchanged (the Slice-B posture for the deterministic kinds).
+ */
+function worseGroundingConformance(selfConformance, tolerance) {
+    const rank = { unobserved: 2, "over-budget": 1, "within-budget": 0 };
+    let worst = selfConformance;
+    const consider = (c) => {
+        if (rank[c] > rank[worst])
+            worst = c;
+    };
+    for (const t of tolerance) {
+        // `unpinned` (observed but no signed tolerance) and `unobserved` (stub) are BOTH the fail-closed
+        // "cannot be gated as passing" class ⇒ collapse to `unobserved`; `over-budget` stays over-budget.
+        if (t.status === "unobserved" || t.status === "unpinned")
+            consider("unobserved");
+        else if (t.status === "over-budget")
+            consider("over-budget");
+    }
+    return worst;
+}
+/**
+ * The grounding-side manifest digest the evidence-spine threads — the `manifestDigest` of the
+ * trusted `digest-manifest` ground (in-process `valid` or external `valid-grounded`). `null` when
+ * no `digest-manifest` ground is trusted (nothing to thread against ⇒ no `chain_mismatch` is
+ * possible). This is the AUTHORITATIVE digest the BSC-1/3/7 threaded `manifest_digest` must match.
+ */
+function groundingManifestDigest(validated) {
+    const entry = validated.byKind.get("digest-manifest");
+    if (entry === undefined)
+        return null;
+    const ground = entry.receipt.ground;
+    return ground.groundKind === "digest-manifest" ? ground.manifestDigest : null;
+}
+/**
+ * Every `manifest_digest` threaded through the shipped BSC-1 realization / BSC-3 driver / BSC-7
+ * approval receipts (in-process + external stores), de-duplicated. `manifest_digest` is ADDITIVE-
+ * OPTIONAL (omit-when-absent), so a pre-BSC-10 receipt contributes NOTHING and the set is empty ⇒
+ * back-compat (no `chain_mismatch`). The field is signature/hash-bound on each receipt (a swapped
+ * digest breaks that receipt's own `recordHash`/signature — but this reader does NOT itself verify
+ * those chains/signatures (and the contributing rungs may be in WARN), so a threaded value is NOT
+ * proven authentic here. That is SAFE because the cross-check is FAIL-CLOSED-ONLY: a disagreeing
+ * digest can only force a `chain_mismatch` BLOCK, never a pass. The deliberate trade-off is that a
+ * file-writer without the key can inject a bogus external `manifest_digest` to provoke a spurious
+ * block (a denial-of-completion, consistent with the system's block-on-suspicion posture) — it can
+ * NEVER suppress a real mismatch. Read tolerantly (the readers never throw).
+ */
+function threadedManifestDigests(paths) {
+    const digests = new Set();
+    const add = (d) => {
+        if (typeof d === "string" && d !== "")
+            digests.add(d);
+    };
+    for (const r of (0, realization_1.readRealizationReceipts)(paths))
+        add(r.manifest_digest);
+    for (const r of (0, realization_1.readExternalRealizationReceipts)(paths))
+        add(r.manifest_digest);
+    for (const r of (0, verification_driver_1.readDriverReceipts)(paths))
+        add(r.manifest_digest);
+    for (const r of (0, verification_driver_1.readExternalDriverReceipts)(paths))
+        add(r.manifest_digest);
+    for (const r of (0, approvals_1.readApprovalReceipts)(paths))
+        add(r.manifest_digest);
+    for (const r of (0, approvals_1.readExternalApprovals)(paths))
+        add(r.manifest_digest);
+    return digests;
+}
+/**
+ * BSC-10 (C4a) — true iff ANY governing BSC-1 realization / BSC-3 driver / BSC-7 approval receipt
+ * (in-process + external stores) is ENROLLED in the evidence-spine (`grounding_bound === true`) yet
+ * carries NO usable `manifest_digest` — the OPT-IN says "I participate in the spine" but the receipt
+ * never bound itself to the signed EvidenceManifest. This is the C4a `manifest_digest_absent` block
+ * condition. The opt-in is the per-receipt TRIGGER (resolving the prior unsatisfiable model): a
+ * receipt that does NOT set `grounding_bound` (the back-compat / grandfathered path) is byte-
+ * identical and NEVER an offender — so shipped BSC-1/3/4 probes + unenrolled fixtures stay green
+ * (absence ≠ forgery). `grounding_bound` is signature/hash-bound on each receipt (it is IN the
+ * canonical field order), so a flipped flag breaks that receipt's OWN `recordHash`/signature; here
+ * the grounding rung just consumes the declared opt-in. Read tolerantly (the readers never throw).
+ *
+ * SCOPE (review-fix): this is consumed inside `evaluateGrounding`, which returns null (fully inert)
+ * BEFORE this check when NO grounding work-class is declared. So an enrolled-but-unbound receipt is
+ * only caught when the run ALSO declares a grounding work-class — C4a enforces CONSISTENCY (you may
+ * not claim `grounding_bound` and bind no digest), NOT COVERAGE (nothing forces a receipt to opt in;
+ * only the external producer sets `grounding_bound`). An empty OR whitespace-only `manifest_digest`
+ * counts as unbound — a junk digest must not satisfy the binding.
+ */
+function hasUnboundGroundingReceipt(paths) {
+    const unbound = (r) => r.grounding_bound === true && (typeof r.manifest_digest !== "string" || r.manifest_digest.trim() === "");
+    return ((0, realization_1.readRealizationReceipts)(paths).some(unbound) ||
+        (0, realization_1.readExternalRealizationReceipts)(paths).some(unbound) ||
+        (0, verification_driver_1.readDriverReceipts)(paths).some(unbound) ||
+        (0, verification_driver_1.readExternalDriverReceipts)(paths).some(unbound) ||
+        (0, approvals_1.readApprovalReceipts)(paths).some(unbound) ||
+        (0, approvals_1.readExternalApprovals)(paths).some(unbound));
+}
+/**
+ * Evaluate the BSC-10 external-reference grounding for the current run (recompute-don't-trust +
+ * fail-closed). The DECLARED work-class is read FRESH from the in-process grounding receipts (each
+ * receipt declares the `workClass` it was minted for); the required ground-kinds are recomputed
+ * from the fixed matrix + the `has_ui` UX-surface force-rule (a `has_ui` run forces `visual-hash`).
+ * For each required kind the LATEST trusted receipt (in-process `valid` / external `valid-grounded`)
+ * is resolved via {@link readGroundingValidated} and its conformance re-derived. A required kind
+ * with no trusted receipt ⇒ `missing`; an over-budget/stale one ⇒ `over_budget`; an unobserved one
+ * ⇒ `unobserved`; a threaded BSC-1/3/7 `manifest_digest` that disagrees ⇒ `chain_mismatch`
+ * (Slice B). A required kind whose `(workClass, groundKind)` axis is covered by a validly-Ed25519-
+ * signed exception is EXEMPTED (not an offender; `exceptionCovered:true`) — M4 fail-closed: an
+ * unsigned/wrong-key/tampered exception exempts NOTHING. Returns `null` when there is no declared
+ * work-class at all (nothing to ground).
+ */
+function evaluateGrounding(paths, state) {
+    const validated = (0, grounding_1.readGroundingValidated)(paths);
+    // M-1 fail-CLOSED on tamper (BEFORE deriving the declared classes). A tampered chain makes
+    // `readGroundingValidated` drop ALL receipts from that store ("a tampered chain trusts NOTHING
+    // from it"), which would otherwise empty `byKind`, yield no declared class, and slip a
+    // required-and-missing run from FAIL to inert PASS — a fail-OPEN. Detection MUST have a gate
+    // consequence: block with the top-level `grounding_unverified` token + `detail.reason:"tampered"`.
+    // BOTH chains are covered symmetrically (Slice B closed the external-chain asymmetry): a
+    // broken/reordered/duplicated EXTERNAL chain blocks here too, so a file-writer cannot silently
+    // drop a stale-resurfaced external grounding down to an undetected `missing`. An EMPTY store
+    // verifies (`verifyGroundingChain([])` ⇒ `{ok:true}`), so absence is NEVER blocked here (absence ≠
+    // forgery); only a NON-EMPTY broken chain blocks. Under WARN (flag default-OFF) `checkGrounding`
+    // downgrades this to a non-blocking notice (flag-gated, like the in-process M-1 posture).
+    if (validated.inProcessChainOk === false || validated.externalChainOk === false) {
+        return { ok: false, reason: "tampered", required: [], summary: [], offenders: [] };
+    }
+    // The DECLARED work-classes across the trusted receipts (recompute-don't-trust: the receipt is
+    // the work-class CLAIM, the matrix is the verdict). No receipt ⇒ no declared class ⇒ nothing to
+    // ground (the not-required inert path — absence ≠ forgery).
+    const declaredClasses = [
+        ...new Set([...validated.byKind.values()].map((e) => e.receipt.workClass)),
+    ].sort();
+    if (declaredClasses.length === 0)
+        return null;
+    // `has_ui` is the observable UX-surface signal; `has_ui !== false` (default true) forces a
+    // visual-hash ground per the force-rule (a screen surface is grounded visually). The union of
+    // the required-sets across every declared class is the closed required-set for the run.
+    const surfaces = state.has_ui !== false ? ["ui"] : [];
+    const requiredSet = new Set();
+    let crossCheckFlag;
+    for (const wc of declaredClasses) {
+        // GATE-LEVEL DECLARED-vs-DERIVED CROSS-CHECK IS NOT YET WIRED (still inert after Slice B, like
+        // the carve-out store). `requiredGroundKindsForWorkClass` is called WITHOUT a third
+        // `derivedClass` argument, so `req.crossCheckFlag` is structurally always `undefined` on this
+        // path — the declared-vs-derived (BSC-8-style) cross-check has NO input source yet (no receipt
+        // carries an evidence-derived class; Slice B added the producer + chain enforcement + sibling-
+        // store consumption, NOT a derived-class field — that adoption lands later, with the Slice-C
+        // stage-obligation prompts). This loop is therefore a UNION over the DECLARED classes, NOT the
+        // declared-vs-derived cross-check; the `crossCheckFlag`/`detail.crossCheck` plumbing below stays
+        // reserved-but-unreachable until a derived class is threaded in. The classifier's cross-check
+        // rule itself is exercised directly by the unit suite (U6).
+        const req = (0, grounding_1.requiredGroundKindsForWorkClass)(wc, surfaces);
+        for (const k of req.required)
+            requiredSet.add(k);
+        if (req.crossCheckFlag)
+            crossCheckFlag = req.crossCheckFlag;
+    }
+    const required = [...requiredSet].sort();
+    if (required.length === 0)
+        return null; // pure-greenfield-only declared ⇒ inert
+    // Signed exemptions (Slice B / M4): the validly-Ed25519-signed `(workClass, groundKind)` axes the
+    // external producer suspended (the I5 SignedException path). An UNSIGNED / wrong-key / tampered
+    // exception exempts NOTHING (fail-closed — verified inside `validGroundingExemptions`); with no
+    // public key loaded (default fork/local/test) the map is empty and the gate enforces fully. A
+    // required kind is `exceptionCovered` iff ANY declared class has a matching signed exemption.
+    const exemptions = (0, grounding_1.validGroundingExemptions)(paths);
+    const isExempt = (kind) => declaredClasses.some((wc) => exemptions.has((0, grounding_1.groundingExemptionKey)(wc, kind)));
+    // C4c — the validly-signed conformance BUDGETS, resolved ONCE per run (3-party authority: an
+    // agent cannot self-issue a passing budget). Drives the INDEPENDENT observed-vs-threshold
+    // comparison for the runner-sensitive TOLERANCE kind (`visual-hash`): the gate computes
+    // `observed > signed_threshold` with its OWN arithmetic rather than trusting the receipt's self-
+    // reported `status` (the deferred MED-1). Empty (no key / no budgets) ⇒ a required tolerance kind
+    // is `unpinned` (fail-closed under enforce); the deterministic kinds are unaffected.
+    const validBudgets = (0, grounding_1.validGroundingBudgets)(paths);
+    const summary = [];
+    const offenders = [];
+    let worstReason = null;
+    // Fail-closed precedence (highest names the block): `chain_mismatch` (the evidence-spine is bound
+    // to a DIFFERENT reference than the one grounded — the most specific spine defect) >
+    // `manifest_digest_absent` (C4a: an ENROLLED receipt bound NOTHING — a less-specific spine defect
+    // than a disagreement) > `missing` (the ground was never even checked) > `unobserved` (checked but
+    // unmeasured) > `over_budget` (measured but out of tolerance). `tampered` is early-handled above.
+    const bump = (r) => {
+        const rank = {
+            chain_mismatch: 5,
+            manifest_digest_absent: 4,
+            missing: 3,
+            unobserved: 2,
+            over_budget: 1,
+            tampered: 0,
+        };
+        if (worstReason === null || rank[r] > rank[worstReason])
+            worstReason = r;
+    };
+    for (const kind of required) {
+        const exemptCovered = isExempt(kind);
+        const entry = validated.byKind.get(kind);
+        if (entry === undefined) {
+            // A missing ground is exempted ONLY by a validly-signed exception for its axis (e.g.
+            // `reference-unreachable`); otherwise it is the hardest offender.
+            summary.push({ groundKind: kind, grounded: false, trustLabel: "ungrounded", conformance: "missing", exceptionCovered: exemptCovered });
+            if (!exemptCovered) {
+                offenders.push(kind);
+                bump("missing");
+            }
+            continue;
+        }
+        // The receipt's OWN content verdict (self-reported conformance status + snapshot staleness).
+        const selfConformance = groundingConformanceOf(paths, entry.receipt);
+        // C4c — the INDEPENDENT gate-side tolerance verdict for a `visual-hash` ground: `observed >
+        // signed_threshold` computed by the gate's OWN arithmetic (recompute-don't-trust), so a generous
+        // self-reported `status` cannot undercut a breached signed budget. Empty for the deterministic
+        // kinds (no tolerance band) and for a visual-hash ground with no tolerance metric. The WORST of
+        // (self-reported, independent-threshold) decides the kind — fail-closed, never the laxer of the two.
+        const tolerance = (0, grounding_1.toleranceThresholdVerdicts)(entry.receipt, validBudgets);
+        let conformance = worseGroundingConformance(selfConformance, tolerance);
+        // C4c fail-closed (review-fix, sec HIGH): a required `visual-hash` ground MUST carry a measured
+        // tolerance metric. An empty / tolerance-free conformance list classifies `valid` in
+        // `validateGroundingContent` and yields an EMPTY `tolerance`, so a producer that simply OMITS the
+        // perceptual-diff / a11y measurement would otherwise slip through as `within-budget` even under the
+        // C4d enforce-flip. Recompute-don't-trust: no `visual`/`a11y` tolerance verdict for a visual-hash
+        // ground ⇒ `unobserved` (never a silent pass — "unobserved ≠ clean").
+        if (kind === "visual-hash" && tolerance.length === 0)
+            conformance = "unobserved";
+        const summaryRow = {
+            groundKind: kind,
+            grounded: true,
+            trustLabel: entry.trustLabel,
+            conformance,
+            exceptionCovered: exemptCovered,
+        };
+        // C4b — surface the observed-vs-budget diff per tolerance metric so a human sees the breach at
+        // approval (only on a `visual-hash` ground carrying tolerance metrics; absent otherwise).
+        if (tolerance.length > 0)
+            summaryRow.toleranceDiff = tolerance;
+        summary.push(summaryRow);
+        // A validly-signed exception suspends this ground's budget ⇒ an over-budget / unobserved kind is
+        // no longer an offender (M4: only a SIGNED exception can do this; unsigned exempts NOTHING).
+        if (exemptCovered)
+            continue;
+        if (conformance === "unobserved") {
+            offenders.push(kind);
+            bump("unobserved");
+        }
+        else if (conformance === "over-budget") {
+            offenders.push(kind);
+            bump("over_budget");
+        }
+    }
+    // Evidence-spine continuity (Slice B / I3): a `manifest_digest` threaded through a BSC-1/3/7
+    // receipt that DISAGREES with the input-grounding manifest digest is a `chain_mismatch` FAIL. Only
+    // computable when a `digest-manifest` ground is trusted (the authoritative digest) AND at least
+    // one receipt threads a value (absent ⇒ additive-optional back-compat PASS). The offender is the
+    // manifest-bearing `digest-manifest` kind, so the per-kind enforce-flip treats it as deterministic.
+    const manifestDigest = groundingManifestDigest(validated);
+    if (manifestDigest !== null) {
+        const threaded = threadedManifestDigests(paths);
+        const mismatched = [...threaded].some((d) => d !== manifestDigest);
+        if (mismatched) {
+            if (!offenders.includes("digest-manifest"))
+                offenders.push("digest-manifest");
+            // LOW-1 observability: make the chain_mismatch offender visible in `res.grounding`. The
+            // `digest-manifest` ground IS trusted (manifestDigest !== null), so reflect its trust label.
+            // chain_mismatch can fire even when `digest-manifest` was NOT in the required-set (the summary
+            // loop above only iterates `required`), so UPDATE an existing row if present, else PUSH a new
+            // one — never leave the blocking offender absent from the summary.
+            const entry = validated.byKind.get("digest-manifest");
+            const existing = summary.find((s) => s.groundKind === "digest-manifest");
+            if (existing) {
+                existing.conformance = "chain_mismatch";
+            }
+            else {
+                summary.push({
+                    groundKind: "digest-manifest",
+                    grounded: true,
+                    trustLabel: entry?.trustLabel ?? "valid",
+                    conformance: "chain_mismatch",
+                    exceptionCovered: false,
+                });
+            }
+            bump("chain_mismatch");
+        }
+    }
+    // Evidence-spine BINDING OPT-IN (Slice C / C4a): a governing BSC-1/3/7 receipt that ENROLLED in
+    // the spine (`grounding_bound === true`) but bound NO `manifest_digest` is a `manifest_digest_absent`
+    // FAIL. The per-receipt opt-in is the trigger (an unenrolled receipt is byte-identical back-compat
+    // PASS), so this NEVER fires on the shipped probes / unenrolled fixtures. The offender is the
+    // manifest-bearing `digest-manifest` kind so {@link bsc10KindEnforced} gates it as deterministic.
+    // It is computed only after a required-set exists (a `null` no-class run returned earlier), so it
+    // does not fabricate a block on a not-required run.
+    if (hasUnboundGroundingReceipt(paths)) {
+        if (!offenders.includes("digest-manifest"))
+            offenders.push("digest-manifest");
+        bump("manifest_digest_absent");
+    }
+    if (worstReason === null) {
+        return crossCheckFlag ? { ok: true, required, summary, crossCheckFlag } : { ok: true, required, summary };
+    }
+    return crossCheckFlag
+        ? { ok: false, reason: worstReason, required, summary, offenders, crossCheckFlag }
+        : { ok: false, reason: worstReason, required, summary, offenders };
+}
+/**
+ * Build the gate detail for a failing grounding verdict (the stable `grounding_unverified` block):
+ * the worst reason, the offending kinds, and the cross-check-mismatch flag when present.
+ */
+function groundingDetail(verdict) {
+    const detail = {
+        reason: verdict.reason,
+        offenders: verdict.offenders,
+        required: verdict.required,
+    };
+    if (verdict.crossCheckFlag)
+        detail.crossCheck = verdict.crossCheckFlag;
+    return detail;
+}
+/**
+ * Whether a FAILING grounding verdict actually BLOCKS this run. A failing verdict blocks iff:
+ *  - `tampered` — the NON-EMPTY in-process grounding chain does not verify (M-1 fail-closed). This is
+ *    FLAG-GATED on the MASTER switch ({@link bsc10EnforcementEnabled}), NOT per-kind: it is a
+ *    structural integrity violation with no per-kind attribution, so the deterministic/runner-
+ *    sensitive split does not apply. This MATCHES the shipped Slice-A M-1 posture — Slice A
+ *    deliberately blocks tamper ONLY under enforce and emits a non-blocking notice under WARN (the
+ *    M-1 fix was silent-inert-PASS → visible, not WARN-blocking; under WARN the grounding rung
+ *    blocks nothing anyway, so flag-gated tampered is not a hole). An EMPTY store verifies upstream,
+ *    so absence stays inert (absence ≠ forgery) and never reaches here; OR
+ *  - ANY offending ground-kind is enforce-PROMOTED for the slice ({@link bsc10KindEnforced} — the
+ *    deterministic `digest-manifest`/`version-pin` in Slice B; this also gates the new Slice-B
+ *    `chain_mismatch` reason, whose offender is `digest-manifest`, per plan I3). A `visual-hash`-ONLY
+ *    offender set stays WARN even under the master switch (its enforce-flip is Slice C), so a
+ *    deterministic failure BLOCKS while a runner-sensitive one rides as a non-blocking `notice` in
+ *    the SAME run.
+ */
+function groundingVerdictBlocks(verdict) {
+    if (verdict.reason === "tampered")
+        return (0, bsc10_flag_1.bsc10EnforcementEnabled)(); // M-1: flag-gated (Slice-A posture)
+    return verdict.offenders.some((kind) => (0, bsc10_flag_1.bsc10KindEnforced)(kind));
+}
+/**
+ * The BSC-10 external-reference grounding sub-check (Axis-B slice-BSC10a) — the NINTH production-
+ * reality sub-check, a THIN summary rung composed among the reality rungs (after assertion-
+ * presence). It does NOT recompute: it CONSUMES the verdict already hoisted before the human-
+ * approval leg (Principle 1), folding `grounding?` onto the result exactly like `dimensions?`/
+ * `assertionPresence?`. It ALWAYS attaches the per-required-kind summary, then BLOCKS on a failing
+ * verdict ONLY when the PER-KIND enforce-flip promotes it ({@link groundingVerdictBlocks} — Slice B
+ * promotes the DETERMINISTIC `digest-manifest`/`version-pin` kinds while `visual-hash` stays WARN).
+ * When the verdict does NOT block (WARN — master switch off, or a `visual-hash`-only offender set in
+ * Slice B) it rides as a non-blocking `notice` with the same `grounding_unverified` token + the
+ * summary; when it blocks it returns the stable token. A `null` verdict (no declared work-class /
+ * empty required-set) ⇒ bare PASS (not-required inert).
+ */
+function checkGrounding(verdict) {
+    if (verdict === null)
+        return PASS; // not-required ⇒ inert (absence ≠ forgery)
+    if (verdict.ok) {
+        // Attach the summary on PASS only when there is a noteworthy signal (any required kind, or a
+        // surfaced cross-check mismatch); otherwise degrade to the bare PASS the gate contract expects.
+        if (verdict.summary.length === 0 && verdict.crossCheckFlag === undefined)
+            return PASS;
+        return { ok: true, grounding: verdict.summary };
+    }
+    const detail = groundingDetail(verdict);
+    if (!groundingVerdictBlocks(verdict)) {
+        // Per-kind WARN (master switch off, OR a runner-sensitive `visual-hash`-only offender set in
+        // Slice B): observe but do not block. Surface the would-be block as a non-blocking notice + the
+        // summary so the warn posture is visible without weakening the gate.
+        return { ok: true, grounding: verdict.summary, notice: { token: "grounding_unverified", detail } };
+    }
+    return { ok: false, error: "grounding_unverified", detail, grounding: verdict.summary };
+}
+// ---------------------------------------------------------------------------
+// BSC-8 / Axis-B slice-7 — tier-correspondence + stage-invalidation enforcement
+// ---------------------------------------------------------------------------
+/**
+ * The minimum tier the brief mechanically requires, derived PURELY from `classifyBrief`
+ * (the lifted `core/tier-classify.ts` sensor both `th tier classify` and the gate share):
+ *  - `T0` when the brief is T0-eligible (every T0 condition holds AND no blast-radius veto).
+ *  - `T1` otherwise — a single failed T0 condition, OR any blast-radius flag (the §5 veto),
+ *    forces ≥T1. The gate never asserts a min ABOVE T1 (T2/T3 are advisory human calls, not
+ *    a mechanical floor), so the floor is exactly the T0-eligibility boundary.
+ *
+ * This is the SAME classifier the producer used at mint, so the recomputed min-tier is
+ * identical at mint + gate (the F8 correspondence lesson).
+ */
+function computeMinTierFromBrief(root) {
+    const briefFile = path.resolve(root, receipts_1.TASK_BRIEF_RELPATH);
+    const loaded = (0, brief_1.loadBriefFromFile)(briefFile);
+    // No brief / invalid brief is NON-DISCRIMINATING: there is no mechanical floor to enforce,
+    // so the min-tier is the permissive `T0` (a run with no brief cannot be under-declared).
+    if (!loaded.ok || !loaded.brief)
+        return { minTier: "T0", briefPresent: false };
+    const { tier0_eligible } = (0, tier_classify_1.classifyBrief)(loaded.brief);
+    return { minTier: tier0_eligible ? "T0" : "T1", briefPresent: true };
+}
+/**
+ * The stage-invalidation ground (BSC-8 negative-control b): for the CURRENT claimed tier,
+ * every engaged stage with an artifact (`produces !== ""`) that sits at-or-before the
+ * current stage in the pipeline MUST have its governing artifact REGISTERED. A tier upgrade
+ * that was NOT rewound (`tierUpgradeBackfillStage` is the producer-side rewind; this is the
+ * gate-enforcement side) silently SKIPS every newly-engaged stage — so that stage's artifact
+ * is absent/unregistered. Returns the FIRST such un-rewound (newly-engaged-but-skipped)
+ * stage id, or `null` when every engaged-and-passed artifact stage is satisfied.
+ *
+ * This is self-contained + recomputable from `state` alone (no receipt history): the
+ * signature of an un-rewound upgrade is exactly a passed engaged stage whose artifact was
+ * never produced. `final-verification` itself is excluded (its report is owned by
+ * `checkFinalVerification`); the implementation/documentation stages carry no artifact.
+ */
+function unrewoundUpgradeStage(state) {
+    const currentOrdinal = stages_1.STAGE_PIPELINE.findIndex((s) => s.stage === (0, stages_1.canonicalizeStage)(state.current_stage));
+    if (currentOrdinal < 0)
+        return null; // pre-pipeline ⇒ nothing passed ⇒ nothing skipped
+    const engaged = new Set((0, stages_1.engagedStagesFor)(state).map((s) => s.stage));
+    for (let i = 0; i < currentOrdinal; i++) {
+        const contract = stages_1.STAGE_PIPELINE[i];
+        if (!engaged.has(contract.stage))
+            continue; // not engaged by this tier — N/A
+        if (contract.produces === "")
+            continue; // no governing artifact (implementation/docs)
+        const produced = contract.produces.replace(/\/$/, "");
+        const registered = state.approved_artifacts.some((a) => a.file === produced);
+        if (!registered)
+            return contract.stage;
+    }
+    return null;
+}
+function evaluateTierCorrespondence(paths, state) {
+    const { minTier } = computeMinTierFromBrief(paths.root);
+    const claimedTier = state.tier;
+    // 0. Tamper walk the chain before trusting any line from it.
+    const receipts = (0, receipts_1.readTierCorrespondenceReceipts)(paths);
+    if (!(0, receipts_1.verifyTierCorrespondenceChain)(receipts).ok) {
+        return {
+            ok: false,
+            reason: "tampered",
+            claimedTier,
+            computedMinTier: minTier,
+            detail: {},
+        };
+    }
+    // tier === null is the tier_unclassified rung's concern, not this one.
+    if (claimedTier === null) {
+        return { ok: true, claimedTier, computedMinTier: minTier };
+    }
+    // The LATEST non-legacy receipt is the run's correspondence artifact (the upgrade witness
+    // for the stage-invalidation check + the stale-brief artifact). A legacy backfill stamp is
+    // grandfathered (no witness).
+    const latest = receipts.length > 0 ? receipts[receipts.length - 1] : undefined;
+    const witness = latest && latest.legacy !== true ? latest : undefined;
+    // 1. Under-declared tier: claimed < computed-min (by TIERS ordinal). Negative-control (a):
+    //    a `--emergency tier:T0` over a brief whose signals force ≥T1 blocks here.
+    const claimedIdx = state_schema_1.TIERS.indexOf(claimedTier);
+    const minIdx = state_schema_1.TIERS.indexOf(minTier);
+    if (claimedIdx >= 0 && minIdx >= 0 && claimedIdx < minIdx) {
+        return {
+            ok: false,
+            reason: "under_declared",
+            claimedTier,
+            computedMinTier: minTier,
+            detail: { claimedTier, computedMinTier: minTier },
+        };
+    }
+    // 2. Un-rewound tier upgrade: a newly-engaged-but-skipped artifact stage WITH a receipt-
+    //    derived upgrade WITNESS. Negative-control (b): a T0→T2 upgrade that did not rewind
+    //    current_stage blocks until rewound. The live recompute (`unrewoundUpgradeStage`) finds a
+    //    passed engaged artifact stage that is not registered; the WITNESS distinguishes an
+    //    un-rewound bypass from (i) a legitimate upgrade whose rewind backfilled it — the gate must
+    //    NOT re-block the legitimate post-upgrade registration window, `checkGoverningArtifact`
+    //    owns that as the run re-advances — and (ii) a grandfathered run that minted no receipt at
+    //    all (ABSENCE ≠ BYPASS, mirroring the sibling rungs' legacy/absent handling, so an existing
+    //    green fixture / pre-BSC-8 run is never reded). Block ONLY when a witness receipt EXISTS and
+    //    proves no rewind covered the skip:
+    //      - the witness's `claimed_tier` is BELOW the live tier (an upgrade happened AFTER the last
+    //        recorded tier without a fresh re-mint — the raw `state set tier --emergency` jump that
+    //        skips both the rewind and the mint), OR
+    //      - the witness's mint stage sits AT-OR-AFTER the skip (the recorded tier IS the live tier
+    //        but its rewind never moved the pointer back to the newly-engaged stage).
+    //    A complete absence of receipts (`witness === undefined`) is grandfathered ⇒ no block.
+    const skipped = unrewoundUpgradeStage(state);
+    if (skipped !== null && witness !== undefined) {
+        const skippedOrdinal = stages_1.STAGE_PIPELINE.findIndex((s) => s.stage === skipped);
+        const witnessTierIdx = state_schema_1.TIERS.indexOf(witness.claimed_tier);
+        // An upgrade reached the live tier without a fresh receipt for it (witness tier < live tier).
+        const upgradeWithoutRemint = witnessTierIdx >= 0 && claimedIdx >= 0 && witnessTierIdx < claimedIdx;
+        const mintOrdinal = witness.current_stage_at_mint !== undefined
+            ? stages_1.STAGE_PIPELINE.findIndex((s) => s.stage === (0, stages_1.canonicalizeStage)(witness.current_stage_at_mint))
+            : -1;
+        // The recorded tier IS the live tier but its rewind never covered the skip.
+        const rewindAbsent = witness.claimed_tier === claimedTier && mintOrdinal >= skippedOrdinal;
+        if (upgradeWithoutRemint || rewindAbsent) {
+            return {
+                ok: false,
+                reason: "stage_unrewound",
+                claimedTier,
+                computedMinTier: minTier,
+                detail: {
+                    stage: skipped,
+                    claimedTier,
+                    witness: upgradeWithoutRemint ? "upgrade_without_remint" : "rewind_absent",
+                },
+            };
+        }
+    }
+    // 3. Stale brief: a recorded receipt whose brief_digest diverged from the recompute.
+    //    Negative-control (c): the brief changed after attestation. A null digest on either
+    //    side is non-discriminating.
+    if (witness) {
+        const currentDigest = (0, receipts_1.computeBriefDigest)(paths.root);
+        if (witness.brief_digest !== null &&
+            currentDigest !== null &&
+            witness.brief_digest !== currentDigest) {
+            return {
+                ok: false,
+                reason: "stale_brief",
+                claimedTier,
+                computedMinTier: minTier,
+                detail: { recordedDigest: witness.brief_digest, currentDigest },
+            };
+        }
+    }
+    return { ok: true, claimedTier, computedMinTier: minTier };
+}
+/**
+ * The BSC-8 tier-correspondence sub-check (Axis-B slice-7) — a production-reality rung
+ * composed among the gating tail (before the BSC-10 grounding summary/fold). It ALWAYS
+ * computes the verdict (so the claimed/computed-min correspondence is observable), then
+ * BLOCKS on a failing verdict ONLY when enforcement is enabled ({@link bsc8EnforcementEnabled},
+ * defaults ON). When enforcement is OFF a failing verdict rides as a non-blocking `notice`
+ * (the ship-dark WARN posture), never weakening the gate. Emits the stable token
+ * `tier_correspondence_unverified` with the verdict's `reason`
+ * (`tampered`/`under_declared`/`stage_unrewound`/`stale_brief`) + detail.
+ */
+function checkTierCorrespondence(paths, state) {
+    const verdict = evaluateTierCorrespondence(paths, state);
+    if (verdict.ok)
+        return PASS;
+    if (!(0, bsc8_flag_1.bsc8EnforcementEnabled)()) {
+        // Flag OFF (ship-dark): observe but do not block. Surface the would-be block as a
+        // non-blocking notice so the warn posture is visible without weakening the gate.
+        return {
+            ok: true,
+            notice: {
+                token: "tier_correspondence_unverified",
+                detail: { reason: verdict.reason, ...verdict.detail },
+            },
+        };
+    }
+    return {
+        ok: false,
+        error: "tier_correspondence_unverified",
+        detail: { reason: verdict.reason, ...verdict.detail },
+    };
+}
+/** `<root>/.omc/audit/probes/bsc9/projection-fixtures.json` — the committed twin-call fixtures. */
+function projectionFixturesPath(paths) {
+    return path.join(paths.root, ".omc", "audit", "probes", "bsc9", "projection-fixtures.json");
+}
+/**
+ * The BSC-9 sub-check (Axis-B slice-7) — the production-reality rung grounding the MCP
+ * `toToolResult` projection AND the interview-readiness claim. Two independent block conditions:
+ *
+ *  (i) PROJECTION ORACLE — load the committed twin-call fixture set and run the projection
+ *      oracle ({@link runProjectionOracle}). Any infidelity (a `toToolResult` projection that
+ *      drops/alters `ok`/`exitCode`/`data`) BLOCKS. A missing/malformed fixture set is
+ *      NOT-APPLICABLE (a downstream project that ships no MCP tools has nothing to project) →
+ *      no oracle block, mirroring the realization rung's "no repo-map ⇒ grandfathered PASS".
+ *
+ *  (ii) READINESS — when an interview is REQUIRED and ASSERTED ready (`interviewReady`), the
+ *      readiness MUST ride a backing {@link InterviewReadinessReceipt} that validates: a
+ *      `valid`/`valid-grounded`/`legacy` status passes; `absent` (readiness with no receipt),
+ *      `not-ready` (sub-cutoff), `forged`, `tampered`, `store_missing`/`store_mismatch`/`stale`
+ *      all BLOCK. Readiness NOT asserted ⇒ nothing to ground (PASS).
+ *
+ * Governed by {@link bsc9EnforcementEnabled} (defaults ON, WARN-flippable via `TH_BSC9_ENFORCE`):
+ * the verdict is ALWAYS computed (so the would-be block surfaces as a non-blocking `notice` when
+ * enforcement is off), but it BLOCKS with the stable token only when enforcement is on.
+ */
+function checkBsc9(paths, state) {
+    // (i) Projection oracle over the committed fixture set (not-applicable when absent).
+    const fixtures = (0, projection_oracle_1.loadProjectionFixtures)(projectionFixturesPath(paths));
+    const infidelities = fixtures ? (0, projection_oracle_1.runProjectionOracle)(fixtures) : [];
+    // (ii) Readiness grounding — only when an interview is required AND asserted ready.
+    let readinessStatus = null;
+    if (interviewRequired(state) && (0, interview_1.interviewReady)(paths)) {
+        readinessStatus = (0, interview_readiness_1.readReadinessReceiptValidated)(paths, (0, interview_readiness_1.readinessRefId)(paths)).status;
+    }
+    const readinessAccepted = readinessStatus === null ||
+        readinessStatus === "valid" ||
+        readinessStatus === "valid-grounded" ||
+        readinessStatus === "legacy";
+    if (infidelities.length === 0 && readinessAccepted)
+        return PASS;
+    const detail = {
+        ...(infidelities.length > 0 ? { projectionInfidelities: infidelities } : {}),
+        ...(readinessStatus !== null && !readinessAccepted ? { readinessStatus } : {}),
+    };
+    // WARN→ENFORCE: when enforcement is OFF, surface the verdict as a non-blocking notice.
+    if (!(0, bsc9_flag_1.bsc9EnforcementEnabled)()) {
+        return { ok: true, notice: { token: "bsc9_unverified", detail } };
+    }
+    return { ok: false, error: "bsc9_unverified", detail };
+}
+/**
+ * The ordered production-reality rung registry — the LITERAL execution list iterated by
+ * {@link checkProductionReality}. Order here IS runtime order; every rung is enumerable
+ * for observability (consensus plan §8). Each entry's body is the verbatim logic the old
+ * monolithic `checkProductionReality` ran inline at the same ordinal; only the call-site
+ * weaving moved into this list. The hoist (`bsc10-grounding-hoist`) sits between the
+ * terminal-receipt rung and the human-approval rung exactly as before, and the gating
+ * rungs (driver/realization/assertion/grounding) record their result into `ctx.captured`
+ * so the post-loop fold reproduces the original `merged` roll-up.
+ */
+exports.PRODUCTION_REALITY_RUNGS = [
+    {
+        // 1. A user-visible simulation still blocks. BSC-4 receipt-aware: an entry blocks
+        // when it is active+user-visible+simulated (the original rule) OR when it is marked
+        // `retired` but that retirement is NOT grounded by a valid/legacy sim-retire receipt
+        // (a retire-by-attestation with no source replacement — no double-exoneration). The
+        // SAME `simEntryBlocksProductionReality` predicate backs `th sim`, so reporting agrees.
+        id: "simulation-unretired",
+        check: (paths, _state, ctx) => {
+            const blocking = ctx.entries.filter((e) => (0, sim_1.simEntryBlocksProductionReality)(paths, e));
+            if (blocking.length > 0) {
+                return {
+                    ok: false,
+                    error: "simulation_unretired",
+                    detail: { ids: blocking.map((e) => e.id), classifications: blocking.map((e) => e.classification) },
+                };
+            }
+            return null;
+        },
+    },
+    {
+        // 1b. Terminal-flip grounding (BSC-4). Every drift-resolution and decision-approval
+        // in force must carry a VALID (or grandfathered-`legacy`) TerminalTransitionReceipt.
+        // A resolve/approve done via a bypass (no receipt) — or whose recorded source target
+        // was deleted (`target_missing`) / changed (`target_mismatch`), or whose snapshot is
+        // forged/stale (`stale`) — is ungrounded and blocks. `sim-retire` grounding is owned
+        // by rung 1 (excluded here to avoid a duplicate token). Pre-upgrade projects carry no
+        // migration marker, so an absent receipt classifies `legacy` and this is a NO-OP until
+        // the receipt regime is active — it never reds an existing complete run.
+        id: "terminal-receipt",
+        check: (paths) => {
+            for (const ent of (0, receipts_1.collectTerminalEntities)(paths)) {
+                if (ent.kind === "sim-retire")
+                    continue; // owned by rung 1's receipt-aware blocker
+                const v = (0, receipts_1.readReceiptValidated)(paths, ent.kind, ent.refId);
+                // Accept set (slice-1b): `valid` (in-process attested), `valid-grounded` (external
+                // keyed receipt that verified), or `legacy` (grandfathered). A `forged` external
+                // claim — and the existing absent/target_missing/target_mismatch/stale — BLOCK.
+                if (v.status !== "valid" && v.status !== "valid-grounded" && v.status !== "legacy") {
+                    return {
+                        ok: false,
+                        error: "terminal_receipt_unverified",
+                        detail: {
+                            kind: ent.kind,
+                            refId: ent.refId,
+                            status: v.status,
+                            ...(v.staleReasons ? { staleReasons: v.staleReasons } : {}),
+                        },
+                    };
+                }
+            }
+            return null;
+        },
+    },
+    {
+        // 1b-grounding. HOIST the BSC-10 external-reference grounding verdict (Axis-B slice-BSC10a,
+        // C1/PCC-1). It is computed ONCE here — BEFORE the human-approval leg — because it depends ONLY
+        // on the grounding receipts + sibling stores + the matrix (NO dependency on verify/tester/dist/
+        // scan/driver/realization/assertion), so it can be resolved first with no ordering hazard. The
+        // SAME verdict is consumed by (i) the SPLIT approval-ACCEPTANCE leg just below and (ii) the thin
+        // grounding summary rung among the reality rungs — a single live recompute, never attached-but-
+        // stale (Principle 1). A late standalone rung after the reality rungs could never inform the 1c
+        // approval leg, which early-`return`s on the happy path — so hoist-evaluate-once is the only
+        // sound control flow. This rung does not terminate (returns null): it only populates `ctx`.
+        id: "bsc10-grounding-hoist",
+        check: (paths, state, ctx) => {
+            ctx.groundingVerdict = evaluateGrounding(paths, state);
+            // A PRESENT-but-UNCONFORMANT ground (grounded, but `over_budget`/`unobserved` — NOT a `missing`
+            // ground, NOT a cross-receipt `chain_mismatch`) is the conformance precondition the BSC-7 approval
+            // ACCEPTANCE leg consumes: an approval cannot be ACCEPTED while the reference it was supposed to be
+            // approved against is itself unconformant. `missing`/`chain_mismatch`/`tampered` are excluded here
+            // (each is the grounding rung's OWN block, not an approval-acceptance failure) so the tokens stay
+            // disjoint. Gated on the PER-KIND enforce-flip ({@link groundingVerdictBlocks}): a deterministic
+            // `digest-manifest`/`version-pin` unconformance blocks acceptance in Slice B, while a runner-
+            // sensitive `visual-hash`-only unconformance stays WARN (does not block) until Slice C.
+            ctx.groundingBlocksAcceptance =
+                ctx.groundingVerdict !== null &&
+                    ctx.groundingVerdict.ok === false &&
+                    (ctx.groundingVerdict.reason === "over_budget" || ctx.groundingVerdict.reason === "unobserved") &&
+                    groundingVerdictBlocks(ctx.groundingVerdict);
+            return null;
+        },
+    },
+    {
+        // 1c. Human-approval grounding over the CLOSED required-set (BSC-7 / Axis-B slice-3a,
+        // R1) — the COMPLETION rung, the L1 backstop. `humanGate` was a declarative-only flag
+        // with ZERO predicate consumers (pure gate theater); this re-validates that EVERY
+        // engaged-and-not-future humanGate stage carries an approval bound to the current
+        // snapshot + governing-artifact digest. The required-set is recomputed FRESH from
+        // `requiredHumanGateStages` (humanGate ∩ engagedStagesFor ∩ ordinal-≤-current) — we do
+        // NOT trust a persisted "approved" summary (the BSC-6 recompute-don't-trust lesson:
+        // presence is the sensed fact). Modeled EXACTLY on the BSC-4 terminal-flip rung above:
+        // for each required stage, `readApprovalValidated` → accept `valid`/`valid-grounded`/
+        // `legacy`, BLOCK on `absent`/`stale`/`target_missing`/`target_mismatch`/`forged`/
+        // `tampered` with the stable token `human_approval_unverified`. Because `engagedStagesFor`
+        // is UI-aware, a `has_ui===false` run does NOT require `ux-design`/`ui-design` (N/A, not
+        // `absent`-blocked); a lower-tier run does not require `security`/`contracts` when not
+        // engaged. This is the backstop the `--emergency`/`state set` jump cannot route around:
+        // jumping `current_stage` to `final-verification` makes every engaged gate ordinal-≤-
+        // current ⇒ required, so the jumped-over stage is re-checked here. The block names the
+        // offending `{stage, status}` (a bounded list — the FIRST failing required stage).
+        //
+        // PCC-1 SPLIT (slice-BSC10a): leg (α) approval-EXISTENCE is the unchanged status check below;
+        // leg (β) approval-ACCEPTANCE additionally refuses to ACCEPT an otherwise-present approval while
+        // `groundingBlocksAcceptance` (a present-but-unconformant BSC-10 ground under enforce). So an
+        // approval that EXISTS but whose reference is unconformant blocks with `grounding_unverified`,
+        // the conformance precondition consumed INSIDE the 1c leg — never bypassed.
+        id: "human-approval",
+        check: (paths, state, ctx) => {
+            for (const stage of requiredHumanGateStages(state)) {
+                const a = (0, approvals_1.readApprovalValidated)(paths, stage);
+                // Leg (α) — approval EXISTENCE: an absent/stale/forged/tampered approval blocks as before.
+                if (a.status !== "valid" && a.status !== "valid-grounded" && a.status !== "legacy") {
+                    return {
+                        ok: false,
+                        error: "human_approval_unverified",
+                        detail: {
+                            stage,
+                            status: a.status,
+                            ...(a.staleReasons ? { staleReasons: a.staleReasons } : {}),
+                        },
+                    };
+                }
+                // Leg (β) — approval ACCEPTANCE: the approval EXISTS, but a present-but-unconformant BSC-10
+                // ground means the reference it authorizes is itself unconformant ⇒ the approval cannot be
+                // ACCEPTED (the conformance precondition is consumed here, not bypassed). Slice-BSC10a only:
+                // gated on the enforce flag (default OFF ⇒ this leg is inert in the WARN commit).
+                if (ctx.groundingBlocksAcceptance) {
+                    const v = ctx.groundingVerdict;
+                    return {
+                        ok: false,
+                        error: "grounding_unverified",
+                        detail: { stage, ...groundingDetail(v) },
+                        grounding: v.summary,
+                    };
+                }
+            }
+            return null;
+        },
+    },
+    {
+        // 2. The verify suite must be green against production-targeted commands, AND the
+        // report must be a CURRENT-binding report (F2/R-30 — not a legacy bare report, not a
+        // stale/copied one). The validated reader classifies the report; only a `valid` GREEN
+        // report passes. A corrupt config still blocks (fail-closed). One stable token
+        // (`production_verify_not_green`) with a `reason` detail naming the divergence.
+        id: "production-verify",
+        check: (paths) => {
+            const verifyLoaded = (0, verify_1.loadVerifyConfig)(paths);
+            if (verifyLoaded.status === "corrupt") {
+                return { ok: false, error: "production_verify_not_green", detail: { reason: "config_corrupt" } };
+            }
+            const verifyCfg = verifyLoaded.config;
+            if (verifyCfg.commands.length > 0) {
+                const validated = (0, verify_1.readVerifyReportValidated)(paths);
+                if (validated.status === "absent") {
+                    return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
+                }
+                if (validated.status !== "valid") {
+                    // legacy / stale / corrupt report → the green claim cannot be trusted for the
+                    // current snapshot. Re-run `th verify run` to seal a fresh bound envelope.
+                    return { ok: false, error: "production_verify_not_green", detail: { reason: validated.status, ...(validated.staleReasons ? { staleReasons: validated.staleReasons } : {}) } };
+                }
+                if (!validated.report.ok) {
+                    const failed = validated.report.results.filter((x) => !x.ok).length;
+                    return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
+                }
+            }
+            return null;
+        },
+    },
+    {
+        // 3. A live-QA Tester run record must be attached (audit C-08).
+        id: "tester-record",
+        check: (paths) => {
+            if (!(0, tester_1.testerRecordPresent)(paths)) {
+                return { ok: false, error: "tester_record_missing", detail: {} };
+            }
+            return null;
+        },
+    },
+    {
+        // 4. dist/ must not carry unledgered simulation patterns. A dist hit is "ledgered"
+        // only when an ACTIVE simulation entry DECLARES that specific hit — matched
+        // PER-DEPENDENCY (audit P1), so a single unrelated, non-user-visible entry no longer
+        // blanket-suppresses every dist hit. The SAME `computeUnledgeredDistHits` join backs
+        // `th sim scan`, so scan and gate agree. The two-tier scan never throws. The scan is
+        // COMPUTED ONCE here and STASHED on `ctx` for the scan-coverage rung to reuse.
+        id: "unledgered-dist",
+        check: (paths, _state, ctx) => {
+            ctx.scan = (0, sim_1.scanForSimulationHits)(paths);
+            const unledgered = (0, sim_1.computeUnledgeredDistHitsReceiptAware)(paths, ctx.entries, ctx.scan.distHits);
+            if (unledgered.length > 0) {
+                return {
+                    ok: false,
+                    error: "unledgered_simulation_in_dist",
+                    detail: { hits: unledgered.slice(0, 20), total: unledgered.length },
+                };
+            }
+            return null;
+        },
+    },
+    {
+        // 5. (BSC-6 / Axis-B slice-2) SCAN-COVERAGE COMPLETENESS — fail closed on the scan's
+        // OWN incompleteness, INDEPENDENT of and ADDITIONAL to the unledgered-token check
+        // above. The two-tier scan enumerated + streaming-hashed every `dist/` path; any path
+        // it could not deep-inspect (per-file / aggregate / watchdog / read error) is
+        // `unobserved` (≠ clean). This rung RECOMPUTES that set fresh every run (it MUST NOT
+        // read `scan-completeness.jsonl` to decide — trusting a persisted "complete" summary is
+        // the exact bug class BSC-6 is) and BLOCKS with the stable token `scan_coverage_incomplete`
+        // when any `unobserved` path is not exonerated by a valid external-signed exception ack.
+        // The SAME `uncoveredAfterExceptions` residual backs `th sim scan`, so scan and gate
+        // agree (control e). This closes the proven RED of `.omc/audit/probes/new-a-scancap/`:
+        // a >2 MB token-bearing file is now either deep-inspected (→ unledgered block) or
+        // `unobserved{file_limit}` (→ this block), never silently skipped. Consumes the same
+        // `scan` the unledgered-dist rung stashed on `ctx` (single scan per run, as before).
+        id: "scan-coverage",
+        check: (paths, _state, ctx) => {
+            const uncovered = (0, sim_1.uncoveredAfterExceptions)(paths, ctx.scan.unobserved);
+            if (uncovered.length > 0) {
+                return {
+                    ok: false,
+                    error: "scan_coverage_incomplete",
+                    detail: {
+                        unobserved: uncovered.slice(0, 20).map((u) => ({ path: u.path, reason: u.reason })),
+                        total: uncovered.length,
+                        reasons: [...new Set(uncovered.map((u) => u.reason))].sort(),
+                    },
+                };
+            }
+            return null;
+        },
+    },
+    {
+        // 6. (BSC-3 / Axis-B slice-4a) VERIFICATION-DRIVER DIMENSION GROUNDING — composed LAST.
+        // A run may not be certified complete on a verify-report that merely says "ok" with NO
+        // record of WHICH verification dimensions a trusted runner actually EXERCISED. The
+        // verification-driver receipt is the SENSOR; this re-derives its ground from
+        // `verify-report.json` and enforces by SIGNATURE-derived trust label (valid / valid-
+        // grounded / forged). ABSENCE ≠ FORGERY: a run with no driver receipt is grandfathered
+        // (in-process attested, allowed). Governed by `bsc3EnforcementEnabled()` (defaults ON):
+        // the verdict is ALWAYS computed (so `dimensions` summarizes the trust posture for the
+        // I1 observability hook), but it BLOCKS with `driver_dimension_unverified` only when
+        // enforcement is on. The `dimensions` summary rides on the result whether PASS or BLOCK.
+        // The result is CAPTURED on `ctx` so later rungs' blocks and the final fold can carry
+        // the driver `dimensions` summary forward (the cross-rung observability dependency).
+        id: "driver-dimensions",
+        check: (paths, _state, ctx) => {
+            const driver = checkDriverDimensions(paths);
+            ctx.captured.driver = driver;
+            if (!driver.ok)
+                return driver;
+            return null;
+        },
+    },
+    {
+        // 7. (BSC-1 / Axis-B slice-5) REALIZATION-RECEIPT GROUNDING — composed LAST. A run may not
+        // be certified complete while a REQ-ID owned by a `done` slice lacks a valid, reachable,
+        // digest-fresh realization referent. The CLAIM (`SliceState.status==="done"`) is authored
+        // independently of the REFERENT (recorded by `th realize`); this enumerates done-slice
+        // REQ-IDs from the cached repo-map, recomputes each referent digest, COLLECTS ALL failures,
+        // and blocks on absent/stale/forged/target_*/tampered/unresolved. ABSENCE is grandfathered
+        // (`legacy`) until the migration marker is stamped, so this is a NO-OP on pre-upgrade
+        // projects. Governed by `realizationEnforcementEnabled()` (defaults ON).
+        id: "realization",
+        check: (paths, state, ctx) => {
+            const realization = checkRealization(paths, state);
+            ctx.captured.realization = realization;
+            if (!realization.ok) {
+                // Preserve the driver `dimensions` summary on the realization block so the trust posture
+                // stays visible alongside the realization failure.
+                const driver = ctx.captured.driver;
+                return driver?.dimensions ? { ...realization, dimensions: driver.dimensions } : realization;
+            }
+            return null;
+        },
+    },
+    {
+        // 8. (BSC-2 / Axis-B slice-6) ASSERTION-PRESENCE GROUNDING — composed LAST (after realization).
+        // A run may not be certified complete while a `tested` REQ-ID lacks a NON-TRIVIAL assertion:
+        // the coverage gate counts a REQ "tested" on anchor presence alone, so a test file with no
+        // cannot-fail-free assertion clears that bar (BSC-2). This recomputes the per-REQ
+        // assertion-presence ground FRESH, requires an F8-bound in-process AssertionPresenceReceipt
+        // for correspondence, subtracts validly-WAIVED REQs, and BLOCKS on a forged MutationKillReceipt.
+        // A signature-verified external MutationKillReceipt is recorded as a DISTINCT module-scoped
+        // `mutationEfficacy` observability signal — it does NOT override the presence rung (presence ≠
+        // efficacy; review HIGH). Governed by `bsc2EnforcementEnabled()` (WARN-first): the verdict is
+        // ALWAYS computed (so `assertionPresence` summarizes the per-REQ posture for the I1 hook), but
+        // it BLOCKS with `assertion_presence_unverified` / `assertion_unobserved` / `mutation_kill_forged`
+        // only when enforcement is on. The summary rides on the result whether PASS or BLOCK.
+        id: "assertion-presence",
+        check: (paths, _state, ctx) => {
+            const assertion = checkAssertionPresence(paths);
+            ctx.captured.assertion = assertion;
+            if (!assertion.ok) {
+                // Preserve the upstream driver `dimensions` summary on the assertion block so the full trust
+                // posture stays visible alongside the assertion failure (assertion already carries its own
+                // `assertionPresence` + `mutationEfficacy`).
+                const driver = ctx.captured.driver;
+                return driver?.dimensions ? { ...assertion, dimensions: driver.dimensions } : assertion;
+            }
+            return null;
+        },
+    },
+    {
+        // 8b. (BSC-8 / Axis-B slice-7) TIER-CORRESPONDENCE + STAGE-INVALIDATION — composed among the
+        // gating tail, before the BSC-10 grounding summary/fold (merge-order discipline). A run may not
+        // be certified complete while its declared `tier` does not correspond to the work: the claimed
+        // tier is UNDER-DECLARED vs the brief's mechanically-computed min-tier (`classifyBrief`), a tier
+        // upgrade left a newly-engaged stage un-rewound (skipped artifact), or the brief was edited after
+        // attestation (stale digest). `tier` stays GATE_OWNED (raw `state set tier` reject preserved in
+        // commands/state.ts); the rewind logic (`tierUpgradeBackfillStage`) already FIRES on the producer
+        // side — this is the GATE-ENFORCEMENT side only. Governed by `bsc8EnforcementEnabled()` (defaults
+        // ON): the verdict is ALWAYS computed, but it BLOCKS with `tier_correspondence_unverified` only
+        // when enforcement is on; OFF ⇒ a non-blocking `notice` (ship-dark WARN). The result is captured
+        // on `ctx.captured.tierCorrespondence` so the WARN-phase `notice` rides the post-loop fold (the
+        // last in the notice-precedence chain), mirroring the sibling gating rungs.
+        id: "tier-correspondence",
+        check: (paths, state, ctx) => {
+            const tierCorr = checkTierCorrespondence(paths, state);
+            ctx.captured.tierCorrespondence = tierCorr;
+            if (!tierCorr.ok)
+                return tierCorr;
+            return null;
+        },
+    },
+    {
+        // 8c. (BSC-5 / Axis-B slice-7) DIMENSION-SET-COVERAGE GROUNDING — composed among the gating
+        // tail, AFTER assertion-presence and BEFORE the thin BSC-10 grounding summary. A run may not be
+        // certified complete while a DECLARED required dimension is not OBSERVED. DECLARED is the
+        // COMMITTED `DECLARED_DIMENSION_SET` constant (`core/declared-dimensions.ts`, Interp A —
+        // narrowing it is a reviewable code + `dist/` diff, never a runtime self-attest); OBSERVED is
+        // re-derived from `verify-report.json` at gate time (the SAME `observedDimensionsFromReport` the
+        // BSC-3 sensor uses). The receipt's stored sets/verdict are NEVER trusted — the gate recomputes
+        // declared (live constant) + observed (live report) + the `declared ⊆ observed` verdict, so a
+        // forged "all covered" claim, a stripped report dimension, or a post-mint narrowing of the
+        // committed set is mechanically detectable. Governed by `bsc5EnforcementEnabled()` (defaults ON):
+        // the verdict is ALWAYS computed (so `coverage` summarizes the posture for the I1 hook), but it
+        // BLOCKS with `dimension_set_uncovered` only when enforcement is on; OFF ⇒ a non-blocking notice.
+        id: "dimension-set-coverage",
+        check: (paths, _state, ctx) => {
+            const coverage = checkDimensionSetCoverage(paths);
+            ctx.captured.coverage = coverage;
+            if (!coverage.ok) {
+                // Preserve the upstream driver `dimensions` summary on the coverage block so the full trust
+                // posture stays visible alongside the coverage failure.
+                const driver = ctx.captured.driver;
+                return driver?.dimensions ? { ...coverage, dimensions: driver.dimensions } : coverage;
+            }
+            return null;
+        },
+    },
+    {
+        // 9. (BSC-10 / Axis-B slice-BSC10a) EXTERNAL-REFERENCE GROUNDING — a THIN summary rung composed
+        // among the reality rungs. It does NOT recompute: it CONSUMES the `groundingVerdict` already
+        // HOISTED before the 1c approval leg (Principle 1 — single live recompute), folding `grounding?`
+        // onto the result exactly like `dimensions?`/`assertionPresence?`. The `missing` reason blocks
+        // HERE (a required input-ground never checked); the present-but-unconformant (`over_budget`/
+        // `unobserved`) reasons already gated the approval-ACCEPTANCE leg above. Governed by
+        // `bsc10EnforcementEnabled()` (slice-BSC10a is the WARN commit, default OFF): the verdict is
+        // ALWAYS computed (so `grounding` summarizes the posture for the I1 hook), but it BLOCKS with
+        // `grounding_unverified` only when enforcement is on; OFF ⇒ a non-blocking `notice` + summary.
+        id: "bsc10-grounding-summary",
+        check: (_paths, _state, ctx) => {
+            const grounding = checkGrounding(ctx.groundingVerdict);
+            ctx.captured.grounding = grounding;
+            if (!grounding.ok) {
+                // Preserve the upstream driver `dimensions` summary on the grounding block so the full trust
+                // posture stays visible (grounding already carries its own `grounding` summary).
+                const driver = ctx.captured.driver;
+                return driver?.dimensions ? { ...grounding, dimensions: driver.dimensions } : grounding;
+            }
+            return null;
+        },
+    },
+    {
+        // 10. (BSC-9 / Axis-B slice-7) MCP `toToolResult` PROJECTION ORACLE + INTERVIEW-READINESS.
+        // The ONLY authentic CLI↔MCP divergence surface is the PROJECTION (every tool closure
+        // delegates to the same `run*` handler the CLI does, guarded by REQ-PCO-070), so this rung
+        // (a) runs the projection oracle over the committed twin-call fixture set — a projection that
+        // drops/alters ok/exitCode/data BLOCKS — and (b) grounds the soft interview gate's
+        // `interviewReady` claim: an asserted readiness must ride a backing InterviewReadinessReceipt
+        // (a no-receipt / sub-cutoff / forged / tampered / stale readiness BLOCKS). Governed by
+        // `bsc9EnforcementEnabled()` (defaults ON): the verdict is ALWAYS computed (a WARN `notice`
+        // when enforcement is off), but it BLOCKS with `bsc9_unverified` only when enforcement is on.
+        // Self-contained: it does not read or write `ctx` (no cross-rung dependency).
+        id: "bsc9-projection-readiness",
+        check: (paths, state, ctx) => {
+            const bsc9 = checkBsc9(paths, state);
+            ctx.captured.bsc9 = bsc9;
+            // A hard block (enforcement on) early-returns; the WARN `notice` (enforcement off) is
+            // folded onto the final PASS via `ctx.captured.bsc9`, mirroring the other gating rungs.
+            return bsc9.ok ? null : bsc9;
+        },
+    },
+];
 function checkProductionReality(paths, state) {
     // Stage-aware: production reality is a CERTIFY-COMPLETION condition, so it only
     // enforces at the completion boundary (final-verification). Earlier stages have no
@@ -374,7 +2039,9 @@ function checkProductionReality(paths, state) {
     // every in-flight run's obligation ladder. Mirrors checkInterview's front-gate shape.
     if (!(0, stages_1.isFinalVerification)(state.current_stage))
         return PASS;
-    // 1. A non-retired simulation entry on a user-visible production path blocks.
+    // Read the simulation ledger ONCE up front (it backs both the sim-unretired rung and
+    // the unledgered-dist rung). A corrupt ledger is the fail-closed front block — it must
+    // precede every rung, exactly as the old inline body's first read did.
     let entries;
     try {
         entries = (0, sim_1.readSimulationLedger)(paths);
@@ -385,58 +2052,65 @@ function checkProductionReality(paths, state) {
         }
         throw e;
     }
-    const blocking = entries.filter(simulation_1.blocksProductionReality);
-    if (blocking.length > 0) {
-        return {
-            ok: false,
-            error: "simulation_unretired",
-            detail: { ids: blocking.map((e) => e.id), classifications: blocking.map((e) => e.classification) },
-        };
+    // The shared context threaded through the rung sweep — the same object the old
+    // function-local `const`s lived in. `RUNGS` iterate in order; the FIRST non-null return
+    // is the terminal result (an early-return block, identical to the old hand-woven returns).
+    const ctx = {
+        entries,
+        scan: null,
+        groundingVerdict: null,
+        groundingBlocksAcceptance: false,
+        captured: {},
+    };
+    for (const rung of exports.PRODUCTION_REALITY_RUNGS) {
+        const r = rung.check(paths, state, ctx);
+        if (r !== null)
+            return r;
     }
-    // 2. The verify suite must be green against production-targeted commands, AND the
-    // report must be a CURRENT-binding report (F2/R-30 — not a legacy bare report, not a
-    // stale/copied one). The validated reader classifies the report; only a `valid` GREEN
-    // report passes. A corrupt config still blocks (fail-closed). One stable token
-    // (`production_verify_not_green`) with a `reason` detail naming the divergence.
-    const verifyLoaded = (0, verify_1.loadVerifyConfig)(paths);
-    if (verifyLoaded.status === "corrupt") {
-        return { ok: false, error: "production_verify_not_green", detail: { reason: "config_corrupt" } };
-    }
-    const verifyCfg = verifyLoaded.config;
-    if (verifyCfg.commands.length > 0) {
-        const validated = (0, verify_1.readVerifyReportValidated)(paths);
-        if (validated.status === "absent") {
-            return { ok: false, error: "production_verify_not_green", detail: { reason: "never_run", commands: verifyCfg.commands.length } };
-        }
-        if (validated.status !== "valid") {
-            // legacy / stale / corrupt report → the green claim cannot be trusted for the
-            // current snapshot. Re-run `th verify run` to seal a fresh bound envelope.
-            return { ok: false, error: "production_verify_not_green", detail: { reason: validated.status, ...(validated.staleReasons ? { staleReasons: validated.staleReasons } : {}) } };
-        }
-        if (!validated.report.ok) {
-            const failed = validated.report.results.filter((x) => !x.ok).length;
-            return { ok: false, error: "production_verify_not_green", detail: { reason: "failing", failed } };
-        }
-    }
-    // 3. A live-QA Tester run record must be attached (audit C-08).
-    if (!(0, tester_1.testerRecordPresent)(paths)) {
-        return { ok: false, error: "tester_record_missing", detail: {} };
-    }
-    // 4. dist/ must not carry unledgered simulation patterns. A dist hit is "ledgered"
-    // only when an ACTIVE simulation entry DECLARES that specific hit — matched
-    // PER-DEPENDENCY (audit P1), so a single unrelated, non-user-visible entry no longer
-    // blanket-suppresses every dist hit. The SAME `computeUnledgeredDistHits` join backs
-    // `th sim scan`, so scan and gate agree. Capped walk (never throws).
-    const scan = (0, sim_1.scanForSimulationHits)(paths);
-    const unledgered = (0, sim_1.computeUnledgeredDistHits)(entries, scan.distHits);
-    if (unledgered.length > 0) {
-        return {
-            ok: false,
-            error: "unledgered_simulation_in_dist",
-            detail: { hits: unledgered.slice(0, 20), total: unledgered.length },
-        };
-    }
-    return PASS;
+    // All rungs passed: fold the optional observability fields up onto ONE result so a single
+    // PASS carries the driver `dimensions`, the assertion `assertionPresence`, the module-scoped
+    // `mutationEfficacy`, the BSC-10 `grounding`, and at most one warn-phase `notice` (driver wins,
+    // then realization, then assertion, then grounding — first non-empty). Reads the rung results
+    // captured on `ctx` during the sweep, reproducing the original `merged` roll-up verbatim.
+    const driver = ctx.captured.driver;
+    const realization = ctx.captured.realization;
+    const assertion = ctx.captured.assertion;
+    const grounding = ctx.captured.grounding;
+    const tierCorrespondence = ctx.captured.tierCorrespondence;
+    const coverage = ctx.captured.coverage;
+    const merged = { ok: true };
+    const dimensions = driver?.dimensions ?? assertion?.dimensions;
+    if (dimensions)
+        merged.dimensions = dimensions;
+    if (assertion?.assertionPresence)
+        merged.assertionPresence = assertion.assertionPresence;
+    if (assertion?.mutationEfficacy)
+        merged.mutationEfficacy = assertion.mutationEfficacy;
+    if (grounding?.grounding)
+        merged.grounding = grounding.grounding;
+    if (coverage?.coverage)
+        merged.coverage = coverage.coverage;
+    // BSC-9 (slice-7): the bsc9 rung's WARN `notice` (enforcement off) folds in LAST in the
+    // precedence chain, so a would-be projection/readiness block stays visible without blocking.
+    const bsc9 = ctx.captured.bsc9;
+    const notice = driver?.notice ??
+        realization?.notice ??
+        assertion?.notice ??
+        grounding?.notice ??
+        tierCorrespondence?.notice ??
+        coverage?.notice ??
+        bsc9?.notice;
+    if (notice)
+        merged.notice = notice;
+    // Degrade to the shared bare PASS when nothing was observed, preserving `{ ok: true }`.
+    return merged.dimensions ||
+        merged.assertionPresence ||
+        merged.mutationEfficacy ||
+        merged.grounding ||
+        merged.coverage ||
+        merged.notice
+        ? merged
+        : PASS;
 }
 // ---------------------------------------------------------------------------
 // Composed gate predicates — consumed by both `th next` and the typed MCP tools.
@@ -445,6 +2119,31 @@ function checkProductionReality(paths, state) {
 function stageOrdinal(stage) {
     const canonical = (0, stages_1.canonicalizeStage)(stage);
     return stages_1.STAGE_PIPELINE.findIndex((s) => s.stage === canonical);
+}
+/**
+ * The CLOSED human-approval required-set for `state` (BSC-7 / Axis-B slice-3a, R1) —
+ * every `humanGate` stage that is engaged-and-not-future: `S.humanGate === true &&
+ * S ∈ engagedStagesFor(state) && stageOrdinal(S) ≤ stageOrdinal(state.current_stage)`.
+ *
+ * This is the ONE traversal both the completion rung (the L1 backstop) and the
+ * advance rung reason over (resolves open-decision §11.2 by extraction). It COMPOSES
+ * the two existing primitives — `engagedStagesFor` (UI-aware: drops `ux-design`/
+ * `ui-design` when `has_ui === false`, so those are N/A not `absent`-blocked) and
+ * `stageOrdinal` — and invents no new pipeline walk.
+ *
+ * "engaged-and-not-future" is the only COMPUTABLE required-set: `TwinHarnessState`
+ * carries no stage-crossing ledger, so "crossed-only" is unimplementable. The
+ * ordinal-≤-current half makes a not-yet-reached gate (e.g. `final-verification` while
+ * mid-pipeline) un-required, while every gate at or behind the current stage IS
+ * required — which is exactly why the `--emergency`/`state set` jump to
+ * `final-verification` cannot route around the completion check (all engaged gates then
+ * have ordinal ≤ current ⇒ all are required).
+ */
+function requiredHumanGateStages(state) {
+    const currentOrdinal = stageOrdinal(state.current_stage);
+    return (0, stages_1.engagedStagesFor)(state)
+        .filter((s) => s.humanGate && stageOrdinal(s.stage) <= currentOrdinal)
+        .map((s) => s.stage);
 }
 /** Index of the `implementation-planning` stage in the canonical pipeline. */
 const IMPLEMENTATION_PLANNING_ORDINAL = stages_1.STAGE_PIPELINE.findIndex((s) => s.stage === "implementation-planning");
@@ -510,6 +2209,12 @@ const STAGE_RUNGS = [
     { id: "checkGoverningArtifact", bucket: "forward-only", scope: "stage:non-final-artifact", run: (p, s) => checkGoverningArtifact(p, s) },
     { id: "checkCoverage", bucket: "forward-only", scope: "stage:implementation-planning", run: (p) => checkCoverage(p) },
     { id: "checkImplementationSettled", bucket: "forward-only", scope: "stage:implementation", run: (_p, s) => checkImplementationSettled(s) },
+    // BSC-7 / Axis-B slice-3a — the human-approval advance rung. `forward-only`: it gates
+    // advancing OUT of a humanGate stage (a per-stage forward-progress block), NOT
+    // completion. Completion enforcement over the CLOSED required-set is the separate C-2
+    // rung composed inside checkFinalVerification (`final`), so this entry must NOT be
+    // `final` or it would double-gate at the completion boundary.
+    { id: "checkHumanApprovalAdvance", bucket: "forward-only", scope: "stage:human-approval-advance", run: (p, s) => checkHumanApprovalAdvance(p, s) },
     { id: "checkFinalVerification", bucket: "final", scope: "stage:final", run: (p, s) => checkFinalVerification(p, s) },
 ];
 /**
@@ -539,6 +2244,11 @@ function rungAppliesAtStage(rung, stage) {
             return stage === "implementation-planning";
         case "stage:implementation":
             return stage === "implementation";
+        case "stage:human-approval-advance":
+            // Applies when advancing OUT of a humanGate stage — i.e. the CURRENT stage is one
+            // of the 8 humanGate stages (the per-stage approval obligation is owed by the stage
+            // being crossed). Mirrors checkHumanApprovalAdvance's own guard.
+            return (0, approvals_1.isHumanGateStage)((0, stages_1.canonicalizeStage)(stage));
         case "stage:final":
             return (0, stages_1.isFinalVerification)(stage);
     }

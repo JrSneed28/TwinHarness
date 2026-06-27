@@ -21,6 +21,31 @@ default handoff currency — the Builder reads THIS before each slice, not the w
 
 ---
 
+---
+
+## Grounding Manifest Pointer
+
+> **Builder-pause:** before any slice begins, the Builder reads this section. If the work class
+> requires external grounds (`version-pin`, `digest-manifest`, or `visual-hash`) and the signed
+> EvidenceManifest listed below does not exist or `th grounding check` is not clean for every
+> required ground kind, **the Builder stops and surfaces the gap to the Orchestrator**. No slice
+> — including Slice 0 — begins until all required grounds are signed and recorded. This is a
+> mechanical blocker: a missing required ground is not a warning; it is a pre-condition the gate
+> enforces under `TH_BSC10_ENFORCE`.
+
+<Filled in by the Architect before slice planning proceeds. Copied from `docs/04-architecture.md`
+→ Grounding Manifest Pointer. Point to the signed manifest — do NOT copy digest values here.>
+
+- **Work class:** <greenfield | redesign | recreation | integration | migration>
+- **Required ground kinds:** <version-pin | digest-manifest | visual-hash | a11y — list all>
+- **Signed EvidenceManifest path:** <relative path, e.g., `.twinharness/grounding/manifest-<id>.json`>
+- **Grounding check status at slice-plan time:** <output of `th grounding check` — must be clean>
+
+*If this section reads "none required" and the work class is pure greenfield with no external
+dependencies, the Builder-pause does not apply and slice execution proceeds normally.*
+
+---
+
 ## Slicing Summary
 
 <One paragraph explaining the slicing strategy: why these slices in this order, what principle

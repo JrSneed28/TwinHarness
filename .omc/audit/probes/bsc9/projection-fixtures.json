@@ -1,0 +1,125 @@
+{
+  "fixtures": [
+    {
+      "tool": "th_state_get",
+      "result": {
+        "ok": true,
+        "exitCode": 0,
+        "data": {
+          "tier": "T1",
+          "current_stage": "requirements",
+          "implementation_allowed": false
+        },
+        "human": "state: T1 @ requirements"
+      },
+      "projected": {
+        "isError": false,
+        "text": "state: T1 @ requirements",
+        "structuredContent": {
+          "tier": "T1",
+          "current_stage": "requirements",
+          "implementation_allowed": false,
+          "exitCode": 0
+        }
+      }
+    },
+    {
+      "tool": "th_coverage_report",
+      "result": {
+        "ok": true,
+        "exitCode": 0,
+        "data": {
+          "total": 3,
+          "covered": 2,
+          "uncovered": [
+            "REQ-003"
+          ]
+        }
+      },
+      "projected": {
+        "isError": false,
+        "text": "{\n  \"total\": 3,\n  \"covered\": 2,\n  \"uncovered\": [\n    \"REQ-003\"\n  ]\n}",
+        "structuredContent": {
+          "total": 3,
+          "covered": 2,
+          "uncovered": [
+            "REQ-003"
+          ],
+          "exitCode": 0
+        }
+      }
+    },
+    {
+      "tool": "th_doctor",
+      "result": {
+        "ok": true,
+        "exitCode": 0
+      },
+      "projected": {
+        "isError": false,
+        "text": "OK",
+        "structuredContent": {
+          "exitCode": 0
+        }
+      }
+    },
+    {
+      "tool": "th_repo_check",
+      "result": {
+        "ok": false,
+        "exitCode": 4,
+        "data": {
+          "status": "stale",
+          "changed": [
+            "src/a.ts"
+          ]
+        },
+        "human": "repo map stale"
+      },
+      "projected": {
+        "isError": true,
+        "text": "repo map stale",
+        "structuredContent": {
+          "status": "stale",
+          "changed": [
+            "src/a.ts"
+          ],
+          "exitCode": 4
+        }
+      }
+    },
+    {
+      "tool": "th_next",
+      "result": {
+        "ok": false,
+        "exitCode": 1
+      },
+      "projected": {
+        "isError": true,
+        "text": "FAILED",
+        "structuredContent": {
+          "exitCode": 1
+        }
+      }
+    },
+    {
+      "tool": "th_state_status",
+      "result": {
+        "ok": true,
+        "exitCode": 0,
+        "data": {
+          "exitCode": 999,
+          "note": "data.exitCode must be shadowed by envelope"
+        }
+      },
+      "projected": {
+        "isError": false,
+        "text": "{\n  \"exitCode\": 999,\n  \"note\": \"data.exitCode must be shadowed by envelope\"\n}",
+        "structuredContent": {
+          "exitCode": 0,
+          "note": "data.exitCode must be shadowed by envelope"
+        }
+      }
+    }
+  ]
+}

@@ -51,7 +51,7 @@ You don't need to memorize these — but every section below assumes them. Skim 
 |---|---|
 | **Run** | One pass of TwinHarness over one idea, in one project directory. All its state lives in `.twinharness/` and `docs/`. |
 | **Orchestrator** | The lead agent (a Claude Code *skill*) that drives the whole run — it picks stages, spawns the other agents, and calls the `th` CLI. You mostly talk to it. |
-| **Agent** | A specialized, fresh-context sub-Claude with one job (Spec writes requirements, Builder writes code, Critic reviews, etc.). There are **16**. You don't invoke them directly; the Orchestrator does. |
+| **Agent** | A specialized, fresh-context sub-Claude with one job (Spec writes requirements, Builder writes code, Critic reviews, etc.). There are **17**. You don't invoke them directly; the Orchestrator does. |
 | **`th` CLI** | A deterministic TypeScript command-line tool bundled with the plugin. It **records and computes** the mechanical truth (state, hashes, coverage, drift counts) — it never *decides* anything. The agents run it for you. |
 | **Artifact** | A governing document a stage produces (`docs/01-requirements.md`, `docs/04-architecture.md`, …). Artifacts **govern** downstream work — they're checked against, not just written and forgotten. |
 | **Summary block** | The compact header at the top of every artifact. Downstream agents read the Summary, not the whole doc — that's what keeps context small. |
@@ -84,6 +84,18 @@ From a local clone:
 (or headless: `claude plugin marketplace add <path>` then
 `claude plugin install twinharness@twinharness`). The plugin installs at **user scope** — it is
 available in every project. For a throwaway test session instead: `claude --plugin-dir <path>`.
+
+**Development / preview channel.** The `dev` branch is published as a separate marketplace named
+`twinharness-dev`, so it installs side-by-side with the stable channel. Pin the marketplace to the
+`dev` ref with `@dev`:
+
+```
+/plugin marketplace add JrSneed28/TwinHarness@dev
+/plugin install twinharness@twinharness-dev
+```
+
+The plugin name stays `twinharness`; only the marketplace ID differs. A local clone checked out on
+`dev` registers as `twinharness-dev` as well, so install it with `twinharness@twinharness-dev`.
 
 Requirements: **Node ≥ 20** on PATH (declared in `engines.node`; the bundled `th` CLI has zero
 runtime dependencies). Claude Code ≥ 1.0.0 (the plugin targets the hook + agent manifest schema v1).
@@ -1292,9 +1304,9 @@ Pre-edit blast-radius analysis over the persisted `repo-map.json`. Reads no stat
 | `map_invalid-json` / `map_schema` / `map_version` | Map file malformed or unknown version | Run `th repo map` to regenerate |
 | `unknown_slice` | `--slice` names no known slice | Check `th state status` for valid slice IDs |
 
-#### MCP tools (registered count 75)
+#### MCP tools (registered count 81)
 
-75 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin. The interview/init surface exposes `th_interview_start`, `th_interview_record`, `th_interview_status`, and `th_init`. Five precondition-gated gate-transition tools safely mutate gate-owned fields: `th_tier_record`, `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`, `th_blast_radius_record`. Additional wired handlers: `th_drift_list`, `th_drift_resolve`, `th_coverage_report`, `th_artifact_register`, `th_artifact_list`, `th_verify_add`, `th_verify_list`, `th_verify_clear`, `th_verify_run`, `th_stage_current`, `th_stage_describe`, `th_stage_list`, `th_doctor`, `th_scorecard`, `th_slices_sync`, `th_slice_set_status`. Notable tools highlighted below:
+81 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin. The interview/init surface exposes `th_interview_start`, `th_interview_record`, `th_interview_status`, and `th_init`. Five precondition-gated gate-transition tools safely mutate gate-owned fields: `th_tier_record`, `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`, `th_blast_radius_record`. Additional wired handlers: `th_drift_list`, `th_drift_resolve`, `th_coverage_report`, `th_artifact_register`, `th_artifact_list`, `th_verify_add`, `th_verify_list`, `th_verify_clear`, `th_verify_run`, `th_stage_current`, `th_stage_describe`, `th_stage_list`, `th_doctor`, `th_scorecard`, `th_slices_sync`, `th_slice_set_status`. Notable tools highlighted below:
 
 | Tool name | CLI equivalent | Notes |
 |---|---|---|
@@ -1311,7 +1323,7 @@ All MCP tool schemas are strict and closed (`additionalProperties: false`). Outp
 
 #### Generated command reference
 
-This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **104 CLI command leaves** and **75 MCP tools**.
+This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **110 CLI command leaves** and **81 MCP tools**.
 
 | CLI command | MCP tool | Status |
 |---|---|---|
@@ -1371,6 +1383,12 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th sim retire` | `th_sim_retire` | mirrored |
 | `th sim scan` | `th_sim_scan` | mirrored |
 | `th tester record` | `th_tester_record` | mirrored |
+| `th driver record` | `th_driver_record` | mirrored |
+| `th approve` | `th_approve` | mirrored |
+| `th realize` | `th_realize` | mirrored |
+| `th assertion-presence record` | `th_assertion_presence_record` | mirrored |
+| `th grounding record` | `th_grounding_record` | mirrored |
+| `th grounding check` | `th_grounding_check` | mirrored |
 | `th gate production-reality` | `th_gate_production_reality` | mirrored |
 | `th collab init` | `th_collab_init` | mirrored |
 | `th collab fragment` | `th_collab_fragment` | mirrored |
@@ -1425,7 +1443,7 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th_interview_record` | — (MCP-only) | MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment). |
 | `th_interview_status` | — (MCP-only) | MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment). |
 
-#### MCP tool roster (exhaustive — all 75)
+#### MCP tool roster (exhaustive — all 81)
 
 Every registered MCP tool name, in registry order. The CLI↔MCP parity test pins this list against `TOOL_DEFS.map(t => t.name)`, so a tool added/removed/renamed without updating this roster fails CI.
 
@@ -1504,6 +1522,12 @@ Every registered MCP tool name, in registry order. The CLI↔MCP parity test pin
 - `th_gate_production_reality`
 - `th_inspector_write`
 - `th_tester_record`
+- `th_driver_record`
+- `th_approve`
+- `th_realize`
+- `th_assertion_presence_record`
+- `th_grounding_record`
+- `th_grounding_check`
 
 <!-- END AUTO-GENERATED: command-reference -->
 
@@ -1645,7 +1669,7 @@ flag applies to. (`--json` and `--cwd` are accepted on every command.)
 ```
 .claude-plugin/   plugin manifest + marketplace.json (installation wiring)
 .github/          CI workflow (ci.yml — typecheck, build, dist-sync, test on every push/PR)
-agents/           16 agent prompt files
+agents/           17 agent prompt files
 commands/         16 Claude Code command files (4 original + 12 curated th-* verbs)
 dist/             compiled CLI — committed on purpose; no build step at install time
 hooks/            Stop hook wiring (hooks.json → th hook stop-gate)
@@ -1686,7 +1710,7 @@ Three invariants are enforced by `tests/plugin-manifest.test.ts` — do not figh
 - **Components never call a bare `th`.** Every skill/command/agent resolves the CLI via
   `${CLAUDE_PLUGIN_ROOT}/dist/cli.js` (substituted by Claude Code at load time), because installed
   users don't have `th` on PATH.
-- **16 agents, 16 commands, 1 skill.** The manifest test verifies these counts automatically via
+- **17 agents, 16 commands, 1 skill.** The manifest test verifies these counts automatically via
   `readdirSync` — adding or removing agents will surface immediately.
 - **Version sync.** `plugin.json` version must equal `package.json` version.
 

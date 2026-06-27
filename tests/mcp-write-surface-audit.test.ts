@@ -126,6 +126,9 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   // simulation ledger (SG3 P2-C; append/transition under stateDir — not path-taking)
   th_sim_add: { classification: "Mocked" },
   th_sim_retire: { id: "SIM-001" },
+  // BSC-6: th_sim_scan appends an incomplete-scan receipt under stateDir when dist/
+  // coverage is incomplete (now a mutating tool); not path-taking.
+  th_sim_scan: {},
   // build leases (append to stateDir)
   th_build_claim: { sliceId: "SLICE-1" },
   th_build_release: { sliceId: "SLICE-1" },
@@ -180,6 +183,31 @@ const PROBE_ARGS: Record<string, Record<string, unknown>> = {
   // live-QA Tester record (SG3 P2-C) — writes only .twinharness/tester-record.json
   // (governed state dir); not path-taking. `driver` is required.
   th_tester_record: { driver: "cli-e2e", provider: "sandbox" },
+  // Axis-B/BSC-7 — in-process human-approval producer; writes only
+  // .twinharness/approval-receipts.jsonl (governed state dir); not path-taking. A
+  // humanGate stage is supplied (the governing artifact may not resolve in the temp
+  // project → refuse-at-creation), but either way nothing escapes the surface.
+  th_approve: { stage: "requirements" },
+  // Axis-B/BSC-3 — in-process driver-dimension producer; writes only
+  // .twinharness/driver-receipts.jsonl (governed state dir); not path-taking. No args
+  // are required (the temp project has no verify-report.json → refuse-at-creation), but
+  // either way nothing escapes the surface.
+  th_driver_record: {},
+  // Axis-B/BSC-1 — in-process realization producer; writes only
+  // .twinharness/realization-receipts.jsonl (governed state dir). The artifact arg is a
+  // repo-relative path that resolves WITHIN root (refuse-at-creation rejects an escaping
+  // path BEFORE any write), so even a probe with a missing artifact escapes nothing.
+  th_realize: { req_id: "REQ-001", artifact: "src/x.ts" },
+  // Axis-B/BSC-2 (2a) — in-process assertion-presence producer; writes only
+  // .twinharness/assertion-presence-receipts.jsonl (governed state dir); not path-taking.
+  // The sensor computes its ground from the temp project's tests/ dir; no args needed.
+  th_assertion_presence_record: {},
+  // Axis-B/BSC-10 (Slice A) — in-process external-reference grounding producer; writes only
+  // .twinharness/grounding-receipts.jsonl (governed state dir); not path-taking. Args are a
+  // minimal valid digest-manifest probe (groundKind + workClass + manifestDigest all supplied);
+  // either the receipt is written to the governed dir, or a refuse-at-creation early-returns
+  // (e.g. invalid state.json in the temp project) — either way nothing escapes the surface.
+  th_grounding_record: { groundKind: "digest-manifest", workClass: "integration", manifestDigest: "sha256:probe" },
 };
 
 describe("MCP write-surface audit — no mutating tool escapes the governed surface (AC#1)", () => {

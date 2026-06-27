@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { makeTempProject, type TempProject } from "./helpers";
 import { runInit } from "../src/commands/init";
 import { runDriftAdd, runDriftList, runDriftResolve } from "../src/commands/drift";
@@ -11,6 +12,19 @@ afterEach(() => tp?.cleanup());
 
 function driftLog(t: TempProject): string {
   return fs.readFileSync(t.paths.driftLog, "utf8");
+}
+
+/**
+ * Write a real source file in the scratch project and return its repo-relative
+ * path. A requirement-layer (BLOCKING) `drift resolve` now REQUIRES a `--target`
+ * that resolves in source (Axis-B slice-1a / BSC-4 grounding), so these tests
+ * ground their blocking resolves in a concrete file.
+ */
+function writeTarget(t: TempProject, rel = "src/grounding-target.ts"): string {
+  const abs = path.join(t.root, rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, "export const grounded = 1;\n", "utf8");
+  return rel;
 }
 
 describe("REQ-DRIFT-001: a derived entry is appended and is NOT blocking (§10)", () => {
@@ -97,7 +111,7 @@ describe("REQ-DRIFT-005: resolve decrements drift_open_blocking (floor 0) and ap
     runDriftAdd(tp.paths, { layer: "requirement", action: "paused" });
     expect(readState(tp.paths).state?.drift_open_blocking).toBe(1);
 
-    const res = runDriftResolve(tp.paths, "DRIFT-001");
+    const res = runDriftResolve(tp.paths, "DRIFT-001", { target: writeTarget(tp) });
     expect(res.ok).toBe(true);
     expect(res.data?.drift_open_blocking).toBe(0);
     expect(readState(tp.paths).state?.drift_open_blocking).toBe(0);
@@ -149,9 +163,10 @@ describe("REQ-DRIFT-008: drift resolve hardening — unknown id, double-resolve,
     tp = makeTempProject();
     runInit(tp.paths, {});
     runDriftAdd(tp.paths, { layer: "requirement", action: "blocked" });
-    runDriftResolve(tp.paths, "DRIFT-001");
+    // The FIRST resolve must succeed now (requirement-layer requires a target).
+    runDriftResolve(tp.paths, "DRIFT-001", { target: writeTarget(tp) });
 
-    const res = runDriftResolve(tp.paths, "DRIFT-001");
+    const res = runDriftResolve(tp.paths, "DRIFT-001", { target: writeTarget(tp) });
     expect(res.ok).toBe(false);
     expect(res.data?.error).toBe("already_resolved");
   });
@@ -162,7 +177,7 @@ describe("REQ-DRIFT-008: drift resolve hardening — unknown id, double-resolve,
     runDriftAdd(tp.paths, { layer: "requirement", action: "blocked" });
     expect(readState(tp.paths).state?.drift_open_blocking).toBe(1);
 
-    const res = runDriftResolve(tp.paths, "DRIFT-001");
+    const res = runDriftResolve(tp.paths, "DRIFT-001", { target: writeTarget(tp) });
     expect(res.ok).toBe(true);
     expect(readState(tp.paths).state?.drift_open_blocking).toBe(0);
     expect(res.human).toContain("requirement layer");
