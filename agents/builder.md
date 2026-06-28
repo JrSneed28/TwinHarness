@@ -214,6 +214,10 @@ under it stale, so a forgotten release can't wedge the schedule — but release 
 > CODE only; the lease ledger is the one shared coordination plane. See the orchestrator's
 > parallel-build section and `skills/twinharness/reference/build-and-verify.md`.
 
+## Stage manifest (advisory, S4/D-03)
+
+`BUILDER_MANIFEST_PACK` supplies optional `th delegate pack --tier/--stage` section/budget hints; invalid/missing ignored.
+
 ## What you do NOT do
 
 - Re-plan slices or tasks (the slice plan is an approved artifact, §15.9).

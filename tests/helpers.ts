@@ -2,7 +2,7 @@ import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { resolveProjectPaths, type ProjectPaths } from "../src/core/paths";
-import { CLI_COMMAND_LEAVES, MCP_EXCLUDED, MCP_ONLY_TOOLS } from "../src/mcp-server";
+import { CLI_COMMAND_LEAVES, MCP_EXCLUDED, MCP_ONLY_TOOLS, cliCommandToToolName } from "../src/mcp-server";
 import { stageContract } from "../src/core/stages";
 import { appendApprovalReceipt, type HumanApprovalReceipt } from "../src/core/approvals";
 import { requiredHumanGateStages } from "../src/core/gate-preconditions";
@@ -17,15 +17,20 @@ import type { TwinHarnessState } from "../src/core/state-schema";
  * than pinned to a literal. A real cross-check against `TOOL_DEFS.length`:
  * `TOOL_DEFS` is one source of truth; the {CLI_COMMAND_LEAVES, MCP_EXCLUDED,
  * MCP_ONLY_TOOLS} partition is the independent other. Every CLI leaf that is not
- * excluded mirrors one tool, plus the deliberate MCP-only additions:
+ * excluded maps to a mirrored tool name, plus the deliberate MCP-only additions.
+ * Aggregated multi-op MCP tools may cover several CLI leaves, so the mirrored side
+ * is counted as a UNIQUE tool-name set rather than a raw leaf count:
  *
- *   expected = (|CLI_COMMAND_LEAVES| − |MCP_EXCLUDED|) + |MCP_ONLY_TOOLS|
+ *   expected = |unique(cliCommandToToolName(non-excluded leaves))| + |MCP_ONLY_TOOLS|
  *
  * Adding a tool (a new CLI leaf, or a new MCP-only entry) updates this with zero
  * literal churn — the count today is 62, derived, not hardcoded.
  */
 export function expectedToolDefsCount(): number {
-  return CLI_COMMAND_LEAVES.length - Object.keys(MCP_EXCLUDED).length + Object.keys(MCP_ONLY_TOOLS).length;
+  const mirrored = new Set(
+    CLI_COMMAND_LEAVES.filter((leaf) => !(leaf in MCP_EXCLUDED)).map(cliCommandToToolName),
+  );
+  return mirrored.size + Object.keys(MCP_ONLY_TOOLS).length;
 }
 
 /**

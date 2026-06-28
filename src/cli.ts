@@ -171,6 +171,8 @@ Usage:
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
   th hook pretool-gate              Emit a Claude Code PreToolUse write-gate decision
   th hook subagent-stop             Emit a Claude Code SubagentStop-hook decision (state-validity guard)
+  th hook posttool-context|session-context|prompt-context|precompact-seal|subagent-context|subagent-seal|session-end
+                                    Emit context-pages OBSERVE hook decisions (internal Claude Code hook protocol; passthrough/fail-safe)
   th migrate                        Upgrade state.json to the current schema version
   th doctor                         Self-diagnostic + run-health audit (env, state, artifacts, coverage, slices, revise loops)
   th next [--explain]               The next mechanical obligation the run owes (next-action oracle); --explain adds a WHY
@@ -184,6 +186,13 @@ Usage:
                                     Assemble the §9 handoff bundle (artifact Summary blocks + slice/REQ/file framing; --max-tokens bounds the pack)
   th context read --files-list <a,b,c> [--max-tokens <N>]
                                     Batch-read files under ONE token budget with deterministic truncation + per-file read receipts (C-11)
+  th context-pages page-status|residency|telemetry|savings|verify|rehydrate|compare [--session-id <id>] [--limit <n>] [--page-id <id>] [--logical-key <k>] [--baseline-id <id>] [--context-id <id>]
+                                    Inspect the context-pages store (th_context MCP shares the same handler for these ops)
+  th context-pages baseline [--session-id <id>]
+                                    S0 token denominator; writes a RunArtifact corpus entry when --session-id is given (human-only)
+  th context-pages gc [--age-days <n>]
+                                    Remove cold CAS objects older than n days (default 5); NEVER removes ledger records (human-only)
+  th context-pages purge            Remove all context-pages data (human-only, destructive)
   th budget check [--max <k>] [--files-read N] [--slices-built N] [--tool-calls N] [--artifacts N]
                                     Deterministic context-budget estimate from agent-supplied proxy counts → { estTokens, pct, verdict } (--max in thousands; tier-aware default when omitted)
   th handoff write                  Assemble .twinharness/HANDOFF.md (run state + next action + artifact Summary blocks + open questions + "don't re-read docs/" directive)
@@ -475,9 +484,15 @@ export interface ParsedArgs {
     workClass?: string;
     // F8/R-31 — the live run's pass verdict (boolean flag).
     passed: boolean;
-    // S0 context-pages command flags.
+    // context-pages command flags (S0 + S1+).
     sessionId?: string;
     limit?: number;
+    pageId?: string;
+    logicalKey?: string;
+    baselineId?: string;
+    contextId?: string;
+    category?: string;
+    ageDays?: number;
   };
 }
 
@@ -612,8 +627,13 @@ const STRING_FLAGS: Record<string, FlagField> = {
   "--perceptual-hash": "perceptualHash",
   "--renderer": "renderer",
   "--work-class": "workClass",
-  // S0 context-pages flags.
+  // context-pages flags (S0 + S1+).
   "--session-id": "sessionId",
+  "--page-id": "pageId",
+  "--logical-key": "logicalKey",
+  "--baseline-id": "baselineId",
+  "--context-id": "contextId",
+  "--category": "category",
 };
 
 /** Flags that consume a numeric value. */
@@ -638,8 +658,9 @@ const NUMBER_FLAGS: Record<string, FlagField> = {
   // ≤0 to its default. `--max-files` = file-count cap; `--max-bytes` = total-bytes cap.
   "--max-files": "maxFiles",
   "--max-bytes": "maxBytes",
-  // S0 context-pages flags.
+  // context-pages flags (S0 + S1+).
   "--limit": "limit",
+  "--age-days": "ageDays",
 };
 
 /**
@@ -1033,21 +1054,46 @@ function dispatch(parsed: ParsedArgs): CommandResult {
         default:
           return failure({ human: `unknown 'context' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
       }
-    // S0 context-pages read-only queries (T6 / D-19): page-status, residency, telemetry, savings, baseline.
+    // context-pages queries (D-19 / AC-10): CLI+MCP-shared ops + human-only ops.
     case "context-pages":
       switch (sub) {
+        // S0: CLI + MCP shared ops.
         case "page-status":
         case "residency":
         case "telemetry":
         case "savings":
-        case "baseline":
           return runContextPagesCommand(sub, {
             session_id: parsed.flags.sessionId,
             limit: parsed.flags.limit,
           }, paths);
+        // S1+: CLI + MCP shared ops.
+        case "verify":
+          return runContextPagesCommand("verify", {}, paths);
+        case "rehydrate":
+          return runContextPagesCommand("rehydrate", {
+            page_id: parsed.flags.pageId,
+            logical_key: parsed.flags.logicalKey,
+          }, paths);
+        case "compare":
+          return runContextPagesCommand("compare", {
+            baseline_id: parsed.flags.baselineId,
+            context_id: parsed.flags.contextId,
+            category: parsed.flags.category,
+          }, paths);
+        // Human-only ops (absent from the MCP enum — see MCP_EXCLUDED).
+        case "baseline":
+          return runContextPagesCommand("baseline", {
+            session_id: parsed.flags.sessionId,
+          }, paths);
+        case "gc":
+          return runContextPagesCommand("gc", {
+            age_days: parsed.flags.ageDays,
+          }, paths);
+        case "purge":
+          return runContextPagesCommand("purge", {}, paths);
         default:
           return failure({
-            human: `unknown 'context-pages' subcommand: ${sub ?? "(none)"}. Valid S0 ops: page-status, residency, telemetry, savings, baseline`,
+            human: `unknown 'context-pages' subcommand: ${sub ?? "(none)"}. Valid ops: page-status, residency, telemetry, savings, verify, rehydrate, compare, baseline, gc, purge`,
           });
       }
     case "delegate":

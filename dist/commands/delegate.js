@@ -44,6 +44,7 @@ const log_1 = require("../core/log");
 const context_1 = require("./context");
 const delegation_1 = require("../core/delegation");
 const delegation_scope_1 = require("../core/delegation-scope");
+const context_manifest_1 = require("../core/context-manifest");
 /**
  * `th delegate` — the Context Preservation / Delegation Layer (advisory).
  *
@@ -147,6 +148,29 @@ function runDelegatePack(paths, opts) {
     // it as the subagent's `delegation_id` (per-id enforcement + clear-own-id-only). It is
     // minted even when there is no scope, so the envelope always names the delegation.
     const delegationId = opts.delegationId ?? (0, delegation_scope_1.mintDelegationId)();
+    // S4/D-03 — advisory stage manifest consultation. When tier+stage are supplied the
+    // manifest is loaded; if absent or malformed it is silently ignored (passthrough). The
+    // manifest never changes the recommendation or the capsule requirement — it only annotates
+    // the handoff with stage-specific section hints and a budget ceiling when a valid manifest
+    // is present. When tier or stage is omitted, `manifestSections` and `manifestMaxBudget`
+    // remain null and the envelope/data are identical to the pre-manifest behaviour.
+    let manifestSections = null;
+    let manifestMaxBudget = null;
+    if (opts.tier && opts.stage) {
+        try {
+            const mr = (0, context_manifest_1.loadManifest)(paths, opts.tier, opts.stage);
+            if (mr.found && mr.valid) {
+                manifestSections = mr.manifest.sections.artifact.length > 0
+                    ? mr.manifest.sections.artifact
+                    : null;
+                manifestMaxBudget = mr.manifest.max_budget > 0 ? mr.manifest.max_budget : null;
+            }
+            // When absent or malformed: advisory — silently ignore, no behaviour change.
+        }
+        catch {
+            // Fail-safe (D-16): never let manifest loading break a delegate pack.
+        }
+    }
     const envelope = [
         "DELEGATED AGENT HANDOFF",
         `Agent: ${opts.agent ?? "(unspecified — set --agent)"}`,
@@ -165,6 +189,13 @@ function runDelegatePack(paths, opts) {
                     : "(state the file/dir/component boundary)"}`,
         ...(allowedFiles.length
             ? [`Allowed files (write-gate enforced): ${allowedFiles.join(", ")}`]
+            : []),
+        // S4/D-03 — advisory manifest hints (omitted when no valid manifest is present)
+        ...(manifestMaxBudget !== null
+            ? [`Context budget (manifest advisory): ${manifestMaxBudget} tokens`]
+            : []),
+        ...(manifestSections !== null
+            ? [`Required sections (manifest advisory): ${manifestSections.join(", ")}`]
             : []),
         "",
         "Context pack:",
@@ -199,6 +230,9 @@ function runDelegatePack(paths, opts) {
             allowedFiles,
             // R-36 (F7) — the minted per-delegation id the CLI arms the scope under.
             delegationId,
+            // S4/D-03 — advisory manifest fields; null when no valid manifest was found.
+            manifestSections,
+            manifestMaxBudget,
         },
         human: envelope.join("\n"),
     });

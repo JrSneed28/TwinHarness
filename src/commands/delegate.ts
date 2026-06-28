@@ -14,6 +14,7 @@ import {
   type DelegationSignals,
 } from "../core/delegation";
 import { mintDelegationId } from "../core/delegation-scope";
+import { loadManifest } from "../core/context-manifest";
 
 /**
  * `th delegate` — the Context Preservation / Delegation Layer (advisory).
@@ -140,6 +141,17 @@ export interface DelegatePackOptions {
    * that must update the SAME delegation's scope rather than mint a new one).
    */
   delegationId?: string;
+  /**
+   * S4/D-03 — tier label for advisory stage manifest lookup
+   * (`.twinharness/context-manifests/<tier>/<stage>.json`). When absent, no manifest
+   * consultation is attempted and the output is identical to today's behaviour.
+   */
+  tier?: string;
+  /**
+   * S4/D-03 — stage label for advisory stage manifest lookup. Requires `tier`.
+   * When absent, no manifest consultation is attempted.
+   */
+  stage?: string;
 }
 
 export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions): CommandResult {
@@ -173,6 +185,29 @@ export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions):
   // minted even when there is no scope, so the envelope always names the delegation.
   const delegationId = opts.delegationId ?? mintDelegationId();
 
+  // S4/D-03 — advisory stage manifest consultation. When tier+stage are supplied the
+  // manifest is loaded; if absent or malformed it is silently ignored (passthrough). The
+  // manifest never changes the recommendation or the capsule requirement — it only annotates
+  // the handoff with stage-specific section hints and a budget ceiling when a valid manifest
+  // is present. When tier or stage is omitted, `manifestSections` and `manifestMaxBudget`
+  // remain null and the envelope/data are identical to the pre-manifest behaviour.
+  let manifestSections: string[] | null = null;
+  let manifestMaxBudget: number | null = null;
+  if (opts.tier && opts.stage) {
+    try {
+      const mr = loadManifest(paths, opts.tier, opts.stage);
+      if (mr.found && mr.valid) {
+        manifestSections = mr.manifest.sections.artifact.length > 0
+          ? mr.manifest.sections.artifact
+          : null;
+        manifestMaxBudget = mr.manifest.max_budget > 0 ? mr.manifest.max_budget : null;
+      }
+      // When absent or malformed: advisory — silently ignore, no behaviour change.
+    } catch {
+      // Fail-safe (D-16): never let manifest loading break a delegate pack.
+    }
+  }
+
   const envelope: string[] = [
     "DELEGATED AGENT HANDOFF",
     `Agent: ${opts.agent ?? "(unspecified — set --agent)"}`,
@@ -193,6 +228,13 @@ export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions):
     }`,
     ...(allowedFiles.length
       ? [`Allowed files (write-gate enforced): ${allowedFiles.join(", ")}`]
+      : []),
+    // S4/D-03 — advisory manifest hints (omitted when no valid manifest is present)
+    ...(manifestMaxBudget !== null
+      ? [`Context budget (manifest advisory): ${manifestMaxBudget} tokens`]
+      : []),
+    ...(manifestSections !== null
+      ? [`Required sections (manifest advisory): ${manifestSections.join(", ")}`]
       : []),
     "",
     "Context pack:",
@@ -229,6 +271,9 @@ export function runDelegatePack(paths: ProjectPaths, opts: DelegatePackOptions):
       allowedFiles,
       // R-36 (F7) — the minted per-delegation id the CLI arms the scope under.
       delegationId,
+      // S4/D-03 — advisory manifest fields; null when no valid manifest was found.
+      manifestSections,
+      manifestMaxBudget,
     },
     human: envelope.join("\n"),
   });

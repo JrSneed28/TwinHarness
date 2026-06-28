@@ -356,6 +356,29 @@ export interface ScanOptions {
    * config; the scanner itself never reads that file (the command layer wires it).
    */
   excludePaths?: string[];
+  /**
+   * M3 — dirty-file incremental re-scan. When provided, source files NOT listed in
+   * `dirtyFiles` that appear in `previousMap.files` reuse their per-file data
+   * (symbols, req_ids) without re-reading the file from disk. Manifest files that
+   * drive cross-file resolution (package.json, tsconfig*.json, pnpm-workspace.yaml,
+   * etc.) are ALWAYS re-read even when not in `dirtyFiles` so alias tables,
+   * workspace patterns, and candidate commands are rebuilt correctly from current
+   * disk state. Import edges for unchanged files are taken directly from
+   * `previousMap.edges` (filtered to the current file set) so the resolved-edge
+   * graph is consistent without re-extracting raw imports from every file.
+   *
+   * Output is byte-identical to a full rebuild for the no-add/no-delete scenario:
+   * when the set of files on disk is unchanged and only listed files have different
+   * content, the serialized map is identical to a fresh `scanRepo` call. This is
+   * the M3 invariant: symbol-page logical_key/content_hash stability in the
+   * context-pages layer depends on it.
+   */
+  incrementalOpts?: {
+    /** POSIX-relative paths of files whose content has changed since the previous scan. */
+    dirtyFiles: ReadonlySet<string>;
+    /** Full-scan RepoMap from the immediately prior run to draw per-file data from. */
+    previousMap: RepoMap;
+  };
 }
 
 /**
@@ -404,6 +427,26 @@ function classifyCommand(name: string): CandidateCommandKind {
 }
 
 /**
+ * M3 — manifest file names that MUST be re-read in incremental mode even when
+ * not listed in `dirtyFiles`. These drive cross-file-resolution structures built
+ * AFTER the walk (alias tables, workspace patterns, candidate commands); skipping
+ * them would leave global structures stale. Plain extension-detected manifests
+ * (go.mod, cargo.toml, …) require no content read and are NOT in this set.
+ */
+function isAlwaysReadManifest(nameLower: string): boolean {
+  return (
+    nameLower === "package.json" ||
+    nameLower === "pnpm-workspace.yaml" ||
+    nameLower === "pnpm-workspace.yml" ||
+    nameLower === "lerna.json" ||
+    nameLower === "makefile" ||
+    nameLower === "tsconfig.json" ||
+    nameLower === "jsconfig.json" ||
+    /^(tsconfig|jsconfig)\..*\.json$/.test(nameLower)
+  );
+}
+
+/**
  * Scan a project root and assemble an in-memory `RepoMap` (best-effort, never
  * throws on repo content). The walk excludes generated dirs before opening them
  * and stops at the caps. Sorting/normalization is deferred to the serializer.
@@ -422,6 +465,24 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
   }
 
   const st: ScannerState = { filesScanned: 0, filesSkipped: 0, totalBytes: 0, capHit: null };
+
+  // M3 — incremental re-scan: per-file lookup and previous-edge tables.
+  // All structures are empty when `incrementalOpts` is absent so there is zero
+  // overhead on the default (full-scan) code path.
+  const prevFilesByPath = new Map<string, FileEntry>();
+  const unchangedFileSet = new Set<string>(); // POSIX-relative paths reused from previousMap
+  let prevEdgesByFrom: Map<string, ImportEdge[]> | undefined;
+  if (opts.incrementalOpts) {
+    for (const fe of opts.incrementalOpts.previousMap.files) {
+      prevFilesByPath.set(fe.path, fe);
+    }
+    prevEdgesByFrom = new Map<string, ImportEdge[]>();
+    for (const edge of opts.incrementalOpts.previousMap.edges ?? []) {
+      let arr = prevEdgesByFrom.get(edge.from);
+      if (!arr) { arr = []; prevEdgesByFrom.set(edge.from, arr); }
+      arr.push(edge);
+    }
+  }
 
   // P3-5 — configured exclusion tokens (bare names or POSIX path prefixes).
   const excludeSet = new Set<string>(opts.excludePaths ?? []);
@@ -676,6 +737,49 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
 
       // Blast-radius signal detection by path tokens (REQ-RU-013).
       recordBlast(rel);
+
+      // M3 — incremental path: reuse per-file data from previousMap for unchanged
+      // source files, skipping the expensive readFileSync + symbol/import extraction.
+      // Always-read manifests (package.json, tsconfig, etc.) bypass this even when
+      // not in dirtyFiles — they supply cross-file-resolution data (alias tables,
+      // workspace patterns, commands) that must reflect current disk state.
+      if (
+        opts.incrementalOpts !== undefined &&
+        !opts.incrementalOpts.dirtyFiles.has(rel) &&
+        !isAlwaysReadManifest(nameLower)
+      ) {
+        const prevEntry = prevFilesByPath.get(rel);
+        if (prevEntry !== undefined) {
+          unchangedFileSet.add(rel);
+          // Reuse req_ids — populate reqIdToFiles so req_anchors is assembled correctly.
+          fileEntry.req_ids = prevEntry.req_ids;
+          for (const id of prevEntry.req_ids) {
+            let idSet = reqIdToFiles.get(id);
+            if (!idSet) { idSet = new Set(); reqIdToFiles.set(id, idSet); }
+            idSet.add(rel);
+          }
+          // Reuse symbols — apply whole-graph cap (per-file cap already bounded in prev scan).
+          if (prevEntry.symbols && prevEntry.symbols.length > 0) {
+            if (symbolTotal < maxTotalSymbols) {
+              const room = maxTotalSymbols - symbolTotal;
+              const bounded =
+                prevEntry.symbols.length > room
+                  ? prevEntry.symbols.slice(0, room)
+                  : prevEntry.symbols;
+              fileEntry.symbols = bounded;
+              symbolTotal += bounded.length;
+              if (bounded.length < prevEntry.symbols.length) st.capHit ??= "symbol-cap";
+            } else {
+              st.capHit ??= "symbol-cap";
+            }
+          }
+          // Entry-file detection is filename-based; run even for reused files.
+          if (ENTRY_FILES.has(nameLower)) {
+            entrypoints.push({ name: entry.name, path: rel, source: "convention" });
+          }
+          continue; // skip content read, import extraction, manifest detection
+        }
+      }
 
       // SINGLE READ (P3-1): a file at or under the per-file cap is read ONCE here as
       // a RAW Buffer. That one buffer serves the binary sniff (P2-4), REQ-ID anchor
@@ -1009,6 +1113,39 @@ export function scanRepo(root: string, opts: ScanOptions = {}): RepoMap {
       if (edgeSeen.has(key)) continue;
       edgeSeen.add(key);
       edges.push({ from, to: imp.specifier, kind: "import", basis: "unresolved", external: true });
+    }
+  }
+
+  // M3 — incremental path: carry import edges for unchanged files from previousMap.
+  // These files were not re-read, so their raw imports are not in `rawImportsByFile`.
+  // Resolved (parsed/alias) edges are filtered to the current file set — a target
+  // deleted since the previous scan is dropped rather than left as a stale resolved
+  // edge. Unresolved edges are always carried (the raw specifier cannot drift by
+  // deletion of other files). The `edgeSeen` dedup set prevents conflicts with any
+  // edges already contributed by dirty files that happen to share a target.
+  if (prevEdgesByFrom !== undefined && unchangedFileSet.size > 0) {
+    reuse: for (const from of unchangedFileSet) {
+      const prevEdges = prevEdgesByFrom.get(from);
+      if (!prevEdges) continue;
+      for (const pe of prevEdges) {
+        // Honour the same whole-graph edge ceiling as the primary resolution loop.
+        if (edges.length >= maxTotalEdges) {
+          st.capHit ??= "edge-cap";
+          break reuse;
+        }
+        // Resolved edge: skip if the target no longer exists in the current scan.
+        if (pe.basis !== "unresolved" && !fileSet.has(pe.to)) continue;
+        const key = `${from}\0${pe.to}\0${pe.basis}`;
+        if (edgeSeen.has(key)) continue;
+        edgeSeen.add(key);
+        edges.push({
+          from: pe.from,
+          to: pe.to,
+          kind: "import",
+          basis: pe.basis,
+          ...(pe.external ? { external: true } : {}),
+        });
+      }
     }
   }
 

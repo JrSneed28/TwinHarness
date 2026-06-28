@@ -119,7 +119,7 @@ describe("BSC-9 negative-control (a): a CLI leaf without HELP/CLI_COMMAND_LEAVES
     const covered = CLI_COMMAND_LEAVES.filter((l) => !(l in MCP_EXCLUDED));
     const excluded = CLI_COMMAND_LEAVES.filter((l) => l in MCP_EXCLUDED);
     expect(covered.length + excluded.length).toBe(CLI_COMMAND_LEAVES.length);
-    const expected = CLI_COMMAND_LEAVES.length - Object.keys(MCP_EXCLUDED).length + Object.keys(MCP_ONLY_TOOLS).length;
+    const expected = new Set(covered.map(cliCommandToToolName)).size + Object.keys(MCP_ONLY_TOOLS).length;
     expect(TOOL_DEFS.length).toBe(expected);
     // Every non-excluded leaf resolves to a real tool name.
     for (const leaf of covered) {

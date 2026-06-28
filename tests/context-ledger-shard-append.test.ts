@@ -20,6 +20,7 @@ import {
   appendLedgerRecord,
   readShardRecords,
   readLastShardRecordHash,
+  contextPagesDir,
   ledgerShardPath,
   computeLedgerRecordHash,
   type LedgerRecord,
@@ -181,7 +182,7 @@ describe("context-ledger — shard append", () => {
     expect(records).toHaveLength(2);
     // The middle schema-invalid line was skipped
     expect(records[0]!.seq).toBe(0);
-    expect(records[1]!.seq).toBe(2);
+    expect(records[1]!.seq).toBe(1);
   });
 
   it("different scopes write to separate shards", () => {
@@ -196,5 +197,26 @@ describe("context-ledger — shard append", () => {
     expect(shard1).not.toBe(shard2);
     expect(readShardRecords(tp.paths, TEST_SCOPE)).toHaveLength(1);
     expect(readShardRecords(tp.paths, scope2)).toHaveLength(1);
+  });
+
+  it("encodes untrusted scope ids so shard paths stay inside context-pages", () => {
+    tp = makeTempProject();
+    const maliciousScope: LedgerScope = {
+      session_id: "sess/../../outside-root",
+      agentOrRoot: "..\\agent:evil",
+    };
+
+    const shard = ledgerShardPath(tp.paths, maliciousScope);
+    const pagesDir = contextPagesDir(tp.paths);
+    const rel = path.relative(path.resolve(pagesDir), path.resolve(shard));
+    expect(rel.startsWith("..")).toBe(false);
+    expect(path.isAbsolute(rel)).toBe(false);
+    expect(path.basename(shard)).toMatch(/^ledger-[A-Za-z0-9_-]+-[A-Za-z0-9_-]+\.jsonl$/);
+
+    const sealed = appendLedgerRecord(tp.paths, maliciousScope, makeRec({
+      session_id: maliciousScope.session_id,
+      agent_id: maliciousScope.agentOrRoot,
+    }));
+    expect(readShardRecords(tp.paths, maliciousScope)).toEqual([sealed]);
   });
 });

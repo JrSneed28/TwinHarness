@@ -23,6 +23,8 @@ import {
   type PostToolContextInput,
   type SessionContextInput,
 } from "../src/commands/hook";
+import { readShardRecords } from "../src/core/context-ledger";
+import { hashContent } from "../src/core/hash";
 
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
@@ -140,6 +142,39 @@ describe("D-16/AC-9: runHookPostToolContext — shape and fail-safe", () => {
     const result = runHookPostToolContext(tp.root, input);
     expect(result.exitCode).toBe(0);
     expect(isValidHookShape(result)).toBe(true);
+  });
+
+  it("records structured Bash tool_response stdout/stderr instead of dropping it", () => {
+    tp = makeTempProject();
+    const result = runHookPostToolContext(tp.root, {
+      session_id: "sess-structured-bash",
+      tool_name: "Bash",
+      tool_input: { command: "echo hello" },
+      tool_response: { stdout: "hello", stderr: "warn", interrupted: false, isImage: false },
+      cwd: tp.root,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const records = readShardRecords(tp.paths, { session_id: "sess-structured-bash", agentOrRoot: "root" });
+    expect(records).toHaveLength(1);
+    expect(records[0]!.content_hash).toBe(hashContent("hello\nwarn"));
+  });
+
+  it("assigns increasing ledger seq values for repeated hook deliveries", () => {
+    tp = makeTempProject();
+    for (const output of ["first", "second"]) {
+      runHookPostToolContext(tp.root, {
+        session_id: "sess-seq",
+        tool_name: "Read",
+        tool_input: { file_path: "src/file.ts" },
+        tool_response: output,
+        cwd: tp.root,
+      });
+    }
+
+    const records = readShardRecords(tp.paths, { session_id: "sess-seq", agentOrRoot: "root" });
+    expect(records.map((r) => r.seq)).toEqual([0, 1]);
+    expect(records[1]!.prevHash).toBe(records[0]!.recordHash);
   });
 });
 

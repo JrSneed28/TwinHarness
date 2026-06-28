@@ -36,8 +36,23 @@ export type SourceKind =
   | "mcp"
   | "test";
 
-/** How the page's content is represented in the ledger / residency store. */
-export type ReductionKind = "FULL" | "delta" | "hash-only";
+/**
+ * How the page's content is represented in the ledger / residency store.
+ *
+ * - `FULL`       — complete content delivered (no reduction).
+ * - `exact`      — exact same-epoch duplicate suppressed to an attestation (S1).
+ * - `delta`      — file/section delta over a proven-resident base (S2).
+ * - `normalized` — delta over deterministically-normalized command/test output (S3).
+ * - `lossy`      — a disclosed lossy reduction (footer marks omitted tokens).
+ * - `hash-only`  — sensitive page; never raw-stored, telemetry carries hashes/counts only.
+ */
+export type ReductionKind =
+  | "FULL"
+  | "exact"
+  | "delta"
+  | "normalized"
+  | "lossy"
+  | "hash-only";
 
 /**
  * D-04 — one unit of context delivered to an agent.  All 18 fields are

@@ -118,6 +118,10 @@ checklist for any mode, read `${CLAUDE_PLUGIN_ROOT}/skills/twinharness/reference
 | `parallelism` | `docs/09-implementation-plan.md` (Phase 3, REQ-PCO-030) | Slice plan minimizes shared components and `depends_on` edges so build waves are wider; consults `th build plan --advise` for current parallelism width + the conflict pairs that serialize the plan; routes concrete re-cut suggestions back to the Vertical-Slice agent. Never weakens vertical-slice integrity or the coverage hard-gate. |
 | `debate-reconcile` | A Reconciler's merged artifact (Phase 4, REQ-PCO-043) | Merged artifact is coherent against the competing inputs it reconciles + the resolved debate-ledger entries; no resolved fork silently dropped or contradicted; every concept still REQ-ID-anchored. Reviewed in fresh context like every other mode. |
 
+## Stage manifest (advisory, S4/D-03)
+
+`CRITIC_MANIFEST_PACK` supplies optional `th delegate pack --tier/--stage` section/evidence/budget hints; invalid/missing ignored.
+
 ## External-reference grounding challenges (BSC-10)
 
 In every mode where the artifact under review references external dependencies, version figures,

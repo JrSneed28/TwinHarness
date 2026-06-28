@@ -1323,7 +1323,7 @@ All MCP tool schemas are strict and closed (`additionalProperties: false`). Outp
 
 #### Generated command reference
 
-This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **110 CLI command leaves** and **82 MCP tools**.
+This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **127 CLI command leaves** and **82 MCP tools**.
 
 | CLI command | MCP tool | Status |
 |---|---|---|
@@ -1400,6 +1400,13 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th hook stop-gate` | — (CLI-only) | Claude Code Stop-hook protocol; not an agent tool. |
 | `th hook pretool-gate` | — (CLI-only) | Claude Code PreToolUse write-gate protocol; not an agent tool. |
 | `th hook subagent-stop` | — (CLI-only) | Claude Code SubagentStop-hook protocol; not an agent tool. |
+| `th hook posttool-context` | — (CLI-only) | Claude Code PostToolUse context OBSERVE hook protocol; not an agent tool. |
+| `th hook session-context` | — (CLI-only) | Claude Code SessionStart context OBSERVE hook protocol; not an agent tool. |
+| `th hook prompt-context` | — (CLI-only) | Claude Code UserPromptSubmit context OBSERVE hook protocol; not an agent tool. |
+| `th hook precompact-seal` | — (CLI-only) | Claude Code PreCompact context OBSERVE hook protocol; not an agent tool. |
+| `th hook subagent-context` | — (CLI-only) | Claude Code SubagentStart context OBSERVE hook protocol; not an agent tool. |
+| `th hook subagent-seal` | — (CLI-only) | Claude Code SubagentStop context OBSERVE hook protocol; not an agent tool. |
+| `th hook session-end` | — (CLI-only) | Claude Code SessionEnd context OBSERVE hook protocol; not an agent tool. |
 | `th migrate` | — (CLI-only) | Destructive state schema rewrite; CLI/human-only (th_init is the safe idempotent MCP entry). |
 | `th doctor` | `th_doctor` | mirrored |
 | `th next` | `th_next` | mirrored |
@@ -1412,6 +1419,16 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th context estimate` | — (CLI-only) | Prompt-surface estimator (operator sizing); th_context_pack/th_budget_check are the MCP context surfaces. |
 | `th context pack` | `th_context_pack` | mirrored |
 | `th context read` | `th_context_read` | mirrored |
+| `th context-pages page-status` | `th_context` | mirrored |
+| `th context-pages residency` | `th_context` | mirrored |
+| `th context-pages telemetry` | `th_context` | mirrored |
+| `th context-pages savings` | `th_context` | mirrored |
+| `th context-pages verify` | `th_context` | mirrored |
+| `th context-pages rehydrate` | `th_context` | mirrored |
+| `th context-pages compare` | `th_context` | mirrored |
+| `th context-pages baseline` | — (CLI-only) | CLI-only: writes a RunArtifact corpus baseline entry; not an agent-callable surface (write side-effect + operator intent required). |
+| `th context-pages gc` | — (CLI-only) | CLI-only: garbage-collects cold CAS objects; not an agent-callable surface (destructive, human-only per 5d constraint). |
+| `th context-pages purge` | — (CLI-only) | CLI-only: removes all context-pages data; destructive, not an agent-callable surface. |
 | `th budget check` | `th_budget_check` | mirrored |
 | `th handoff write` | `th_handoff_write` | mirrored |
 | `th handoff verify` | — (CLI-only) | Resume-integrity CLI check; th_handoff_write is the MCP handoff surface. |
@@ -1442,7 +1459,6 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th_interview_start` | — (MCP-only) | MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment). |
 | `th_interview_record` | — (MCP-only) | MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment). |
 | `th_interview_status` | — (MCP-only) | MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment). |
-| `th_context` | — (MCP-only) | S0 context-pages multi-op reader (no 1:1 CLI leaf; individual ops dispatched via `th context-pages <op>`). |
 
 #### MCP tool roster (exhaustive — all 82)
 

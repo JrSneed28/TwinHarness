@@ -20,9 +20,18 @@ import type { CommandResult } from "../src/core/output";
 let tp: TempProject | undefined;
 afterEach(() => tp?.cleanup());
 
-/** The S0 read-only operation set (mirrors S0_OPS in context-pages.ts). */
-const S0_OPS = ["page-status", "residency", "telemetry", "savings", "baseline"] as const;
-type S0Op = (typeof S0_OPS)[number];
+/**
+ * Operations exposed through the th_context MCP enum (CLI + MCP shared).
+ * Human-only ops (baseline/gc/purge) are absent — they are CLI-only and
+ * listed in MCP_EXCLUDED.
+ */
+const MCP_OPS = [
+  // S0
+  "page-status", "residency", "telemetry", "savings",
+  // S1+ (verify/rehydrate/compare)
+  "verify", "rehydrate", "compare",
+] as const;
+type McpOp = (typeof MCP_OPS)[number];
 
 /**
  * Locate the th_context TOOL_DEFS entry and return a typed wrapper around its
@@ -54,13 +63,17 @@ describe("N1: th_context MCP registration", () => {
 
   it("th_context inputSchema has the correct operation enum", () => {
     const def = TOOL_DEFS.find((t) => t.name === "th_context")!;
-    // Narrow to access the schema properties without casting through any
     const schema = def.inputSchema as {
       type: string;
       properties: {
         operation: { type: string; enum: string[] };
         session_id?: { type: string };
         limit?: { type: string };
+        page_id?: { type: string };
+        logical_key?: { type: string };
+        baseline_id?: { type: string };
+        context_id?: { type: string };
+        category?: { type: string };
       };
       required: string[];
       additionalProperties: boolean;
@@ -71,21 +84,34 @@ describe("N1: th_context MCP registration", () => {
     expect(schema.additionalProperties).toBe(false);
 
     const { enum: ops } = schema.properties.operation;
-    for (const op of S0_OPS) {
+    // All MCP ops must appear in the enum.
+    for (const op of MCP_OPS) {
       expect(ops, `operation enum must include "${op}"`).toContain(op);
     }
-    // No extra operations beyond S0 at this slice
-    expect(ops.length).toBe(S0_OPS.length);
+    // Human-only ops must NOT appear in the MCP enum.
+    for (const excluded of ["baseline", "gc", "purge"]) {
+      expect(ops, `"${excluded}" must be absent from MCP enum (human-only/CLI-only)`).not.toContain(excluded);
+    }
+    expect(ops.length).toBe(MCP_OPS.length);
   });
 
-  it("th_context inputSchema accepts optional session_id and limit fields", () => {
+  it("th_context inputSchema accepts optional filter and selector fields", () => {
     const def = TOOL_DEFS.find((t) => t.name === "th_context")!;
     const schema = def.inputSchema as { properties: Record<string, unknown>; required: string[] };
+    // S0 fields
     expect(schema.properties).toHaveProperty("session_id");
     expect(schema.properties).toHaveProperty("limit");
-    // These are optional — must NOT appear in required
-    expect(schema.required).not.toContain("session_id");
-    expect(schema.required).not.toContain("limit");
+    // S1+ rehydrate fields
+    expect(schema.properties).toHaveProperty("page_id");
+    expect(schema.properties).toHaveProperty("logical_key");
+    // S1+ compare fields
+    expect(schema.properties).toHaveProperty("baseline_id");
+    expect(schema.properties).toHaveProperty("context_id");
+    expect(schema.properties).toHaveProperty("category");
+    // All optional — must NOT appear in required.
+    for (const field of ["session_id", "limit", "page_id", "logical_key", "baseline_id", "context_id", "category"]) {
+      expect(schema.required, `"${field}" must be optional`).not.toContain(field);
+    }
   });
 });
 
@@ -93,21 +119,28 @@ describe("N1: th_context MCP registration", () => {
 // AC-10: CLI↔MCP parity — each op returns deep-equal CommandResult
 // ---------------------------------------------------------------------------
 
+/**
+ * Ops that succeed with no additional args on an empty store.
+ * rehydrate/compare require args (page_id/baseline_id) and return ok:false
+ * without them — they are tested individually below.
+ */
+const NO_ARG_OPS = ["page-status", "residency", "telemetry", "savings", "verify"] as const;
+
 describe("AC-10/D-19: CLI↔MCP parity — shared pure handler contract", () => {
-  for (const op of S0_OPS) {
+  for (const op of NO_ARG_OPS) {
     it(`operation "${op}": CLI and MCP produce deep-equal CommandResult (empty store)`, () => {
       tp = makeTempProject();
       const cli = cliRun(tp.paths, op);
       const mcp = mcpRun(tp.paths, op);
 
-      // Both must succeed on an empty (no-data) store
+      // Both must succeed on an empty (no-data) store.
       expect(cli.ok, `CLI "${op}" must succeed`).toBe(true);
       expect(mcp.ok, `MCP "${op}" must succeed`).toBe(true);
 
-      // Exit codes must match
+      // Exit codes must match.
       expect(cli.exitCode).toBe(mcp.exitCode);
 
-      // data payloads must be deep-equal — the parity guarantee
+      // data payloads must be deep-equal — the parity guarantee (AC-10).
       expect(cli.data, `data must be deep-equal for op="${op}"`).toEqual(mcp.data);
     });
   }
@@ -141,20 +174,58 @@ describe("AC-10/D-19: CLI↔MCP parity — shared pure handler contract", () => 
     expect(cli.data).toEqual(mcp.data);
   });
 
-  it("baseline S0 data: savings_target=0%, tier=s0 in both paths", () => {
+  it("baseline: CLI succeeds with correct S0 data (human-only — absent from MCP enum)", () => {
+    // N.B. The schema enum enforcement (baseline absent from th_context enum) is tested
+    // in the N1 block above. The run() handler itself accepts all ops — the enum
+    // restriction is enforced at the MCP protocol / schema-validation layer, not here.
     tp = makeTempProject();
     const cli = cliRun(tp.paths, "baseline");
-    const mcp = mcpRun(tp.paths, "baseline");
+    expect(cli.ok).toBe(true);
+    const cliData = cli.data as { tier?: string; baseline_tokens?: number };
+    expect(cliData.tier).toBe("s0");
+    expect(cliData.baseline_tokens).toBe(0);
+  });
+
+  it("verify: CLI and MCP agree on chain result (empty store → PASS)", () => {
+    tp = makeTempProject();
+    const cli = cliRun(tp.paths, "verify");
+    const mcp = mcpRun(tp.paths, "verify");
     expect(cli.ok).toBe(true);
     expect(mcp.ok).toBe(true);
-    // Both must agree on S0 invariants
-    const cliData = cli.data as { tier?: string; baseline_tokens?: number };
-    const mcpData = mcp.data as { tier?: string; baseline_tokens?: number };
-    expect(cliData.tier).toBe("s0");
-    expect(mcpData.tier).toBe("s0");
-    expect(cliData.baseline_tokens).toBe(0); // no telemetry yet
-    expect(mcpData.baseline_tokens).toBe(0);
     expect(cli.data).toEqual(mcp.data);
+    const cliData = cli.data as { ok: boolean; record_count: number };
+    expect(cliData.ok).toBe(true);
+    expect(cliData.record_count).toBe(0);
+  });
+
+  it("rehydrate: missing args → CLI and MCP both return ok:false", () => {
+    tp = makeTempProject();
+    const cli = cliRun(tp.paths, "rehydrate"); // no page_id or logical_key
+    const mcp = mcpRun(tp.paths, "rehydrate");
+    expect(cli.ok).toBe(false);
+    expect(mcp.ok).toBe(false);
+    expect(cli.exitCode).toBe(mcp.exitCode);
+  });
+
+  it("rehydrate: page_id not found → CLI and MCP both succeed with found:false", () => {
+    tp = makeTempProject();
+    const extra = { page_id: "abc123def456" };
+    const cli = cliRun(tp.paths, "rehydrate", extra);
+    const mcp = mcpRun(tp.paths, "rehydrate", extra);
+    expect(cli.ok).toBe(true);
+    expect(mcp.ok).toBe(true);
+    expect(cli.data).toEqual(mcp.data);
+    const cliData = cli.data as { found: boolean };
+    expect(cliData.found).toBe(false);
+  });
+
+  it("compare: missing args → CLI and MCP both return ok:false", () => {
+    tp = makeTempProject();
+    const cli = cliRun(tp.paths, "compare"); // no baseline_id or context_id
+    const mcp = mcpRun(tp.paths, "compare");
+    expect(cli.ok).toBe(false);
+    expect(mcp.ok).toBe(false);
+    expect(cli.exitCode).toBe(mcp.exitCode);
   });
 
   it("savings S0 data: savings_pct=0 in both paths", () => {

@@ -18,6 +18,32 @@ import { hashContent, GENESIS_PREV_HASH, HEX64 } from "./hash";
 import { readJsonlValues, scanTailValid } from "./jsonl";
 import { sleepSync } from "./sleep";
 
+const SHARD_COMPONENT_FALLBACK = "unknown";
+
+/**
+ * Encode untrusted session / agent identifiers into one filesystem-safe segment.
+ * Hook payloads are external input; raw ids must never be interpolated into a path
+ * because `/`, `\\`, `..`, drive prefixes, or reserved characters can escape the
+ * context-pages directory.  Base64url is deterministic, compact, and contains no
+ * path separators; very long ids fall back to a full content hash to keep path
+ * lengths bounded.
+ */
+function encodeShardComponent(raw: string): string {
+  const value = raw.length > 0 ? raw : SHARD_COMPONENT_FALLBACK;
+  const encoded = Buffer.from(value, "utf8").toString("base64url");
+  return encoded.length <= 120 ? encoded : `sha256-${hashContent(value)}`;
+}
+
+function assertUnderContextPages(pagesDir: string, candidate: string): string {
+  const resolvedRoot = path.resolve(pagesDir);
+  const resolvedCandidate = path.resolve(candidate);
+  const rel = path.relative(resolvedRoot, resolvedCandidate);
+  if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) {
+    return resolvedCandidate;
+  }
+  throw new Error("context ledger shard path escaped context-pages directory");
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -72,12 +98,11 @@ export function contextPagesDir(paths: ProjectPaths): string {
   return path.join(paths.stateDir, "context-pages");
 }
 
-/** `<contextPagesDir>/ledger-<session>-<agentOrRoot>.jsonl`. */
+/** `<contextPagesDir>/ledger-<encoded-session>-<encoded-agentOrRoot>.jsonl`. */
 export function ledgerShardPath(paths: ProjectPaths, scope: LedgerScope): string {
-  return path.join(
-    contextPagesDir(paths),
-    `ledger-${scope.session_id}-${scope.agentOrRoot}.jsonl`,
-  );
+  const pagesDir = contextPagesDir(paths);
+  const shard = `ledger-${encodeShardComponent(scope.session_id)}-${encodeShardComponent(scope.agentOrRoot)}.jsonl`;
+  return assertUnderContextPages(pagesDir, path.join(pagesDir, shard));
 }
 
 // ---------------------------------------------------------------------------
@@ -169,13 +194,17 @@ export function readShardRecords(paths: ProjectPaths, scope: LedgerScope): Ledge
   return readJsonlValues(ledgerShardPath(paths, scope), isValidLedgerRecord);
 }
 
+function readLastShardRecord(paths: ProjectPaths, scope: LedgerScope): LedgerRecord | undefined {
+  return scanTailValid(ledgerShardPath(paths, scope), isValidLedgerRecord) ?? undefined;
+}
+
 /**
  * The recordHash of the last valid record in the shard — the prevHash seed for the
  * next append. Missing / empty / no-valid-tail → GENESIS_PREV_HASH. Tail-scans so
  * N sequential appends stay O(N) total. Never throws.
  */
 export function readLastShardRecordHash(paths: ProjectPaths, scope: LedgerScope): string {
-  const last = scanTailValid(ledgerShardPath(paths, scope), isValidLedgerRecord);
+  const last = readLastShardRecord(paths, scope);
   return last ? last.recordHash : GENESIS_PREV_HASH;
 }
 
@@ -273,11 +302,13 @@ export function appendLedgerRecord(
   try {
     // Inside the lock: read the accurate tail. On timeout: use GENESIS_PREV_HASH
     // (forked prevHash is acceptable — chain is advisory, not a gate).
+    const last = acquiredLock ? readLastShardRecord(paths, scope) : undefined;
     const prevHash = acquiredLock
-      ? readLastShardRecordHash(paths, scope)
+      ? (last ? last.recordHash : GENESIS_PREV_HASH)
       : GENESIS_PREV_HASH;
+    const seq = acquiredLock ? (last ? last.seq + 1 : 0) : rec.seq;
 
-    const withPrev: Omit<LedgerRecord, "recordHash"> = { ...rec, prevHash };
+    const withPrev: Omit<LedgerRecord, "recordHash"> = { ...rec, seq, prevHash };
     const recordHash = computeLedgerRecordHash(withPrev);
     const sealed: LedgerRecord = { ...withPrev, recordHash };
 

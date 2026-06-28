@@ -57,6 +57,29 @@ const path = __importStar(require("node:path"));
 const hash_1 = require("./hash");
 const jsonl_1 = require("./jsonl");
 const sleep_1 = require("./sleep");
+const SHARD_COMPONENT_FALLBACK = "unknown";
+/**
+ * Encode untrusted session / agent identifiers into one filesystem-safe segment.
+ * Hook payloads are external input; raw ids must never be interpolated into a path
+ * because `/`, `\\`, `..`, drive prefixes, or reserved characters can escape the
+ * context-pages directory.  Base64url is deterministic, compact, and contains no
+ * path separators; very long ids fall back to a full content hash to keep path
+ * lengths bounded.
+ */
+function encodeShardComponent(raw) {
+    const value = raw.length > 0 ? raw : SHARD_COMPONENT_FALLBACK;
+    const encoded = Buffer.from(value, "utf8").toString("base64url");
+    return encoded.length <= 120 ? encoded : `sha256-${(0, hash_1.hashContent)(value)}`;
+}
+function assertUnderContextPages(pagesDir, candidate) {
+    const resolvedRoot = path.resolve(pagesDir);
+    const resolvedCandidate = path.resolve(candidate);
+    const rel = path.relative(resolvedRoot, resolvedCandidate);
+    if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) {
+        return resolvedCandidate;
+    }
+    throw new Error("context ledger shard path escaped context-pages directory");
+}
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
@@ -64,9 +87,11 @@ const sleep_1 = require("./sleep");
 function contextPagesDir(paths) {
     return path.join(paths.stateDir, "context-pages");
 }
-/** `<contextPagesDir>/ledger-<session>-<agentOrRoot>.jsonl`. */
+/** `<contextPagesDir>/ledger-<encoded-session>-<encoded-agentOrRoot>.jsonl`. */
 function ledgerShardPath(paths, scope) {
-    return path.join(contextPagesDir(paths), `ledger-${scope.session_id}-${scope.agentOrRoot}.jsonl`);
+    const pagesDir = contextPagesDir(paths);
+    const shard = `ledger-${encodeShardComponent(scope.session_id)}-${encodeShardComponent(scope.agentOrRoot)}.jsonl`;
+    return assertUnderContextPages(pagesDir, path.join(pagesDir, shard));
 }
 // ---------------------------------------------------------------------------
 // Canonical serialization + record hash (mirrors computeRecordHash in receipts.ts)
@@ -166,13 +191,16 @@ function isValidLedgerRecord(parsed) {
 function readShardRecords(paths, scope) {
     return (0, jsonl_1.readJsonlValues)(ledgerShardPath(paths, scope), isValidLedgerRecord);
 }
+function readLastShardRecord(paths, scope) {
+    return (0, jsonl_1.scanTailValid)(ledgerShardPath(paths, scope), isValidLedgerRecord) ?? undefined;
+}
 /**
  * The recordHash of the last valid record in the shard — the prevHash seed for the
  * next append. Missing / empty / no-valid-tail → GENESIS_PREV_HASH. Tail-scans so
  * N sequential appends stay O(N) total. Never throws.
  */
 function readLastShardRecordHash(paths, scope) {
-    const last = (0, jsonl_1.scanTailValid)(ledgerShardPath(paths, scope), isValidLedgerRecord);
+    const last = readLastShardRecord(paths, scope);
     return last ? last.recordHash : hash_1.GENESIS_PREV_HASH;
 }
 // ---------------------------------------------------------------------------
@@ -258,10 +286,12 @@ function appendLedgerRecord(paths, scope, rec) {
     try {
         // Inside the lock: read the accurate tail. On timeout: use GENESIS_PREV_HASH
         // (forked prevHash is acceptable — chain is advisory, not a gate).
+        const last = acquiredLock ? readLastShardRecord(paths, scope) : undefined;
         const prevHash = acquiredLock
-            ? readLastShardRecordHash(paths, scope)
+            ? (last ? last.recordHash : hash_1.GENESIS_PREV_HASH)
             : hash_1.GENESIS_PREV_HASH;
-        const withPrev = { ...rec, prevHash };
+        const seq = acquiredLock ? (last ? last.seq + 1 : 0) : rec.seq;
+        const withPrev = { ...rec, seq, prevHash };
         const recordHash = computeLedgerRecordHash(withPrev);
         const sealed = { ...withPrev, recordHash };
         // Single-syscall append — atomic for one \n-terminated line on all major FSes.
