@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs50, exportName) {
+    function addFormats(ajv, list, fs52, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs50[f]);
+        ajv.addFormat(f, fs52[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -15473,7 +15473,7 @@ var StdioServerTransport = class {
 };
 
 // src/mcp-server.ts
-var fs49 = __toESM(require("node:fs"));
+var fs51 = __toESM(require("node:fs"));
 var path55 = __toESM(require("node:path"));
 
 // src/core/paths.ts
@@ -18331,16 +18331,16 @@ var DEFAULT_SCAN_LIMITS = {
 };
 function envScanLimitOverrides() {
   const out = {};
-  const num = (v) => {
+  const num2 = (v) => {
     if (v === void 0 || v === "") return void 0;
     const n = Number(v);
     return Number.isFinite(n) && n >= 0 ? n : void 0;
   };
-  const f = num(process.env.TH_SCAN_FILE_MAX_BYTES);
+  const f = num2(process.env.TH_SCAN_FILE_MAX_BYTES);
   if (f !== void 0) out.deepInspectFileMaxBytes = f;
-  const a = num(process.env.TH_SCAN_AGGREGATE_MAX_BYTES);
+  const a = num2(process.env.TH_SCAN_AGGREGATE_MAX_BYTES);
   if (a !== void 0) out.deepInspectAggregateMaxBytes = a;
-  const w = num(process.env.TH_SCAN_WATCHDOG_MS);
+  const w = num2(process.env.TH_SCAN_WATCHDOG_MS);
   if (w !== void 0) out.watchdogMs = w;
   return out;
 }
@@ -28158,7 +28158,7 @@ ${v.missing.map((m) => `  - ${m}`).join("\n")}`
 }
 
 // src/commands/context-pages.ts
-var fs38 = __toESM(require("node:fs"));
+var fs40 = __toESM(require("node:fs"));
 var path38 = __toESM(require("node:path"));
 
 // src/core/context-page.ts
@@ -28231,6 +28231,7 @@ function verifyLedgerChain2(records) {
 }
 
 // src/core/context-telemetry.ts
+var fs37 = __toESM(require("node:fs"));
 var path36 = __toESM(require("node:path"));
 function contextPagesDir(paths) {
   return path36.join(paths.stateDir, "context-pages");
@@ -28238,9 +28239,49 @@ function contextPagesDir(paths) {
 function telemetryFilePath(paths) {
   return path36.join(contextPagesDir(paths), "telemetry.jsonl");
 }
+function transcriptActuals(transcript_path) {
+  try {
+    if (!fs37.existsSync(transcript_path)) return void 0;
+    const raw = fs37.readFileSync(transcript_path, "utf8");
+    let input_tokens = 0;
+    let output_tokens = 0;
+    let context_window;
+    let found = false;
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parsed = safeParseJson(trimmed);
+      if (typeof parsed !== "object" || parsed === null) continue;
+      const rec = parsed;
+      const usage = typeof rec["usage"] === "object" && rec["usage"] !== null ? rec["usage"] : void 0;
+      const inp = typeof rec["input_tokens"] === "number" ? rec["input_tokens"] : typeof usage?.["input_tokens"] === "number" ? usage["input_tokens"] : void 0;
+      const out = typeof rec["output_tokens"] === "number" ? rec["output_tokens"] : typeof usage?.["output_tokens"] === "number" ? usage["output_tokens"] : void 0;
+      if (inp !== void 0) {
+        input_tokens += inp;
+        found = true;
+      }
+      if (out !== void 0) {
+        output_tokens += out;
+        found = true;
+      }
+      const cw = typeof rec["context_window"] === "number" ? rec["context_window"] : typeof usage?.["context_window"] === "number" ? usage["context_window"] : void 0;
+      if (cw !== void 0 && (context_window === void 0 || cw > context_window)) {
+        context_window = cw;
+      }
+    }
+    if (!found) return void 0;
+    return {
+      input_tokens,
+      output_tokens,
+      ...context_window !== void 0 ? { context_window } : {}
+    };
+  } catch {
+    return void 0;
+  }
+}
 
 // src/core/context-equivalence.ts
-var fs37 = __toESM(require("node:fs"));
+var fs38 = __toESM(require("node:fs"));
 var path37 = __toESM(require("node:path"));
 var WORKLOAD_CATEGORIES = [
   "read",
@@ -28271,9 +28312,9 @@ function writeCorpusEntry(paths, artifact) {
   try {
     if (!isSafeSessionId(artifact.session_id)) return false;
     const dir = corpusCategoryDir(paths, artifact.workload_category);
-    fs37.mkdirSync(dir, { recursive: true });
+    fs38.mkdirSync(dir, { recursive: true });
     const file = path37.join(dir, `${artifact.session_id}.json`);
-    fs37.writeFileSync(file, JSON.stringify(artifact, null, 2), "utf8");
+    fs38.writeFileSync(file, JSON.stringify(artifact, null, 2), "utf8");
     return true;
   } catch {
     return false;
@@ -28283,8 +28324,8 @@ function readCorpusEntry(paths, category, sessionId) {
   try {
     if (!isSafeSessionId(sessionId)) return void 0;
     const file = path37.join(corpusCategoryDir(paths, category), `${sessionId}.json`);
-    if (!fs37.existsSync(file)) return void 0;
-    return JSON.parse(fs37.readFileSync(file, "utf8"));
+    if (!fs38.existsSync(file)) return void 0;
+    return JSON.parse(fs38.readFileSync(file, "utf8"));
   } catch {
     return void 0;
   }
@@ -28469,6 +28510,313 @@ function runEquivalence(baselineRun, contextRun) {
   }
 }
 
+// src/core/savings-classify.ts
+var TELEMETRY_WORKLOAD_CATEGORIES = [
+  "file-read",
+  "artifact-summary",
+  "repo-analysis",
+  "test-output",
+  "debug-output",
+  "mcp-result",
+  "rehydration",
+  "compaction"
+];
+var CATEGORY_SET = new Set(TELEMETRY_WORKLOAD_CATEGORIES);
+var FILE_READ_TOOLS = /* @__PURE__ */ new Set(["Read", "Grep", "Glob"]);
+var TEST_CMD = /\b(vitest|jest|pytest|go\s+test|cargo\s+test|npm\s+t(est)?\b)/i;
+var REPO_CMD = /\b(git|rg|grep|find|ls|tree)\b/i;
+function classify(input) {
+  if (input.op === "rehydrate" || input.full_rehydration === true) {
+    return "rehydration";
+  }
+  if (input.compaction === true) {
+    return "compaction";
+  }
+  if (typeof input.tool_type === "string" && input.tool_type.startsWith("mcp__")) {
+    return "mcp-result";
+  }
+  if (input.tool_type !== void 0 && FILE_READ_TOOLS.has(input.tool_type) || input.source_kind === "file" || input.source_kind === "range" || input.source_kind === "symbol") {
+    return "file-read";
+  }
+  if (input.command !== void 0 && TEST_CMD.test(input.command)) {
+    return "test-output";
+  }
+  if (input.command !== void 0 && REPO_CMD.test(input.command) || input.source_kind === "search") {
+    return "repo-analysis";
+  }
+  if (input.is_summary === true || input.reduction_kind === "lossy") {
+    return "artifact-summary";
+  }
+  return "debug-output";
+}
+var LEGACY_TOOL_DERIVED = /* @__PURE__ */ new Set(["suppress", "observe"]);
+function resolveCategory(rec) {
+  const wc = rec.workload_category;
+  if (typeof wc === "string" && CATEGORY_SET.has(wc)) {
+    return wc;
+  }
+  if (wc === "planning") {
+    return "debug-output";
+  }
+  const derived = classify({
+    full_rehydration: (rec.full_rehydrations ?? 0) > 0 ? void 0 : void 0,
+    // never infer rehydration from a counter
+    tool_type: rec.tool_type,
+    source_kind: rec.source_kind,
+    reduction_kind: rec.reduction_kind
+  });
+  if (typeof wc === "string" && LEGACY_TOOL_DERIVED.has(wc)) {
+    return derived;
+  }
+  const hasSignal = rec.tool_type !== void 0 || rec.source_kind !== void 0 || rec.reduction_kind === "lossy";
+  return hasSignal ? derived : void 0;
+}
+
+// src/core/savings.ts
+function num(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+function origOf(rec) {
+  return num(rec.orig_tokens);
+}
+function returnedOf(rec) {
+  if (typeof rec.returned_tokens === "number" && Number.isFinite(rec.returned_tokens)) {
+    return rec.returned_tokens;
+  }
+  return origOf(rec);
+}
+function isRehydration(rec) {
+  return rec.rehydrated_full_tokens !== null && rec.rehydrated_full_tokens !== void 0;
+}
+function buildCycles(records) {
+  const keyed = /* @__PURE__ */ new Map();
+  const singletons = [];
+  const capsule = [];
+  for (const rec of records) {
+    const pageId = typeof rec.page_id === "string" && rec.page_id.length > 0 ? rec.page_id : void 0;
+    if (pageId === void 0 && isRehydration(rec)) {
+      capsule.push(rec);
+      continue;
+    }
+    const cycle = pageId === void 0 ? { base: [], rehydration: [] } : (() => {
+      const key = `${pageId}${num(rec.epoch)}`;
+      let c = keyed.get(key);
+      if (c === void 0) {
+        c = { base: [], rehydration: [] };
+        keyed.set(key, c);
+      }
+      return c;
+    })();
+    if (isRehydration(rec)) cycle.rehydration.push(rec);
+    else cycle.base.push(rec);
+    if (pageId === void 0) singletons.push(cycle);
+  }
+  return { cycles: [...keyed.values(), ...singletons], capsule };
+}
+function dedupPayback(rehydration) {
+  const byHash = /* @__PURE__ */ new Map();
+  let anonymous = 0;
+  for (const rec of rehydration) {
+    const tokens = num(rec.rehydrated_full_tokens);
+    const hash = rec.content_hash;
+    if (typeof hash === "string" && hash.length > 0) {
+      byHash.set(hash, Math.max(byHash.get(hash) ?? 0, tokens));
+    } else {
+      anonymous += tokens;
+    }
+  }
+  let total = anonymous;
+  for (const v of byHash.values()) total += v;
+  return total;
+}
+function computeSavings(records, opts) {
+  const sessionId = opts?.session_id;
+  const suppressMode = opts?.suppressMode ?? false;
+  const scoped = sessionId !== void 0 ? records.filter((r) => r.session_id === sessionId) : records.slice();
+  let baseline = 0;
+  let actual = 0;
+  for (const rec of scoped) {
+    baseline += origOf(rec);
+    actual += returnedOf(rec);
+  }
+  const buckets = /* @__PURE__ */ new Map();
+  for (const c of TELEMETRY_WORKLOAD_CATEGORIES) buckets.set(c, 0);
+  let uncategorized = 0;
+  const { cycles, capsule } = buildCycles(scoped);
+  let avoided = 0;
+  let paybackTotal = 0;
+  let creditedTotal = 0;
+  for (const cycle of cycles) {
+    let credited = 0;
+    for (const rec of cycle.base) {
+      const contrib = Math.max(0, origOf(rec) - returnedOf(rec));
+      credited += contrib;
+      const cat = resolveCategory(rec);
+      if (cat === void 0) uncategorized += contrib;
+      else buckets.set(cat, (buckets.get(cat) ?? 0) + contrib);
+    }
+    creditedTotal += credited;
+    const payback = cycle.rehydration.length > 0 ? Math.min(dedupPayback(cycle.rehydration), credited) : 0;
+    avoided += credited - payback;
+    paybackTotal += payback;
+  }
+  const capsulePayback = dedupPayback(capsule);
+  const appliedCapsule = Math.min(capsulePayback, avoided);
+  avoided -= appliedCapsule;
+  paybackTotal += appliedCapsule;
+  const anyRehydration = capsule.length > 0 || cycles.some((c) => c.rehydration.length > 0);
+  const paybackMeasured = anyRehydration || creditedTotal === 0;
+  buckets.set("rehydration", (buckets.get("rehydration") ?? 0) - paybackTotal);
+  const categories = TELEMETRY_WORKLOAD_CATEGORIES.map((category) => ({
+    category,
+    avoided_tokens: buckets.get(category) ?? 0,
+    label: category === "rehydration" && !paybackMeasured ? "incomplete" : "measured"
+  }));
+  const saved_pct = baseline > 0 ? Math.round(avoided / baseline * 1e4) / 100 : 0;
+  const headline_label = !suppressMode ? "measured \xB7 observe-only (0%)" : !paybackMeasured ? "measured \xB7 pre-rehydration upper bound" : "measured";
+  return {
+    baseline_tokens: baseline,
+    actual_tokens: actual,
+    avoided_tokens: avoided,
+    saved_pct,
+    payback_tokens: paybackTotal,
+    payback_measured: paybackMeasured,
+    cache_read_tokens: 0,
+    categories,
+    uncategorized_tokens: uncategorized,
+    avoided_input_tokens: avoided,
+    record_count: scoped.length,
+    ...sessionId !== void 0 ? { session_id: sessionId } : {},
+    suppress_mode: suppressMode,
+    headline_label
+  };
+}
+
+// src/core/pricing.ts
+var fs39 = __toESM(require("node:fs"));
+
+// src/core/pricing-snapshot.json
+var pricing_snapshot_default = {
+  snapshot_date: "2026-06-28",
+  models: {
+    "claude-opus-4-8": {
+      input: 15,
+      output: 75,
+      cache_read: 1.5
+    },
+    "claude-sonnet-4-6": {
+      input: 3,
+      output: 15,
+      cache_read: 0.3
+    },
+    "claude-haiku-4-5": {
+      input: 0.8,
+      output: 4,
+      cache_read: 0.08
+    }
+  }
+};
+
+// src/core/pricing.ts
+function loadPricingSnapshot() {
+  return pricing_snapshot_default;
+}
+function priceAvoided(avoidedInputTokens, modelId, snapshot = loadPricingSnapshot()) {
+  const snapshotDate = snapshot.snapshot_date;
+  if (!modelId) {
+    return { cost_usd: null, snapshot_date: snapshotDate, model_id: null, label: "[unavailable]" };
+  }
+  const rates = snapshot.models[modelId];
+  if (!rates) {
+    return { cost_usd: null, snapshot_date: snapshotDate, model_id: null, label: "[unavailable]" };
+  }
+  const cost_usd = avoidedInputTokens * (rates.input / 1e6);
+  return {
+    cost_usd,
+    snapshot_date: snapshotDate,
+    model_id: modelId,
+    label: `[estimated \u2022 snapshot ${snapshotDate}]`
+  };
+}
+function parseTranscriptModelId(transcriptPath) {
+  try {
+    if (!fs39.existsSync(transcriptPath)) return void 0;
+    const raw = fs39.readFileSync(transcriptPath, "utf8");
+    const counts = /* @__PURE__ */ new Map();
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parsed = safeParseJson(trimmed);
+      if (typeof parsed !== "object" || parsed === null) continue;
+      const rec = parsed;
+      let modelId;
+      if (typeof rec["model"] === "string" && rec["model"]) {
+        modelId = rec["model"];
+      }
+      if (!modelId) {
+        const msg = rec["message"];
+        if (typeof msg === "object" && msg !== null) {
+          const msgRec = msg;
+          if (typeof msgRec["model"] === "string" && msgRec["model"]) {
+            modelId = msgRec["model"];
+          }
+        }
+      }
+      if (!modelId) {
+        const usage = rec["usage"];
+        if (typeof usage === "object" && usage !== null) {
+          const usageRec = usage;
+          if (typeof usageRec["model"] === "string" && usageRec["model"]) {
+            modelId = usageRec["model"];
+          }
+        }
+      }
+      if (modelId) {
+        counts.set(modelId, (counts.get(modelId) ?? 0) + 1);
+      }
+    }
+    if (counts.size === 0) return void 0;
+    let best;
+    let bestCount = 0;
+    for (const [id, count] of counts) {
+      if (count > bestCount) {
+        best = id;
+        bestCount = count;
+      }
+    }
+    return best;
+  } catch {
+    return void 0;
+  }
+}
+
+// src/core/savings-render.ts
+function fmtPct(pct) {
+  return Number.isInteger(pct) ? `${pct}` : `${pct}`;
+}
+function renderDetail(result, costLabel) {
+  const lines = [];
+  lines.push(`TwinHarness savings \u2014 ${result.headline_label}`);
+  lines.push(`  saved:      ${fmtPct(result.saved_pct)}%  [${result.payback_measured ? "measured" : "upper bound"}]`);
+  lines.push(`  baseline:   ${result.baseline_tokens} tok`);
+  lines.push(`  actual:     ${result.actual_tokens} tok`);
+  lines.push(`  avoided:    ${result.avoided_tokens} tok`);
+  lines.push(
+    `  payback:    ${result.payback_measured ? `${result.payback_tokens} tok [measured]` : "[unavailable]"}`
+  );
+  lines.push(`  mode:       ${result.suppress_mode ? "suppress (active)" : "observe-only (S0)"}`);
+  lines.push("  categories:");
+  for (const cat of result.categories) {
+    lines.push(`    ${cat.category.padEnd(18)} ${cat.avoided_tokens} tok  [${cat.label}]`);
+  }
+  if (result.uncategorized_tokens > 0) {
+    lines.push(`    ${"uncategorized".padEnd(18)} ${result.uncategorized_tokens} tok  [incomplete]`);
+  }
+  lines.push(`  cache-read: ${result.cache_read_tokens} tok  [excluded \xB7 separate]`);
+  lines.push(`  cost:       ${costLabel ?? "[unavailable]"}`);
+  return lines.join("\n");
+}
+
 // src/commands/context-pages.ts
 var ALL_OPS = /* @__PURE__ */ new Set([
   // S0 (CLI + MCP)
@@ -28476,6 +28824,7 @@ var ALL_OPS = /* @__PURE__ */ new Set([
   "residency",
   "telemetry",
   "savings",
+  "savings-detail",
   // S1+ (CLI + MCP)
   "verify",
   "rehydrate",
@@ -28497,8 +28846,8 @@ function isTelemetryRec(v) {
 }
 function listShardFiles(pagesRoot) {
   try {
-    if (!fs38.existsSync(pagesRoot)) return [];
-    return fs38.readdirSync(pagesRoot).filter((name) => name.startsWith("ledger-") && name.endsWith(".jsonl")).map((name) => path38.join(pagesRoot, name));
+    if (!fs40.existsSync(pagesRoot)) return [];
+    return fs40.readdirSync(pagesRoot).filter((name) => name.startsWith("ledger-") && name.endsWith(".jsonl")).map((name) => path38.join(pagesRoot, name));
   } catch {
     return [];
   }
@@ -28584,8 +28933,10 @@ function handleTelemetry(args, paths) {
   ].join("\n");
   return success({ data: { count: tail.length, total: all.length, records: tail }, human });
 }
-function handleSavings(_args, paths) {
+function handleSavings(args, paths) {
   const records = readAllTelemetryRecords(paths);
+  const session_id = typeof args.session_id === "string" ? args.session_id : void 0;
+  const suppressMode = process.env.TH_EXACT_SUPPRESS === "1";
   let origTokens = 0;
   let returnedTokens = 0;
   let deltaTokens = 0;
@@ -28597,8 +28948,9 @@ function handleSavings(_args, paths) {
     if (r.dup_avoided) dupAvoidedCount++;
   }
   const savingsPct = origTokens > 0 ? Math.round((origTokens - returnedTokens) / origTokens * 1e4) / 100 : 0;
+  const result = computeSavings(records, { session_id, suppressMode });
   const human = [
-    `Savings: ${savingsPct}% (S0 target = 0%)`,
+    `Savings: ${result.saved_pct}% \u2014 ${result.headline_label}`,
     `  Original tokens : ${origTokens}`,
     `  Returned tokens : ${returnedTokens}`,
     `  Delta tokens    : ${deltaTokens}`,
@@ -28607,12 +28959,66 @@ function handleSavings(_args, paths) {
   ].join("\n");
   return success({
     data: {
+      // Deprecated-in-place (I3/M6 — do not rename; old all-records/no-payback semantics).
       savings_pct: savingsPct,
+      // New session-scoped savings fields (AC-22, AC-26).
+      saved_pct: result.saved_pct,
       orig_tokens: origTokens,
       returned_tokens: returnedTokens,
       delta_tokens: deltaTokens,
       dup_avoided_count: dupAvoidedCount,
-      record_count: records.length
+      record_count: records.length,
+      savings: result
+    },
+    human
+  });
+}
+function handleSavingsDetail(args, paths) {
+  const records = readAllTelemetryRecords(paths);
+  const session_id = typeof args.session_id === "string" ? args.session_id : void 0;
+  const suppressMode = process.env.TH_EXACT_SUPPRESS === "1";
+  const transcriptPath = typeof args.transcript_path === "string" ? args.transcript_path : void 0;
+  const result = computeSavings(records, { session_id, suppressMode });
+  const actuals = transcriptPath !== void 0 ? transcriptActuals(transcriptPath) : void 0;
+  const modelId = transcriptPath !== void 0 ? parseTranscriptModelId(transcriptPath) : void 0;
+  const pricing = priceAvoided(result.avoided_input_tokens, modelId);
+  const cacheLabel = transcriptPath !== void 0 ? "[estimated]" : "[unavailable]";
+  let origTokens = 0;
+  let returnedTokens = 0;
+  for (const r of records) {
+    origTokens += r.orig_tokens ?? 0;
+    returnedTokens += r.returned_tokens ?? r.orig_tokens ?? 0;
+  }
+  const savingsPct = origTokens > 0 ? Math.round((origTokens - returnedTokens) / origTokens * 1e4) / 100 : 0;
+  const human = [
+    renderDetail(result, pricing.label),
+    `  whole-window:   ${actuals !== void 0 ? `input=${actuals.input_tokens} tok, output=${actuals.output_tokens} tok` + (actuals.context_window !== void 0 ? `, window=${actuals.context_window}` : "") + " [estimated]" : "[unavailable]"}`,
+    `  provider-cache: ${cacheLabel} (separate from dedup savings)`,
+    `  cost:           ${pricing.label}${pricing.cost_usd !== null ? ` ($${pricing.cost_usd.toFixed(4)} USD)` : ""}`
+  ].join("\n");
+  return success({
+    data: {
+      // Deprecated-in-place (I3/M6 — do not rename; old all-records/no-payback semantics).
+      savings_pct: savingsPct,
+      // New session-scoped savings fields (AC-22, AC-26).
+      saved_pct: result.saved_pct,
+      orig_tokens: origTokens,
+      returned_tokens: returnedTokens,
+      record_count: records.length,
+      savings: result,
+      // Whole-window estimate (transcript-derived, labeled [estimated]/[unavailable]).
+      whole_window: actuals !== void 0 ? {
+        input_tokens: actuals.input_tokens,
+        output_tokens: actuals.output_tokens,
+        ...actuals.context_window !== void 0 ? { context_window: actuals.context_window } : {},
+        label: "[estimated]"
+      } : { label: "[unavailable]" },
+      // USD cost estimate (pricing snapshot, separately labeled).
+      cost_usd: pricing.cost_usd,
+      cost_label: pricing.label,
+      model_id: pricing.model_id,
+      // Provider prompt-cache line (AC-13): separate from dedup savings.
+      cache_label: cacheLabel
     },
     human
   });
@@ -28814,28 +29220,28 @@ function handleGc(args, paths) {
   let removedCount = 0;
   let bytesFreed = 0;
   try {
-    if (!fs38.existsSync(objectsDir)) {
+    if (!fs40.existsSync(objectsDir)) {
       return success({
         data: { removed_count: 0, bytes_freed: 0, age_days: ageDays },
         human: `GC: objects directory absent \u2014 nothing to collect (${ageDays}d threshold).`
       });
     }
-    for (const hh of fs38.readdirSync(objectsDir)) {
+    for (const hh of fs40.readdirSync(objectsDir)) {
       const hhDir = path38.join(objectsDir, hh);
       let stat;
       try {
-        stat = fs38.statSync(hhDir);
+        stat = fs40.statSync(hhDir);
       } catch {
         continue;
       }
       if (!stat.isDirectory()) continue;
-      for (const hash of fs38.readdirSync(hhDir)) {
+      for (const hash of fs40.readdirSync(hhDir)) {
         const objPath = path38.join(hhDir, hash);
         try {
-          const objStat = fs38.statSync(objPath);
+          const objStat = fs40.statSync(objPath);
           if (objStat.isFile() && objStat.mtimeMs < cutoffMs) {
             bytesFreed += objStat.size;
-            fs38.unlinkSync(objPath);
+            fs40.unlinkSync(objPath);
             removedCount++;
           }
         } catch {
@@ -28856,13 +29262,13 @@ function handleGc(args, paths) {
 function handlePurge(_args, paths) {
   const pagesRoot = contextPagesRoot(paths);
   try {
-    if (!fs38.existsSync(pagesRoot)) {
+    if (!fs40.existsSync(pagesRoot)) {
       return success({
         data: { purged: false, pages_root: pagesRoot, note: "already_absent" },
         human: `Purge: context-pages directory not found \u2014 nothing to remove (${pagesRoot}).`
       });
     }
-    fs38.rmSync(pagesRoot, { recursive: true, force: true });
+    fs40.rmSync(pagesRoot, { recursive: true, force: true });
     return success({
       data: { purged: true, pages_root: pagesRoot },
       human: `Purge: removed all context-pages data at ${pagesRoot}.`
@@ -28880,6 +29286,7 @@ var HANDLERS = {
   residency: handleResidency,
   telemetry: handleTelemetry,
   savings: handleSavings,
+  "savings-detail": handleSavingsDetail,
   // S1+ (CLI + MCP)
   verify: handleVerify,
   rehydrate: handleRehydrate,
@@ -28984,7 +29391,7 @@ function runBudgetCheck(paths, opts = {}) {
 }
 
 // src/commands/handoff.ts
-var fs39 = __toESM(require("node:fs"));
+var fs41 = __toESM(require("node:fs"));
 var path39 = __toESM(require("node:path"));
 function handoffPath(paths) {
   return path39.join(paths.stateDir, "HANDOFF.md");
@@ -29055,7 +29462,7 @@ function runHandoffWrite(paths) {
     HANDOFF_STATE_CLOSE,
     ""
   ].join("\n");
-  fs39.mkdirSync(paths.stateDir, { recursive: true });
+  fs41.mkdirSync(paths.stateDir, { recursive: true });
   atomicWriteFile(handoffPath(paths), md, { root: paths.root });
   const relPath2 = path39.relative(paths.root, handoffPath(paths)).split(path39.sep).join("/");
   structuredLog({ cmd: "handoff write", path: relPath2, slices: slices.length, artifacts: s.approved_artifacts.length });
@@ -29082,7 +29489,7 @@ function runHandoffWrite(paths) {
 var path41 = __toESM(require("node:path"));
 
 // src/commands/artifact.ts
-var fs40 = __toESM(require("node:fs"));
+var fs42 = __toESM(require("node:fs"));
 var path40 = __toESM(require("node:path"));
 function toRelKey(root, file) {
   const abs = path40.resolve(root, file);
@@ -29100,10 +29507,10 @@ function runArtifactRegisterLocked(paths, file, version2) {
   if (abs === null) {
     return failure({ human: `Path outside project root: ${file}`, data: { error: "path_outside_root", file } });
   }
-  if (!fs40.existsSync(abs)) {
+  if (!fs42.existsSync(abs)) {
     return failure({ human: `File not found: ${file}`, data: { error: "file_not_found", file } });
   }
-  const stat = fs40.statSync(abs);
+  const stat = fs42.statSync(abs);
   if (!stat.isFile() && !stat.isDirectory()) {
     return failure({ human: `Not a file or directory: ${file}`, data: { error: "not_a_file_or_dir", file } });
   }
@@ -29132,7 +29539,7 @@ ${formatIssues(r.issues)}`,
   let summaryWarning = null;
   if (stat.isFile() && /\.(md|markdown)$/i.test(relKey)) {
     try {
-      const { summary } = extractSummary(fs40.readFileSync(abs, "utf8"));
+      const { summary } = extractSummary(fs42.readFileSync(abs, "utf8"));
       if (summary === null) {
         summaryWarning = `no \`## Summary\` block \u2014 \`th context pack\` will fall back to the file head; add a Summary block to keep the handoff tight.`;
       }
@@ -29218,14 +29625,14 @@ function runArtifactSection(paths, opts = {}) {
     structuredLog({ cmd: "artifact section", error: "path_outside_root", file: opts.file });
     return failure({ human: `Path outside project root: ${opts.file}`, data: { error: "path_outside_root", file: opts.file } });
   }
-  if (!fs40.existsSync(abs) || !fs40.statSync(abs).isFile()) {
+  if (!fs42.existsSync(abs) || !fs42.statSync(abs).isFile()) {
     structuredLog({ cmd: "artifact section", error: "file_not_found", file: opts.file });
     return failure({ human: `File not found: ${opts.file}`, data: { error: "file_not_found", file: opts.file } });
   }
   const relKey = toRelKey(paths.root, opts.file);
   let content;
   try {
-    content = fs40.readFileSync(abs, "utf8");
+    content = fs42.readFileSync(abs, "utf8");
   } catch {
     structuredLog({ cmd: "artifact section", error: "read_failed", file: relKey });
     return failure({ human: `Could not read ${relKey}`, data: { error: "read_failed", file: relKey } });
@@ -29751,7 +30158,7 @@ function runGroundingCheck(paths, _opts = {}) {
 }
 
 // src/commands/decision.ts
-var fs41 = __toESM(require("node:fs"));
+var fs43 = __toESM(require("node:fs"));
 var path48 = __toESM(require("node:path"));
 
 // src/core/decision-key.ts
@@ -29813,12 +30220,12 @@ function runDecisionDetect(paths, _opts = {}) {
   const candidates = [];
   const adrDir = path48.join(paths.docsDir, "05-adrs");
   try {
-    const entries = fs41.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
+    const entries = fs43.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
     for (const f of entries) {
       const rel = path48.posix.join("docs/05-adrs", f);
       let title = f;
       try {
-        const heading = firstHeading(fs41.readFileSync(path48.join(adrDir, f), "utf8"));
+        const heading = firstHeading(fs43.readFileSync(path48.join(adrDir, f), "utf8"));
         if (heading) title = heading;
       } catch {
       }
@@ -29827,7 +30234,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const driftBody = fs41.readFileSync(paths.driftLog, "utf8");
+    const driftBody = fs43.readFileSync(paths.driftLog, "utf8");
     const seen = /* @__PURE__ */ new Set();
     for (const line of driftBody.split(/\r?\n/)) {
       const m = /^##\s+(DRIFT-\d+)\b(.*)$/.exec(line);
@@ -29846,7 +30253,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const scopeBody = fs41.readFileSync(path48.join(paths.docsDir, "02-scope.md"), "utf8");
+    const scopeBody = fs43.readFileSync(path48.join(paths.docsDir, "02-scope.md"), "utf8");
     if (/(^##\s+Changes\b)|(^\s*(ADDED|CHANGED):)/m.test(scopeBody)) {
       candidates.push({
         title: "Scope signal: a post-requirements scope change is recorded",
@@ -29961,7 +30368,7 @@ function sealWarningData(events) {
 }
 
 // src/commands/template.ts
-var fs42 = __toESM(require("node:fs"));
+var fs44 = __toESM(require("node:fs"));
 var path49 = __toESM(require("node:path"));
 var TEMPLATE_EXT = ".md";
 var PROJECT_TEMPLATE_REL = path49.join(".twinharness", "templates");
@@ -29987,8 +30394,8 @@ function resolve19(name, projectRoot, plugin) {
     [pluginPath, "plugin-bundled"]
   ]) {
     try {
-      const st = fs42.statSync(abs);
-      if (st.isFile()) return { path: abs, content: fs42.readFileSync(abs, "utf8"), source };
+      const st = fs44.statSync(abs);
+      if (st.isFile()) return { path: abs, content: fs44.readFileSync(abs, "utf8"), source };
     } catch {
     }
   }
@@ -30023,10 +30430,10 @@ function runTemplateGet(paths, name) {
   });
 }
 function listTemplateDir(dir) {
-  if (!fs42.existsSync(dir)) return [];
+  if (!fs44.existsSync(dir)) return [];
   try {
-    if (!fs42.statSync(dir).isDirectory()) return [];
-    return fs42.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(TEMPLATE_EXT)).map((e) => e.name);
+    if (!fs44.statSync(dir).isDirectory()) return [];
+    return fs44.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(TEMPLATE_EXT)).map((e) => e.name);
   } catch {
     return [];
   }
@@ -30131,7 +30538,7 @@ function runArtifactLeases(paths) {
 }
 
 // src/core/collab.ts
-var fs43 = __toESM(require("node:fs"));
+var fs45 = __toESM(require("node:fs"));
 var path50 = __toESM(require("node:path"));
 function validatePathSegment(segment, label) {
   if (path50.isAbsolute(segment)) {
@@ -30162,9 +30569,9 @@ function writeFragment(paths, input) {
   validatePathSegment(input.name, "name");
   const dir = collabDir(paths, input.stage, input.round);
   const file = path50.join(dir, input.name);
-  fs43.mkdirSync(dir, { recursive: true });
+  fs45.mkdirSync(dir, { recursive: true });
   try {
-    fs43.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
+    fs45.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
   } catch (e) {
     if (e.code === "EEXIST") throw new FragmentExistsError(file);
     throw e;
@@ -30175,8 +30582,8 @@ function listFragments(paths, stage, round) {
   const out = [];
   const readRound = (r) => {
     const dir = collabDir(paths, stage, r);
-    if (!fs43.existsSync(dir) || !fs43.statSync(dir).isDirectory()) return;
-    const names = fs43.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
+    if (!fs45.existsSync(dir) || !fs45.statSync(dir).isDirectory()) return;
+    const names = fs45.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
     for (const name of names) {
       out.push({ stage, round: r, name, path: path50.join(dir, name) });
     }
@@ -30186,8 +30593,8 @@ function listFragments(paths, stage, round) {
     return out;
   }
   const stageDir = collabDir(paths, stage);
-  if (!fs43.existsSync(stageDir) || !fs43.statSync(stageDir).isDirectory()) return out;
-  const rounds = fs43.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  if (!fs45.existsSync(stageDir) || !fs45.statSync(stageDir).isDirectory()) return out;
+  const rounds = fs45.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
   for (const r of rounds) readRound(r);
   return out;
 }
@@ -30196,14 +30603,14 @@ function mergeFragments(paths, stage, round) {
   const fragments = listFragments(paths, stage, round);
   const unanchored = [];
   for (const f of fragments) {
-    const content = fs43.readFileSync(f.path, "utf8");
+    const content = fs45.readFileSync(f.path, "utf8");
     if (extractReqIds(content).length === 0) unanchored.push(f.name);
   }
   if (unanchored.length > 0) {
     return { ok: false, merged: "", fragments, unanchored };
   }
   const parts = fragments.map((f) => {
-    const content = fs43.readFileSync(f.path, "utf8");
+    const content = fs45.readFileSync(f.path, "utf8");
     return content.endsWith("\n") ? content : `${content}
 `;
   });
@@ -30316,7 +30723,7 @@ function runCollabMerge(paths, opts) {
 }
 
 // src/commands/debate.ts
-var fs44 = __toESM(require("node:fs"));
+var fs46 = __toESM(require("node:fs"));
 var path51 = __toESM(require("node:path"));
 
 // src/core/debate-log.ts
@@ -30389,18 +30796,18 @@ function debateLogPath(paths) {
 }
 function readDebateLog(paths) {
   const file = debateLogPath(paths);
-  if (!fs44.existsSync(file)) {
+  if (!fs46.existsSync(file)) {
     atomicWriteFile(file, DEBATE_LOG_HEADER, { root: paths.root });
     return DEBATE_LOG_HEADER;
   }
-  return fs44.readFileSync(file, "utf8");
+  return fs46.readFileSync(file, "utf8");
 }
 function appendDebateLog(paths, block) {
   const file = debateLogPath(paths);
   readDebateLog(paths);
   assertGovernedWriteSurface(paths.root, file);
   const sep26 = endsWithNewline(file) ? "" : "\n";
-  fs44.appendFileSync(file, `${sep26}${block}`, "utf8");
+  fs46.appendFileSync(file, `${sep26}${block}`, "utf8");
 }
 function runDebateAdd(paths, opts) {
   const locked = assertFeatureUnlocked(paths, "debate");
@@ -30463,7 +30870,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs44.existsSync(file) ? fs44.readFileSync(file, "utf8") : "";
+  const text = fs46.existsSync(file) ? fs46.readFileSync(file, "utf8") : "";
   const entries = sortById(effectiveEntries(parseDebateEntries(text)));
   const openBlocking = r.state.debate_open_blocking ?? 0;
   const human = entries.length ? entries.map((e) => `${e.id}  (${e.topic})  ${e.status}`).join("\n") : "(no debate entries)";
@@ -30499,7 +30906,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs44.existsSync(file) ? fs44.readFileSync(file, "utf8") : "";
+  const text = fs46.existsSync(file) ? fs46.readFileSync(file, "utf8") : "";
   const entries = parseDebateEntries(text);
   const entry = entries.find((e) => e.id === id);
   if (!entry) {
@@ -30545,7 +30952,7 @@ ${formatIssues(r.issues)}`,
 }
 
 // src/commands/init.ts
-var fs45 = __toESM(require("node:fs"));
+var fs47 = __toESM(require("node:fs"));
 var DRIFT_LOG_HEADER2 = `# Drift Log
 
 Append-only record of implementation discoveries (spec \xA710). Each entry records the
@@ -30580,11 +30987,11 @@ function runInit(paths, opts) {
   const created = [];
   const skipped = [];
   const maxTokens = opts.maxTokens !== void 0 && Number.isFinite(opts.maxTokens) && opts.maxTokens > 0 ? kToTokens(opts.maxTokens) : void 0;
-  if (!fs45.existsSync(paths.docsDir)) {
-    fs45.mkdirSync(paths.docsDir, { recursive: true });
+  if (!fs47.existsSync(paths.docsDir)) {
+    fs47.mkdirSync(paths.docsDir, { recursive: true });
     created.push("docs/");
   }
-  fs45.mkdirSync(paths.stateDir, { recursive: true });
+  fs47.mkdirSync(paths.stateDir, { recursive: true });
   const existing = readState(paths);
   if (existing.exists && !opts.force) {
     if (maxTokens !== void 0 && existing.state) {
@@ -30610,7 +31017,7 @@ ${formatIssues(validation.issues)}`,
     writeState(paths, state);
     created.push(".twinharness/state.json");
   }
-  if (!fs45.existsSync(paths.driftLog)) {
+  if (!fs47.existsSync(paths.driftLog)) {
     atomicWriteFile(paths.driftLog, DRIFT_LOG_HEADER2, { root: paths.root });
     created.push("drift-log.md");
   } else {
@@ -30901,7 +31308,7 @@ function runStageCurrent(paths) {
 }
 
 // src/commands/doctor.ts
-var fs46 = __toESM(require("node:fs"));
+var fs48 = __toESM(require("node:fs"));
 var path53 = __toESM(require("node:path"));
 var DOCTOR_STRICT_KEY_ALLOWLIST = /* @__PURE__ */ new Set([]);
 function pluginRoot2() {
@@ -30917,7 +31324,7 @@ function packagingCheck(root, files) {
     const abs = path53.join(root, entry);
     let st;
     try {
-      st = fs46.statSync(abs);
+      st = fs48.statSync(abs);
     } catch {
       missing.push(entry);
       continue;
@@ -30925,7 +31332,7 @@ function packagingCheck(root, files) {
     if (st.isDirectory()) {
       let n = 0;
       try {
-        n = fs46.readdirSync(abs).length;
+        n = fs48.readdirSync(abs).length;
       } catch {
       }
       counts.push(`${entry}/ (${n})`);
@@ -30950,9 +31357,9 @@ function templateShadowCheck(root, pluginDir) {
   const projectDir = path53.join(root, ".twinharness", "templates");
   const mdFiles = (dir) => {
     try {
-      if (!fs46.statSync(dir).isDirectory()) return /* @__PURE__ */ new Set();
+      if (!fs48.statSync(dir).isDirectory()) return /* @__PURE__ */ new Set();
       return new Set(
-        fs46.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => e.name)
+        fs48.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => e.name)
       );
     } catch {
       return /* @__PURE__ */ new Set();
@@ -30974,7 +31381,7 @@ function templateShadowCheck(root, pluginDir) {
   };
 }
 function ledgerChecks(paths, opts) {
-  if (!fs46.existsSync(ledgerPath(paths))) return [];
+  if (!fs48.existsSync(ledgerPath(paths))) return [];
   const ledgerEntries = readLedger(paths);
   const ledgerCount = ledgerEntries.length;
   const anchors = ledgerEntries.filter((e) => e.event === "high-water").length;
@@ -31021,13 +31428,13 @@ function runDoctor(paths, opts = {}) {
   const distCli = path53.join(root, "dist", "cli.js");
   checks.push({
     name: "plugin cli",
-    status: fs46.existsSync(distCli) ? "ok" : "warn",
-    detail: fs46.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary"
+    status: fs48.existsSync(distCli) ? "ok" : "warn",
+    detail: fs48.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary"
   });
   let version2 = "unknown";
   let pkgFiles = [];
   try {
-    const pkg = JSON.parse(fs46.readFileSync(path53.join(root, "package.json"), "utf8"));
+    const pkg = JSON.parse(fs48.readFileSync(path53.join(root, "package.json"), "utf8"));
     if (typeof pkg.version === "string") version2 = pkg.version;
     if (Array.isArray(pkg.files)) pkgFiles = pkg.files.filter((f) => typeof f === "string");
   } catch {
@@ -31071,10 +31478,10 @@ function runDoctor(paths, opts = {}) {
       detail: `mode: ${writeMode} \u2014 GUARDRAIL for a compliant agent, NOT a security sandbox. The Bash heuristic is conservative and fail-open (unparsed here-docs/subshells/variable indirection and program-mediated writes like \`python -c\`/\`node -e\` bypass it). Do not run TwinHarness against untrusted repos and review \`th verify list\` before \`th verify run\`.`
     });
     const lockDir = path53.join(paths.stateDir, ".state.lock");
-    if (fs46.existsSync(lockDir)) {
+    if (fs48.existsSync(lockDir)) {
       let age = 0;
       try {
-        age = Date.now() - fs46.statSync(lockDir).mtimeMs;
+        age = Date.now() - fs48.statSync(lockDir).mtimeMs;
       } catch {
       }
       checks.push({
@@ -31203,7 +31610,7 @@ function runDoctor(paths, opts = {}) {
 }
 
 // src/commands/scorecard.ts
-var fs47 = __toESM(require("node:fs"));
+var fs49 = __toESM(require("node:fs"));
 function summarizeRouting(paths) {
   const models = {};
   let events = 0;
@@ -31293,8 +31700,8 @@ function runScorecard(paths, opts) {
   const suiteFailures = report ? report.results.filter((x) => !x.ok).length : 0;
   let driftEntries = 0;
   try {
-    if (fs47.existsSync(paths.driftLog)) {
-      driftEntries = parseDriftEntries(fs47.readFileSync(paths.driftLog, "utf8")).length;
+    if (fs49.existsSync(paths.driftLog)) {
+      driftEntries = parseDriftEntries(fs49.readFileSync(paths.driftLog, "utf8")).length;
     }
   } catch {
   }
@@ -31358,7 +31765,7 @@ function renderScorecard(d) {
 }
 
 // src/commands/slices.ts
-var fs48 = __toESM(require("node:fs"));
+var fs50 = __toESM(require("node:fs"));
 var path54 = __toESM(require("node:path"));
 function parseComponentTokens(raw) {
   const quoted = [];
@@ -31411,14 +31818,14 @@ function runSlicesSync(paths, opts = {}) {
 }
 function runSlicesSyncLocked(paths, opts = {}) {
   const planAbs = path54.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
-  if (!fs48.existsSync(planAbs) || !fs48.statSync(planAbs).isFile()) {
+  if (!fs50.existsSync(planAbs) || !fs50.statSync(planAbs).isFile()) {
     const rel = path54.relative(paths.root, planAbs).split(path54.sep).join("/");
     return failure({
       human: `Plan file not found: ${rel}. Provide the path with --plan or author the implementation plan first.`,
       data: { error: "plan_file_not_found", planFile: rel }
     });
   }
-  const planContent = fs48.readFileSync(planAbs, "utf8");
+  const planContent = fs50.readFileSync(planAbs, "utf8");
   const planSlices = parsePlanSlices(planContent);
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
@@ -32934,18 +33341,18 @@ var TOOL_DEFS = [
   // Human-only ops (baseline/gc/purge) are excluded from this enum and listed in MCP_EXCLUDED.
   {
     name: "th_context",
-    description: "Inspect the context-pages store. `operation` selects the view: page-status (shard inventory), residency (delivered pages), telemetry (raw telemetry records), savings (dedup savings \u2014 0% at S0), verify (ledger chain integrity audit), rehydrate (fetch page from cold store; GC-evicted \u2192 re-derive FULL), compare (equivalence harness on two corpus RunArtifacts). Optional `session_id` filters residency; `limit` caps telemetry (default 50); `page_id`/`logical_key` for rehydrate; `baseline_id`/`context_id`/`category` for compare. Read-only (human-only ops gc/baseline/purge are CLI-only).",
+    description: "Inspect the context-pages store. `operation` selects the view: page-status (shard inventory), residency (delivered pages), telemetry (raw telemetry records), savings (dedup savings \u2014 0% at S0), savings-detail (savings + whole-window estimate + per-category breakdown + USD cost), verify (ledger chain integrity audit), rehydrate (fetch page from cold store; GC-evicted \u2192 re-derive FULL), compare (equivalence harness on two corpus RunArtifacts). Optional `session_id` filters residency and scopes savings; `limit` caps telemetry (default 50); `page_id`/`logical_key` for rehydrate; `baseline_id`/`context_id`/`category` for compare; `transcript_path` for savings-detail whole-window and cost estimates. Read-only (human-only ops gc/baseline/purge are CLI-only).",
     inputSchema: {
       type: "object",
       properties: {
         operation: {
           type: "string",
-          description: "The context-pages view to run: page-status | residency | telemetry | savings | verify | rehydrate | compare.",
-          enum: ["page-status", "residency", "telemetry", "savings", "verify", "rehydrate", "compare"]
+          description: "The context-pages view to run: page-status | residency | telemetry | savings | savings-detail | verify | rehydrate | compare.",
+          enum: ["page-status", "residency", "telemetry", "savings", "savings-detail", "verify", "rehydrate", "compare"]
         },
         session_id: {
           type: "string",
-          description: "Filter residency to a single session_id (optional; residency only)."
+          description: "Filter residency to a single session_id, or scope savings/savings-detail to one session (optional)."
         },
         limit: {
           type: "number",
@@ -32970,6 +33377,10 @@ var TOOL_DEFS = [
         category: {
           type: "string",
           description: "Workload category to narrow corpus search (optional; compare only)."
+        },
+        transcript_path: {
+          type: "string",
+          description: "Path to a Claude Code transcript JSONL file for whole-window and cost estimates (optional; savings-detail only)."
         }
       },
       required: ["operation"],
@@ -33188,6 +33599,9 @@ var MCP_EXCLUDED = {
   "context-pages baseline": "CLI-only: writes a RunArtifact corpus baseline entry; not an agent-callable surface (write side-effect + operator intent required).",
   "context-pages gc": "CLI-only: garbage-collects cold CAS objects; not an agent-callable surface (destructive, human-only per 5d constraint).",
   "context-pages purge": "CLI-only: removes all context-pages data; destructive, not an agent-callable surface.",
+  // B5 — top-level convenience wrappers; agents use the th_context MCP tool directly.
+  savings: "CLI convenience wrapper over th_context savings/savings-detail ops; plan forbids a separate th_savings MCP tool (the MCP surface is th_context).",
+  statusline: "Claude Code statusLine emitter (single compact stdout band); no MCP equivalent.",
   "handoff verify": "Resume-integrity CLI check; th_handoff_write is the MCP handoff surface.",
   resume: "Resume detector (prints th next); agents call th_next directly.",
   "delegate capsule": "Prints a blank capsule skeleton; a static template, not a coordination tool.",
@@ -33299,12 +33713,15 @@ var CLI_COMMAND_LEAVES = [
   "context-pages residency",
   "context-pages telemetry",
   "context-pages savings",
+  "context-pages savings-detail",
   "context-pages verify",
   "context-pages rehydrate",
   "context-pages compare",
   "context-pages baseline",
   "context-pages gc",
   "context-pages purge",
+  "savings",
+  "statusline",
   "budget check",
   "handoff write",
   "handoff verify",
@@ -33367,8 +33784,8 @@ function readServerVersion() {
   ];
   for (const candidate of candidates) {
     try {
-      if (fs49.existsSync(candidate)) {
-        const json = JSON.parse(fs49.readFileSync(candidate, "utf8"));
+      if (fs51.existsSync(candidate)) {
+        const json = JSON.parse(fs51.readFileSync(candidate, "utf8"));
         if (typeof json === "object" && json !== null && "version" in json) {
           const v = json.version;
           if (typeof v === "string") return v;

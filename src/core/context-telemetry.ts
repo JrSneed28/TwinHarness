@@ -14,7 +14,34 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "./paths";
+import type { SourceKind } from "./context-page";
 import { safeParseJson } from "./jsonl";
+
+// ---------------------------------------------------------------------------
+// Telemetry workload categories (8-value — Savings UI)
+// ---------------------------------------------------------------------------
+
+/**
+ * The 8 savings-attribution categories assigned to each telemetry record by the
+ * write-time classifier (`src/core/savings-classify.ts`, invoked in `hook.ts`).
+ *
+ * DISTINCT from the 5-value {@link import("./context-equivalence").WorkloadCategory}
+ * (which routes corpus directories) — do not conflate. Persisted into the loose
+ * `workload_category` string field; new records carry one of these 8 values,
+ * legacy records carry older labels and are normalized at read time.
+ */
+export type TelemetryWorkloadCategory =
+  | "file-read"
+  | "artifact-summary"
+  | "repo-analysis"
+  | "test-output"
+  | "debug-output"
+  | "mcp-result"
+  | "rehydration"
+  | "compaction";
+
+/** Current telemetry record schema version. Absent on a record ⇒ legacy v1. */
+export const TELEMETRY_SCHEMA_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // Token estimator (defined locally — src/core/context.ts does not exist)
@@ -58,6 +85,12 @@ export function telemetryFilePath(paths: ProjectPaths): string {
  * callers to emit partial records without faking values.
  */
 export interface TelemetryRecord {
+  /**
+   * Record schema version. Absent ⇒ legacy v1 (pre-savings-UI). Readers MUST
+   * tolerate absence and treat it as 1. New records set
+   * {@link TELEMETRY_SCHEMA_VERSION}.
+   */
+  schema_version?: number;
   /** ISO-8601 timestamp (ms precision). */
   ts: string;
   /** Session identifier (opaque token — not itself a secret value). */
@@ -106,8 +139,27 @@ export interface TelemetryRecord {
   retries?: number;
   /** Wall-clock runtime in milliseconds for this operation. */
   runtime_ms?: number;
-  /** Reduction kind label (e.g. "none", "delta", "hash-only"). */
+  /** Reduction kind label (e.g. "none", "delta", "hash-only", "lossy"). */
   reduction_kind?: string;
+  /**
+   * Source kind that produced the underlying page (file/search/bash/mcp/…).
+   * Persisted at write time so read-time classification rules 6/7 are
+   * reproducible from telemetry.jsonl alone. Never raw content.
+   */
+  source_kind?: SourceKind;
+  /**
+   * Short content hash of the page identity (never raw content). Used as part
+   * of the rehydration-payback idempotency key `(page_id, epoch, content_hash)`
+   * so repeated rehydrations of the same page in one epoch subtract once.
+   */
+  content_hash?: string;
+  /**
+   * Full tokens re-served back into context by a rehydration event (the
+   * "payback" that offsets earlier suppression credit). Written ONLY by the
+   * authoritative R7 post-compact host path. Absent ⇒ payback unmeasured for
+   * this page/epoch ⇒ headline is an upper bound.
+   */
+  rehydrated_full_tokens?: number;
 }
 
 // ---------------------------------------------------------------------------

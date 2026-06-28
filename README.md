@@ -197,9 +197,17 @@ Full per-feature detail is in [USAGE.md](./USAGE.md).
 
 `th` is a zero-dependency TypeScript CLI that owns every mechanical operation in a run. It records and computes — it never decides which stage, agent, or tier runs; those are the Orchestrator's calls. All commands accept `--json`.
 
-Command groups: `init` · `state` · `tier` · `artifact` · `coverage` · `verify` · `slices`/`slice` · `build` (plan / next-wave / leases) · `debug` · `anchors`/`trace`/`stale` · `drift` · `revise` · `hook` · `stage` · `doctor` · `next` · `preview` · `scorecard` · `telemetry` · `manifest` · `context` · `delegate` · `migrate` · `repo` (map / relevant / impact / check) · `decision` · advanced coordination (`collab`, `debate`, artifact & sub leases). Full reference in [USAGE.md](./USAGE.md) Part 3.
+Command groups: `init` · `state` · `tier` · `artifact` · `coverage` · `verify` · `slices`/`slice` · `build` (plan / next-wave / leases) · `debug` · `anchors`/`trace`/`stale` · `drift` · `revise` · `hook` · `stage` · `doctor` · `next` · `preview` · `scorecard` · `telemetry` · `savings`/`statusline` · `manifest` · `context` · `delegate` · `migrate` · `repo` (map / relevant / impact / check) · `decision` · advanced coordination (`collab`, `debate`, artifact & sub leases). Full reference in [USAGE.md](./USAGE.md) Part 3.
 
 A deterministic **repo-understanding layer** (`th repo map|relevant|impact|check`, plus matching MCP tools) gives brownfield runs a mechanical spine for adopting an existing codebase. It treats all repository content as untrusted data: discovered build/test commands are recorded as inert strings and never executed (see [SECURITY.md](./SECURITY.md)).
+
+A **token-savings display** (`th savings [--detail]`, and `th statusline` as a Claude Code statusLine emitter) reports deterministic ContextPages tool-output savings from `telemetry.jsonl`. The headline is honestly labeled — `[measured]`, an explicit `pre-rehydration upper bound`, or `observe-only (0%)` at the default tier — and `--detail` adds an `[estimated]` whole-window view, a per-category breakdown, a separately-labeled provider prompt-cache line, and `[estimated • snapshot <date>]` USD cost. Only aggregate numbers and category names ever leave the store. Wire the live status band by adding to Claude Code's `settings.json`:
+
+```json
+{
+  "statusLine": { "type": "command", "command": "th statusline" }
+}
+```
 
 ---
 

@@ -1323,7 +1323,7 @@ All MCP tool schemas are strict and closed (`additionalProperties: false`). Outp
 
 #### Generated command reference
 
-This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **127 CLI command leaves** and **82 MCP tools**.
+This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **130 CLI command leaves** and **82 MCP tools**.
 
 | CLI command | MCP tool | Status |
 |---|---|---|
@@ -1423,12 +1423,15 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th context-pages residency` | `th_context` | mirrored |
 | `th context-pages telemetry` | `th_context` | mirrored |
 | `th context-pages savings` | `th_context` | mirrored |
+| `th context-pages savings-detail` | `th_context` | mirrored |
 | `th context-pages verify` | `th_context` | mirrored |
 | `th context-pages rehydrate` | `th_context` | mirrored |
 | `th context-pages compare` | `th_context` | mirrored |
 | `th context-pages baseline` | — (CLI-only) | CLI-only: writes a RunArtifact corpus baseline entry; not an agent-callable surface (write side-effect + operator intent required). |
 | `th context-pages gc` | — (CLI-only) | CLI-only: garbage-collects cold CAS objects; not an agent-callable surface (destructive, human-only per 5d constraint). |
 | `th context-pages purge` | — (CLI-only) | CLI-only: removes all context-pages data; destructive, not an agent-callable surface. |
+| `th savings` | — (CLI-only) | CLI convenience wrapper over th_context savings/savings-detail ops; plan forbids a separate th_savings MCP tool (the MCP surface is th_context). |
+| `th statusline` | — (CLI-only) | Claude Code statusLine emitter (single compact stdout band); no MCP equivalent. |
 | `th budget check` | `th_budget_check` | mirrored |
 | `th handoff write` | `th_handoff_write` | mirrored |
 | `th handoff verify` | — (CLI-only) | Resume-integrity CLI check; th_handoff_write is the MCP handoff surface. |

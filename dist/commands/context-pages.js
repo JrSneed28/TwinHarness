@@ -70,12 +70,15 @@ const context_ledger_1 = require("../core/context-ledger");
 const context_telemetry_1 = require("../core/context-telemetry");
 const jsonl_1 = require("../core/jsonl");
 const context_equivalence_1 = require("../core/context-equivalence");
+const savings_1 = require("../core/savings");
+const pricing_1 = require("../core/pricing");
+const savings_render_1 = require("../core/savings-render");
 // ---------------------------------------------------------------------------
 // Valid operation set (CLI + MCP-shared; gc/baseline/purge are CLI-only)
 // ---------------------------------------------------------------------------
 const ALL_OPS = new Set([
     // S0 (CLI + MCP)
-    "page-status", "residency", "telemetry", "savings",
+    "page-status", "residency", "telemetry", "savings", "savings-detail",
     // S1+ (CLI + MCP)
     "verify", "rehydrate", "compare",
     // Human-only (CLI only)
@@ -261,10 +264,22 @@ function handleTelemetry(args, paths) {
  * always 0% because no suppression is applied — this is intentional: S0 is
  * OBSERVE-only with savings target = 0%.
  *
- * data: { savings_pct, orig_tokens, returned_tokens, delta_tokens, dup_avoided_count, record_count }
+ * Accepts an optional `session_id` to scope the savings calc to a single
+ * session (AC-22, AC-26).  `TH_EXACT_SUPPRESS=1` activates suppress mode.
+ *
+ * data: {
+ *   savings_pct,          — deprecated-in-place (I3/M6); old all-records/no-payback formula
+ *   saved_pct,            — new session-scoped figure (result.saved_pct)
+ *   orig_tokens, returned_tokens, delta_tokens, dup_avoided_count, record_count,
+ *   savings,              — full SavingsResult (B1 shape)
+ * }
  */
-function handleSavings(_args, paths) {
+function handleSavings(args, paths) {
     const records = readAllTelemetryRecords(paths);
+    const session_id = typeof args.session_id === "string" ? args.session_id : undefined;
+    const suppressMode = process.env.TH_EXACT_SUPPRESS === "1";
+    // Deprecated-in-place legacy aggregates (I3/M6 — do not rename savings_pct).
+    // Old formula: all-records, no payback, no session filter.
     let origTokens = 0;
     let returnedTokens = 0;
     let deltaTokens = 0;
@@ -278,8 +293,10 @@ function handleSavings(_args, paths) {
     }
     // S0: no suppression, so savings_pct is always 0.
     const savingsPct = origTokens > 0 ? Math.round(((origTokens - returnedTokens) / origTokens) * 10000) / 100 : 0;
+    // New session-scoped, per-cycle-netted savings calculation (B1).
+    const result = (0, savings_1.computeSavings)(records, { session_id, suppressMode });
     const human = [
-        `Savings: ${savingsPct}% (S0 target = 0%)`,
+        `Savings: ${result.saved_pct}% — ${result.headline_label}`,
         `  Original tokens : ${origTokens}`,
         `  Returned tokens : ${returnedTokens}`,
         `  Delta tokens    : ${deltaTokens}`,
@@ -288,12 +305,94 @@ function handleSavings(_args, paths) {
     ].join("\n");
     return (0, output_1.success)({
         data: {
+            // Deprecated-in-place (I3/M6 — do not rename; old all-records/no-payback semantics).
             savings_pct: savingsPct,
+            // New session-scoped savings fields (AC-22, AC-26).
+            saved_pct: result.saved_pct,
             orig_tokens: origTokens,
             returned_tokens: returnedTokens,
             delta_tokens: deltaTokens,
             dup_avoided_count: dupAvoidedCount,
             record_count: records.length,
+            savings: result,
+        },
+        human,
+    });
+}
+// ---------------------------------------------------------------------------
+// Handler: savings-detail
+// ---------------------------------------------------------------------------
+/**
+ * Extended savings view: everything `savings` returns, plus a whole-window
+ * estimate (from an optional `transcript_path`), per-category breakdown, a
+ * separately-labeled provider prompt-cache line, and a USD cost estimate.
+ *
+ * Privacy: only aggregate numbers, category names, and labels are emitted —
+ * never raw content, logical keys, or transcript path contents (AC-24).
+ *
+ * data: {
+ *   savings_pct, saved_pct, orig_tokens, returned_tokens, record_count, savings,
+ *   whole_window, cost_usd, cost_label, model_id, cache_label
+ * }
+ */
+function handleSavingsDetail(args, paths) {
+    const records = readAllTelemetryRecords(paths);
+    const session_id = typeof args.session_id === "string" ? args.session_id : undefined;
+    const suppressMode = process.env.TH_EXACT_SUPPRESS === "1";
+    const transcriptPath = typeof args.transcript_path === "string" ? args.transcript_path : undefined;
+    const result = (0, savings_1.computeSavings)(records, { session_id, suppressMode });
+    // Whole-window estimate from transcript (labeled [estimated] per plan Principle 1).
+    const actuals = transcriptPath !== undefined ? (0, context_telemetry_1.transcriptActuals)(transcriptPath) : undefined;
+    // USD cost: priced against avoided input tokens (AC-10–13).
+    const modelId = transcriptPath !== undefined ? (0, pricing_1.parseTranscriptModelId)(transcriptPath) : undefined;
+    const pricing = (0, pricing_1.priceAvoided)(result.avoided_input_tokens, modelId);
+    // Provider prompt-cache is a separately-labeled line (AC-13): NOT part of
+    // avoided dedup savings. Label [estimated] when a transcript was supplied
+    // (the file exists and we could read it), [unavailable] when not.
+    const cacheLabel = transcriptPath !== undefined ? "[estimated]" : "[unavailable]";
+    // Deprecated-in-place legacy aggregates (I3/M6 — do not rename savings_pct).
+    let origTokens = 0;
+    let returnedTokens = 0;
+    for (const r of records) {
+        origTokens += r.orig_tokens ?? 0;
+        returnedTokens += r.returned_tokens ?? r.orig_tokens ?? 0;
+    }
+    const savingsPct = origTokens > 0 ? Math.round(((origTokens - returnedTokens) / origTokens) * 10000) / 100 : 0;
+    const human = [
+        (0, savings_render_1.renderDetail)(result, pricing.label),
+        `  whole-window:   ${actuals !== undefined
+            ? `input=${actuals.input_tokens} tok, output=${actuals.output_tokens} tok` +
+                (actuals.context_window !== undefined ? `, window=${actuals.context_window}` : "") +
+                " [estimated]"
+            : "[unavailable]"}`,
+        `  provider-cache: ${cacheLabel} (separate from dedup savings)`,
+        `  cost:           ${pricing.label}${pricing.cost_usd !== null ? ` ($${pricing.cost_usd.toFixed(4)} USD)` : ""}`,
+    ].join("\n");
+    return (0, output_1.success)({
+        data: {
+            // Deprecated-in-place (I3/M6 — do not rename; old all-records/no-payback semantics).
+            savings_pct: savingsPct,
+            // New session-scoped savings fields (AC-22, AC-26).
+            saved_pct: result.saved_pct,
+            orig_tokens: origTokens,
+            returned_tokens: returnedTokens,
+            record_count: records.length,
+            savings: result,
+            // Whole-window estimate (transcript-derived, labeled [estimated]/[unavailable]).
+            whole_window: actuals !== undefined
+                ? {
+                    input_tokens: actuals.input_tokens,
+                    output_tokens: actuals.output_tokens,
+                    ...(actuals.context_window !== undefined ? { context_window: actuals.context_window } : {}),
+                    label: "[estimated]",
+                }
+                : { label: "[unavailable]" },
+            // USD cost estimate (pricing snapshot, separately labeled).
+            cost_usd: pricing.cost_usd,
+            cost_label: pricing.label,
+            model_id: pricing.model_id,
+            // Provider prompt-cache line (AC-13): separate from dedup savings.
+            cache_label: cacheLabel,
         },
         human,
     });
@@ -684,6 +783,7 @@ const HANDLERS = {
     residency: handleResidency,
     telemetry: handleTelemetry,
     savings: handleSavings,
+    "savings-detail": handleSavingsDetail,
     // S1+ (CLI + MCP)
     verify: handleVerify,
     rehydrate: handleRehydrate,

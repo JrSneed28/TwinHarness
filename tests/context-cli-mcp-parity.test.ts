@@ -27,7 +27,7 @@ afterEach(() => tp?.cleanup());
  */
 const MCP_OPS = [
   // S0
-  "page-status", "residency", "telemetry", "savings",
+  "page-status", "residency", "telemetry", "savings", "savings-detail",
   // S1+ (verify/rehydrate/compare)
   "verify", "rehydrate", "compare",
 ] as const;

@@ -87,6 +87,7 @@ const template_1 = require("./commands/template");
 const sim_1 = require("./commands/sim");
 const gate_1 = require("./commands/gate");
 const context_pages_1 = require("./commands/context-pages");
+const savings_render_1 = require("./core/savings-render");
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
@@ -172,13 +173,16 @@ Usage:
                                     Assemble the §9 handoff bundle (artifact Summary blocks + slice/REQ/file framing; --max-tokens bounds the pack)
   th context read --files-list <a,b,c> [--max-tokens <N>]
                                     Batch-read files under ONE token budget with deterministic truncation + per-file read receipts (C-11)
-  th context-pages page-status|residency|telemetry|savings|verify|rehydrate|compare [--session-id <id>] [--limit <n>] [--page-id <id>] [--logical-key <k>] [--baseline-id <id>] [--context-id <id>]
+  th context-pages page-status|residency|telemetry|savings|savings-detail|verify|rehydrate|compare [--session-id <id>] [--limit <n>] [--page-id <id>] [--logical-key <k>] [--baseline-id <id>] [--context-id <id>] [--transcript-path <path>]
                                     Inspect the context-pages store (th_context MCP shares the same handler for these ops)
   th context-pages baseline [--session-id <id>]
                                     S0 token denominator; writes a RunArtifact corpus entry when --session-id is given (human-only)
   th context-pages gc [--age-days <n>]
                                     Remove cold CAS objects older than n days (default 5); NEVER removes ledger records (human-only)
   th context-pages purge            Remove all context-pages data (human-only, destructive)
+  th savings [--detail] [--session-id <id>] [--json]
+                                    Context-pages savings summary (--detail for full transcript-cost breakdown); convenience wrapper over th context-pages savings
+  th statusline [--session-id <id>]  Claude Code statusLine emitter: single compact savings band on stdout
   th budget check [--max <k>] [--files-read N] [--slices-built N] [--tool-calls N] [--artifacts N]
                                     Deterministic context-budget estimate from agent-supplied proxy counts → { estTokens, pct, verdict } (--max in thousands; tier-aware default when omitted)
   th handoff write                  Assemble .twinharness/HANDOFF.md (run state + next action + artifact Summary blocks + open questions + "don't re-read docs/" directive)
@@ -326,7 +330,8 @@ Global flags:
   --evidence-ref <p>  (tester record) Path/URL to the raw live-run output or screenshots
   --dimension <a,b>  (driver record) Comma-separated dimension(s) to record as observed; intersected with what verify-report.json observes (default: every observed seed dimension)
   --identity <who>  (driver record / realize / assertion-presence record / grounding record) Producer identity to record (attribution-only, zero trust weight; default: cli:th driver record / cli:th realize / cli:th assertion-presence record / cli:th grounding record)
-  --artifact <path>  (realize) Source path the REQ-ID is realized in — the referent the realization receipt binds a content digest of; must resolve in source`;
+  --artifact <path>  (realize) Source path the REQ-ID is realized in — the referent the realization receipt binds a content digest of; must resolve in source
+  --detail          (savings) Emit the full transcript cost breakdown; routes to savings-detail`;
 /** Boolean flags (presence = true). */
 const BOOLEAN_FLAGS = {
     "--json": "json",
@@ -367,6 +372,8 @@ const BOOLEAN_FLAGS = {
     "--user-visible": "userVisible",
     // F8/R-31 — the live run's pass verdict for `th tester record`.
     "--passed": "passed",
+    // B5 — `th savings --detail` routes to savings-detail op.
+    "--detail": "detail",
 };
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
 const STRING_FLAGS = {
@@ -461,6 +468,7 @@ const STRING_FLAGS = {
     "--logical-key": "logicalKey",
     "--baseline-id": "baselineId",
     "--context-id": "contextId",
+    "--transcript-path": "transcriptPath",
     "--category": "category",
 };
 /** Flags that consume a numeric value. */
@@ -545,6 +553,7 @@ function parseArgs(argv) {
         readOnly: false,
         userVisible: false,
         passed: false,
+        detail: false,
     };
     const positionals = [];
     const unknownFlags = [];
@@ -891,6 +900,11 @@ function dispatch(parsed) {
                         session_id: parsed.flags.sessionId,
                         limit: parsed.flags.limit,
                     }, paths);
+                case "savings-detail":
+                    return (0, context_pages_1.runContextPagesCommand)("savings-detail", {
+                        session_id: parsed.flags.sessionId,
+                        transcript_path: parsed.flags.transcriptPath,
+                    }, paths);
                 // S1+: CLI + MCP shared ops.
                 case "verify":
                     return (0, context_pages_1.runContextPagesCommand)("verify", {}, paths);
@@ -918,9 +932,28 @@ function dispatch(parsed) {
                     return (0, context_pages_1.runContextPagesCommand)("purge", {}, paths);
                 default:
                     return (0, output_1.failure)({
-                        human: `unknown 'context-pages' subcommand: ${sub ?? "(none)"}. Valid ops: page-status, residency, telemetry, savings, verify, rehydrate, compare, baseline, gc, purge`,
+                        human: `unknown 'context-pages' subcommand: ${sub ?? "(none)"}. Valid ops: page-status, residency, telemetry, savings, savings-detail, verify, rehydrate, compare, baseline, gc, purge`,
                     });
             }
+        // B5 — top-level convenience wrappers over the context-pages savings ops.
+        case "savings":
+            if (parsed.flags.detail) {
+                return (0, context_pages_1.runContextPagesCommand)("savings-detail", {
+                    session_id: parsed.flags.sessionId,
+                    transcript_path: parsed.flags.transcriptPath,
+                }, paths);
+            }
+            return (0, context_pages_1.runContextPagesCommand)("savings", {
+                session_id: parsed.flags.sessionId,
+            }, paths);
+        case "statusline": {
+            // B5 — Claude Code statusLine emitter: compute savings, render the single compact band.
+            const res = (0, context_pages_1.runContextPagesCommand)("savings", { session_id: parsed.flags.sessionId }, paths);
+            const result = res.data.savings;
+            const width = Number(process.env.COLUMNS) > 0 ? Number(process.env.COLUMNS) : 80;
+            const color = !process.env.NO_COLOR && Boolean(process.stdout.isTTY);
+            return (0, output_1.success)({ human: (0, savings_render_1.renderStatusLine)(result, width, color), data: result });
+        }
         case "delegate":
             switch (sub) {
                 case "plan":

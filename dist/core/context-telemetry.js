@@ -45,6 +45,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.TELEMETRY_SCHEMA_VERSION = void 0;
 exports.estimateTokens = estimateTokens;
 exports.contextPagesDir = contextPagesDir;
 exports.telemetryFilePath = telemetryFilePath;
@@ -58,6 +59,8 @@ exports.probeSubagentStartFired = probeSubagentStartFired;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const jsonl_1 = require("./jsonl");
+/** Current telemetry record schema version. Absent on a record ⇒ legacy v1. */
+exports.TELEMETRY_SCHEMA_VERSION = 2;
 // ---------------------------------------------------------------------------
 // Token estimator (defined locally — src/core/context.ts does not exist)
 // ---------------------------------------------------------------------------

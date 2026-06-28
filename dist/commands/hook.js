@@ -65,6 +65,7 @@ const context_ledger_1 = require("../core/context-ledger");
 const context_residency_1 = require("../core/context-residency");
 const context_capsule_1 = require("../core/context-capsule");
 const context_telemetry_1 = require("../core/context-telemetry");
+const savings_classify_1 = require("../core/savings-classify");
 /**
  * Decide whether the orchestrator may declare completion (R-29 — now the COMPLETION
  * predicate `canCompleteRun`, the single source of truth shared with `th next` and
@@ -1377,6 +1378,21 @@ function runHookPostToolContext(root, input, env = process.env) {
         const agent_id = input?.agent_id ?? "";
         const agent_type = input?.agent_type ?? "";
         const est = (0, context_telemetry_1.estimateTokens)(toolResponse);
+        // A4 (Savings UI): classify the workload ONCE at write time, threading the
+        // raw Bash command (in scope only here) into the classifier and then
+        // discarding it — the command text is NEVER persisted onto a telemetry
+        // record (privacy by construction). Only the resulting 8-value category is
+        // stored, alongside `source_kind`/`content_hash`/`schema_version`, so the
+        // read-time savings calc can attribute savings without the command. No
+        // `lossy` marker is set here: these posttool deliveries are FULL/hash-only,
+        // never a disclosed lossy reduction.
+        const command = source_kind === "bash" ? String(toolInput.command ?? "") : undefined;
+        const workload_category = (0, savings_classify_1.classify)({
+            tool_type: toolName,
+            source_kind,
+            reduction_kind,
+            command,
+        });
         // M2b (AC-7 / R2): for sensitive pages, never write the raw logical_key
         // into ledger-*.jsonl — substitute its short hash.  Sensitive pages are
         // always FULL (never used for residency matching), so the redacted form
@@ -1427,12 +1443,15 @@ function runHookPostToolContext(root, input, env = process.env) {
             if (!attestOk) {
                 // PF-i: write failed → return original output (no suppression occurred)
                 (0, context_telemetry_1.recordTelemetry)(paths, {
+                    schema_version: context_telemetry_1.TELEMETRY_SCHEMA_VERSION,
                     ts: now,
                     session_id,
                     agent_id: input?.agent_id,
                     epoch: epochRec.epoch,
                     tool_type: toolName,
-                    workload_category: "suppress",
+                    workload_category,
+                    source_kind,
+                    content_hash,
                     tier: "s1",
                     stage: "attest",
                     page_id,
@@ -1458,12 +1477,15 @@ function runHookPostToolContext(root, input, env = process.env) {
             });
             const reduced = `[th-context: exact match — content omitted]${footer}`;
             (0, context_telemetry_1.recordTelemetry)(paths, {
+                schema_version: context_telemetry_1.TELEMETRY_SCHEMA_VERSION,
                 ts: now,
                 session_id,
                 agent_id: input?.agent_id,
                 epoch: epochRec.epoch,
                 tool_type: toolName,
-                workload_category: "suppress",
+                workload_category,
+                source_kind,
+                content_hash,
                 tier: "s1",
                 stage: "attest",
                 page_id,
@@ -1507,12 +1529,15 @@ function runHookPostToolContext(root, input, env = process.env) {
             });
         }
         (0, context_telemetry_1.recordTelemetry)(paths, {
+            schema_version: context_telemetry_1.TELEMETRY_SCHEMA_VERSION,
             ts: now,
             session_id,
             agent_id: input?.agent_id,
             epoch: epochRec.epoch,
             tool_type: toolName,
-            workload_category: "observe",
+            workload_category,
+            source_kind,
+            content_hash,
             tier: "s0",
             stage: "deliver",
             slice: "s0",
@@ -1583,6 +1608,25 @@ function runHookSessionContext(root, input, env = process.env) {
                                 });
                                 const msg = `[th-context post-compact rehydrate epoch=${epochRec.epoch}]\n` +
                                     JSON.stringify(capsule, null, 2);
+                                // A2 (Savings UI): this R7 host path is the AUTHORITATIVE
+                                // rehydration-payback emitter — it actually re-serves full tokens
+                                // back into context post-compact, offsetting earlier suppression
+                                // credit. The dispatcher `handleRehydrate` stays a pure query and
+                                // does NOT emit (avoids the parity-test double-write). Idempotency
+                                // is on (page_id, epoch, content_hash); `content_hash` of the
+                                // re-served capsule lets the consumer subtract a repeated
+                                // post-compact rehydrate of the same epoch only once. Fail-safe:
+                                // wrapped in the surrounding try/catch (recordTelemetry also
+                                // swallows its own I/O errors).
+                                (0, context_telemetry_1.recordTelemetry)(paths, {
+                                    schema_version: context_telemetry_1.TELEMETRY_SCHEMA_VERSION,
+                                    ts: new Date().toISOString(),
+                                    session_id,
+                                    epoch: epochRec.epoch,
+                                    workload_category: "rehydration",
+                                    content_hash: (0, hash_1.hashContent)(msg),
+                                    rehydrated_full_tokens: (0, context_telemetry_1.estimateTokens)(msg),
+                                });
                                 return { stdout: JSON.stringify({ systemMessage: msg }), exitCode: 0 };
                             }
                         }
@@ -1624,7 +1668,23 @@ function runHookPrecompactSeal(root, input, env = process.env) {
         // Bump epoch — invalidates all prior residency claims (AC-4 / R7).
         // The reason "SessionStart{compact}" signals runHookSessionContext to inject
         // an eager-rehydrate capsule on the subsequent SessionStart.
-        (0, context_residency_1.bumpEpoch)(paths, "SessionStart{compact}");
+        const compactedEpoch = (0, context_residency_1.bumpEpoch)(paths, "SessionStart{compact}");
+        // A3 (Savings UI): emit ONE compaction record (stop relying on the literal
+        // `compaction_resets: 0` written at the deliver site). Idempotency key is
+        // (session_id, epoch): `bumpEpoch` makes the epoch unique per compaction, so
+        // this path emits at most one record per distinct (session_id, epoch). The
+        // pending S1+ runtime promotion OWNS the increment when active — it will emit
+        // the canonical compaction record for that key, and the read-time consumer
+        // dedups on (session_id, epoch), so this A3 emit is effectively a no-op once
+        // the promotion path is live. Fail-safe: recordTelemetry swallows I/O errors.
+        (0, context_telemetry_1.recordTelemetry)(paths, {
+            schema_version: context_telemetry_1.TELEMETRY_SCHEMA_VERSION,
+            ts: new Date().toISOString(),
+            session_id: input?.session_id ?? "",
+            epoch: compactedEpoch,
+            workload_category: "compaction",
+            compaction_resets: 1,
+        });
         // S6 TODO: sealActiveManifest(paths, input?.session_id);
         void input;
         return contextPassthrough();

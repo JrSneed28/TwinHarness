@@ -1847,18 +1847,18 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_context",
     description:
-      "Inspect the context-pages store. `operation` selects the view: page-status (shard inventory), residency (delivered pages), telemetry (raw telemetry records), savings (dedup savings — 0% at S0), verify (ledger chain integrity audit), rehydrate (fetch page from cold store; GC-evicted → re-derive FULL), compare (equivalence harness on two corpus RunArtifacts). Optional `session_id` filters residency; `limit` caps telemetry (default 50); `page_id`/`logical_key` for rehydrate; `baseline_id`/`context_id`/`category` for compare. Read-only (human-only ops gc/baseline/purge are CLI-only).",
+      "Inspect the context-pages store. `operation` selects the view: page-status (shard inventory), residency (delivered pages), telemetry (raw telemetry records), savings (dedup savings — 0% at S0), savings-detail (savings + whole-window estimate + per-category breakdown + USD cost), verify (ledger chain integrity audit), rehydrate (fetch page from cold store; GC-evicted → re-derive FULL), compare (equivalence harness on two corpus RunArtifacts). Optional `session_id` filters residency and scopes savings; `limit` caps telemetry (default 50); `page_id`/`logical_key` for rehydrate; `baseline_id`/`context_id`/`category` for compare; `transcript_path` for savings-detail whole-window and cost estimates. Read-only (human-only ops gc/baseline/purge are CLI-only).",
     inputSchema: {
       type: "object",
       properties: {
         operation: {
           type: "string",
-          description: "The context-pages view to run: page-status | residency | telemetry | savings | verify | rehydrate | compare.",
-          enum: ["page-status", "residency", "telemetry", "savings", "verify", "rehydrate", "compare"],
+          description: "The context-pages view to run: page-status | residency | telemetry | savings | savings-detail | verify | rehydrate | compare.",
+          enum: ["page-status", "residency", "telemetry", "savings", "savings-detail", "verify", "rehydrate", "compare"],
         },
         session_id: {
           type: "string",
-          description: "Filter residency to a single session_id (optional; residency only).",
+          description: "Filter residency to a single session_id, or scope savings/savings-detail to one session (optional).",
         },
         limit: {
           type: "number",
@@ -1883,6 +1883,10 @@ export const TOOL_DEFS: readonly ToolDef[] = [
         category: {
           type: "string",
           description: "Workload category to narrow corpus search (optional; compare only).",
+        },
+        transcript_path: {
+          type: "string",
+          description: "Path to a Claude Code transcript JSONL file for whole-window and cost estimates (optional; savings-detail only).",
         },
       },
       required: ["operation"],
@@ -2206,6 +2210,9 @@ export const MCP_EXCLUDED: Readonly<Record<string, string>> = {
   "context-pages baseline": "CLI-only: writes a RunArtifact corpus baseline entry; not an agent-callable surface (write side-effect + operator intent required).",
   "context-pages gc": "CLI-only: garbage-collects cold CAS objects; not an agent-callable surface (destructive, human-only per 5d constraint).",
   "context-pages purge": "CLI-only: removes all context-pages data; destructive, not an agent-callable surface.",
+  // B5 — top-level convenience wrappers; agents use the th_context MCP tool directly.
+  savings: "CLI convenience wrapper over th_context savings/savings-detail ops; plan forbids a separate th_savings MCP tool (the MCP surface is th_context).",
+  statusline: "Claude Code statusLine emitter (single compact stdout band); no MCP equivalent.",
   "handoff verify": "Resume-integrity CLI check; th_handoff_write is the MCP handoff surface.",
   resume: "Resume detector (prints th next); agents call th_next directly.",
   "delegate capsule": "Prints a blank capsule skeleton; a static template, not a coordination tool.",
@@ -2275,9 +2282,10 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "migrate", "doctor", "next", "preview", "scorecard", "route",
   "telemetry on", "telemetry off", "telemetry status",
   "context estimate", "context pack", "context read",
-  "context-pages page-status", "context-pages residency", "context-pages telemetry", "context-pages savings",
+  "context-pages page-status", "context-pages residency", "context-pages telemetry", "context-pages savings", "context-pages savings-detail",
   "context-pages verify", "context-pages rehydrate", "context-pages compare",
   "context-pages baseline", "context-pages gc", "context-pages purge",
+  "savings", "statusline",
   "budget check",
   "handoff write", "handoff verify", "resume",
   "inspector write",
