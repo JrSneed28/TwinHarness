@@ -29099,6 +29099,8 @@ function handleVerify(_args, paths) {
         return success({
           data: {
             ok: false,
+            status: "broken",
+            verified: false,
             record_count: recordCount,
             shard_count: shardFiles.length,
             shard,
@@ -29109,14 +29111,28 @@ function handleVerify(_args, paths) {
         });
       }
     }
+    const empty = shardFiles.length === 0;
     return success({
-      data: { ok: true, record_count: recordCount, shard_count: shardFiles.length },
-      human: `Ledger chain: PASS \u2014 ${shardFiles.length} shard(s), ${recordCount} record(s) verified.`
+      data: {
+        ok: true,
+        status: empty ? "empty" : "verified",
+        verified: true,
+        record_count: recordCount,
+        shard_count: shardFiles.length
+      },
+      human: empty ? "Ledger chain: no ledger shards found (empty store)." : `Ledger chain: PASS \u2014 ${shardFiles.length} shard(s), ${recordCount} record(s) verified.`
     });
   } catch {
     return success({
-      data: { ok: true, record_count: 0, note: "read_error_passthrough" },
-      human: "Ledger chain: no records read (fail-safe passthrough)."
+      data: {
+        ok: false,
+        status: "unknown",
+        verified: false,
+        blocking: false,
+        record_count: 0,
+        reason: "read_error_passthrough"
+      },
+      human: "Ledger chain: UNKNOWN \u2014 could not read or verify ledger (advisory, non-blocking)."
     });
   }
 }

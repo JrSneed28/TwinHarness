@@ -461,9 +461,12 @@ function handleBaseline(args, paths) {
  * A forked chain (concurrent writers using GENESIS_PREV_HASH) surfaces as
  * `prev_mismatch` — diagnostic, not data loss.
  *
- * Fail-safe: any read error returns ok:true with 0 records (never blocks).
+ * States are distinguishable via `status`: "verified" (chains intact),
+ * "empty" (no shards to verify), "broken" (a chain failed), and "unknown" (a
+ * read/verify error — reported as ok:false/verified:false, NOT a false PASS).
+ * Always non-blocking (advisory): the command exits zero in every state.
  *
- * data: { ok, record_count, broken_at?, reason? }
+ * data: { ok, status, verified, record_count, shard_count?, broken_at?, reason?, blocking? }
  */
 function handleVerify(_args, paths) {
     try {
@@ -483,6 +486,8 @@ function handleVerify(_args, paths) {
                 return (0, output_1.success)({
                     data: {
                         ok: false,
+                        status: "broken",
+                        verified: false,
                         record_count: recordCount,
                         shard_count: shardFiles.length,
                         shard,
@@ -493,16 +498,39 @@ function handleVerify(_args, paths) {
                 });
             }
         }
+        // Distinguish a genuinely-empty store from a verified one. An empty store has
+        // nothing to verify; a non-empty store passed every shard's chain check.
+        const empty = shardFiles.length === 0;
         return (0, output_1.success)({
-            data: { ok: true, record_count: recordCount, shard_count: shardFiles.length },
-            human: `Ledger chain: PASS — ${shardFiles.length} shard(s), ${recordCount} record(s) verified.`,
+            data: {
+                ok: true,
+                status: empty ? "empty" : "verified",
+                verified: true,
+                record_count: recordCount,
+                shard_count: shardFiles.length,
+            },
+            human: empty
+                ? "Ledger chain: no ledger shards found (empty store)."
+                : `Ledger chain: PASS — ${shardFiles.length} shard(s), ${recordCount} record(s) verified.`,
         });
     }
     catch {
-        // Fail-safe: never throw across a handler boundary (D-16).
+        // Fail-safe: never throw across a handler boundary (D-16). A read/verify
+        // failure is NOT proof of a clean ledger — surfacing ok:true here would let
+        // automation mistake "could not read" for "verified", violating the broader
+        // rule that unknown evidence must never be presented as proof. Return a
+        // DISTINCT unknown/unverified state instead. Still non-blocking (advisory):
+        // CommandResult stays a success() so the command exits zero. (#3)
         return (0, output_1.success)({
-            data: { ok: true, record_count: 0, note: "read_error_passthrough" },
-            human: "Ledger chain: no records read (fail-safe passthrough).",
+            data: {
+                ok: false,
+                status: "unknown",
+                verified: false,
+                blocking: false,
+                record_count: 0,
+                reason: "read_error_passthrough",
+            },
+            human: "Ledger chain: UNKNOWN — could not read or verify ledger (advisory, non-blocking).",
         });
     }
 }
