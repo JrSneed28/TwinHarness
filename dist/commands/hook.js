@@ -44,6 +44,9 @@ exports.extractBashWriteTargets = extractBashWriteTargets;
 exports.bashWriteTargetWasDropped = bashWriteTargetWasDropped;
 exports.classifyOwnership = classifyOwnership;
 exports.runHookPretoolGate = runHookPretoolGate;
+exports.resolveScope = resolveScope;
+exports.runHookPostToolContext = runHookPostToolContext;
+exports.runHookSessionContext = runHookSessionContext;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const paths_1 = require("../core/paths");
@@ -52,6 +55,10 @@ const artifact_guard_1 = require("../core/artifact-guard");
 const delegation_scope_1 = require("../core/delegation-scope");
 const gate_preconditions_1 = require("../core/gate-preconditions");
 const next_1 = require("./next");
+const hash_1 = require("../core/hash");
+const context_page_1 = require("../core/context-page");
+const context_ledger_1 = require("../core/context-ledger");
+const context_telemetry_1 = require("../core/context-telemetry");
 /**
  * Decide whether the orchestrator may declare completion (R-29 — now the COMPLETION
  * predicate `canCompleteRun`, the single source of truth shared with `th next` and
@@ -1071,4 +1078,231 @@ function runHookPretoolGate(paths, input, env = process.env) {
     if (h)
         return h;
     return allow();
+}
+// ---------------------------------------------------------------------------
+// Context-pages OBSERVE-only hook handlers (S0)
+//
+// S0 = record everything, suppress nothing, change no externally visible
+// behavior.  Every handler here MUST:
+//   1. Check TH_DISABLE_CONTEXT_PAGES=1 → pure passthrough.
+//   2. Wrap its body in a fail-safe try/catch → passthrough on any error.
+//   3. Return the original tool output unchanged (exit 0).
+// ---------------------------------------------------------------------------
+/** Passthrough result emitted by all new OBSERVE handlers: `{}` + exit 0. */
+function contextPassthrough() {
+    return { stdout: JSON.stringify({}), exitCode: 0 };
+}
+/**
+ * Resolve the ledger scope for a hook input payload.  POSITIVE-only: we only
+ * claim a scope when the evidence is unambiguous.
+ *
+ *   agent_id present              → `agent` scope (agentOrRoot = agent_id).
+ *   session_id only, no agent_id  → `root` scope  (agentOrRoot = "root").
+ *   neither present               → `indeterminate` (no shard written).
+ *
+ * SubagentStart/Stop depth is for epoch/probe purposes ONLY — it is NOT used
+ * for per-tool scope attribution here (brief B3/M4).
+ */
+function resolveScope(input) {
+    if (input.agent_id) {
+        const session_id = input.session_id ?? "unknown";
+        return { kind: "agent", scope: { session_id, agentOrRoot: input.agent_id } };
+    }
+    // IMPORTANT — B3/P2 "Phantom Root" gate (MUST be probe-gated before S1):
+    // A bare session_id with no agent_id is assumed to be the root session here
+    // at S0 because there are no consumers and S1 is hard-gated.  Before S1 is
+    // enabled this branch MUST be tightened: only a CONFIRMED-distinct root
+    // session_id (verified against epoch.json / SubagentStart probe counters)
+    // may map to `root`; an unconfirmed id MUST map to `indeterminate` instead,
+    // preventing a phantom-root attribution that would merge subagent pages into
+    // the root shard.  Per plan B3/P2 — do NOT remove this comment until the
+    // probe-gate is wired.
+    if (input.session_id) {
+        return { kind: "root", scope: { session_id: input.session_id, agentOrRoot: "root" } };
+    }
+    return { kind: "indeterminate" };
+}
+/** Map a Claude Code tool name to a ContextPage SourceKind + locator parts. */
+function resolveToolPage(tool_name, tool_input) {
+    const tn = tool_name.toLowerCase();
+    if (tn === "read") {
+        const p = String(tool_input.file_path ?? "");
+        return { source_kind: "file", parts: { path: p }, source_locator: p };
+    }
+    if (tn === "glob") {
+        const pattern = String(tool_input.pattern ?? "");
+        const dir = String(tool_input.path ?? "");
+        return {
+            source_kind: "search",
+            parts: { tool: "Glob", query: pattern, cwd: dir },
+            source_locator: `Glob|${pattern}`,
+        };
+    }
+    if (tn === "grep") {
+        const pattern = String(tool_input.pattern ?? "");
+        const dir = String(tool_input.path ?? "");
+        return {
+            source_kind: "search",
+            parts: { tool: "Grep", query: pattern, cwd: dir },
+            source_locator: `Grep|${pattern}`,
+        };
+    }
+    if (tn === "bash") {
+        const cmd = String(tool_input.command ?? "");
+        return {
+            source_kind: "bash",
+            parts: { argv: cmd },
+            source_locator: cmd,
+        };
+    }
+    if (tn === "webfetch") {
+        const url = String(tool_input.url ?? "");
+        return {
+            source_kind: "search",
+            parts: { tool: "WebFetch", query: url },
+            source_locator: `WebFetch|${url}`,
+        };
+    }
+    if (tool_name.includes("__")) {
+        // mcp__<server>__<op> pattern
+        return {
+            source_kind: "mcp",
+            parts: { tool: tool_name, params: tool_input },
+            source_locator: tool_name,
+        };
+    }
+    return null;
+}
+/**
+ * `th hook posttool-context` — OBSERVE the PostToolUse payload, record a
+ * deliver ledger entry + telemetry, then return the original output unchanged.
+ *
+ * Fail-safe: any error → passthrough (exit 0, original output preserved).
+ * Kill-switch: `TH_DISABLE_CONTEXT_PAGES=1` → pure passthrough, no I/O.
+ */
+function runHookPostToolContext(root, input, env = process.env) {
+    if (env["TH_DISABLE_CONTEXT_PAGES"] === "1")
+        return contextPassthrough();
+    try {
+        const toolName = input?.tool_name ?? "";
+        const toolInput = input?.tool_input ?? {};
+        const toolResponse = typeof input?.tool_response === "string"
+            ? input.tool_response
+            : "";
+        if (!toolName || !toolResponse)
+            return contextPassthrough();
+        if (input?.agent_id)
+            (0, context_telemetry_1.probeAgentIdPresentOnToolHook)();
+        const resolved = resolveToolPage(toolName, toolInput);
+        if (!resolved)
+            return contextPassthrough();
+        const r = resolveOrConflict(root);
+        if ("conflict" in r)
+            return contextPassthrough();
+        const { paths } = r;
+        const { source_kind, parts, source_locator } = resolved;
+        const logical_key = (0, context_page_1.normalizeLocator)(source_kind, parts);
+        const content_hash = (0, hash_1.hashContent)(toolResponse);
+        const now = new Date().toISOString();
+        const scopeRes = resolveScope(input ?? {});
+        const pageBase = {
+            schema_version: context_page_1.CONTEXT_PAGE_SCHEMA_VERSION,
+            source_kind,
+            logical_key,
+            content_hash,
+        };
+        const page_id = (0, context_page_1.computePageId)(pageBase);
+        const pageLike = { source_locator, source_kind };
+        const sensitive = (0, context_page_1.classifySensitive)(pageLike, paths, toolResponse);
+        const raw_objref = (0, context_page_1.coldStorePut)(paths, toolResponse, sensitive);
+        const reduction_kind = sensitive ? "hash-only" : "FULL";
+        const session_id = input?.session_id ?? "";
+        const agent_id = input?.agent_id ?? "";
+        const agent_type = input?.agent_type ?? "";
+        const est = (0, context_telemetry_1.estimateTokens)(toolResponse);
+        // M2b (AC-7 / R2): for sensitive pages, never write the raw logical_key
+        // into ledger-*.jsonl — substitute its short hash.  Sensitive pages are
+        // always FULL (never used for residency matching), so the redacted form
+        // carries no cost to correctness; it keeps inline secrets off disk.
+        const ledger_logical_key = sensitive ? (0, hash_1.shortHash)(logical_key) : logical_key;
+        if (scopeRes.kind !== "indeterminate") {
+            const rec = {
+                seq: 0,
+                ts: now,
+                session_id,
+                agent_id,
+                agent_type,
+                epoch: 0,
+                op: "deliver",
+                page_id,
+                logical_key: ledger_logical_key,
+                content_hash,
+                base_hash: undefined,
+                complete: true,
+                est_tokens: est,
+                reduction_kind,
+            };
+            (0, context_ledger_1.appendLedgerRecord)(paths, scopeRes.scope, rec);
+        }
+        (0, context_telemetry_1.recordTelemetry)(paths, {
+            ts: now,
+            session_id,
+            agent_id: input?.agent_id,
+            epoch: 0,
+            tool_type: toolName,
+            workload_category: "observe",
+            tier: "s0",
+            stage: "deliver",
+            slice: "s0",
+            page_id,
+            orig_tokens: est,
+            returned_tokens: est,
+            dup_detected: false,
+            dup_avoided: false,
+            delta_tokens: 0,
+            full_rehydrations: 0,
+            compaction_resets: 0,
+            parent_pages: 0,
+            child_pages: 0,
+            assumed_resident_misses: 0,
+            verification_outcome: "ok",
+            turns: 0,
+            retries: 0,
+            runtime_ms: 0,
+            reduction_kind,
+        });
+        void raw_objref; // acknowledged: used in the page record (future slices)
+        return contextPassthrough();
+    }
+    catch {
+        // Fail-safe: any error → passthrough, exit 0
+        return contextPassthrough();
+    }
+}
+/**
+ * `th hook session-context` — S0 OBSERVE entry for SessionStart.
+ *
+ * At S0: records the SubagentStart probe counter when agent_id is present;
+ * epoch read/reconcile is a no-op stub (epoch tracking begins in S1+).
+ * Returns `{}` (no capsule injection at S0 — minimal/empty per brief D-15).
+ *
+ * Fail-safe: any error → passthrough (exit 0).
+ * Kill-switch: `TH_DISABLE_CONTEXT_PAGES=1` → pure passthrough.
+ */
+function runHookSessionContext(_root, input, env = process.env) {
+    if (env["TH_DISABLE_CONTEXT_PAGES"] === "1")
+        return contextPassthrough();
+    try {
+        // Probe: SubagentStart fired (agent_id is present in a session-context payload)
+        if (input?.agent_id) {
+            (0, context_telemetry_1.probeSubagentStartFired)();
+        }
+        // S0 epoch reconcile stub — reads/writes deferred to S1+.
+        // Future: read epoch.json, compare session_id, bump if new session.
+        // S0 capsule content = empty (no injection at S0 per brief D-15).
+        return contextPassthrough();
+    }
+    catch {
+        return contextPassthrough();
+    }
 }

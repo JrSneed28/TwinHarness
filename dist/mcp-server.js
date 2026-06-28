@@ -3230,8 +3230,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path51) {
-      let input = path51;
+    function removeDotSegments(path54) {
+      let input = path54;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3483,8 +3483,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path51, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path51 && path51 !== "/" ? path51 : void 0;
+        const [path54, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path54 && path54 !== "/" ? path54 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -6877,12 +6877,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs46, exportName) {
+    function addFormats(ajv, list, fs47, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs46[f]);
+        ajv.addFormat(f, fs47[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -7152,10 +7152,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path51) {
-  if (!path51)
+function getElementAtPath(obj, path54) {
+  if (!path54)
     return obj;
-  return path51.reduce((acc, key) => acc?.[key], obj);
+  return path54.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7564,11 +7564,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path51, issues) {
+function prefixIssues(path54, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path51);
+    iss.path.unshift(path54);
     return iss;
   });
 }
@@ -7715,16 +7715,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path51 = []) => {
+  const processError = (error3, path54 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path51, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path54, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path51, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path54, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path51, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path54, ...issue2.path]);
       } else {
-        const fullpath = [...path51, ...issue2.path];
+        const fullpath = [...path54, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -15473,8 +15473,8 @@ var StdioServerTransport = class {
 };
 
 // src/mcp-server.ts
-var fs45 = __toESM(require("node:fs"));
-var path50 = __toESM(require("node:path"));
+var fs46 = __toESM(require("node:fs"));
+var path53 = __toESM(require("node:path"));
 
 // src/core/paths.ts
 var fs = __toESM(require("node:fs"));
@@ -27965,6 +27965,193 @@ ${v.missing.map((m) => `  - ${m}`).join("\n")}`
   });
 }
 
+// src/commands/context-pages.ts
+var fs35 = __toESM(require("node:fs"));
+var path36 = __toESM(require("node:path"));
+
+// src/core/context-page.ts
+var path34 = __toESM(require("node:path"));
+function contextPagesRoot(paths) {
+  return path34.join(paths.stateDir, "context-pages");
+}
+
+// src/core/context-telemetry.ts
+var path35 = __toESM(require("node:path"));
+function contextPagesDir(paths) {
+  return path35.join(paths.stateDir, "context-pages");
+}
+function telemetryFilePath(paths) {
+  return path35.join(contextPagesDir(paths), "telemetry.jsonl");
+}
+
+// src/commands/context-pages.ts
+var S0_OPS = /* @__PURE__ */ new Set(["page-status", "residency", "telemetry", "savings", "baseline"]);
+function isLedgerRec(v) {
+  if (typeof v !== "object" || v === null) return false;
+  const r = v;
+  return typeof r.seq === "number" && typeof r.ts === "string" && typeof r.session_id === "string" && typeof r.page_id === "string" && typeof r.op === "string" && typeof r.recordHash === "string";
+}
+function isTelemetryRec(v) {
+  if (typeof v !== "object" || v === null) return false;
+  const r = v;
+  return typeof r.ts === "string" && typeof r.session_id === "string" && typeof r.epoch === "number";
+}
+function listShardFiles(pagesRoot) {
+  try {
+    if (!fs35.existsSync(pagesRoot)) return [];
+    return fs35.readdirSync(pagesRoot).filter((name) => name.startsWith("ledger-") && name.endsWith(".jsonl")).map((name) => path36.join(pagesRoot, name));
+  } catch {
+    return [];
+  }
+}
+function readAllLedgerRecords(paths) {
+  const pagesRoot = contextPagesRoot(paths);
+  const shards = listShardFiles(pagesRoot);
+  const out = [];
+  for (const file of shards) {
+    const records = readJsonlValues(file, isLedgerRec);
+    out.push(...records);
+  }
+  return out;
+}
+function readAllTelemetryRecords(paths) {
+  return readJsonlValues(telemetryFilePath(paths), isTelemetryRec);
+}
+function handlePageStatus(_args, paths) {
+  const pagesRoot = contextPagesRoot(paths);
+  const shardFiles = listShardFiles(pagesRoot);
+  const shards = [];
+  const allPageIds = /* @__PURE__ */ new Set();
+  let totalRecords = 0;
+  for (const file of shardFiles) {
+    const records = readJsonlValues(file, isLedgerRec);
+    for (const r of records) allPageIds.add(r.page_id);
+    shards.push({ file: path36.basename(file), records: records.length });
+    totalRecords += records.length;
+  }
+  const uniquePages = allPageIds.size;
+  const human = [
+    `Context-pages directory: ${pagesRoot}`,
+    `Shards: ${shards.length}`,
+    ...shards.map((s) => `  ${s.file}: ${s.records} record(s)`),
+    `Total records : ${totalRecords}`,
+    `Unique page_ids: ${uniquePages}`
+  ].join("\n");
+  return success({
+    data: { shards, total_records: totalRecords, unique_pages: uniquePages, pages_root: pagesRoot },
+    human
+  });
+}
+function handleResidency(args, paths) {
+  const sessionFilter = typeof args.session_id === "string" ? args.session_id : void 0;
+  let records = readAllLedgerRecords(paths).filter((r) => r.op === "deliver");
+  if (sessionFilter !== void 0) {
+    records = records.filter((r) => r.session_id === sessionFilter);
+  }
+  const byPageId = /* @__PURE__ */ new Map();
+  for (const r of records) byPageId.set(r.page_id, r);
+  const resident = [...byPageId.values()].sort((a, b) => a.seq - b.seq);
+  const summary = resident.map((r) => ({
+    page_id: r.page_id,
+    logical_key: r.logical_key,
+    content_hash: r.content_hash,
+    est_tokens: r.est_tokens,
+    reduction_kind: r.reduction_kind,
+    session_id: r.session_id,
+    ts: r.ts
+  }));
+  const human = [
+    `Resident pages: ${resident.length}${sessionFilter ? ` (session: ${sessionFilter})` : ""}`,
+    ...summary.map((r) => `  ${r.page_id}  ${r.logical_key}  (${r.est_tokens} tok, ${r.reduction_kind})`)
+  ].join("\n");
+  return success({ data: { resident_count: resident.length, records: summary }, human });
+}
+function handleTelemetry(args, paths) {
+  const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : 50;
+  const all = readAllTelemetryRecords(paths);
+  const tail = all.slice(-limit);
+  const human = [
+    `Telemetry records: ${all.length} total (showing last ${tail.length})`,
+    `File: ${telemetryFilePath(paths)}`,
+    ...tail.map(
+      (r) => `  [${r.ts}] sess=${r.session_id} epoch=${r.epoch}` + (r.tool_type ? ` tool=${r.tool_type}` : "") + (r.orig_tokens !== void 0 ? ` orig=${r.orig_tokens}tok` : "") + (r.dup_avoided ? " DUP_AVOIDED" : "")
+    )
+  ].join("\n");
+  return success({ data: { count: tail.length, total: all.length, records: tail }, human });
+}
+function handleSavings(_args, paths) {
+  const records = readAllTelemetryRecords(paths);
+  let origTokens = 0;
+  let returnedTokens = 0;
+  let deltaTokens = 0;
+  let dupAvoidedCount = 0;
+  for (const r of records) {
+    origTokens += r.orig_tokens ?? 0;
+    returnedTokens += r.returned_tokens ?? r.orig_tokens ?? 0;
+    deltaTokens += r.delta_tokens ?? 0;
+    if (r.dup_avoided) dupAvoidedCount++;
+  }
+  const savingsPct = origTokens > 0 ? Math.round((origTokens - returnedTokens) / origTokens * 1e4) / 100 : 0;
+  const human = [
+    `Savings: ${savingsPct}% (S0 target = 0%)`,
+    `  Original tokens : ${origTokens}`,
+    `  Returned tokens : ${returnedTokens}`,
+    `  Delta tokens    : ${deltaTokens}`,
+    `  Dups avoided    : ${dupAvoidedCount}`,
+    `  Records         : ${records.length}`
+  ].join("\n");
+  return success({
+    data: {
+      savings_pct: savingsPct,
+      orig_tokens: origTokens,
+      returned_tokens: returnedTokens,
+      delta_tokens: deltaTokens,
+      dup_avoided_count: dupAvoidedCount,
+      record_count: records.length
+    },
+    human
+  });
+}
+function handleBaseline(_args, paths) {
+  const records = readAllTelemetryRecords(paths);
+  const baselineTokens = records.reduce((acc, r) => acc + (r.orig_tokens ?? 0), 0);
+  const pagesRoot = contextPagesRoot(paths);
+  const human = [
+    `S0 baseline (OBSERVE-only, savings target = 0%)`,
+    `  Baseline tokens : ${baselineTokens}`,
+    `  Record count    : ${records.length}`,
+    `  Tier            : s0`,
+    `  Pages root      : ${pagesRoot}`
+  ].join("\n");
+  return success({
+    data: {
+      baseline_tokens: baselineTokens,
+      record_count: records.length,
+      tier: "s0",
+      epoch: 0,
+      pages_root: pagesRoot
+    },
+    human
+  });
+}
+var HANDLERS = {
+  "page-status": handlePageStatus,
+  residency: handleResidency,
+  telemetry: handleTelemetry,
+  savings: handleSavings,
+  baseline: handleBaseline
+};
+function runContextPagesCommand(op, args, paths) {
+  const handler = HANDLERS[op];
+  if (handler === void 0) {
+    return failure({
+      data: { op, valid_ops: [...S0_OPS] },
+      human: `Unknown context-pages operation: "${op}". Valid S0 ops: ${[...S0_OPS].join(", ")}.`
+    });
+  }
+  return handler(args, paths);
+}
+
 // src/commands/budget.ts
 var BUDGET_BASE = 2e3;
 var BUDGET_W_FILE = 1500;
@@ -28049,10 +28236,10 @@ function runBudgetCheck(paths, opts = {}) {
 }
 
 // src/commands/handoff.ts
-var fs35 = __toESM(require("node:fs"));
-var path34 = __toESM(require("node:path"));
+var fs36 = __toESM(require("node:fs"));
+var path37 = __toESM(require("node:path"));
 function handoffPath(paths) {
-  return path34.join(paths.stateDir, "HANDOFF.md");
+  return path37.join(paths.stateDir, "HANDOFF.md");
 }
 var HANDOFF_STATE_OPEN = "<!-- TH-HANDOFF-STATE";
 var HANDOFF_STATE_CLOSE = "TH-HANDOFF-STATE -->";
@@ -28120,9 +28307,9 @@ function runHandoffWrite(paths) {
     HANDOFF_STATE_CLOSE,
     ""
   ].join("\n");
-  fs35.mkdirSync(paths.stateDir, { recursive: true });
+  fs36.mkdirSync(paths.stateDir, { recursive: true });
   atomicWriteFile(handoffPath(paths), md, { root: paths.root });
-  const relPath2 = path34.relative(paths.root, handoffPath(paths)).split(path34.sep).join("/");
+  const relPath2 = path37.relative(paths.root, handoffPath(paths)).split(path37.sep).join("/");
   structuredLog({ cmd: "handoff write", path: relPath2, slices: slices.length, artifacts: s.approved_artifacts.length });
   return success({
     data: {
@@ -28144,14 +28331,14 @@ function runHandoffWrite(paths) {
 }
 
 // src/commands/inspector.ts
-var path36 = __toESM(require("node:path"));
+var path39 = __toESM(require("node:path"));
 
 // src/commands/artifact.ts
-var fs36 = __toESM(require("node:fs"));
-var path35 = __toESM(require("node:path"));
+var fs37 = __toESM(require("node:fs"));
+var path38 = __toESM(require("node:path"));
 function toRelKey(root, file) {
-  const abs = path35.resolve(root, file);
-  return path35.relative(root, abs).split(path35.sep).join("/");
+  const abs = path38.resolve(root, file);
+  return path38.relative(root, abs).split(path38.sep).join("/");
 }
 function runArtifactRegister(paths, file, version2) {
   return withStateLock(paths, () => runArtifactRegisterLocked(paths, file, version2));
@@ -28165,10 +28352,10 @@ function runArtifactRegisterLocked(paths, file, version2) {
   if (abs === null) {
     return failure({ human: `Path outside project root: ${file}`, data: { error: "path_outside_root", file } });
   }
-  if (!fs36.existsSync(abs)) {
+  if (!fs37.existsSync(abs)) {
     return failure({ human: `File not found: ${file}`, data: { error: "file_not_found", file } });
   }
-  const stat = fs36.statSync(abs);
+  const stat = fs37.statSync(abs);
   if (!stat.isFile() && !stat.isDirectory()) {
     return failure({ human: `Not a file or directory: ${file}`, data: { error: "not_a_file_or_dir", file } });
   }
@@ -28197,7 +28384,7 @@ ${formatIssues(r.issues)}`,
   let summaryWarning = null;
   if (stat.isFile() && /\.(md|markdown)$/i.test(relKey)) {
     try {
-      const { summary } = extractSummary(fs36.readFileSync(abs, "utf8"));
+      const { summary } = extractSummary(fs37.readFileSync(abs, "utf8"));
       if (summary === null) {
         summaryWarning = `no \`## Summary\` block \u2014 \`th context pack\` will fall back to the file head; add a Summary block to keep the handoff tight.`;
       }
@@ -28283,14 +28470,14 @@ function runArtifactSection(paths, opts = {}) {
     structuredLog({ cmd: "artifact section", error: "path_outside_root", file: opts.file });
     return failure({ human: `Path outside project root: ${opts.file}`, data: { error: "path_outside_root", file: opts.file } });
   }
-  if (!fs36.existsSync(abs) || !fs36.statSync(abs).isFile()) {
+  if (!fs37.existsSync(abs) || !fs37.statSync(abs).isFile()) {
     structuredLog({ cmd: "artifact section", error: "file_not_found", file: opts.file });
     return failure({ human: `File not found: ${opts.file}`, data: { error: "file_not_found", file: opts.file } });
   }
   const relKey = toRelKey(paths.root, opts.file);
   let content;
   try {
-    content = fs36.readFileSync(abs, "utf8");
+    content = fs37.readFileSync(abs, "utf8");
   } catch {
     structuredLog({ cmd: "artifact section", error: "read_failed", file: relKey });
     return failure({ human: `Could not read ${relKey}`, data: { error: "read_failed", file: relKey } });
@@ -28390,7 +28577,7 @@ ${formatIssues(r.issues)}`,
   const guard = guardApprovedArtifactReauthor(r.state.approved_artifacts, INSPECTOR_ANALYSIS_FILE, opts.version, `inspector write ${INSPECTOR_ANALYSIS_FILE}`);
   if (!guard.ok) return guard.result;
   const version2 = guard.version;
-  const abs = path36.resolve(paths.root, INSPECTOR_ANALYSIS_FILE);
+  const abs = path39.resolve(paths.root, INSPECTOR_ANALYSIS_FILE);
   atomicWriteFile(abs, content, { root: paths.root });
   const reg = runArtifactRegister(paths, INSPECTOR_ANALYSIS_FILE, version2);
   if (!reg.ok) {
@@ -28405,11 +28592,11 @@ ${formatIssues(r.issues)}`,
   });
 }
 function normalizeRel(p) {
-  return p.split(path36.sep).join("/").replace(/^\.\//, "");
+  return p.split(path39.sep).join("/").replace(/^\.\//, "");
 }
 
 // src/commands/tester.ts
-var path37 = __toESM(require("node:path"));
+var path40 = __toESM(require("node:path"));
 function runTesterRecord(paths, opts) {
   const driver = (opts.driver ?? "").trim();
   if (driver === "") {
@@ -28444,7 +28631,7 @@ Pass --evidence-ref pointing at the live run's saved output (a readable file und
   const body = JSON.stringify(record2, null, 2) + "\n";
   atomicWriteFile(testerRecordPath(paths), body, { root: paths.root });
   const hash = shortHash(body);
-  const rel = path37.relative(paths.root, testerRecordPath(paths)).split(path37.sep).join("/");
+  const rel = path40.relative(paths.root, testerRecordPath(paths)).split(path40.sep).join("/");
   appendLedger(paths, { event: "tester-record", driver: record2.driver, provider: record2.provider ?? null, passed });
   structuredLog({ cmd: "tester record", driver: record2.driver, provider: record2.provider ?? null, passed });
   const gateNote = passed ? "The production-reality gate's Tester condition is now satisfied." : "NOTE: recorded as NOT passed (`--passed` absent) \u2014 the production-reality gate's Tester condition is NOT satisfied. Re-record with `--passed` once the live run is green.";
@@ -28456,7 +28643,7 @@ Pass --evidence-ref pointing at the live run's saved output (a readable file und
 }
 
 // src/commands/approve.ts
-var path38 = __toESM(require("node:path"));
+var path41 = __toESM(require("node:path"));
 function runApprove(paths, stage, opts = {}) {
   return withStateLock(paths, () => runApproveLocked(paths, stage, opts));
 }
@@ -28499,7 +28686,7 @@ function runApproveLocked(paths, stageArg, opts) {
     }
     throw e;
   }
-  const rel = path38.relative(paths.root, approvalReceiptsPath(paths)).split(path38.sep).join("/");
+  const rel = path41.relative(paths.root, approvalReceiptsPath(paths)).split(path41.sep).join("/");
   appendLedger(paths, { event: "approve", stage, approvalRecordHash: sealed.recordHash });
   structuredLog({ cmd: "approve", stage, approvalRecordHash: sealed.recordHash });
   return success({
@@ -28516,7 +28703,7 @@ function runApproveLocked(paths, stageArg, opts) {
 }
 
 // src/commands/driver.ts
-var path39 = __toESM(require("node:path"));
+var path42 = __toESM(require("node:path"));
 function runDriverRecord(paths, opts = {}) {
   return withStateLock(paths, () => runDriverRecordLocked(paths, opts));
 }
@@ -28550,7 +28737,7 @@ function runDriverRecordLocked(paths, opts) {
     }
     throw e;
   }
-  const rel = path39.relative(paths.root, driverReceiptsPath(paths)).split(path39.sep).join("/");
+  const rel = path42.relative(paths.root, driverReceiptsPath(paths)).split(path42.sep).join("/");
   const recorded = sealed.dimensions.map((d) => d.name);
   appendLedger(paths, { event: "driver-record", dimensions: recorded, driverRecordHash: sealed.recordHash });
   structuredLog({ cmd: "driver record", dimensions: recorded, driverRecordHash: sealed.recordHash });
@@ -28567,7 +28754,7 @@ function runDriverRecordLocked(paths, opts) {
 }
 
 // src/commands/realize.ts
-var path40 = __toESM(require("node:path"));
+var path43 = __toESM(require("node:path"));
 function runRealize(paths, opts = {}) {
   return withStateLock(paths, () => runRealizeLocked(paths, opts));
 }
@@ -28614,7 +28801,7 @@ function runRealizeLocked(paths, opts) {
     }
     throw e;
   }
-  const rel = path40.relative(paths.root, realizationReceiptsPath(paths)).split(path40.sep).join("/");
+  const rel = path43.relative(paths.root, realizationReceiptsPath(paths)).split(path43.sep).join("/");
   appendLedger(paths, {
     event: "realize",
     reqId,
@@ -28640,7 +28827,7 @@ function runRealizeLocked(paths, opts) {
 }
 
 // src/commands/assertion-presence.ts
-var path41 = __toESM(require("node:path"));
+var path44 = __toESM(require("node:path"));
 function runAssertionPresenceRecord(paths, opts = {}) {
   return withStateLock(paths, () => runAssertionPresenceRecordLocked(paths, opts));
 }
@@ -28656,7 +28843,7 @@ function runAssertionPresenceRecordLocked(paths, opts) {
   const sealed = appendAssertionPresenceReceipt(paths, {
     producerIdentity: opts.producerIdentity ?? "cli:th assertion-presence record"
   });
-  const rel = path41.relative(paths.root, assertionPresenceReceiptsPath(paths)).split(path41.sep).join("/");
+  const rel = path44.relative(paths.root, assertionPresenceReceiptsPath(paths)).split(path44.sep).join("/");
   const reqs = sealed.ground.length;
   const assertionFree = sealed.ground.filter((g) => g.assertionFree).length;
   appendLedger(paths, {
@@ -28678,7 +28865,7 @@ function runAssertionPresenceRecordLocked(paths, opts) {
 }
 
 // src/commands/grounding.ts
-var path42 = __toESM(require("node:path"));
+var path45 = __toESM(require("node:path"));
 function runGroundingRecord(paths, opts = {}) {
   return withStateLock(paths, () => runGroundingRecordLocked(paths, opts));
 }
@@ -28753,7 +28940,7 @@ function runGroundingRecordLocked(paths, opts) {
     ground,
     producerIdentity: opts.producerIdentity ?? "cli:th grounding record"
   });
-  const rel = path42.relative(paths.root, groundingReceiptsPath(paths)).split(path42.sep).join("/");
+  const rel = path45.relative(paths.root, groundingReceiptsPath(paths)).split(path45.sep).join("/");
   appendLedger(paths, {
     event: "grounding-record",
     groundKind,
@@ -28816,8 +29003,8 @@ function runGroundingCheck(paths, _opts = {}) {
 }
 
 // src/commands/decision.ts
-var fs37 = __toESM(require("node:fs"));
-var path43 = __toESM(require("node:path"));
+var fs38 = __toESM(require("node:fs"));
+var path46 = __toESM(require("node:path"));
 
 // src/core/decision-key.ts
 function resolveDecisionKey() {
@@ -28876,14 +29063,14 @@ function firstHeading(body) {
 }
 function runDecisionDetect(paths, _opts = {}) {
   const candidates = [];
-  const adrDir = path43.join(paths.docsDir, "05-adrs");
+  const adrDir = path46.join(paths.docsDir, "05-adrs");
   try {
-    const entries = fs37.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
+    const entries = fs38.readdirSync(adrDir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort();
     for (const f of entries) {
-      const rel = path43.posix.join("docs/05-adrs", f);
+      const rel = path46.posix.join("docs/05-adrs", f);
       let title = f;
       try {
-        const heading = firstHeading(fs37.readFileSync(path43.join(adrDir, f), "utf8"));
+        const heading = firstHeading(fs38.readFileSync(path46.join(adrDir, f), "utf8"));
         if (heading) title = heading;
       } catch {
       }
@@ -28892,7 +29079,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const driftBody = fs37.readFileSync(paths.driftLog, "utf8");
+    const driftBody = fs38.readFileSync(paths.driftLog, "utf8");
     const seen = /* @__PURE__ */ new Set();
     for (const line of driftBody.split(/\r?\n/)) {
       const m = /^##\s+(DRIFT-\d+)\b(.*)$/.exec(line);
@@ -28911,7 +29098,7 @@ function runDecisionDetect(paths, _opts = {}) {
   } catch {
   }
   try {
-    const scopeBody = fs37.readFileSync(path43.join(paths.docsDir, "02-scope.md"), "utf8");
+    const scopeBody = fs38.readFileSync(path46.join(paths.docsDir, "02-scope.md"), "utf8");
     if (/(^##\s+Changes\b)|(^\s*(ADDED|CHANGED):)/m.test(scopeBody)) {
       candidates.push({
         title: "Scope signal: a post-requirements scope change is recorded",
@@ -29026,15 +29213,15 @@ function sealWarningData(events) {
 }
 
 // src/commands/template.ts
-var fs38 = __toESM(require("node:fs"));
-var path44 = __toESM(require("node:path"));
+var fs39 = __toESM(require("node:fs"));
+var path47 = __toESM(require("node:path"));
 var TEMPLATE_EXT = ".md";
-var PROJECT_TEMPLATE_REL = path44.join(".twinharness", "templates");
+var PROJECT_TEMPLATE_REL = path47.join(".twinharness", "templates");
 var PLUGIN_TEMPLATE_REL = "templates";
 function pluginRoot() {
   const env = process.env.CLAUDE_PLUGIN_ROOT;
-  if (typeof env === "string" && env.length > 0) return path44.resolve(env);
-  return path44.resolve(__dirname, "..", "..");
+  if (typeof env === "string" && env.length > 0) return path47.resolve(env);
+  return path47.resolve(__dirname, "..", "..");
 }
 function normalizeTemplateName(name) {
   const trimmed = name.trim();
@@ -29045,15 +29232,15 @@ function normalizeTemplateName(name) {
   return trimmed.toLowerCase().endsWith(TEMPLATE_EXT) ? trimmed : trimmed + TEMPLATE_EXT;
 }
 function resolve19(name, projectRoot, plugin) {
-  const projectPath = path44.join(projectRoot, PROJECT_TEMPLATE_REL, name);
-  const pluginPath = path44.join(plugin, PLUGIN_TEMPLATE_REL, name);
+  const projectPath = path47.join(projectRoot, PROJECT_TEMPLATE_REL, name);
+  const pluginPath = path47.join(plugin, PLUGIN_TEMPLATE_REL, name);
   for (const [abs, source] of [
     [projectPath, "project-override"],
     [pluginPath, "plugin-bundled"]
   ]) {
     try {
-      const st = fs38.statSync(abs);
-      if (st.isFile()) return { path: abs, content: fs38.readFileSync(abs, "utf8"), source };
+      const st = fs39.statSync(abs);
+      if (st.isFile()) return { path: abs, content: fs39.readFileSync(abs, "utf8"), source };
     } catch {
     }
   }
@@ -29088,17 +29275,17 @@ function runTemplateGet(paths, name) {
   });
 }
 function listTemplateDir(dir) {
-  if (!fs38.existsSync(dir)) return [];
+  if (!fs39.existsSync(dir)) return [];
   try {
-    if (!fs38.statSync(dir).isDirectory()) return [];
-    return fs38.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(TEMPLATE_EXT)).map((e) => e.name);
+    if (!fs39.statSync(dir).isDirectory()) return [];
+    return fs39.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(TEMPLATE_EXT)).map((e) => e.name);
   } catch {
     return [];
   }
 }
 function runTemplateList(paths) {
-  const projectDir = path44.join(paths.root, PROJECT_TEMPLATE_REL);
-  const pluginDir = path44.join(pluginRoot(), PLUGIN_TEMPLATE_REL);
+  const projectDir = path47.join(paths.root, PROJECT_TEMPLATE_REL);
+  const pluginDir = path47.join(pluginRoot(), PLUGIN_TEMPLATE_REL);
   const projectNames = new Set(listTemplateDir(projectDir));
   const pluginNames = new Set(listTemplateDir(pluginDir));
   const byName = /* @__PURE__ */ new Map();
@@ -29196,10 +29383,10 @@ function runArtifactLeases(paths) {
 }
 
 // src/core/collab.ts
-var fs39 = __toESM(require("node:fs"));
-var path45 = __toESM(require("node:path"));
+var fs40 = __toESM(require("node:fs"));
+var path48 = __toESM(require("node:path"));
 function validatePathSegment(segment, label) {
-  if (path45.isAbsolute(segment)) {
+  if (path48.isAbsolute(segment)) {
     throw new PathContainmentError(`collab: ${label} must not be an absolute path: "${segment}"`, segment);
   }
   if (segment === ".." || segment.includes("/") || segment.includes("\\")) {
@@ -29220,16 +29407,16 @@ var FragmentExistsError = class extends Error {
 function collabDir(paths, stage, round) {
   validatePathSegment(stage, "stage");
   if (round !== void 0) validatePathSegment(round, "round");
-  const base = path45.join(paths.stateDir, "collab", stage);
-  return round === void 0 ? base : path45.join(base, round);
+  const base = path48.join(paths.stateDir, "collab", stage);
+  return round === void 0 ? base : path48.join(base, round);
 }
 function writeFragment(paths, input) {
   validatePathSegment(input.name, "name");
   const dir = collabDir(paths, input.stage, input.round);
-  const file = path45.join(dir, input.name);
-  fs39.mkdirSync(dir, { recursive: true });
+  const file = path48.join(dir, input.name);
+  fs40.mkdirSync(dir, { recursive: true });
   try {
-    fs39.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
+    fs40.writeFileSync(file, input.content, { encoding: "utf8", flag: input.force ? "w" : "wx" });
   } catch (e) {
     if (e.code === "EEXIST") throw new FragmentExistsError(file);
     throw e;
@@ -29240,10 +29427,10 @@ function listFragments(paths, stage, round) {
   const out = [];
   const readRound = (r) => {
     const dir = collabDir(paths, stage, r);
-    if (!fs39.existsSync(dir) || !fs39.statSync(dir).isDirectory()) return;
-    const names = fs39.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
+    if (!fs40.existsSync(dir) || !fs40.statSync(dir).isDirectory()) return;
+    const names = fs40.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name).sort();
     for (const name of names) {
-      out.push({ stage, round: r, name, path: path45.join(dir, name) });
+      out.push({ stage, round: r, name, path: path48.join(dir, name) });
     }
   };
   if (round !== void 0) {
@@ -29251,8 +29438,8 @@ function listFragments(paths, stage, round) {
     return out;
   }
   const stageDir = collabDir(paths, stage);
-  if (!fs39.existsSync(stageDir) || !fs39.statSync(stageDir).isDirectory()) return out;
-  const rounds = fs39.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  if (!fs40.existsSync(stageDir) || !fs40.statSync(stageDir).isDirectory()) return out;
+  const rounds = fs40.readdirSync(stageDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
   for (const r of rounds) readRound(r);
   return out;
 }
@@ -29261,14 +29448,14 @@ function mergeFragments(paths, stage, round) {
   const fragments = listFragments(paths, stage, round);
   const unanchored = [];
   for (const f of fragments) {
-    const content = fs39.readFileSync(f.path, "utf8");
+    const content = fs40.readFileSync(f.path, "utf8");
     if (extractReqIds(content).length === 0) unanchored.push(f.name);
   }
   if (unanchored.length > 0) {
     return { ok: false, merged: "", fragments, unanchored };
   }
   const parts = fragments.map((f) => {
-    const content = fs39.readFileSync(f.path, "utf8");
+    const content = fs40.readFileSync(f.path, "utf8");
     return content.endsWith("\n") ? content : `${content}
 `;
   });
@@ -29381,8 +29568,8 @@ function runCollabMerge(paths, opts) {
 }
 
 // src/commands/debate.ts
-var fs40 = __toESM(require("node:fs"));
-var path46 = __toESM(require("node:path"));
+var fs41 = __toESM(require("node:fs"));
+var path49 = __toESM(require("node:path"));
 
 // src/core/debate-log.ts
 var DEBATE_LEDGER = {
@@ -29450,22 +29637,22 @@ Links      : ...
 \`\`\`
 `;
 function debateLogPath(paths) {
-  return path46.join(paths.root, "debate-log.md");
+  return path49.join(paths.root, "debate-log.md");
 }
 function readDebateLog(paths) {
   const file = debateLogPath(paths);
-  if (!fs40.existsSync(file)) {
+  if (!fs41.existsSync(file)) {
     atomicWriteFile(file, DEBATE_LOG_HEADER, { root: paths.root });
     return DEBATE_LOG_HEADER;
   }
-  return fs40.readFileSync(file, "utf8");
+  return fs41.readFileSync(file, "utf8");
 }
 function appendDebateLog(paths, block) {
   const file = debateLogPath(paths);
   readDebateLog(paths);
   assertGovernedWriteSurface(paths.root, file);
   const sep26 = endsWithNewline(file) ? "" : "\n";
-  fs40.appendFileSync(file, `${sep26}${block}`, "utf8");
+  fs41.appendFileSync(file, `${sep26}${block}`, "utf8");
 }
 function runDebateAdd(paths, opts) {
   const locked = assertFeatureUnlocked(paths, "debate");
@@ -29528,7 +29715,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs40.existsSync(file) ? fs40.readFileSync(file, "utf8") : "";
+  const text = fs41.existsSync(file) ? fs41.readFileSync(file, "utf8") : "";
   const entries = sortById(effectiveEntries(parseDebateEntries(text)));
   const openBlocking = r.state.debate_open_blocking ?? 0;
   const human = entries.length ? entries.map((e) => `${e.id}  (${e.topic})  ${e.status}`).join("\n") : "(no debate entries)";
@@ -29564,7 +29751,7 @@ ${formatIssues(r.issues)}`,
     });
   }
   const file = debateLogPath(paths);
-  const text = fs40.existsSync(file) ? fs40.readFileSync(file, "utf8") : "";
+  const text = fs41.existsSync(file) ? fs41.readFileSync(file, "utf8") : "";
   const entries = parseDebateEntries(text);
   const entry = entries.find((e) => e.id === id);
   if (!entry) {
@@ -29610,7 +29797,7 @@ ${formatIssues(r.issues)}`,
 }
 
 // src/commands/init.ts
-var fs41 = __toESM(require("node:fs"));
+var fs42 = __toESM(require("node:fs"));
 var DRIFT_LOG_HEADER2 = `# Drift Log
 
 Append-only record of implementation discoveries (spec \xA710). Each entry records the
@@ -29645,11 +29832,11 @@ function runInit(paths, opts) {
   const created = [];
   const skipped = [];
   const maxTokens = opts.maxTokens !== void 0 && Number.isFinite(opts.maxTokens) && opts.maxTokens > 0 ? kToTokens(opts.maxTokens) : void 0;
-  if (!fs41.existsSync(paths.docsDir)) {
-    fs41.mkdirSync(paths.docsDir, { recursive: true });
+  if (!fs42.existsSync(paths.docsDir)) {
+    fs42.mkdirSync(paths.docsDir, { recursive: true });
     created.push("docs/");
   }
-  fs41.mkdirSync(paths.stateDir, { recursive: true });
+  fs42.mkdirSync(paths.stateDir, { recursive: true });
   const existing = readState(paths);
   if (existing.exists && !opts.force) {
     if (maxTokens !== void 0 && existing.state) {
@@ -29675,7 +29862,7 @@ ${formatIssues(validation.issues)}`,
     writeState(paths, state);
     created.push(".twinharness/state.json");
   }
-  if (!fs41.existsSync(paths.driftLog)) {
+  if (!fs42.existsSync(paths.driftLog)) {
     atomicWriteFile(paths.driftLog, DRIFT_LOG_HEADER2, { root: paths.root });
     created.push("drift-log.md");
   } else {
@@ -29719,7 +29906,7 @@ function runInitMcp(paths, opts = {}) {
 }
 
 // src/commands/research.ts
-var path47 = __toESM(require("node:path"));
+var path50 = __toESM(require("node:path"));
 var WINDOWS_RESERVED = /* @__PURE__ */ new Set([
   "con",
   "prn",
@@ -29748,7 +29935,7 @@ function sanitizeTopic(topic) {
   const raw = topic.trim();
   if (raw === "") return { error: "empty topic" };
   if (raw.includes("/") || raw.includes("\\")) return { error: "topic must not contain a path separator" };
-  if (path47.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) return { error: "topic must not be an absolute or drive path" };
+  if (path50.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) return { error: "topic must not be an absolute or drive path" };
   if (raw.includes("..")) return { error: "topic must not contain `..`" };
   const stem = raw.replace(/\.(md|markdown)$/i, "");
   if (stem === "") return { error: "empty topic" };
@@ -29774,8 +29961,8 @@ function runResearchWrite(paths, opts) {
     return failure({ human: `Refusing research write: ${sanitized.error}: ${topic}`, data: { error: "invalid_topic", reason: sanitized.error, topic } });
   }
   const relTarget = `${RESEARCH_DIR}/${sanitized.stem}.md`;
-  const absTarget = path47.resolve(paths.root, relTarget);
-  const reRel = path47.relative(paths.root, absTarget).split(path47.sep).join("/");
+  const absTarget = path50.resolve(paths.root, relTarget);
+  const reRel = path50.relative(paths.root, absTarget).split(path50.sep).join("/");
   if (reRel !== relTarget) {
     return failure({ human: `Refusing research write outside ${RESEARCH_DIR}/: ${reRel}`, data: { error: "path_not_pinned", expected: relTarget, got: reRel } });
   }
@@ -29966,11 +30153,11 @@ function runStageCurrent(paths) {
 }
 
 // src/commands/doctor.ts
-var fs42 = __toESM(require("node:fs"));
-var path48 = __toESM(require("node:path"));
+var fs43 = __toESM(require("node:fs"));
+var path51 = __toESM(require("node:path"));
 var DOCTOR_STRICT_KEY_ALLOWLIST = /* @__PURE__ */ new Set([]);
 function pluginRoot2() {
-  return path48.resolve(__dirname, "..", "..");
+  return path51.resolve(__dirname, "..", "..");
 }
 function packagingCheck(root, files) {
   if (files.length === 0) {
@@ -29979,10 +30166,10 @@ function packagingCheck(root, files) {
   const missing = [];
   const counts = [];
   for (const entry of files) {
-    const abs = path48.join(root, entry);
+    const abs = path51.join(root, entry);
     let st;
     try {
-      st = fs42.statSync(abs);
+      st = fs43.statSync(abs);
     } catch {
       missing.push(entry);
       continue;
@@ -29990,7 +30177,7 @@ function packagingCheck(root, files) {
     if (st.isDirectory()) {
       let n = 0;
       try {
-        n = fs42.readdirSync(abs).length;
+        n = fs43.readdirSync(abs).length;
       } catch {
       }
       counts.push(`${entry}/ (${n})`);
@@ -30012,12 +30199,12 @@ function nodeMajor() {
   return m ? Number(m[1]) : 0;
 }
 function templateShadowCheck(root, pluginDir) {
-  const projectDir = path48.join(root, ".twinharness", "templates");
+  const projectDir = path51.join(root, ".twinharness", "templates");
   const mdFiles = (dir) => {
     try {
-      if (!fs42.statSync(dir).isDirectory()) return /* @__PURE__ */ new Set();
+      if (!fs43.statSync(dir).isDirectory()) return /* @__PURE__ */ new Set();
       return new Set(
-        fs42.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => e.name)
+        fs43.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md")).map((e) => e.name)
       );
     } catch {
       return /* @__PURE__ */ new Set();
@@ -30039,7 +30226,7 @@ function templateShadowCheck(root, pluginDir) {
   };
 }
 function ledgerChecks(paths, opts) {
-  if (!fs42.existsSync(ledgerPath(paths))) return [];
+  if (!fs43.existsSync(ledgerPath(paths))) return [];
   const ledgerEntries = readLedger(paths);
   const ledgerCount = ledgerEntries.length;
   const anchors = ledgerEntries.filter((e) => e.event === "high-water").length;
@@ -30083,23 +30270,23 @@ function runDoctor(paths, opts = {}) {
     detail: major >= 20 ? `${process.version} (>= 20)` : `${process.version} \u2014 TwinHarness requires Node >= 20`
   });
   const root = pluginRoot2();
-  const distCli = path48.join(root, "dist", "cli.js");
+  const distCli = path51.join(root, "dist", "cli.js");
   checks.push({
     name: "plugin cli",
-    status: fs42.existsSync(distCli) ? "ok" : "warn",
-    detail: fs42.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary"
+    status: fs43.existsSync(distCli) ? "ok" : "warn",
+    detail: fs43.existsSync(distCli) ? distCli : "dist/cli.js not found next to this binary"
   });
   let version2 = "unknown";
   let pkgFiles = [];
   try {
-    const pkg = JSON.parse(fs42.readFileSync(path48.join(root, "package.json"), "utf8"));
+    const pkg = JSON.parse(fs43.readFileSync(path51.join(root, "package.json"), "utf8"));
     if (typeof pkg.version === "string") version2 = pkg.version;
     if (Array.isArray(pkg.files)) pkgFiles = pkg.files.filter((f) => typeof f === "string");
   } catch {
   }
   checks.push({ name: "version", status: "ok", detail: version2 });
   checks.push(packagingCheck(root, pkgFiles));
-  checks.push(templateShadowCheck(paths.root, path48.join(root, "templates")));
+  checks.push(templateShadowCheck(paths.root, path51.join(root, "templates")));
   checks.push({
     name: "claude code",
     status: "warn",
@@ -30135,11 +30322,11 @@ function runDoctor(paths, opts = {}) {
       status: "ok",
       detail: `mode: ${writeMode} \u2014 GUARDRAIL for a compliant agent, NOT a security sandbox. The Bash heuristic is conservative and fail-open (unparsed here-docs/subshells/variable indirection and program-mediated writes like \`python -c\`/\`node -e\` bypass it). Do not run TwinHarness against untrusted repos and review \`th verify list\` before \`th verify run\`.`
     });
-    const lockDir = path48.join(paths.stateDir, ".state.lock");
-    if (fs42.existsSync(lockDir)) {
+    const lockDir = path51.join(paths.stateDir, ".state.lock");
+    if (fs43.existsSync(lockDir)) {
       let age = 0;
       try {
-        age = Date.now() - fs42.statSync(lockDir).mtimeMs;
+        age = Date.now() - fs43.statSync(lockDir).mtimeMs;
       } catch {
       }
       checks.push({
@@ -30268,7 +30455,7 @@ function runDoctor(paths, opts = {}) {
 }
 
 // src/commands/scorecard.ts
-var fs43 = __toESM(require("node:fs"));
+var fs44 = __toESM(require("node:fs"));
 function summarizeRouting(paths) {
   const models = {};
   let events = 0;
@@ -30358,8 +30545,8 @@ function runScorecard(paths, opts) {
   const suiteFailures = report ? report.results.filter((x) => !x.ok).length : 0;
   let driftEntries = 0;
   try {
-    if (fs43.existsSync(paths.driftLog)) {
-      driftEntries = parseDriftEntries(fs43.readFileSync(paths.driftLog, "utf8")).length;
+    if (fs44.existsSync(paths.driftLog)) {
+      driftEntries = parseDriftEntries(fs44.readFileSync(paths.driftLog, "utf8")).length;
     }
   } catch {
   }
@@ -30423,8 +30610,8 @@ function renderScorecard(d) {
 }
 
 // src/commands/slices.ts
-var fs44 = __toESM(require("node:fs"));
-var path49 = __toESM(require("node:path"));
+var fs45 = __toESM(require("node:fs"));
+var path52 = __toESM(require("node:path"));
 function parseComponentTokens(raw) {
   const quoted = [];
   for (const m of raw.matchAll(/`([^`]+)`/g)) {
@@ -30475,15 +30662,15 @@ function runSlicesSync(paths, opts = {}) {
   return withStateLock(paths, () => runSlicesSyncLocked(paths, opts));
 }
 function runSlicesSyncLocked(paths, opts = {}) {
-  const planAbs = path49.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
-  if (!fs44.existsSync(planAbs) || !fs44.statSync(planAbs).isFile()) {
-    const rel = path49.relative(paths.root, planAbs).split(path49.sep).join("/");
+  const planAbs = path52.resolve(paths.root, opts.planFile ?? "docs/09-implementation-plan.md");
+  if (!fs45.existsSync(planAbs) || !fs45.statSync(planAbs).isFile()) {
+    const rel = path52.relative(paths.root, planAbs).split(path52.sep).join("/");
     return failure({
       human: `Plan file not found: ${rel}. Provide the path with --plan or author the implementation plan first.`,
       data: { error: "plan_file_not_found", planFile: rel }
     });
   }
-  const planContent = fs44.readFileSync(planAbs, "utf8");
+  const planContent = fs45.readFileSync(planAbs, "utf8");
   const planSlices = parsePlanSlices(planContent);
   const r = readState(paths);
   if (!r.exists) return NOT_INIT;
@@ -31994,6 +32181,35 @@ var TOOL_DEFS = [
       additionalProperties: false
     },
     run: (paths, _args) => runGroundingCheck(paths, {})
+  },
+  // context-pages S0 OBSERVE — single multi-op tool (CLI↔MCP parity via operation enum).
+  {
+    name: "th_context",
+    description: "Inspect the S0 context-pages store (OBSERVE-only). `operation` selects the view: page-status (shard inventory), residency (delivered pages), telemetry (raw telemetry records), savings (dedup savings summary \u2014 0% at S0), baseline (S0 token denominator). Optional `session_id` filters residency by session; optional `limit` caps telemetry results (default 50). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        operation: {
+          type: "string",
+          description: "The context-pages view to run: page-status | residency | telemetry | savings | baseline.",
+          enum: ["page-status", "residency", "telemetry", "savings", "baseline"]
+        },
+        session_id: {
+          type: "string",
+          description: "Filter residency to a single session_id (optional; residency only)."
+        },
+        limit: {
+          type: "number",
+          description: "Maximum telemetry records to return, default 50 (optional; telemetry only)."
+        }
+      },
+      required: ["operation"],
+      additionalProperties: false
+    },
+    run: (paths, args) => {
+      const op = optString(args, "operation") ?? "";
+      return runContextPagesCommand(op, args, paths);
+    }
   }
 ];
 var ro = (category) => ({ category, readOnlyHint: true, destructiveHint: false, idempotentHint: true });
@@ -32133,7 +32349,10 @@ var TOOL_ANNOTATIONS = {
   // each call appends a fresh hash-chained grounding receipt to grounding-receipts.jsonl.
   th_grounding_record: wr("grounding", { idempotent: false }),
   // Axis-B/BSC-10 (Slice A) — read-only grounding chain validator. Appends nothing; pure read.
-  th_grounding_check: ro("grounding")
+  th_grounding_check: ro("grounding"),
+  // context-pages S0 OBSERVE — single multi-op read-only tool; individual CLI leaves
+  // are in MCP_EXCLUDED since the operation enum covers all S0 read ops.
+  th_context: ro("context")
 };
 function toolAnnotations(name) {
   return TOOL_ANNOTATIONS[name];
@@ -32194,7 +32413,10 @@ var MCP_ONLY_TOOLS = {
   th_write_gate_set: "Typed gate setter; the CLI reaches write_gate only via `th state set write_gate ... --emergency`.",
   th_interview_start: "MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment).",
   th_interview_record: "MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment).",
-  th_interview_status: "MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment)."
+  th_interview_status: "MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment).",
+  // S0 context-pages multi-op read tool: the individual CLI leaves live under `th context-pages <op>`
+  // (T6 wiring) but have no 1:1 MCP tool per op — the single enum-dispatch th_context covers all.
+  th_context: "S0 context-pages multi-op reader (no 1:1 CLI leaf; individual ops dispatched via `th context-pages <op>`)."
 };
 var CLI_COMMAND_LEAVES = [
   "init",
@@ -32339,13 +32561,13 @@ function listTools() {
 var SERVER_NAME = "twinharness-th";
 function readServerVersion() {
   const candidates = [
-    path50.join(__dirname, "..", "package.json"),
-    path50.join(__dirname, "..", "..", "package.json")
+    path53.join(__dirname, "..", "package.json"),
+    path53.join(__dirname, "..", "..", "package.json")
   ];
   for (const candidate of candidates) {
     try {
-      if (fs45.existsSync(candidate)) {
-        const json = JSON.parse(fs45.readFileSync(candidate, "utf8"));
+      if (fs46.existsSync(candidate)) {
+        const json = JSON.parse(fs46.readFileSync(candidate, "utf8"));
         if (typeof json === "object" && json !== null && "version" in json) {
           const v = json.version;
           if (typeof v === "string") return v;

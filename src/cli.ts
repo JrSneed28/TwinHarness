@@ -48,9 +48,13 @@ import {
   runHookStopGateFromRoot,
   runHookPretoolGateFromRoot,
   runHookSubagentStopFromRoot,
+  runHookPostToolContext,
+  runHookSessionContext,
   type StopHookInput,
   type PreToolHookInput,
   type SubagentStopHookInput,
+  type PostToolContextInput,
+  type SessionContextInput,
 } from "./commands/hook";
 import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
 import { runMigrate } from "./commands/migrate";
@@ -95,6 +99,7 @@ import {
 import { runTemplateGet, runTemplateList } from "./commands/template";
 import { runSimAdd, runSimList, runSimRetire, runSimScan } from "./commands/sim";
 import { runGateProductionReality } from "./commands/gate";
+import { runContextPagesCommand } from "./commands/context-pages";
 
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
@@ -470,6 +475,9 @@ export interface ParsedArgs {
     workClass?: string;
     // F8/R-31 — the live run's pass verdict (boolean flag).
     passed: boolean;
+    // S0 context-pages command flags.
+    sessionId?: string;
+    limit?: number;
   };
 }
 
@@ -604,6 +612,8 @@ const STRING_FLAGS: Record<string, FlagField> = {
   "--perceptual-hash": "perceptualHash",
   "--renderer": "renderer",
   "--work-class": "workClass",
+  // S0 context-pages flags.
+  "--session-id": "sessionId",
 };
 
 /** Flags that consume a numeric value. */
@@ -628,6 +638,8 @@ const NUMBER_FLAGS: Record<string, FlagField> = {
   // ≤0 to its default. `--max-files` = file-count cap; `--max-bytes` = total-bytes cap.
   "--max-files": "maxFiles",
   "--max-bytes": "maxBytes",
+  // S0 context-pages flags.
+  "--limit": "limit",
 };
 
 /**
@@ -1020,6 +1032,23 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           });
         default:
           return failure({ human: `unknown 'context' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+      }
+    // S0 context-pages read-only queries (T6 / D-19): page-status, residency, telemetry, savings, baseline.
+    case "context-pages":
+      switch (sub) {
+        case "page-status":
+        case "residency":
+        case "telemetry":
+        case "savings":
+        case "baseline":
+          return runContextPagesCommand(sub, {
+            session_id: parsed.flags.sessionId,
+            limit: parsed.flags.limit,
+          }, paths);
+        default:
+          return failure({
+            human: `unknown 'context-pages' subcommand: ${sub ?? "(none)"}. Valid S0 ops: page-status, residency, telemetry, savings, baseline`,
+          });
       }
     case "delegate":
       switch (sub) {
@@ -1656,6 +1685,22 @@ function main(): void {
     } else if (parsed.positionals[1] === "subagent-stop") {
       const { effectiveCwd, payload } = readHookPayload<SubagentStopHookInput>(parsed.flags.cwd);
       hookOut = runHookSubagentStopFromRoot(effectiveCwd, payload);
+    } else if (parsed.positionals[1] === "posttool-context") {
+      const { effectiveCwd, payload } = readHookPayload<PostToolContextInput>(parsed.flags.cwd);
+      hookOut = runHookPostToolContext(effectiveCwd, payload);
+    } else if (parsed.positionals[1] === "session-context") {
+      const { effectiveCwd, payload } = readHookPayload<SessionContextInput>(parsed.flags.cwd);
+      hookOut = runHookSessionContext(effectiveCwd, payload);
+    } else if (
+      parsed.positionals[1] === "prompt-context" ||
+      parsed.positionals[1] === "precompact-seal" ||
+      parsed.positionals[1] === "subagent-context" ||
+      parsed.positionals[1] === "subagent-seal" ||
+      parsed.positionals[1] === "session-end"
+    ) {
+      // S0 no-op passthrough stubs: hook leaves not yet implemented in T5 exit 0
+      // with an empty decision object (fail-safe per D-15 / brief T6).
+      hookOut = { stdout: JSON.stringify({}), exitCode: 0 };
     }
     if (hookOut) {
       writeAndExit(hookOut.stdout + "\n", hookOut.exitCode);

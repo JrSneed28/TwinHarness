@@ -86,6 +86,7 @@ const decision_1 = require("./commands/decision");
 const template_1 = require("./commands/template");
 const sim_1 = require("./commands/sim");
 const gate_1 = require("./commands/gate");
+const context_pages_1 = require("./commands/context-pages");
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
@@ -445,6 +446,8 @@ const STRING_FLAGS = {
     "--perceptual-hash": "perceptualHash",
     "--renderer": "renderer",
     "--work-class": "workClass",
+    // S0 context-pages flags.
+    "--session-id": "sessionId",
 };
 /** Flags that consume a numeric value. */
 const NUMBER_FLAGS = {
@@ -468,6 +471,8 @@ const NUMBER_FLAGS = {
     // ≤0 to its default. `--max-files` = file-count cap; `--max-bytes` = total-bytes cap.
     "--max-files": "maxFiles",
     "--max-bytes": "maxBytes",
+    // S0 context-pages flags.
+    "--limit": "limit",
 };
 /**
  * P4-8 — build the scanner `ScanOptions` cap overrides from the parsed `--max-files`
@@ -858,6 +863,23 @@ function dispatch(parsed) {
                     });
                 default:
                     return (0, output_1.failure)({ human: `unknown 'context' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
+            }
+        // S0 context-pages read-only queries (T6 / D-19): page-status, residency, telemetry, savings, baseline.
+        case "context-pages":
+            switch (sub) {
+                case "page-status":
+                case "residency":
+                case "telemetry":
+                case "savings":
+                case "baseline":
+                    return (0, context_pages_1.runContextPagesCommand)(sub, {
+                        session_id: parsed.flags.sessionId,
+                        limit: parsed.flags.limit,
+                    }, paths);
+                default:
+                    return (0, output_1.failure)({
+                        human: `unknown 'context-pages' subcommand: ${sub ?? "(none)"}. Valid S0 ops: page-status, residency, telemetry, savings, baseline`,
+                    });
             }
         case "delegate":
             switch (sub) {
@@ -1484,6 +1506,23 @@ function main() {
         else if (parsed.positionals[1] === "subagent-stop") {
             const { effectiveCwd, payload } = readHookPayload(parsed.flags.cwd);
             hookOut = (0, hook_1.runHookSubagentStopFromRoot)(effectiveCwd, payload);
+        }
+        else if (parsed.positionals[1] === "posttool-context") {
+            const { effectiveCwd, payload } = readHookPayload(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookPostToolContext)(effectiveCwd, payload);
+        }
+        else if (parsed.positionals[1] === "session-context") {
+            const { effectiveCwd, payload } = readHookPayload(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookSessionContext)(effectiveCwd, payload);
+        }
+        else if (parsed.positionals[1] === "prompt-context" ||
+            parsed.positionals[1] === "precompact-seal" ||
+            parsed.positionals[1] === "subagent-context" ||
+            parsed.positionals[1] === "subagent-seal" ||
+            parsed.positionals[1] === "session-end") {
+            // S0 no-op passthrough stubs: hook leaves not yet implemented in T5 exit 0
+            // with an empty decision object (fail-safe per D-15 / brief T6).
+            hookOut = { stdout: JSON.stringify({}), exitCode: 0 };
         }
         if (hookOut) {
             writeAndExit(hookOut.stdout + "\n", hookOut.exitCode);

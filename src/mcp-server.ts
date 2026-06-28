@@ -54,6 +54,7 @@ import { runNext } from "./commands/next";
 import { runDelegatePlan, runDelegatePack, runDelegateCheck } from "./commands/delegate";
 import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck, runRepoSearch, repoFreshnessSummary } from "./commands/repo";
 import { runContextPack, runContextRead } from "./commands/context";
+import { runContextPagesCommand } from "./commands/context-pages";
 import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite } from "./commands/handoff";
 import { runInspectorWrite } from "./commands/inspector";
@@ -1841,6 +1842,36 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     },
     run: (paths, _args) => runGroundingCheck(paths, {}),
   },
+  // context-pages S0 OBSERVE — single multi-op tool (CLI↔MCP parity via operation enum).
+  {
+    name: "th_context",
+    description:
+      "Inspect the S0 context-pages store (OBSERVE-only). `operation` selects the view: page-status (shard inventory), residency (delivered pages), telemetry (raw telemetry records), savings (dedup savings summary — 0% at S0), baseline (S0 token denominator). Optional `session_id` filters residency by session; optional `limit` caps telemetry results (default 50). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        operation: {
+          type: "string",
+          description: "The context-pages view to run: page-status | residency | telemetry | savings | baseline.",
+          enum: ["page-status", "residency", "telemetry", "savings", "baseline"],
+        },
+        session_id: {
+          type: "string",
+          description: "Filter residency to a single session_id (optional; residency only).",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum telemetry records to return, default 50 (optional; telemetry only).",
+        },
+      },
+      required: ["operation"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      const op = optString(args, "operation") ?? "";
+      return runContextPagesCommand(op, args as Record<string, unknown>, paths);
+    },
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -2052,6 +2083,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_grounding_record: wr("grounding", { idempotent: false }),
   // Axis-B/BSC-10 (Slice A) — read-only grounding chain validator. Appends nothing; pure read.
   th_grounding_check: ro("grounding"),
+  // context-pages S0 OBSERVE — single multi-op read-only tool; individual CLI leaves
+  // are in MCP_EXCLUDED since the operation enum covers all S0 read ops.
+  th_context: ro("context"),
 };
 
 /** The MCP-standard annotation object for a tool (or undefined if unknown). */
@@ -2149,6 +2183,9 @@ export const MCP_ONLY_TOOLS: Readonly<Record<string, string>> = {
   th_interview_start: "MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment).",
   th_interview_record: "MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment).",
   th_interview_status: "MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment).",
+  // S0 context-pages multi-op read tool: the individual CLI leaves live under `th context-pages <op>`
+  // (T6 wiring) but have no 1:1 MCP tool per op — the single enum-dispatch th_context covers all.
+  th_context: "S0 context-pages multi-op reader (no 1:1 CLI leaf; individual ops dispatched via `th context-pages <op>`).",
 };
 
 /**

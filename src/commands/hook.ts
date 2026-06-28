@@ -15,6 +15,24 @@ import {
 } from "../core/delegation-scope";
 import { canCompleteRun } from "../core/gate-preconditions";
 import { renderStopReason } from "./next";
+import { hashContent, shortHash } from "../core/hash";
+import {
+  computePageId,
+  normalizeLocator,
+  classifySensitive,
+  coldStorePut,
+  CONTEXT_PAGE_SCHEMA_VERSION,
+  type SourceKind,
+  type ReductionKind,
+} from "../core/context-page";
+import type { LedgerScope } from "../core/context-ledger";
+import { appendLedgerRecord } from "../core/context-ledger";
+import {
+  recordTelemetry,
+  estimateTokens,
+  probeAgentIdPresentOnToolHook,
+  probeSubagentStartFired,
+} from "../core/context-telemetry";
 
 /**
  * Stop-gate decision (plan pre-mortem #2 mitigation): the mechanical gate that
@@ -1268,4 +1286,304 @@ export function runHookPretoolGate(
   if (h) return h;
 
   return allow();
+}
+
+// ---------------------------------------------------------------------------
+// Context-pages OBSERVE-only hook handlers (S0)
+//
+// S0 = record everything, suppress nothing, change no externally visible
+// behavior.  Every handler here MUST:
+//   1. Check TH_DISABLE_CONTEXT_PAGES=1 → pure passthrough.
+//   2. Wrap its body in a fail-safe try/catch → passthrough on any error.
+//   3. Return the original tool output unchanged (exit 0).
+// ---------------------------------------------------------------------------
+
+/** Passthrough result emitted by all new OBSERVE handlers: `{}` + exit 0. */
+function contextPassthrough(): { stdout: string; exitCode: number } {
+  return { stdout: JSON.stringify({}), exitCode: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// resolveScope — POSITIVE-only scope attribution (B3 / M4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Discriminated union returned by {@link resolveScope}.  Only `agent` and
+ * `root` carry a usable {@link LedgerScope}; `indeterminate` must never be
+ * attributed to the root shard.
+ */
+export type ScopeResolution =
+  | { kind: "agent"; scope: LedgerScope }
+  | { kind: "root"; scope: LedgerScope }
+  | { kind: "indeterminate" };
+
+/**
+ * Resolve the ledger scope for a hook input payload.  POSITIVE-only: we only
+ * claim a scope when the evidence is unambiguous.
+ *
+ *   agent_id present              → `agent` scope (agentOrRoot = agent_id).
+ *   session_id only, no agent_id  → `root` scope  (agentOrRoot = "root").
+ *   neither present               → `indeterminate` (no shard written).
+ *
+ * SubagentStart/Stop depth is for epoch/probe purposes ONLY — it is NOT used
+ * for per-tool scope attribution here (brief B3/M4).
+ */
+export function resolveScope(input: {
+  session_id?: string;
+  agent_id?: string;
+}): ScopeResolution {
+  if (input.agent_id) {
+    const session_id = input.session_id ?? "unknown";
+    return { kind: "agent", scope: { session_id, agentOrRoot: input.agent_id } };
+  }
+  // IMPORTANT — B3/P2 "Phantom Root" gate (MUST be probe-gated before S1):
+  // A bare session_id with no agent_id is assumed to be the root session here
+  // at S0 because there are no consumers and S1 is hard-gated.  Before S1 is
+  // enabled this branch MUST be tightened: only a CONFIRMED-distinct root
+  // session_id (verified against epoch.json / SubagentStart probe counters)
+  // may map to `root`; an unconfirmed id MUST map to `indeterminate` instead,
+  // preventing a phantom-root attribution that would merge subagent pages into
+  // the root shard.  Per plan B3/P2 — do NOT remove this comment until the
+  // probe-gate is wired.
+  if (input.session_id) {
+    return { kind: "root", scope: { session_id: input.session_id, agentOrRoot: "root" } };
+  }
+  return { kind: "indeterminate" };
+}
+
+// ---------------------------------------------------------------------------
+// PostToolUse OBSERVE handler (D-08)
+// ---------------------------------------------------------------------------
+
+/**
+ * Subset of the Claude Code PostToolUse stdin payload we observe.
+ * `tool_response` is the raw string output the tool returned.
+ */
+export interface PostToolContextInput {
+  session_id?: string;
+  agent_id?: string;
+  agent_type?: string;
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
+  tool_response?: string;
+  cwd?: string;
+}
+
+/** Map a Claude Code tool name to a ContextPage SourceKind + locator parts. */
+function resolveToolPage(
+  tool_name: string,
+  tool_input: Record<string, unknown>,
+): { source_kind: SourceKind; parts: Record<string, unknown>; source_locator: string } | null {
+  const tn = tool_name.toLowerCase();
+  if (tn === "read") {
+    const p = String(tool_input.file_path ?? "");
+    return { source_kind: "file", parts: { path: p }, source_locator: p };
+  }
+  if (tn === "glob") {
+    const pattern = String(tool_input.pattern ?? "");
+    const dir = String(tool_input.path ?? "");
+    return {
+      source_kind: "search",
+      parts: { tool: "Glob", query: pattern, cwd: dir },
+      source_locator: `Glob|${pattern}`,
+    };
+  }
+  if (tn === "grep") {
+    const pattern = String(tool_input.pattern ?? "");
+    const dir = String(tool_input.path ?? "");
+    return {
+      source_kind: "search",
+      parts: { tool: "Grep", query: pattern, cwd: dir },
+      source_locator: `Grep|${pattern}`,
+    };
+  }
+  if (tn === "bash") {
+    const cmd = String(tool_input.command ?? "");
+    return {
+      source_kind: "bash",
+      parts: { argv: cmd },
+      source_locator: cmd,
+    };
+  }
+  if (tn === "webfetch") {
+    const url = String(tool_input.url ?? "");
+    return {
+      source_kind: "search",
+      parts: { tool: "WebFetch", query: url },
+      source_locator: `WebFetch|${url}`,
+    };
+  }
+  if (tool_name.includes("__")) {
+    // mcp__<server>__<op> pattern
+    return {
+      source_kind: "mcp",
+      parts: { tool: tool_name, params: tool_input },
+      source_locator: tool_name,
+    };
+  }
+  return null;
+}
+
+/**
+ * `th hook posttool-context` — OBSERVE the PostToolUse payload, record a
+ * deliver ledger entry + telemetry, then return the original output unchanged.
+ *
+ * Fail-safe: any error → passthrough (exit 0, original output preserved).
+ * Kill-switch: `TH_DISABLE_CONTEXT_PAGES=1` → pure passthrough, no I/O.
+ */
+export function runHookPostToolContext(
+  root: string,
+  input?: PostToolContextInput,
+  env: NodeJS.ProcessEnv = process.env,
+): { stdout: string; exitCode: number } {
+  if (env["TH_DISABLE_CONTEXT_PAGES"] === "1") return contextPassthrough();
+  try {
+    const toolName = input?.tool_name ?? "";
+    const toolInput = input?.tool_input ?? {};
+    const toolResponse = typeof input?.tool_response === "string"
+      ? input.tool_response
+      : "";
+
+    if (!toolName || !toolResponse) return contextPassthrough();
+
+    if (input?.agent_id) probeAgentIdPresentOnToolHook();
+
+    const resolved = resolveToolPage(toolName, toolInput);
+    if (!resolved) return contextPassthrough();
+
+    const r = resolveOrConflict(root);
+    if ("conflict" in r) return contextPassthrough();
+    const { paths } = r;
+
+    const { source_kind, parts, source_locator } = resolved;
+    const logical_key = normalizeLocator(source_kind, parts);
+    const content_hash = hashContent(toolResponse);
+    const now = new Date().toISOString();
+    const scopeRes = resolveScope(input ?? {});
+
+    const pageBase = {
+      schema_version: CONTEXT_PAGE_SCHEMA_VERSION,
+      source_kind,
+      logical_key,
+      content_hash,
+    };
+    const page_id = computePageId(pageBase);
+
+    const pageLike = { source_locator, source_kind };
+    const sensitive = classifySensitive(pageLike, paths, toolResponse);
+
+    const raw_objref = coldStorePut(paths, toolResponse, sensitive);
+
+    const reduction_kind: ReductionKind = sensitive ? "hash-only" : "FULL";
+    const session_id = input?.session_id ?? "";
+    const agent_id = input?.agent_id ?? "";
+    const agent_type = input?.agent_type ?? "";
+    const est = estimateTokens(toolResponse);
+
+    // M2b (AC-7 / R2): for sensitive pages, never write the raw logical_key
+    // into ledger-*.jsonl — substitute its short hash.  Sensitive pages are
+    // always FULL (never used for residency matching), so the redacted form
+    // carries no cost to correctness; it keeps inline secrets off disk.
+    const ledger_logical_key = sensitive ? shortHash(logical_key) : logical_key;
+
+    if (scopeRes.kind !== "indeterminate") {
+      const rec = {
+        seq: 0,
+        ts: now,
+        session_id,
+        agent_id,
+        agent_type,
+        epoch: 0,
+        op: "deliver" as const,
+        page_id,
+        logical_key: ledger_logical_key,
+        content_hash,
+        base_hash: undefined,
+        complete: true,
+        est_tokens: est,
+        reduction_kind,
+      };
+      appendLedgerRecord(paths, scopeRes.scope, rec);
+    }
+
+    recordTelemetry(paths, {
+      ts: now,
+      session_id,
+      agent_id: input?.agent_id,
+      epoch: 0,
+      tool_type: toolName,
+      workload_category: "observe",
+      tier: "s0",
+      stage: "deliver",
+      slice: "s0",
+      page_id,
+      orig_tokens: est,
+      returned_tokens: est,
+      dup_detected: false,
+      dup_avoided: false,
+      delta_tokens: 0,
+      full_rehydrations: 0,
+      compaction_resets: 0,
+      parent_pages: 0,
+      child_pages: 0,
+      assumed_resident_misses: 0,
+      verification_outcome: "ok",
+      turns: 0,
+      retries: 0,
+      runtime_ms: 0,
+      reduction_kind,
+    });
+
+    void raw_objref; // acknowledged: used in the page record (future slices)
+    return contextPassthrough();
+  } catch {
+    // Fail-safe: any error → passthrough, exit 0
+    return contextPassthrough();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SessionStart OBSERVE handler (D-15)
+// ---------------------------------------------------------------------------
+
+/**
+ * Subset of the Claude Code SessionStart stdin payload we observe.
+ */
+export interface SessionContextInput {
+  session_id?: string;
+  agent_id?: string;
+  agent_type?: string;
+  cwd?: string;
+}
+
+/**
+ * `th hook session-context` — S0 OBSERVE entry for SessionStart.
+ *
+ * At S0: records the SubagentStart probe counter when agent_id is present;
+ * epoch read/reconcile is a no-op stub (epoch tracking begins in S1+).
+ * Returns `{}` (no capsule injection at S0 — minimal/empty per brief D-15).
+ *
+ * Fail-safe: any error → passthrough (exit 0).
+ * Kill-switch: `TH_DISABLE_CONTEXT_PAGES=1` → pure passthrough.
+ */
+export function runHookSessionContext(
+  _root: string,
+  input?: SessionContextInput,
+  env: NodeJS.ProcessEnv = process.env,
+): { stdout: string; exitCode: number } {
+  if (env["TH_DISABLE_CONTEXT_PAGES"] === "1") return contextPassthrough();
+  try {
+    // Probe: SubagentStart fired (agent_id is present in a session-context payload)
+    if (input?.agent_id) {
+      probeSubagentStartFired();
+    }
+
+    // S0 epoch reconcile stub — reads/writes deferred to S1+.
+    // Future: read epoch.json, compare session_id, bump if new session.
+
+    // S0 capsule content = empty (no injection at S0 per brief D-15).
+    return contextPassthrough();
+  } catch {
+    return contextPassthrough();
+  }
 }
