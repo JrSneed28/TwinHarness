@@ -115,11 +115,13 @@ describe("REQ-PCO-070: CLI↔MCP command parity (every CLI leaf covered or exclu
     const covered = CLI_COMMAND_LEAVES.filter((l) => !(l in MCP_EXCLUDED));
     const excluded = CLI_COMMAND_LEAVES.filter((l) => l in MCP_EXCLUDED);
     expect(covered.length + excluded.length).toBe(CLI_COMMAND_LEAVES.length);
-    // The tool count is DERIVED, not pinned to a literal: (CLI-leaf mirrors) +
-    // (MCP-only tools) = (|CLI_COMMAND_LEAVES| − |MCP_EXCLUDED|) + |MCP_ONLY_TOOLS|.
-    // Adding a tool updates this with zero literal churn (it is 62 today).
-    const expected = CLI_COMMAND_LEAVES.length - Object.keys(MCP_EXCLUDED).length + Object.keys(MCP_ONLY_TOOLS).length;
-    expect(covered.length + Object.keys(MCP_ONLY_TOOLS).length).toBe(TOOL_DEFS.length);
+    // The tool count is DERIVED, not pinned to a literal: unique mirrored tool names
+    // from non-excluded CLI leaves + MCP-only tools. Aggregated multi-op tools (for
+    // example th_context) may cover several CLI leaves, so this counts unique tool
+    // names instead of raw leaves.
+    const mirrored = new Set(covered.map(cliCommandToToolName));
+    const expected = mirrored.size + Object.keys(MCP_ONLY_TOOLS).length;
+    expect(mirrored.size + Object.keys(MCP_ONLY_TOOLS).length).toBe(TOOL_DEFS.length);
     expect(TOOL_DEFS.length).toBe(expected);
   });
 });
@@ -234,8 +236,12 @@ describe("REQ-PCO-070: CLI/MCP asymmetry is pinned (intentional, not accidental 
     // And the two partitions must tile the registry exactly (every tool is annotated
     // as exactly one of read-only / mutating — no un-annotated tool, no overlap).
     expect(readOnly.length + mutating.length).toBe(TOOL_DEFS.length);
-    // Derived parity count: (|CLI_COMMAND_LEAVES| − |MCP_EXCLUDED|) + |MCP_ONLY_TOOLS|.
-    const expected = CLI_COMMAND_LEAVES.length - Object.keys(MCP_EXCLUDED).length + Object.keys(MCP_ONLY_TOOLS).length;
+    // Derived parity count: unique mirrored tool names from non-excluded CLI leaves
+    // + MCP-only tools (aggregated tools may mirror multiple leaves).
+    const mirrored = new Set(
+      CLI_COMMAND_LEAVES.filter((leaf) => !(leaf in MCP_EXCLUDED)).map(cliCommandToToolName),
+    );
+    const expected = mirrored.size + Object.keys(MCP_ONLY_TOOLS).length;
     expect(TOOL_DEFS.length).toBe(expected);
   });
 

@@ -54,6 +54,7 @@ import { runNext } from "./commands/next";
 import { runDelegatePlan, runDelegatePack, runDelegateCheck } from "./commands/delegate";
 import { runRepoMap, runRepoRelevant, runRepoImpact, runRepoCheck, runRepoSearch, repoFreshnessSummary } from "./commands/repo";
 import { runContextPack, runContextRead } from "./commands/context";
+import { runContextPagesCommand } from "./commands/context-pages";
 import { runBudgetCheck } from "./commands/budget";
 import { runHandoffWrite } from "./commands/handoff";
 import { runInspectorWrite } from "./commands/inspector";
@@ -1841,6 +1842,61 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     },
     run: (paths, _args) => runGroundingCheck(paths, {}),
   },
+  // context-pages — single multi-op tool (CLI↔MCP parity via operation enum).
+  // Human-only ops (baseline/gc/purge) are excluded from this enum and listed in MCP_EXCLUDED.
+  {
+    name: "th_context",
+    description:
+      "Inspect the context-pages store. `operation` selects the view: page-status (shard inventory), residency (delivered pages), telemetry (raw telemetry records), savings (dedup savings — 0% at S0), savings-detail (savings + whole-window estimate + per-category breakdown + USD cost), verify (ledger chain integrity audit), rehydrate (fetch page from cold store; GC-evicted → re-derive FULL), compare (equivalence harness on two corpus RunArtifacts). Optional `session_id` filters residency and scopes savings; `limit` caps telemetry (default 50); `page_id`/`logical_key` for rehydrate; `baseline_id`/`context_id`/`category` for compare; `transcript_path` for savings-detail whole-window and cost estimates. Read-only (human-only ops gc/baseline/purge are CLI-only).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        operation: {
+          type: "string",
+          description: "The context-pages view to run: page-status | residency | telemetry | savings | savings-detail | verify | rehydrate | compare.",
+          enum: ["page-status", "residency", "telemetry", "savings", "savings-detail", "verify", "rehydrate", "compare"],
+        },
+        session_id: {
+          type: "string",
+          description: "Filter residency to a single session_id, or scope savings/savings-detail to one session (optional).",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum telemetry records to return, default 50 (optional; telemetry only).",
+        },
+        page_id: {
+          type: "string",
+          description: "12-char page_id to rehydrate from the cold store (optional; rehydrate only).",
+        },
+        logical_key: {
+          type: "string",
+          description: "Logical key to rehydrate from the cold store (optional; rehydrate only).",
+        },
+        baseline_id: {
+          type: "string",
+          description: "session_id of the baseline RunArtifact in the corpus (compare only).",
+        },
+        context_id: {
+          type: "string",
+          description: "session_id of the context RunArtifact in the corpus (compare only).",
+        },
+        category: {
+          type: "string",
+          description: "Workload category to narrow corpus search (optional; compare only).",
+        },
+        transcript_path: {
+          type: "string",
+          description: "Path to a Claude Code transcript JSONL file for whole-window and cost estimates (optional; savings-detail only).",
+        },
+      },
+      required: ["operation"],
+      additionalProperties: false,
+    },
+    run: (paths, args) => {
+      const op = optString(args, "operation") ?? "";
+      return runContextPagesCommand(op, args as Record<string, unknown>, paths);
+    },
+  },
 ] as const;
 
 /* ------------------------------------------------------------------ *
@@ -2052,6 +2108,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotation>> = {
   th_grounding_record: wr("grounding", { idempotent: false }),
   // Axis-B/BSC-10 (Slice A) — read-only grounding chain validator. Appends nothing; pure read.
   th_grounding_check: ro("grounding"),
+  // context-pages S0 OBSERVE — single multi-op read-only tool; cliCommandToToolName
+  // maps each `th context-pages <op>` leaf to this aggregate operation-enum tool.
+  th_context: ro("context"),
 };
 
 /** The MCP-standard annotation object for a tool (or undefined if unknown). */
@@ -2071,10 +2130,23 @@ export function toolAnnotations(name: string): ToolAnnotation | undefined {
 /**
  * Map a CLI command leaf (e.g. `repo map`, `state get`, `next`) to the MCP tool
  * name that mirrors it (`th_repo_map`, `th_state_get`, `th_next`): prefix `th_`,
- * collapse spaces and hyphens to underscores. This is the EXACT naming convention
- * the registry follows, so a tool's presence can be checked mechanically.
+ * collapse spaces and hyphens to underscores. Aggregated multi-op tools may
+ * intentionally map several CLI leaves to one MCP tool (currently th_context).
+ *
+ * Human-only context-pages ops (baseline/gc/purge) are excluded from th_context's
+ * operation enum; they return a synthetic non-tool name so the parity test
+ * correctly sees them as genuinely not MCP-exposed.
  */
 export function cliCommandToToolName(commandLeaf: string): string {
+  if (commandLeaf.startsWith("context-pages ")) {
+    const op = commandLeaf.slice("context-pages ".length);
+    // Human-only CLI ops have no MCP equivalent; map to a synthetic name that
+    // is NOT in TOOL_DEFS so the parity "genuinely not exposed" assertion holds.
+    if (op === "baseline" || op === "gc" || op === "purge") {
+      return "th_context_" + op;
+    }
+    return "th_context";
+  }
   return "th_" + commandLeaf.trim().replace(/[ -]+/g, "_");
 }
 
@@ -2092,6 +2164,13 @@ export const MCP_EXCLUDED: Readonly<Record<string, string>> = {
   "hook stop-gate": "Claude Code Stop-hook protocol; not an agent tool.",
   "hook pretool-gate": "Claude Code PreToolUse write-gate protocol; not an agent tool.",
   "hook subagent-stop": "Claude Code SubagentStop-hook protocol; not an agent tool.",
+  "hook posttool-context": "Claude Code PostToolUse context OBSERVE hook protocol; not an agent tool.",
+  "hook session-context": "Claude Code SessionStart context OBSERVE hook protocol; not an agent tool.",
+  "hook prompt-context": "Claude Code UserPromptSubmit context OBSERVE hook protocol; not an agent tool.",
+  "hook precompact-seal": "Claude Code PreCompact context OBSERVE hook protocol; not an agent tool.",
+  "hook subagent-context": "Claude Code SubagentStart context OBSERVE hook protocol; not an agent tool.",
+  "hook subagent-seal": "Claude Code SubagentStop context OBSERVE hook protocol; not an agent tool.",
+  "hook session-end": "Claude Code SessionEnd context OBSERVE hook protocol; not an agent tool.",
   // --- CLI meta (no run state to mutate; the MCP server advertises its own
   // version/help via the protocol). ---
   version: "CLI meta; the MCP server advertises version via the protocol.",
@@ -2127,6 +2206,13 @@ export const MCP_EXCLUDED: Readonly<Record<string, string>> = {
   "trace render": "On-demand traceability render; not an MCP coordination tool.",
   stale: "Diff-scoped staleness CLI surface; not an MCP coordination tool.",
   "context estimate": "Prompt-surface estimator (operator sizing); th_context_pack/th_budget_check are the MCP context surfaces.",
+  // context-pages human-only ops: absent from the th_context enum (agents cannot GC, write baseline, or purge).
+  "context-pages baseline": "CLI-only: writes a RunArtifact corpus baseline entry; not an agent-callable surface (write side-effect + operator intent required).",
+  "context-pages gc": "CLI-only: garbage-collects cold CAS objects; not an agent-callable surface (destructive, human-only per 5d constraint).",
+  "context-pages purge": "CLI-only: removes all context-pages data; destructive, not an agent-callable surface.",
+  // B5 — top-level convenience wrappers; agents use the th_context MCP tool directly.
+  savings: "CLI convenience wrapper over th_context savings/savings-detail ops; plan forbids a separate th_savings MCP tool (the MCP surface is th_context).",
+  statusline: "Claude Code statusLine emitter (single compact stdout band); no MCP equivalent.",
   "handoff verify": "Resume-integrity CLI check; th_handoff_write is the MCP handoff surface.",
   resume: "Resume detector (prints th next); agents call th_next directly.",
   "delegate capsule": "Prints a blank capsule skeleton; a static template, not a coordination tool.",
@@ -2192,9 +2278,14 @@ export const CLI_COMMAND_LEAVES: readonly string[] = [
   "collab init", "collab fragment", "collab list", "collab merge",
   "debate add", "debate list", "debate resolve",
   "hook stop-gate", "hook pretool-gate", "hook subagent-stop",
+  "hook posttool-context", "hook session-context", "hook prompt-context", "hook precompact-seal", "hook subagent-context", "hook subagent-seal", "hook session-end",
   "migrate", "doctor", "next", "preview", "scorecard", "route",
   "telemetry on", "telemetry off", "telemetry status",
   "context estimate", "context pack", "context read",
+  "context-pages page-status", "context-pages residency", "context-pages telemetry", "context-pages savings", "context-pages savings-detail",
+  "context-pages verify", "context-pages rehydrate", "context-pages compare",
+  "context-pages baseline", "context-pages gc", "context-pages purge",
+  "savings", "statusline",
   "budget check",
   "handoff write", "handoff verify", "resume",
   "inspector write",

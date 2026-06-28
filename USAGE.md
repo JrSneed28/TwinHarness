@@ -1304,9 +1304,9 @@ Pre-edit blast-radius analysis over the persisted `repo-map.json`. Reads no stat
 | `map_invalid-json` / `map_schema` / `map_version` | Map file malformed or unknown version | Run `th repo map` to regenerate |
 | `unknown_slice` | `--slice` names no known slice | Check `th state status` for valid slice IDs |
 
-#### MCP tools (registered count 81)
+#### MCP tools (registered count 82)
 
-81 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin. The interview/init surface exposes `th_interview_start`, `th_interview_record`, `th_interview_status`, and `th_init`. Five precondition-gated gate-transition tools safely mutate gate-owned fields: `th_tier_record`, `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`, `th_blast_radius_record`. Additional wired handlers: `th_drift_list`, `th_drift_resolve`, `th_coverage_report`, `th_artifact_register`, `th_artifact_list`, `th_verify_add`, `th_verify_list`, `th_verify_clear`, `th_verify_run`, `th_stage_current`, `th_stage_describe`, `th_stage_list`, `th_doctor`, `th_scorecard`, `th_slices_sync`, `th_slice_set_status`. Notable tools highlighted below:
+82 MCP tools are registered in `dist/mcp-server.js`, each a thin one-liner adapter over the same handler as its CLI twin. The interview/init surface exposes `th_interview_start`, `th_interview_record`, `th_interview_status`, and `th_init`. Five precondition-gated gate-transition tools safely mutate gate-owned fields: `th_tier_record`, `th_stage_advance`, `th_implementation_unlock`, `th_write_gate_set`, `th_blast_radius_record`. Additional wired handlers: `th_drift_list`, `th_drift_resolve`, `th_coverage_report`, `th_artifact_register`, `th_artifact_list`, `th_verify_add`, `th_verify_list`, `th_verify_clear`, `th_verify_run`, `th_stage_current`, `th_stage_describe`, `th_stage_list`, `th_doctor`, `th_scorecard`, `th_slices_sync`, `th_slice_set_status`. Notable tools highlighted below:
 
 | Tool name | CLI equivalent | Notes |
 |---|---|---|
@@ -1323,7 +1323,7 @@ All MCP tool schemas are strict and closed (`additionalProperties: false`). Outp
 
 #### Generated command reference
 
-This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **110 CLI command leaves** and **81 MCP tools**.
+This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry (`scripts/gen-command-reference.ts`); do not edit it by hand. There are **130 CLI command leaves** and **82 MCP tools**.
 
 | CLI command | MCP tool | Status |
 |---|---|---|
@@ -1400,6 +1400,13 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th hook stop-gate` | — (CLI-only) | Claude Code Stop-hook protocol; not an agent tool. |
 | `th hook pretool-gate` | — (CLI-only) | Claude Code PreToolUse write-gate protocol; not an agent tool. |
 | `th hook subagent-stop` | — (CLI-only) | Claude Code SubagentStop-hook protocol; not an agent tool. |
+| `th hook posttool-context` | — (CLI-only) | Claude Code PostToolUse context OBSERVE hook protocol; not an agent tool. |
+| `th hook session-context` | — (CLI-only) | Claude Code SessionStart context OBSERVE hook protocol; not an agent tool. |
+| `th hook prompt-context` | — (CLI-only) | Claude Code UserPromptSubmit context OBSERVE hook protocol; not an agent tool. |
+| `th hook precompact-seal` | — (CLI-only) | Claude Code PreCompact context OBSERVE hook protocol; not an agent tool. |
+| `th hook subagent-context` | — (CLI-only) | Claude Code SubagentStart context OBSERVE hook protocol; not an agent tool. |
+| `th hook subagent-seal` | — (CLI-only) | Claude Code SubagentStop context OBSERVE hook protocol; not an agent tool. |
+| `th hook session-end` | — (CLI-only) | Claude Code SessionEnd context OBSERVE hook protocol; not an agent tool. |
 | `th migrate` | — (CLI-only) | Destructive state schema rewrite; CLI/human-only (th_init is the safe idempotent MCP entry). |
 | `th doctor` | `th_doctor` | mirrored |
 | `th next` | `th_next` | mirrored |
@@ -1412,6 +1419,19 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th context estimate` | — (CLI-only) | Prompt-surface estimator (operator sizing); th_context_pack/th_budget_check are the MCP context surfaces. |
 | `th context pack` | `th_context_pack` | mirrored |
 | `th context read` | `th_context_read` | mirrored |
+| `th context-pages page-status` | `th_context` | mirrored |
+| `th context-pages residency` | `th_context` | mirrored |
+| `th context-pages telemetry` | `th_context` | mirrored |
+| `th context-pages savings` | `th_context` | mirrored |
+| `th context-pages savings-detail` | `th_context` | mirrored |
+| `th context-pages verify` | `th_context` | mirrored |
+| `th context-pages rehydrate` | `th_context` | mirrored |
+| `th context-pages compare` | `th_context` | mirrored |
+| `th context-pages baseline` | — (CLI-only) | CLI-only: writes a RunArtifact corpus baseline entry; not an agent-callable surface (write side-effect + operator intent required). |
+| `th context-pages gc` | — (CLI-only) | CLI-only: garbage-collects cold CAS objects; not an agent-callable surface (destructive, human-only per 5d constraint). |
+| `th context-pages purge` | — (CLI-only) | CLI-only: removes all context-pages data; destructive, not an agent-callable surface. |
+| `th savings` | — (CLI-only) | CLI convenience wrapper over th_context savings/savings-detail ops; plan forbids a separate th_savings MCP tool (the MCP surface is th_context). |
+| `th statusline` | — (CLI-only) | Claude Code statusLine emitter (single compact stdout band); no MCP equivalent. |
 | `th budget check` | `th_budget_check` | mirrored |
 | `th handoff write` | `th_handoff_write` | mirrored |
 | `th handoff verify` | — (CLI-only) | Resume-integrity CLI check; th_handoff_write is the MCP handoff surface. |
@@ -1443,7 +1463,7 @@ This table is generated from the CLI dispatcher and the MCP `TOOL_DEFS` registry
 | `th_interview_record` | — (MCP-only) | MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment). |
 | `th_interview_status` | — (MCP-only) | MCP-driven scored interview (no `th interview` CLI group; the agent supplies all judgment). |
 
-#### MCP tool roster (exhaustive — all 81)
+#### MCP tool roster (exhaustive — all 82)
 
 Every registered MCP tool name, in registry order. The CLI↔MCP parity test pins this list against `TOOL_DEFS.map(t => t.name)`, so a tool added/removed/renamed without updating this roster fails CI.
 
@@ -1528,6 +1548,7 @@ Every registered MCP tool name, in registry order. The CLI↔MCP parity test pin
 - `th_assertion_presence_record`
 - `th_grounding_record`
 - `th_grounding_check`
+- `th_context`
 
 <!-- END AUTO-GENERATED: command-reference -->
 

@@ -63,6 +63,8 @@ The state, drift, build-lease, route, decision, repo, context, and delegate verb
 > `th slices sync`, `th slice set-status`, `th doctor`, `th next`, `th context estimate|pack`,
 > `th delegate plan|pack|capsule|check`, `th stage current|describe|list`, `th manifest export`, `th version`.
 >
+> **Stage manifests.** `th delegate pack --tier/--stage` may include optional manifest section/budget hints; invalid/missing ignored.
+>
 > **`th next`** is the mechanical next-action oracle: when unsure what the run owes next (or after a
 > long context window), run it for the single highest-priority obligation. It computes; you decide.
 >

@@ -15,6 +15,35 @@ import {
 } from "../core/delegation-scope";
 import { canCompleteRun } from "../core/gate-preconditions";
 import { renderStopReason } from "./next";
+import { hashContent, shortHash } from "../core/hash";
+import {
+  computePageId,
+  normalizeLocator,
+  classifySensitive,
+  coldStorePut,
+  contextPagesRoot,
+  CONTEXT_PAGE_SCHEMA_VERSION,
+  type SourceKind,
+  type ReductionKind,
+} from "../core/context-page";
+import type { LedgerScope, LedgerRecord } from "../core/context-ledger";
+import { appendLedgerRecord, readShardRecordsTail } from "../core/context-ledger";
+import {
+  deriveResidency,
+  currentEpoch,
+  bumpEpoch,
+  maybeCheckEpoch,
+  RESIDENCY_TTL_TURNS,
+} from "../core/context-residency";
+import { capsuleFromState } from "../core/context-capsule";
+import {
+  recordTelemetry,
+  estimateTokens,
+  probeAgentIdPresentOnToolHook,
+  probeSubagentStartFired,
+  TELEMETRY_SCHEMA_VERSION,
+} from "../core/context-telemetry";
+import { classify } from "../core/savings-classify";
 
 /**
  * Stop-gate decision (plan pre-mortem #2 mitigation): the mechanical gate that
@@ -1268,4 +1297,775 @@ export function runHookPretoolGate(
   if (h) return h;
 
   return allow();
+}
+
+// ---------------------------------------------------------------------------
+// Context-pages OBSERVE-only hook handlers (S0)
+//
+// S0 = record everything, suppress nothing, change no externally visible
+// behavior.  Every handler here MUST:
+//   1. Check TH_DISABLE_CONTEXT_PAGES=1 → pure passthrough.
+//   2. Wrap its body in a fail-safe try/catch → passthrough on any error.
+//   3. Return the original tool output unchanged (exit 0).
+// ---------------------------------------------------------------------------
+
+/** Passthrough result emitted by all new OBSERVE handlers: `{}` + exit 0. */
+function contextPassthrough(): { stdout: string; exitCode: number } {
+  return { stdout: JSON.stringify({}), exitCode: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// S1 — reduction footer (PF-iii)
+// ---------------------------------------------------------------------------
+
+/**
+ * Options for building a context-reduction footer (PF-iii).
+ * The footer must appear at the END of reduced or large-FULL content so it
+ * lands on the model-visible (last) chunk when output is split at ~10 K chars.
+ */
+export interface FooterOpts {
+  kind: "exact" | "normalized" | "lossy";
+  page_id: string;
+  base_hash?: string;
+  current_hash: string;
+  omitted_tokens: number;
+  raw_objref?: string | null;
+}
+
+/**
+ * Build the reduction footer block.  Appended to the END of every reduced
+ * or large-FULL delivery so it always survives 10 K chunking (PF-iii).
+ *
+ * The block is delimited with `--- th-context-reduction ---` so the model and
+ * future tooling can locate it deterministically.  The `rehydrate:` line
+ * provides the literal CLI command that restores full content.
+ */
+export function reductionFooter(opts: FooterOpts): string {
+  const short = (h: string | undefined | null): string => (h ? h.slice(0, 12) : "");
+  const lines: string[] = [
+    "--- th-context-reduction ---",
+    `kind: ${opts.kind}`,
+    `page_id: ${opts.page_id}`,
+    ...(opts.base_hash ? [`base: ${short(opts.base_hash)}`] : []),
+    `current: ${short(opts.current_hash)}`,
+    `omitted_tokens: ${opts.omitted_tokens}`,
+    ...(opts.raw_objref ? [`raw_objref: ${short(opts.raw_objref)}`] : []),
+    `rehydrate: th context rehydrate ${opts.page_id}`,
+    "---",
+  ];
+  return "\n" + lines.join("\n") + "\n";
+}
+
+// ---------------------------------------------------------------------------
+// S1 — capability probe (5b / D-18)
+// ---------------------------------------------------------------------------
+
+interface CapabilityRecord {
+  /** "A" = updatedToolOutput (transcript-confirmed); "B" = systemMessage (default). */
+  mode: "A" | "B";
+  /** session_id when Mode A was confirmed — re-confirm when the session changes. */
+  session_id: string;
+  confirmed_at: string;
+  confirmed_tool_use_id?: string;
+}
+
+function capabilityFilePath(paths: ProjectPaths): string {
+  return path.join(contextPagesRoot(paths), "capability.json");
+}
+
+/**
+ * Read the cached delivery-mode choice.  Returns "B" (systemMessage, default)
+ * when capability.json is absent, malformed, or the session_id has changed
+ * (re-confirm once per session before the first Mode-A ATTEST — 5b/D-18).
+ */
+function readCapabilityMode(paths: ProjectPaths, currentSessionId?: string): "A" | "B" {
+  try {
+    const p = capabilityFilePath(paths);
+    if (!fs.existsSync(p)) return "B";
+    const rec = JSON.parse(fs.readFileSync(p, "utf8")) as CapabilityRecord;
+    if (rec.mode !== "A") return "B";
+    // Re-confirm required when the session has changed.
+    if (currentSessionId && rec.session_id && rec.session_id !== currentSessionId) return "B";
+    return "A";
+  } catch {
+    return "B";
+  }
+}
+
+/**
+ * Persist a capability mode confirmation.  Mode A (updatedToolOutput) requires a
+ * transcript-confirmed no-op rewrite before it is cached.  Exported so the surfaces
+ * layer (`th context probe`) can write the confirmation after verification.
+ */
+export function writeCapabilityMode(
+  paths: ProjectPaths,
+  mode: "A" | "B",
+  sessionId: string,
+  confirmedToolUseId?: string,
+): void {
+  try {
+    const rec: CapabilityRecord = {
+      mode,
+      session_id: sessionId,
+      confirmed_at: new Date().toISOString(),
+      ...(confirmedToolUseId ? { confirmed_tool_use_id: confirmedToolUseId } : {}),
+    };
+    const p = capabilityFilePath(paths);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(rec), "utf8");
+  } catch {
+    // fail-safe: capability.json write errors never propagate
+  }
+}
+
+// ---------------------------------------------------------------------------
+// S1 — PF-i ledger-append seam (test-only injection)
+// ---------------------------------------------------------------------------
+
+type LedgerAppendFn = typeof appendLedgerRecord;
+
+/**
+ * Module-level override for appendLedgerRecord, used ONLY in PF-i tests to
+ * simulate ATTEST write failures without OS-level file tricks.  Never set in
+ * production — the default is null (real implementation).
+ */
+let _appendOverride: LedgerAppendFn | null = null;
+
+/**
+ * Test-only: inject a custom appendLedgerRecord implementation and return a
+ * teardown function that restores the real one.
+ * @internal
+ */
+export function _setAppendLedgerOverride(fn: LedgerAppendFn | null): () => void {
+  _appendOverride = fn;
+  return () => { _appendOverride = null; };
+}
+
+/** Dispatch to the real or injected ledger append. */
+function doAppendLedger(
+  ...args: Parameters<LedgerAppendFn>
+): ReturnType<LedgerAppendFn> {
+  return (_appendOverride ?? appendLedgerRecord)(...args);
+}
+
+// ---------------------------------------------------------------------------
+// resolveScope — POSITIVE-only scope attribution (B3 / M4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Discriminated union returned by {@link resolveScope}.  Only `agent` and
+ * `root` carry a usable {@link LedgerScope}; `indeterminate` must never be
+ * attributed to the root shard.
+ */
+export type ScopeResolution =
+  | { kind: "agent"; scope: LedgerScope }
+  | { kind: "root"; scope: LedgerScope }
+  | { kind: "indeterminate" };
+
+/**
+ * Resolve the ledger scope for a hook input payload.  POSITIVE-only: we only
+ * claim a scope when the evidence is unambiguous.
+ *
+ *   agent_id present              → `agent` scope (agentOrRoot = agent_id).
+ *   session_id only, no agent_id  → `root` scope  (agentOrRoot = "root").
+ *   neither present               → `indeterminate` (no shard written).
+ *
+ * SubagentStart/Stop depth is for epoch/probe purposes ONLY — it is NOT used
+ * for per-tool scope attribution here (brief B3/M4).
+ */
+export function resolveScope(input: {
+  session_id?: string;
+  agent_id?: string;
+}): ScopeResolution {
+  if (input.agent_id) {
+    const session_id = input.session_id ?? "unknown";
+    return { kind: "agent", scope: { session_id, agentOrRoot: input.agent_id } };
+  }
+  // IMPORTANT — B3/P2 "Phantom Root" gate (MUST be probe-gated before S1):
+  // A bare session_id with no agent_id is assumed to be the root session here
+  // at S0 because there are no consumers and S1 is hard-gated.  Before S1 is
+  // enabled this branch MUST be tightened: only a CONFIRMED-distinct root
+  // session_id (verified against epoch.json / SubagentStart probe counters)
+  // may map to `root`; an unconfirmed id MUST map to `indeterminate` instead,
+  // preventing a phantom-root attribution that would merge subagent pages into
+  // the root shard.  Per plan B3/P2 — do NOT remove this comment until the
+  // probe-gate is wired.
+  if (input.session_id) {
+    return { kind: "root", scope: { session_id: input.session_id, agentOrRoot: "root" } };
+  }
+  return { kind: "indeterminate" };
+}
+
+// ---------------------------------------------------------------------------
+// PostToolUse OBSERVE handler (D-08)
+// ---------------------------------------------------------------------------
+
+/**
+ * Subset of the Claude Code PostToolUse stdin payload we observe.
+ * `tool_response` is tool-specific: some built-ins return strings, while Bash
+ * and newer Claude Code tool events return structured objects.
+ */
+export interface PostToolContextInput {
+  session_id?: string;
+  agent_id?: string;
+  agent_type?: string;
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
+  tool_response?: unknown;
+  cwd?: string;
+}
+
+function canonicalResponseJson(value: unknown): string {
+  if (value === undefined) return "";
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? String(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalResponseJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${canonicalResponseJson(record[k])}`)
+    .join(",")}}`;
+}
+
+function contentBlockText(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const chunks: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string") {
+      chunks.push(item);
+      continue;
+    }
+    if (typeof item === "object" && item !== null) {
+      const rec = item as Record<string, unknown>;
+      if (typeof rec.text === "string") chunks.push(rec.text);
+    }
+  }
+  return chunks.length > 0 ? chunks.join("\n") : undefined;
+}
+
+function extractToolResponseText(tool_name: string, tool_response: unknown): string {
+  if (typeof tool_response === "string") return tool_response;
+  if (tool_response === undefined || tool_response === null) return "";
+  if (typeof tool_response !== "object") return String(tool_response);
+
+  const rec = tool_response as Record<string, unknown>;
+  if (tool_name.toLowerCase() === "bash") {
+    const stdout = typeof rec.stdout === "string" ? rec.stdout : "";
+    const stderr = typeof rec.stderr === "string" ? rec.stderr : "";
+    return [stdout, stderr].filter((s) => s.length > 0).join("\n");
+  }
+
+  const blockText = contentBlockText(rec.content);
+  if (blockText !== undefined) return blockText;
+
+  for (const key of ["text", "content", "output", "result", "message", "stdout", "stderr"]) {
+    const value = rec[key];
+    if (typeof value === "string") return value;
+  }
+
+  return canonicalResponseJson(tool_response);
+}
+
+/** Map a Claude Code tool name to a ContextPage SourceKind + locator parts. */
+function resolveToolPage(
+  tool_name: string,
+  tool_input: Record<string, unknown>,
+): { source_kind: SourceKind; parts: Record<string, unknown>; source_locator: string } | null {
+  const tn = tool_name.toLowerCase();
+  if (tn === "read") {
+    const p = String(tool_input.file_path ?? "");
+    return { source_kind: "file", parts: { path: p }, source_locator: p };
+  }
+  if (tn === "glob") {
+    const pattern = String(tool_input.pattern ?? "");
+    const dir = String(tool_input.path ?? "");
+    return {
+      source_kind: "search",
+      parts: { tool: "Glob", query: pattern, cwd: dir },
+      source_locator: `Glob|${pattern}`,
+    };
+  }
+  if (tn === "grep") {
+    const pattern = String(tool_input.pattern ?? "");
+    const dir = String(tool_input.path ?? "");
+    return {
+      source_kind: "search",
+      parts: { tool: "Grep", query: pattern, cwd: dir },
+      source_locator: `Grep|${pattern}`,
+    };
+  }
+  if (tn === "bash") {
+    const cmd = String(tool_input.command ?? "");
+    return {
+      source_kind: "bash",
+      parts: { argv: cmd },
+      source_locator: cmd,
+    };
+  }
+  if (tn === "webfetch") {
+    const url = String(tool_input.url ?? "");
+    return {
+      source_kind: "search",
+      parts: { tool: "WebFetch", query: url },
+      source_locator: `WebFetch|${url}`,
+    };
+  }
+  if (tool_name.includes("__")) {
+    // mcp__<server>__<op> pattern
+    // The params land in `logical_key` (via normalizeLocator), so they MUST be
+    // reachable by the secret scan, which only inspects `source_locator` and the
+    // response. Serialize them into the locator so an inline secret in tool_input
+    // (e.g. an api_key arg) is detected and the page is classified sensitive —
+    // otherwise the raw key would be written into ledger-*.jsonl. (#2 / AC-7 / R2)
+    let paramsRepr = "";
+    try {
+      paramsRepr = JSON.stringify(tool_input ?? {});
+    } catch {
+      paramsRepr = "";
+    }
+    return {
+      source_kind: "mcp",
+      parts: { tool: tool_name, params: tool_input },
+      source_locator: `${tool_name}|${paramsRepr}`,
+    };
+  }
+  return null;
+}
+
+/**
+ * `th hook posttool-context` — OBSERVE the PostToolUse payload, record a
+ * deliver ledger entry + telemetry, then return the original output unchanged.
+ *
+ * Fail-safe: any error → passthrough (exit 0, original output preserved).
+ * Kill-switch: `TH_DISABLE_CONTEXT_PAGES=1` → pure passthrough, no I/O.
+ */
+export function runHookPostToolContext(
+  root: string,
+  input?: PostToolContextInput,
+  env: NodeJS.ProcessEnv = process.env,
+): { stdout: string; exitCode: number } {
+  if (env["TH_DISABLE_CONTEXT_PAGES"] === "1") return contextPassthrough();
+  try {
+    const toolName = input?.tool_name ?? "";
+    const toolInput = input?.tool_input ?? {};
+    const toolResponse = extractToolResponseText(toolName, input?.tool_response);
+
+    if (!toolName || !toolResponse) return contextPassthrough();
+
+    if (input?.agent_id) probeAgentIdPresentOnToolHook();
+
+    const resolved = resolveToolPage(toolName, toolInput);
+    if (!resolved) return contextPassthrough();
+
+    const r = resolveOrConflict(root);
+    if ("conflict" in r) return contextPassthrough();
+    const { paths } = r;
+
+    const { source_kind, parts, source_locator } = resolved;
+    const logical_key = normalizeLocator(source_kind, parts);
+    const content_hash = hashContent(toolResponse);
+    const now = new Date().toISOString();
+    const scopeRes = resolveScope(input ?? {});
+
+    const pageBase = {
+      schema_version: CONTEXT_PAGE_SCHEMA_VERSION,
+      source_kind,
+      logical_key,
+      content_hash,
+    };
+    const page_id = computePageId(pageBase);
+
+    const pageLike = { source_locator, source_kind };
+    const sensitive = classifySensitive(pageLike, paths, toolResponse);
+
+    const raw_objref = coldStorePut(paths, toolResponse, sensitive);
+
+    const reduction_kind: ReductionKind = sensitive ? "hash-only" : "FULL";
+    const session_id = input?.session_id ?? "";
+    const agent_id = input?.agent_id ?? "";
+    const agent_type = input?.agent_type ?? "";
+    const est = estimateTokens(toolResponse);
+
+    // A4 (Savings UI): classify the workload ONCE at write time, threading the
+    // raw Bash command (in scope only here) into the classifier and then
+    // discarding it — the command text is NEVER persisted onto a telemetry
+    // record (privacy by construction). Only the resulting 8-value category is
+    // stored, alongside `source_kind`/`content_hash`/`schema_version`, so the
+    // read-time savings calc can attribute savings without the command. No
+    // `lossy` marker is set here: these posttool deliveries are FULL/hash-only,
+    // never a disclosed lossy reduction.
+    const command = source_kind === "bash" ? String(toolInput.command ?? "") : undefined;
+    const workload_category = classify({
+      tool_type: toolName,
+      source_kind,
+      reduction_kind,
+      command,
+    });
+
+    // M2b (AC-7 / R2): for sensitive pages, never write the raw logical_key
+    // into ledger-*.jsonl — substitute its short hash.  Sensitive pages are
+    // always FULL (never used for residency matching), so the redacted form
+    // carries no cost to correctness; it keeps inline secrets off disk.
+    const ledger_logical_key = sensitive ? shortHash(logical_key) : logical_key;
+
+    // S1 — residency check BEFORE writing any ledger record (non-sensitive only).
+    // Sensitive pages are always FULL and are never resident-matched for suppression.
+    const epochRec = currentEpoch(paths);
+    const exactSuppressOn = env["TH_EXACT_SUPPRESS"] === "1";
+    let isResident = false;
+
+    if (scopeRes.kind !== "indeterminate" && !sensitive) {
+      try {
+        // F1: bounded tail read instead of a full O(N) shard read on every
+        // PostToolUse. deriveResidency only matches records within the
+        // RESIDENCY_TTL_TURNS window, so reading the recent tail cannot change
+        // residency outcomes for any realistic shard. The limit is set well
+        // above the TTL window (×8, floored at 256) to absorb interleaved
+        // non-eligible ops and concurrent-agent records within the window.
+        const RESIDENCY_TAIL_LIMIT = Math.max(RESIDENCY_TTL_TURNS * 8, 256);
+        const shardRecs = readShardRecordsTail(paths, scopeRes.scope, RESIDENCY_TAIL_LIMIT);
+        // nowTurn = depth of what we read (matches prior behavior on short
+        // shards). deriveResidency compares nowTurn - record.seq against the TTL;
+        // because records appended within the TTL window are all present in the
+        // tail, the age comparison is preserved for any in-window page.
+        const nowTurn = shardRecs.length; // shard depth as turn proxy (S1 counter)
+        const residency = deriveResidency(
+          shardRecs,
+          scopeRes.scope,
+          ledger_logical_key,
+          content_hash,
+          epochRec.epoch,
+          nowTurn,
+        );
+        isResident = residency.resident;
+      } catch {
+        isResident = false; // fail-safe: check error → treat as not resident
+      }
+    }
+
+    // PF-i: suppress path — exact_suppress ON and page is resident.
+    // Record ATTEST first; on write failure → return original output, NO attest written.
+    if (exactSuppressOn && isResident && scopeRes.kind !== "indeterminate") {
+      let attestOk = false;
+      try {
+        doAppendLedger(paths, scopeRes.scope, {
+          seq: 0,
+          ts: now,
+          session_id,
+          agent_id,
+          agent_type,
+          epoch: epochRec.epoch,
+          op: "attest" as const,
+          page_id,
+          logical_key: ledger_logical_key,
+          content_hash,
+          base_hash: undefined,
+          complete: true,
+          est_tokens: est,
+          reduction_kind,
+        });
+        attestOk = true;
+      } catch {
+        attestOk = false;
+      }
+
+      if (!attestOk) {
+        // PF-i: write failed → return original output (no suppression occurred)
+        recordTelemetry(paths, {
+          schema_version: TELEMETRY_SCHEMA_VERSION,
+          ts: now,
+          session_id,
+          agent_id: input?.agent_id,
+          epoch: epochRec.epoch,
+          tool_type: toolName,
+          workload_category,
+          source_kind,
+          content_hash,
+          tier: "s1",
+          stage: "attest",
+          page_id,
+          orig_tokens: est,
+          returned_tokens: est,
+          dup_detected: true,
+          dup_avoided: false,
+          delta_tokens: 0,
+          verification_outcome: "attest_fail",
+          reduction_kind,
+        });
+        void raw_objref;
+        return contextPassthrough();
+      }
+
+      // Attest succeeded → emit reduced replacement (Mode A or Mode B).
+      const mode = readCapabilityMode(paths, session_id);
+      const footer = reductionFooter({
+        kind: "exact",
+        page_id,
+        current_hash: content_hash,
+        omitted_tokens: est,
+        raw_objref,
+      });
+      const reduced = `[th-context: exact match — content omitted]${footer}`;
+
+      recordTelemetry(paths, {
+        schema_version: TELEMETRY_SCHEMA_VERSION,
+        ts: now,
+        session_id,
+        agent_id: input?.agent_id,
+        epoch: epochRec.epoch,
+        tool_type: toolName,
+        workload_category,
+        source_kind,
+        content_hash,
+        tier: "s1",
+        stage: "attest",
+        page_id,
+        orig_tokens: est,
+        returned_tokens: estimateTokens(reduced),
+        dup_detected: true,
+        dup_avoided: true,
+        delta_tokens: est - estimateTokens(reduced),
+        verification_outcome: "ok",
+        reduction_kind: "hash-only",
+      });
+
+      void raw_objref;
+      if (mode === "A") {
+        return { stdout: JSON.stringify({ updatedToolOutput: reduced }), exitCode: 0 };
+      }
+      // Mode B default: systemMessage route (D-18 — until transcript-confirmed)
+      return {
+        stdout: JSON.stringify({ systemMessage: `[th-context] ${reduced}` }),
+        exitCode: 0,
+      };
+    }
+
+    // Shadow mode OR not resident: deliver as normal (S0 behavior preserved).
+    // In shadow mode with a resident page: log would-suppress telemetry but deliver FULL.
+    const wouldSuppress = !exactSuppressOn && isResident;
+
+    if (scopeRes.kind !== "indeterminate") {
+      doAppendLedger(paths, scopeRes.scope, {
+        seq: 0,
+        ts: now,
+        session_id,
+        agent_id,
+        agent_type,
+        epoch: epochRec.epoch,
+        op: "deliver" as const,
+        page_id,
+        logical_key: ledger_logical_key,
+        content_hash,
+        base_hash: undefined,
+        complete: true,
+        est_tokens: est,
+        reduction_kind,
+      });
+    }
+
+    recordTelemetry(paths, {
+      schema_version: TELEMETRY_SCHEMA_VERSION,
+      ts: now,
+      session_id,
+      agent_id: input?.agent_id,
+      epoch: epochRec.epoch,
+      tool_type: toolName,
+      workload_category,
+      source_kind,
+      content_hash,
+      tier: "s0",
+      stage: "deliver",
+      slice: "s0",
+      page_id,
+      orig_tokens: est,
+      returned_tokens: est,
+      dup_detected: isResident,
+      dup_avoided: false,
+      delta_tokens: 0,
+      full_rehydrations: 0,
+      compaction_resets: 0,
+      parent_pages: 0,
+      child_pages: 0,
+      assumed_resident_misses: 0,
+      verification_outcome: wouldSuppress ? "would_suppress" : "ok",
+      turns: 0,
+      retries: 0,
+      runtime_ms: 0,
+      reduction_kind,
+    });
+
+    void raw_objref; // acknowledged: used in the page record (future slices)
+    return contextPassthrough();
+  } catch {
+    // Fail-safe: any error → passthrough, exit 0
+    return contextPassthrough();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SessionStart OBSERVE handler (D-15)
+// ---------------------------------------------------------------------------
+
+/**
+ * Subset of the Claude Code SessionStart stdin payload we observe.
+ */
+export interface SessionContextInput {
+  session_id?: string;
+  agent_id?: string;
+  agent_type?: string;
+  cwd?: string;
+}
+
+/**
+ * `th hook session-context` — S0 OBSERVE entry for SessionStart.
+ *
+ * At S0: records the SubagentStart probe counter when agent_id is present;
+ * epoch read/reconcile is a no-op stub (epoch tracking begins in S1+).
+ * Returns `{}` (no capsule injection at S0 — minimal/empty per brief D-15).
+ *
+ * Fail-safe: any error → passthrough (exit 0).
+ * Kill-switch: `TH_DISABLE_CONTEXT_PAGES=1` → pure passthrough.
+ */
+export function runHookSessionContext(
+  root: string,
+  input?: SessionContextInput,
+  env: NodeJS.ProcessEnv = process.env,
+): { stdout: string; exitCode: number } {
+  if (env["TH_DISABLE_CONTEXT_PAGES"] === "1") return contextPassthrough();
+  try {
+    // Probe: SubagentStart fired (agent_id is present in a session-context payload)
+    if (input?.agent_id) {
+      probeSubagentStartFired();
+    }
+
+    // S1: Session epoch reconcile — detect new session_id, bump epoch if changed.
+    const session_id = input?.session_id ?? "";
+    if (root && session_id) {
+      const r = resolveOrConflict(root);
+      if (!("conflict" in r)) {
+        const { paths } = r;
+        maybeCheckEpoch(paths, "session_start", { session_id });
+
+        // R7: Post-compact eager rehydrate — inject capsule when the epoch reason
+        // is "SessionStart{compact}" (set by runHookPrecompactSeal).
+        // Default OFF (shadow); only fires when TH_EXACT_SUPPRESS=1.
+        const exactSuppressOn = env["TH_EXACT_SUPPRESS"] === "1";
+        if (exactSuppressOn) {
+          const epochRec = currentEpoch(paths);
+          if (epochRec.reason === "SessionStart{compact}") {
+            try {
+              const stateResult = readState(paths);
+              if (stateResult.state) {
+                const tier = String(
+                  (stateResult.state as unknown as Record<string, unknown>)["tier"] ?? "unclassified",
+                );
+                const stage = stateResult.state.current_stage;
+                const capsule = capsuleFromState(stateResult.state, tier, stage, {
+                  epoch: epochRec.epoch,
+                });
+                const msg =
+                  `[th-context post-compact rehydrate epoch=${epochRec.epoch}]\n` +
+                  JSON.stringify(capsule, null, 2);
+
+                // A2 (Savings UI): this R7 host path is the AUTHORITATIVE
+                // rehydration-payback emitter — it actually re-serves full tokens
+                // back into context post-compact, offsetting earlier suppression
+                // credit. The dispatcher `handleRehydrate` stays a pure query and
+                // does NOT emit (avoids the parity-test double-write). Idempotency
+                // is on (page_id, epoch, content_hash); `content_hash` of the
+                // re-served capsule lets the consumer subtract a repeated
+                // post-compact rehydrate of the same epoch only once. Fail-safe:
+                // wrapped in the surrounding try/catch (recordTelemetry also
+                // swallows its own I/O errors).
+                recordTelemetry(paths, {
+                  schema_version: TELEMETRY_SCHEMA_VERSION,
+                  ts: new Date().toISOString(),
+                  session_id,
+                  epoch: epochRec.epoch,
+                  workload_category: "rehydration",
+                  content_hash: hashContent(msg),
+                  rehydrated_full_tokens: estimateTokens(msg),
+                });
+                return { stdout: JSON.stringify({ systemMessage: msg }), exitCode: 0 };
+              }
+            } catch {
+              // fail-safe: capsule build errors → passthrough
+            }
+          }
+        }
+      }
+    }
+
+    return contextPassthrough();
+  } catch {
+    return contextPassthrough();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PrecompactSeal handler (S6 — bump epoch before context-window compaction)
+// ---------------------------------------------------------------------------
+
+/**
+ * Subset of the PreCompact hook stdin payload this handler observes.
+ */
+export interface PrecompactSealInput {
+  session_id?: string;
+  cwd?: string;
+}
+
+/**
+ * `th hook precompact-seal` — fired when Claude Code is about to auto-compact
+ * the context window.
+ *
+ * Bumps the epoch (reason = "SessionStart{compact}") so that all prior-epoch
+ * residency claims are invalidated on the next SessionStart (AC-4).  The next
+ * call to `runHookSessionContext` detects that reason and injects the post-
+ * compact eager-rehydrate capsule (R7).
+ *
+ * S6 TODO: also seal the active stage manifest when T6 integration lands.
+ *
+ * Fail-safe: any error → passthrough (D-16).
+ * Kill-switch: TH_DISABLE_CONTEXT_PAGES=1 → pure passthrough.
+ */
+export function runHookPrecompactSeal(
+  root: string,
+  input?: PrecompactSealInput,
+  env: NodeJS.ProcessEnv = process.env,
+): { stdout: string; exitCode: number } {
+  if (env["TH_DISABLE_CONTEXT_PAGES"] === "1") return contextPassthrough();
+  try {
+    const r = resolveOrConflict(root);
+    if ("conflict" in r) return contextPassthrough();
+    const { paths } = r;
+
+    // Bump epoch — invalidates all prior residency claims (AC-4 / R7).
+    // The reason "SessionStart{compact}" signals runHookSessionContext to inject
+    // an eager-rehydrate capsule on the subsequent SessionStart.
+    const compactedEpoch = bumpEpoch(paths, "SessionStart{compact}");
+
+    // A3 (Savings UI): emit ONE compaction record (stop relying on the literal
+    // `compaction_resets: 0` written at the deliver site). Idempotency key is
+    // (session_id, epoch): `bumpEpoch` makes the epoch unique per compaction, so
+    // this path emits at most one record per distinct (session_id, epoch). The
+    // pending S1+ runtime promotion OWNS the increment when active — it will emit
+    // the canonical compaction record for that key, and the read-time consumer
+    // dedups on (session_id, epoch), so this A3 emit is effectively a no-op once
+    // the promotion path is live. Fail-safe: recordTelemetry swallows I/O errors.
+    recordTelemetry(paths, {
+      schema_version: TELEMETRY_SCHEMA_VERSION,
+      ts: new Date().toISOString(),
+      session_id: input?.session_id ?? "",
+      epoch: compactedEpoch,
+      workload_category: "compaction",
+      compaction_resets: 1,
+    });
+
+    // S6 TODO: sealActiveManifest(paths, input?.session_id);
+    void input;
+
+    return contextPassthrough();
+  } catch {
+    // Fail-safe: bump failure never blocks the compact (D-16).
+    return contextPassthrough();
+  }
 }

@@ -77,6 +77,10 @@ approved artifact (returns a content-hash receipt); it refuses any other target.
 th inspector write --content "<the full markdown analysis>" --version 1
 ```
 
+## Stage manifest (advisory, S4/D-03)
+
+`INSPECTOR_MANIFEST_PACK` supplies optional `th delegate pack --tier/--stage` section/budget hints; invalid/missing ignored.
+
 ## Boundaries
 
 - **You gather; you do not decide.** Findings feed tiering and the design overlay; the Orchestrator,

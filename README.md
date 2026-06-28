@@ -2,7 +2,7 @@
 
 A Claude Code plugin that runs a vague software idea through requirements, design, and slice-by-slice implementation — with verification gates at every step. It is backed by a deterministic TypeScript CLI (`th`) that owns state, hashing, traceability, coverage, and a completion gate, so progress can't be faked by prompt text.
 
-> **You are reading the `dev` branch.** This is the development/preview channel, currently **ahead of the last release (`v0.7.0`, tagged on `main`)**. The published `0.7.0` does **not** include the changes here, and no new release has been cut from `dev` yet. Install the `@dev` channel (below) to run this code. Expect breaking changes before 1.0 \u2014 interfaces may still move.
+> **TwinHarness 1.0.0 is released.** `main` now ships the first stable release (`v1.0.0`); the recommended **stable channel** (below) installs it. Public CLI and MCP interfaces are stable at 1.0 and follow semver from here. The `@dev` channel remains the optional preview channel for post-1.0, bleeding-edge work \u2014 install it only if you want changes ahead of the next stable release.
 
 ---
 
@@ -20,13 +20,38 @@ Three things make it different from asking an agent to build something directly:
 
 ---
 
+## Find your way
+
+Start with the guide that matches what you're doing:
+
+- **New here / first run** → [docs/guide/getting-started.md](docs/guide/getting-started.md)
+- **Command tour** → [docs/guide/cli-reference.md](docs/guide/cli-reference.md)
+- **Orchestration, gates, coverage, drift, MCP** → [docs/guide/advanced.md](docs/guide/advanced.md)
+- **Internals / how it's built** → [docs/guide/architecture.md](docs/guide/architecture.md)
+
+[USAGE.md](./USAGE.md) is the full deep reference — comprehensive, but not required for a first run.
+
+---
+
 ## Getting started
 
 **Prerequisites:** Claude Code ≥ 1.0.0 and Node ≥ 20 on PATH. On older Node, `th` exits immediately with an upgrade pointer — install Node 20+ via [nvm](https://github.com/nvm-sh/nvm) (`nvm install 20`) or [nodejs.org](https://nodejs.org/).
 
-### Install — dev / preview channel
+### Install — stable channel (recommended)
 
-You're on `dev`, so install the `@dev` marketplace to run this code. It ships as its own marketplace (`twinharness-dev`) and coexists side-by-side with the stable channel.
+The stable channel ships **TwinHarness 1.0.0** and tracks `main`. This is the recommended default for almost everyone.
+
+```
+/plugin marketplace add JrSneed28/TwinHarness
+/plugin install twinharness@twinharness
+```
+
+Throwaway trial without installing: `claude --plugin-dir C:\path\to\TwinHarness`
+
+<details>
+<summary>Preview channel (<code>@dev</code>) — bleeding-edge, post-1.0 work</summary>
+
+The `@dev` channel ships its own marketplace (`twinharness-dev`) and coexists side-by-side with the stable channel. Install it only if you want post-1.0 changes ahead of the next stable release.
 
 ```
 /plugin marketplace add JrSneed28/TwinHarness@dev
@@ -40,19 +65,7 @@ A **local clone checked out on `dev`** registers the same way (the marketplace n
 /plugin install twinharness@twinharness-dev
 ```
 
-The plugin name is always `twinharness`; only the marketplace differs (`@twinharness-dev` vs `@twinharness`), which is what lets both channels coexist.
-
-<details>
-<summary>Stable channel (released v0.7.0) — lags this code</summary>
-
-The released build tracks `main` and is behind the `dev` code above.
-
-```
-/plugin marketplace add JrSneed28/TwinHarness
-/plugin install twinharness@twinharness
-```
-
-Throwaway trial without installing: `claude --plugin-dir C:\path\to\TwinHarness`
+The plugin name is always `twinharness`; only the marketplace differs (`@twinharness` stable vs `@twinharness-dev` preview), which is what lets both channels coexist.
 </details>
 
 ### First run
@@ -172,7 +185,7 @@ Naming what it isn't keeps the promise honest:
 
 Features split into a **Core** spine every run uses and **Advanced** machinery that is **OFF by default**, activating only at **tier ≥ T2** or when a run is already doing **parallel authorship**. So sub-Builders, collaboration, and debate are not "always on" — they are tier-gated capabilities. `th tier features` shows exactly what's active; the matching MCP tools return a structured `tier_locked` refusal until the threshold is met.
 
-**Core (every run):** Tier scaling with Tier-0 bypass · code-enforced blast-radius floor (`th tier veto-check`) · fresh-context Critic reviews with capped revise loops · REQ-ID traceability (`th anchors scan`, `th trace render`) · bidirectional drift log · vertical slices scheduled into conflict-free parallel waves · a Stop hook that blocks "done" while state is invalid or blocking drift is open · a configurable, fail-open PreToolUse write-gate · a gate-mutation audit ledger · on-demand Researcher and Debugger agents · self-diagnostics (`th doctor`, `th next`, `th coverage`, `th manifest export`) · conditional UX (4a) + UI (4b) stages · tier-scaled docs · automatic model routing · brownfield mode (`th init --brownfield`) · a full **81-tool MCP surface** at parity with the CLI.
+**Core (every run):** Tier scaling with Tier-0 bypass · code-enforced blast-radius floor (`th tier veto-check`) · fresh-context Critic reviews with capped revise loops · REQ-ID traceability (`th anchors scan`, `th trace render`) · bidirectional drift log · vertical slices scheduled into conflict-free parallel waves · a Stop hook that blocks "done" while state is invalid or blocking drift is open · a configurable, fail-open PreToolUse write-gate · a gate-mutation audit ledger · on-demand Researcher and Debugger agents · self-diagnostics (`th doctor`, `th next`, `th coverage`, `th manifest export`) · conditional UX (4a) + UI (4b) stages · tier-scaled docs · automatic model routing · brownfield mode (`th init --brownfield`) · a full **82-tool MCP surface** at parity with the CLI.
 
 **Advanced (opt-in — tier ≥ T2 or parallel authorship):** coordinated safe parallel builds with cross-process locking and dynamic component leases · a multi-writer coordination plane (`th collab`, `th debate`, section/sub leases) · decision governance (`th decision …`) with a hash-chained, tamper-evident audit trail and a human-only TTY approval gate that aborts in any agent or CI context.
 
@@ -184,20 +197,30 @@ Full per-feature detail is in [USAGE.md](./USAGE.md).
 
 `th` is a zero-dependency TypeScript CLI that owns every mechanical operation in a run. It records and computes — it never decides which stage, agent, or tier runs; those are the Orchestrator's calls. All commands accept `--json`.
 
-Command groups: `init` · `state` · `tier` · `artifact` · `coverage` · `verify` · `slices`/`slice` · `build` (plan / next-wave / leases) · `debug` · `anchors`/`trace`/`stale` · `drift` · `revise` · `hook` · `stage` · `doctor` · `next` · `preview` · `scorecard` · `telemetry` · `manifest` · `context` · `delegate` · `migrate` · `repo` (map / relevant / impact / check) · `decision` · advanced coordination (`collab`, `debate`, artifact & sub leases). Full reference in [USAGE.md](./USAGE.md) Part 3.
+Command groups: `init` · `state` · `tier` · `artifact` · `coverage` · `verify` · `slices`/`slice` · `build` (plan / next-wave / leases) · `debug` · `anchors`/`trace`/`stale` · `drift` · `revise` · `hook` · `stage` · `doctor` · `next` · `preview` · `scorecard` · `telemetry` · `savings`/`statusline` · `manifest` · `context` · `delegate` · `migrate` · `repo` (map / relevant / impact / check) · `decision` · advanced coordination (`collab`, `debate`, artifact & sub leases). Full reference in [USAGE.md](./USAGE.md) Part 3.
 
 A deterministic **repo-understanding layer** (`th repo map|relevant|impact|check`, plus matching MCP tools) gives brownfield runs a mechanical spine for adopting an existing codebase. It treats all repository content as untrusted data: discovered build/test commands are recorded as inert strings and never executed (see [SECURITY.md](./SECURITY.md)).
+
+A **token-savings display** (`th savings [--detail]`, and `th statusline` as a Claude Code statusLine emitter) reports deterministic ContextPages tool-output savings from `telemetry.jsonl`. The headline is honestly labeled — `[measured]`, an explicit `pre-rehydration upper bound`, or `observe-only (0%)` at the default tier — and `--detail` adds an `[estimated]` whole-window view, a per-category breakdown, a separately-labeled provider prompt-cache line, and `[estimated • snapshot <date>]` USD cost. Only aggregate numbers and category names ever leave the store. Wire the live status band by adding to Claude Code's `settings.json`:
+
+```json
+{
+  "statusLine": { "type": "command", "command": "th statusline" }
+}
+```
+
+**Local data & privacy.** ContextPages' on-by-default PostToolUse hook runs in OBSERVE mode: it never alters tool output but does persist tool outputs (file reads, bash/web/MCP results) as **local plaintext** under `.twinharness/context-pages/` (gitignored; never sent off-machine). Sensitive content is excluded by a best-effort secret classifier (path denylist + regex, fail-toward-sensitive) — only its hash is recorded. Set `TH_DISABLE_CONTEXT_PAGES=1` to record nothing, and clear the store with `th context-pages gc [--age-days <n>]` or `th context-pages purge`. Details in [docs/guide/advanced.md](./docs/guide/advanced.md#context-pages-what-lands-on-disk).
 
 ---
 
 ## Status
 
-**On the `dev` branch:** ahead of the released `v0.7.0` (tagged on `main`); the published build does not include this work, and no release has been cut from `dev`.
+**Released:** `v1.0.0` is tagged on `main` and shipped through the stable channel — the first stable release. The `@dev` channel carries post-1.0 preview work ahead of the next stable cut.
 
 **What works today:**
 
 - Full T0\u2013T3 pipeline, all 17 agents, all stages.
-- `th` CLI with **2,000+ tests** covering CLI behavior, plugin-packaging integrity, security containment (path traversal, proto-pollution), the repo-understanding layer, decision governance (hash-chain tamper detection, TTY barrier), brownfield tiering, and the full 81-tool MCP surface.
+- `th` CLI with **2,000+ tests** covering CLI behavior, plugin-packaging integrity, security containment (path traversal, proto-pollution), the repo-understanding layer, decision governance (hash-chain tamper detection, TTY barrier), brownfield tiering, and the full 82-tool MCP surface.
 - CI runs typecheck, build, a dist-sync assertion, and the full suite on every push/PR across Linux/macOS/Windows \u2014 with 1 POSIX-only permission test in `tests/concurrency.test.ts` intentionally skipped on Windows and covered on Linux/macOS CI.
 - Validated Claude Code plugin packaging (`claude plugin validate` + `--plugin-dir` load).
 - PreToolUse write-gate, gate-mutation audit ledger, managed drift counter, schema-versioned state with `th migrate`, and context-budgeted prompts (always-loaded files fit Claude Code's ~500-line / ~5k-token guidance).
@@ -205,7 +228,7 @@ A deterministic **repo-understanding layer** (`th repo map|relevant|impact|check
 **Not yet done:**
 
 - **Limited real-world mileage** — exercised internally, not yet validated across a broad range of real projects.
-- **No release cut from `dev`** — the version is still `0.7.0`; expect breaking changes (artifact schemas, state fields, CLI flags) before 1.0.
+- **Stable at 1.0, evolving** — public CLI and MCP interfaces are stable at 1.0 and change under semver; artifact schemas and state fields carry versioned `th migrate` paths, so post-1.0 work lands without breaking installed runs.
 
 ---
 
@@ -254,7 +277,11 @@ MIT
 
 ## Links
 
-- [USAGE.md](./USAGE.md) — full usage guide, from install through advanced CLI reference
+- [docs/guide/getting-started.md](docs/guide/getting-started.md) — new users and first run
+- [docs/guide/cli-reference.md](docs/guide/cli-reference.md) — command tour
+- [docs/guide/advanced.md](docs/guide/advanced.md) — orchestration, gates, coverage, drift, MCP
+- [docs/guide/architecture.md](docs/guide/architecture.md) — internals
+- [USAGE.md](./USAGE.md) — full deep reference (not required for a first run)
 - [CHANGELOG.md](./CHANGELOG.md) — version history
 - [SECURITY.md](./SECURITY.md) — threat model, trust boundaries, vulnerability reporting
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — dev setup and packaging invariants
@@ -263,4 +290,4 @@ MIT
 
 ---
 
-[![version](https://img.shields.io/badge/version-0.7.0-blue)](CHANGELOG.md) [![branch](https://img.shields.io/badge/branch-dev%20(ahead)-orange)](#status) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-7c3aed) ![node](https://img.shields.io/badge/node-%E2%89%A5%2020-339933)
+[![version](https://img.shields.io/badge/version-1.0.0-blue)](CHANGELOG.md) [![release](https://img.shields.io/badge/release-1.0.0-green)](#status) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-7c3aed) ![node](https://img.shields.io/badge/node-%E2%89%A5%2020-339933)

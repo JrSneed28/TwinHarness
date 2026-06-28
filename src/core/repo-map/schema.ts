@@ -850,6 +850,309 @@ function validateRepoMapShape(v: Record<string, unknown>): boolean {
 }
 
 /* ------------------------------------------------------------------ *
+ * Page projections — advisory symbol/caller/test/component views.    *
+ *                                                                    *
+ * Pure + deterministic derived views of a RepoMap used by the        *
+ * context-pages layer (T5/S5). These projections are ADVISORY DATA   *
+ * ONLY: they do not modify the RepoMap, are never persisted inside   *
+ * it, and have no effect on default scanRepo behavior. Determinism   *
+ * is ensured by sorting every output collection at the call site.    *
+ * ------------------------------------------------------------------ */
+
+/**
+ * Symbol-page projection — per-exported-symbol context for the context-pages
+ * layer. Each exported symbol in the RepoMap gets one SymbolPage that records
+ * where it is defined, which files call into its defining file (callers), and
+ * which test files are associated with it.
+ *
+ * Sorted output (defined_in, name, kind) for byte-stable page identity (M3).
+ */
+export interface SymbolPage {
+  /** Exported symbol name. */
+  name: string;
+  kind: SymbolKind;
+  /** POSIX-relative file path where the symbol is defined. */
+  defined_in: string;
+  /** Component.name of the defining file, or null if unowned. */
+  component: string | null;
+  /**
+   * POSIX-relative files with a resolved import edge (basis "parsed"|"alias")
+   * to the defining file. Sorted lexicographically.
+   */
+  callers: string[];
+  /**
+   * POSIX-relative test files in the same component, or that import the
+   * defining file via a resolved edge. Sorted lexicographically.
+   */
+  tests: string[];
+}
+
+/**
+ * Caller-page projection — which files import a given file, derived from the
+ * resolved import edges (basis "parsed"|"alias") in the RepoMap.
+ * Only files with at least one caller get a CallerPage.
+ */
+export interface CallerPage {
+  /** POSIX-relative target file. */
+  file: string;
+  /** POSIX-relative files with a resolved import edge to this file. Sorted. */
+  callers: string[];
+}
+
+/**
+ * Test-page projection — test files associated with a given source file.
+ *
+ * A test file is associated when it:
+ *   (a) imports the source file via a resolved edge (import-based), OR
+ *   (b) shares the same non-null component (component-based).
+ *
+ * Only non-test source files receive a TestPage; files with no associations
+ * are omitted. Sorted by source file path for byte-stable page identity.
+ */
+export interface TestPage {
+  /** POSIX-relative non-test source file. */
+  file: string;
+  /** POSIX-relative test files associated with this source file. Sorted. */
+  test_files: string[];
+  /** Component of the source file; null if unowned. */
+  component: string | null;
+}
+
+/**
+ * Component-page projection — all files grouped under a named component,
+ * with their aggregated exported symbols.
+ *
+ * Sorted by component name for byte-stable page identity.
+ */
+export interface ComponentPage {
+  /** Component.name (POSIX-relative). */
+  component: string;
+  /** POSIX-relative non-test files in this component. Sorted. */
+  files: string[];
+  /** POSIX-relative test files in this component. Sorted. */
+  test_files: string[];
+  /**
+   * Exported symbols aggregated from all (non-test) files in the component.
+   * Sorted by (name, kind) — mirrors the serializer's sort.
+   */
+  symbols: ExportedSymbol[];
+}
+
+/** Stable lexicographic comparator for strings (locale-independent). */
+function cmpStr(a: string, b: string): -1 | 0 | 1 {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Build caller-page projections from a RepoMap.
+ * Derives one CallerPage per file that is the target of at least one resolved
+ * import edge (basis "parsed" | "alias"). Unresolved edges are excluded — they
+ * do not represent confirmed in-repo caller relationships.
+ *
+ * Pure, deterministic (sorted output), advisory — no side effects on the map.
+ */
+export function buildCallerPages(map: RepoMap): CallerPage[] {
+  // target file → set of callers (files with resolved import edge to target).
+  const callersOf = new Map<string, Set<string>>();
+  for (const edge of map.edges ?? []) {
+    if (edge.basis === "unresolved") continue;
+    let set = callersOf.get(edge.to);
+    if (!set) {
+      set = new Set();
+      callersOf.set(edge.to, set);
+    }
+    set.add(edge.from);
+  }
+  // Emit one CallerPage per file that has callers, sorted by file path.
+  const pages: CallerPage[] = [];
+  const filePaths = map.files.map((f) => f.path).sort(cmpStr);
+  for (const file of filePaths) {
+    const callerSet = callersOf.get(file);
+    if (!callerSet || callerSet.size === 0) continue;
+    pages.push({
+      file,
+      callers: [...callerSet].sort(cmpStr),
+    });
+  }
+  return pages;
+}
+
+/**
+ * Build test-page projections from a RepoMap.
+ * Associates test files with non-test source files via import edges (resolved)
+ * or shared component membership. Files with no associations are omitted.
+ *
+ * Pure, deterministic (sorted output), advisory — no side effects on the map.
+ */
+export function buildTestPages(map: RepoMap): TestPage[] {
+  const testFilePaths = new Set(map.files.filter((f) => f.is_test).map((f) => f.path));
+
+  // Index: source file → test files that import it (resolved import edge).
+  const testsByTarget = new Map<string, Set<string>>();
+  for (const edge of map.edges ?? []) {
+    if (edge.basis === "unresolved") continue;
+    if (!testFilePaths.has(edge.from)) continue; // only edges originating from test files
+    let set = testsByTarget.get(edge.to);
+    if (!set) {
+      set = new Set();
+      testsByTarget.set(edge.to, set);
+    }
+    set.add(edge.from);
+  }
+
+  // Index: component → test files in that component.
+  const testsByComponent = new Map<string, Set<string>>();
+  for (const f of map.files) {
+    if (!f.is_test || !f.component) continue;
+    let set = testsByComponent.get(f.component);
+    if (!set) {
+      set = new Set();
+      testsByComponent.set(f.component, set);
+    }
+    set.add(f.path);
+  }
+
+  // Build one TestPage per non-test source file that has at least one association.
+  const pages: TestPage[] = [];
+  for (const f of map.files) {
+    if (f.is_test) continue;
+    const importTests = testsByTarget.get(f.path) ?? new Set<string>();
+    const compTests = f.component
+      ? (testsByComponent.get(f.component) ?? new Set<string>())
+      : new Set<string>();
+    const combined = new Set([...importTests, ...compTests]);
+    if (combined.size === 0) continue;
+    pages.push({
+      file: f.path,
+      test_files: [...combined].sort(cmpStr),
+      component: f.component,
+    });
+  }
+  return pages.sort((a, b) => cmpStr(a.file, b.file));
+}
+
+/**
+ * Build symbol-page projections from a RepoMap.
+ * Combines the caller-page and test-page relationships for each exported
+ * symbol. Each symbol in a file that defines at least one export receives a
+ * SymbolPage; files with no symbols are silently omitted.
+ *
+ * Pure, deterministic (sorted output by (defined_in, name, kind)), advisory.
+ */
+export function buildSymbolPages(map: RepoMap): SymbolPage[] {
+  // Build callers-of-file index (resolved edges only).
+  const callersOf = new Map<string, Set<string>>();
+  for (const edge of map.edges ?? []) {
+    if (edge.basis === "unresolved") continue;
+    let set = callersOf.get(edge.to);
+    if (!set) {
+      set = new Set();
+      callersOf.set(edge.to, set);
+    }
+    set.add(edge.from);
+  }
+
+  // Build test association indexes (same logic as buildTestPages).
+  const testFilePaths = new Set(map.files.filter((f) => f.is_test).map((f) => f.path));
+  const testsByTarget = new Map<string, Set<string>>();
+  for (const edge of map.edges ?? []) {
+    if (edge.basis === "unresolved" || !testFilePaths.has(edge.from)) continue;
+    let set = testsByTarget.get(edge.to);
+    if (!set) {
+      set = new Set();
+      testsByTarget.set(edge.to, set);
+    }
+    set.add(edge.from);
+  }
+  const testsByComponent = new Map<string, Set<string>>();
+  for (const f of map.files) {
+    if (!f.is_test || !f.component) continue;
+    let set = testsByComponent.get(f.component);
+    if (!set) {
+      set = new Set();
+      testsByComponent.set(f.component, set);
+    }
+    set.add(f.path);
+  }
+
+  const pages: SymbolPage[] = [];
+  for (const f of map.files) {
+    if (!f.symbols || f.symbols.length === 0) continue;
+    const callerSet = callersOf.get(f.path) ?? new Set<string>();
+    const importTests = testsByTarget.get(f.path) ?? new Set<string>();
+    const compTests = f.component
+      ? (testsByComponent.get(f.component) ?? new Set<string>())
+      : new Set<string>();
+    const testsSet = new Set([...importTests, ...compTests]);
+
+    for (const sym of f.symbols) {
+      pages.push({
+        name: sym.name,
+        kind: sym.kind,
+        defined_in: f.path,
+        component: f.component,
+        callers: [...callerSet].sort(cmpStr),
+        tests: [...testsSet].sort(cmpStr),
+      });
+    }
+  }
+  // Sort by (defined_in, name, kind) for byte-stable page identity (M3).
+  return pages.sort((a, b) => {
+    const fd = cmpStr(a.defined_in, b.defined_in);
+    if (fd !== 0) return fd;
+    const fn = cmpStr(a.name, b.name);
+    if (fn !== 0) return fn;
+    return cmpStr(a.kind, b.kind);
+  });
+}
+
+/**
+ * Build component-page projections from a RepoMap.
+ * Groups all owned files under their component, separating source from test
+ * files, and aggregating exported symbols across the component's source files.
+ *
+ * Pure, deterministic (sorted output by component name), advisory.
+ */
+export function buildComponentPages(map: RepoMap): ComponentPage[] {
+  const byComponent = new Map<
+    string,
+    { files: Set<string>; test_files: Set<string>; symbols: ExportedSymbol[] }
+  >();
+
+  for (const f of map.files) {
+    if (!f.component) continue;
+    let entry = byComponent.get(f.component);
+    if (!entry) {
+      entry = { files: new Set(), test_files: new Set(), symbols: [] };
+      byComponent.set(f.component, entry);
+    }
+    if (f.is_test) {
+      entry.test_files.add(f.path);
+    } else {
+      entry.files.add(f.path);
+      if (f.symbols) {
+        entry.symbols.push(...f.symbols);
+      }
+    }
+  }
+
+  const pages: ComponentPage[] = [];
+  for (const [component, data] of byComponent.entries()) {
+    pages.push({
+      component,
+      files: [...data.files].sort(cmpStr),
+      test_files: [...data.test_files].sort(cmpStr),
+      // Sort aggregated symbols by (name, kind) — mirrors the serializer.
+      symbols: [...data.symbols].sort((a, b) => {
+        const sn = cmpStr(a.name, b.name);
+        return sn !== 0 ? sn : cmpStr(a.kind, b.kind);
+      }),
+    });
+  }
+  return pages.sort((a, b) => cmpStr(a.component, b.component));
+}
+
+/* ------------------------------------------------------------------ *
  * Compact markdown renderer (IF-005) — deterministic, byte-stable.    *
  * ------------------------------------------------------------------ */
 

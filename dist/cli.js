@@ -86,6 +86,8 @@ const decision_1 = require("./commands/decision");
 const template_1 = require("./commands/template");
 const sim_1 = require("./commands/sim");
 const gate_1 = require("./commands/gate");
+const context_pages_1 = require("./commands/context-pages");
+const savings_render_1 = require("./core/savings-render");
 const HELP = `th — TwinHarness mechanical CLI (records and computes; never decides)
 
 Usage:
@@ -156,6 +158,8 @@ Usage:
   th hook stop-gate                 Emit a Claude Code Stop-hook decision
   th hook pretool-gate              Emit a Claude Code PreToolUse write-gate decision
   th hook subagent-stop             Emit a Claude Code SubagentStop-hook decision (state-validity guard)
+  th hook posttool-context|session-context|prompt-context|precompact-seal|subagent-context|subagent-seal|session-end
+                                    Emit context-pages OBSERVE hook decisions (internal Claude Code hook protocol; passthrough/fail-safe)
   th migrate                        Upgrade state.json to the current schema version
   th doctor                         Self-diagnostic + run-health audit (env, state, artifacts, coverage, slices, revise loops)
   th next [--explain]               The next mechanical obligation the run owes (next-action oracle); --explain adds a WHY
@@ -169,6 +173,16 @@ Usage:
                                     Assemble the §9 handoff bundle (artifact Summary blocks + slice/REQ/file framing; --max-tokens bounds the pack)
   th context read --files-list <a,b,c> [--max-tokens <N>]
                                     Batch-read files under ONE token budget with deterministic truncation + per-file read receipts (C-11)
+  th context-pages page-status|residency|telemetry|savings|savings-detail|verify|rehydrate|compare [--session-id <id>] [--limit <n>] [--page-id <id>] [--logical-key <k>] [--baseline-id <id>] [--context-id <id>] [--transcript-path <path>]
+                                    Inspect the context-pages store (th_context MCP shares the same handler for these ops)
+  th context-pages baseline [--session-id <id>]
+                                    S0 token denominator; writes a RunArtifact corpus entry when --session-id is given (human-only)
+  th context-pages gc [--age-days <n>]
+                                    Remove cold CAS objects older than n days (default 5); NEVER removes ledger records (human-only)
+  th context-pages purge            Remove all context-pages data (human-only, destructive)
+  th savings [--detail] [--session-id <id>] [--json]
+                                    Context-pages savings summary (--detail for full transcript-cost breakdown); convenience wrapper over th context-pages savings
+  th statusline [--session-id <id>]  Claude Code statusLine emitter: single compact savings band on stdout
   th budget check [--max <k>] [--files-read N] [--slices-built N] [--tool-calls N] [--artifacts N]
                                     Deterministic context-budget estimate from agent-supplied proxy counts → { estTokens, pct, verdict } (--max in thousands; tier-aware default when omitted)
   th handoff write                  Assemble .twinharness/HANDOFF.md (run state + next action + artifact Summary blocks + open questions + "don't re-read docs/" directive)
@@ -316,7 +330,8 @@ Global flags:
   --evidence-ref <p>  (tester record) Path/URL to the raw live-run output or screenshots
   --dimension <a,b>  (driver record) Comma-separated dimension(s) to record as observed; intersected with what verify-report.json observes (default: every observed seed dimension)
   --identity <who>  (driver record / realize / assertion-presence record / grounding record) Producer identity to record (attribution-only, zero trust weight; default: cli:th driver record / cli:th realize / cli:th assertion-presence record / cli:th grounding record)
-  --artifact <path>  (realize) Source path the REQ-ID is realized in — the referent the realization receipt binds a content digest of; must resolve in source`;
+  --artifact <path>  (realize) Source path the REQ-ID is realized in — the referent the realization receipt binds a content digest of; must resolve in source
+  --detail          (savings) Emit the full transcript cost breakdown; routes to savings-detail`;
 /** Boolean flags (presence = true). */
 const BOOLEAN_FLAGS = {
     "--json": "json",
@@ -357,6 +372,8 @@ const BOOLEAN_FLAGS = {
     "--user-visible": "userVisible",
     // F8/R-31 — the live run's pass verdict for `th tester record`.
     "--passed": "passed",
+    // B5 — `th savings --detail` routes to savings-detail op.
+    "--detail": "detail",
 };
 /** Flags that consume a string value (`--flag v` or `--flag=v`). */
 const STRING_FLAGS = {
@@ -445,6 +462,14 @@ const STRING_FLAGS = {
     "--perceptual-hash": "perceptualHash",
     "--renderer": "renderer",
     "--work-class": "workClass",
+    // context-pages flags (S0 + S1+).
+    "--session-id": "sessionId",
+    "--page-id": "pageId",
+    "--logical-key": "logicalKey",
+    "--baseline-id": "baselineId",
+    "--context-id": "contextId",
+    "--transcript-path": "transcriptPath",
+    "--category": "category",
 };
 /** Flags that consume a numeric value. */
 const NUMBER_FLAGS = {
@@ -468,6 +493,9 @@ const NUMBER_FLAGS = {
     // ≤0 to its default. `--max-files` = file-count cap; `--max-bytes` = total-bytes cap.
     "--max-files": "maxFiles",
     "--max-bytes": "maxBytes",
+    // context-pages flags (S0 + S1+).
+    "--limit": "limit",
+    "--age-days": "ageDays",
 };
 /**
  * P4-8 — build the scanner `ScanOptions` cap overrides from the parsed `--max-files`
@@ -525,6 +553,7 @@ function parseArgs(argv) {
         readOnly: false,
         userVisible: false,
         passed: false,
+        detail: false,
     };
     const positionals = [];
     const unknownFlags = [];
@@ -859,6 +888,72 @@ function dispatch(parsed) {
                 default:
                     return (0, output_1.failure)({ human: `unknown 'context' subcommand: ${sub ?? "(none)"}\n\n${HELP}` });
             }
+        // context-pages queries (D-19 / AC-10): CLI+MCP-shared ops + human-only ops.
+        case "context-pages":
+            switch (sub) {
+                // S0: CLI + MCP shared ops.
+                case "page-status":
+                case "residency":
+                case "telemetry":
+                case "savings":
+                    return (0, context_pages_1.runContextPagesCommand)(sub, {
+                        session_id: parsed.flags.sessionId,
+                        limit: parsed.flags.limit,
+                    }, paths);
+                case "savings-detail":
+                    return (0, context_pages_1.runContextPagesCommand)("savings-detail", {
+                        session_id: parsed.flags.sessionId,
+                        transcript_path: parsed.flags.transcriptPath,
+                    }, paths);
+                // S1+: CLI + MCP shared ops.
+                case "verify":
+                    return (0, context_pages_1.runContextPagesCommand)("verify", {}, paths);
+                case "rehydrate":
+                    return (0, context_pages_1.runContextPagesCommand)("rehydrate", {
+                        page_id: parsed.flags.pageId,
+                        logical_key: parsed.flags.logicalKey,
+                    }, paths);
+                case "compare":
+                    return (0, context_pages_1.runContextPagesCommand)("compare", {
+                        baseline_id: parsed.flags.baselineId,
+                        context_id: parsed.flags.contextId,
+                        category: parsed.flags.category,
+                    }, paths);
+                // Human-only ops (absent from the MCP enum — see MCP_EXCLUDED).
+                case "baseline":
+                    return (0, context_pages_1.runContextPagesCommand)("baseline", {
+                        session_id: parsed.flags.sessionId,
+                    }, paths);
+                case "gc":
+                    return (0, context_pages_1.runContextPagesCommand)("gc", {
+                        age_days: parsed.flags.ageDays,
+                    }, paths);
+                case "purge":
+                    return (0, context_pages_1.runContextPagesCommand)("purge", {}, paths);
+                default:
+                    return (0, output_1.failure)({
+                        human: `unknown 'context-pages' subcommand: ${sub ?? "(none)"}. Valid ops: page-status, residency, telemetry, savings, savings-detail, verify, rehydrate, compare, baseline, gc, purge`,
+                    });
+            }
+        // B5 — top-level convenience wrappers over the context-pages savings ops.
+        case "savings":
+            if (parsed.flags.detail) {
+                return (0, context_pages_1.runContextPagesCommand)("savings-detail", {
+                    session_id: parsed.flags.sessionId,
+                    transcript_path: parsed.flags.transcriptPath,
+                }, paths);
+            }
+            return (0, context_pages_1.runContextPagesCommand)("savings", {
+                session_id: parsed.flags.sessionId,
+            }, paths);
+        case "statusline": {
+            // B5 — Claude Code statusLine emitter: compute savings, render the single compact band.
+            const res = (0, context_pages_1.runContextPagesCommand)("savings", { session_id: parsed.flags.sessionId }, paths);
+            const result = res.data.savings;
+            const width = Number(process.env.COLUMNS) > 0 ? Number(process.env.COLUMNS) : 80;
+            const color = !process.env.NO_COLOR && Boolean(process.stdout.isTTY);
+            return (0, output_1.success)({ human: (0, savings_render_1.renderStatusLine)(result, width, color), data: result });
+        }
         case "delegate":
             switch (sub) {
                 case "plan":
@@ -1484,6 +1579,26 @@ function main() {
         else if (parsed.positionals[1] === "subagent-stop") {
             const { effectiveCwd, payload } = readHookPayload(parsed.flags.cwd);
             hookOut = (0, hook_1.runHookSubagentStopFromRoot)(effectiveCwd, payload);
+        }
+        else if (parsed.positionals[1] === "posttool-context") {
+            const { effectiveCwd, payload } = readHookPayload(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookPostToolContext)(effectiveCwd, payload);
+        }
+        else if (parsed.positionals[1] === "session-context") {
+            const { effectiveCwd, payload } = readHookPayload(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookSessionContext)(effectiveCwd, payload);
+        }
+        else if (parsed.positionals[1] === "precompact-seal") {
+            const { effectiveCwd, payload } = readHookPayload(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookPrecompactSeal)(effectiveCwd, payload);
+        }
+        else if (parsed.positionals[1] === "prompt-context" ||
+            parsed.positionals[1] === "subagent-context" ||
+            parsed.positionals[1] === "subagent-seal" ||
+            parsed.positionals[1] === "session-end") {
+            // S0 no-op passthrough stubs: hook leaves not yet implemented in T5 exit 0
+            // with an empty decision object (fail-safe per D-15 / brief T6).
+            hookOut = { stdout: JSON.stringify({}), exitCode: 0 };
         }
         if (hookOut) {
             writeAndExit(hookOut.stdout + "\n", hookOut.exitCode);

@@ -5,30 +5,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.7.0] — 2026-06-18
-
-### Removed — BREAKING
-
-- **The entire `th proof` / operational-proof-suite feature is removed.** This is a
-  breaking change for any caller that depended on the proof surface:
-  - **CLI:** the `th proof run|component|report|baseline update|scenario start|finish|list`
-    command group and its `--self-test`/`--brief`/`--corpus-root`/`--output-root`/`--scenario-root`
-    flags are gone.
-  - **MCP:** the `th_proof_run`, `th_proof_component`, and `th_proof_report` tools are
-    de-registered (−3). The shipped 0.7.0 MCP registry holds **62 tools**.
-  - **Producer trail:** the MCP adapter no longer writes the dedicated
-    `<stateDir>/proof-calls.jsonl` call trail (the `appendProofCall` instrumentation is removed
-    from `callTool`'s success and error paths).
-  - **Packaging:** the `twinharness-proof` skill, the `th-proof`/`th-proof-component` command
-    files, the bundled `proof/corpus/` fixtures, and `src/core/proof/**` are all deleted.
-- `src/core/telemetry.ts` and `src/core/health.ts` are **retained** — they remain load-bearing
-  for `th next`, `th route`, `th scorecard`, `th doctor`, and `th verify`.
-
----
-
 ## [Unreleased]
 
-Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding layer + self-epic governance + coordination-primitive hardening), not yet cut as a versioned release. **1100+ tests, green on CI** (1 platform-conditional skip in `tests/concurrency.test.ts`; was 460 at 0.6.2).
+## [1.0.0] — 2026-06-26
+
+First stable release. The public `th` CLI and the MCP tool surface are now considered stable: within the 1.x line, breaking changes to documented CLI commands and flags, MCP tool names and schemas, and the `state.json` schema follow semantic versioning. New beginner-oriented guides live under [`docs/guide/`](docs/guide/getting-started.md); [`USAGE.md`](USAGE.md) remains the exhaustive reference.
+
+This release folds in all post-0.6.2 infrastructure work (Phases 1–6 + the SLICE-0..5 repo-understanding layer + self-epic governance + coordination-primitive hardening), previously tracked under `[Unreleased]`. **1100+ tests, green on CI** (1 platform-conditional skip in `tests/concurrency.test.ts`; was 460 at 0.6.2).
 
 ### Fixed — interactive approval read (TTY) (2026-06-26)
 
@@ -241,7 +224,7 @@ Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding lay
   mechanism" claim — `gate-ledger.jsonl` is a plain append-only log and is **not tamper-evident**
   (unlike the SHA-256 hash-chained `decisions.jsonl`); the claim is softened to "best-effort review
   aid." A falsifiable `tests/security-doc-lint.test.ts` pins the corrected text and the absence of
-  the stale claims. *(The gate-ledger hash-chain itself is a post-1.0 follow-up — **now landed, see Phase 3 below**.)*
+  the stale claims. *(The gate-ledger hash-chain itself was a deferred follow-up — **now landed, see Phase 3 below**.)*
 
 #### Phase 3 — maintainability / performance dedup + remaining Mediums (2026-06-16)
 
@@ -265,7 +248,7 @@ Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding lay
   pre-migration unsealed lines are an unverifiable prefix, not a tamper signal. `SECURITY.md`
   is **re-elevated** to "tamper-evident", with three honest limits (legacy prefix; keyless
   full-rewrite; wholesale deletion of the sealed run); the doc lint is flipped accordingly.
-  *(This supersedes the post-1.0 note above.)*
+  *(This supersedes the deferred-follow-up note above.)*
 - **Dedup cluster (CQ-001/002/003/005/006/007).** Extracted a shared append-only markdown-
   ledger module behind drift-log/debate-log (byte-identical output); deleted dead
   `findDecision`; migrated byte-identical `requireState` sites; extracted `loadPersistedMap`;
@@ -425,6 +408,25 @@ Post-0.6.2 infrastructure work (Phases 1–6 + SLICE-0..5 repo-understanding lay
 - **`th build claim` requires the slice to be `in-progress`.** A claim on a `pending`/`done`/`blocked` slice is now refused (`slice_not_in_progress`), mirroring `th build sub-claim`'s parent check and the Phase-B write-gate. The documented protocol has always been "set in-progress, then claim."
 - **`strict` write-gate wording reconciled.** The README feature bullet and the published JSON Schema described `strict` as only adding Phase-B Bash enforcement; both now state the full definition — `deny` semantics **plus** Phase-B Bash-mediated-write enforcement (a superset of `deny`) — matching the changelog, spec, and code. `strict` is also now listed in the README and USAGE write-gate mode tables.
 - **Flaky verify tests.** Both `REQ-VERIFY-005` cases used a tight 150 ms command budget that intermittently failed under full-suite parallel load (a real shell spawn needs more headroom): the "fast command" case now uses the default budget, and the timeout-kill case uses a load-robust 2 s budget. Both pass deterministically.
+
+## [0.7.0] — 2026-06-18
+
+### Removed — BREAKING
+
+- **The entire `th proof` / operational-proof-suite feature is removed.** This is a
+  breaking change for any caller that depended on the proof surface:
+  - **CLI:** the `th proof run|component|report|baseline update|scenario start|finish|list`
+    command group and its `--self-test`/`--brief`/`--corpus-root`/`--output-root`/`--scenario-root`
+    flags are gone.
+  - **MCP:** the `th_proof_run`, `th_proof_component`, and `th_proof_report` tools are
+    de-registered (−3). The shipped 0.7.0 MCP registry holds **62 tools**.
+  - **Producer trail:** the MCP adapter no longer writes the dedicated
+    `<stateDir>/proof-calls.jsonl` call trail (the `appendProofCall` instrumentation is removed
+    from `callTool`'s success and error paths).
+  - **Packaging:** the `twinharness-proof` skill, the `th-proof`/`th-proof-component` command
+    files, the bundled `proof/corpus/` fixtures, and `src/core/proof/**` are all deleted.
+- `src/core/telemetry.ts` and `src/core/health.ts` are **retained** — they remain load-bearing
+  for `th next`, `th route`, `th scorecard`, `th doctor`, and `th verify`.
 
 ## [0.6.2] — 2026-06-14
 

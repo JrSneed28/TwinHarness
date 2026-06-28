@@ -167,6 +167,8 @@ The mechanical spine (advisory — it computes; you decide):
    (`th delegate capsule` prints the blank skeleton). Keep only the capsule. Long-form output lives in
    durable files under `.twinharness/delegations/DEL-###/`, referenced from the capsule — never pasted back.
 
+**Stage manifests.** `th delegate pack --tier/--stage` may include optional manifest section/budget hints; invalid/missing ignored.
+
 **Trust the confidence label (P2-9).** `th context pack` tags every signal with a **`basis`** +
 **`confidence`**. Treat `low`/`path-token`/`unresolved` as **"possible — verify"**, not fact; confirm a
 `high`-confidence `parsed`/`manifest` signal before an irreversible routing/gate decision.

@@ -105,6 +105,10 @@ above). Stay strictly inside your sub-leased components; the shared `.twinharnes
 concurrent Debuggers from stepping on each other. Do not widen scope to a component another Debugger
 holds — that is a boundary escalation, not a retry.
 
+## Stage manifest (advisory, S4/D-03)
+
+`DEBUGGER_MANIFEST_PACK` supplies optional `th delegate pack --tier/--stage` section/budget hints; invalid/missing ignored.
+
 ## Boundaries
 
 - **You propose; the Builder fixes.** Hand the fix to the Builder for the owning slice. You may apply
