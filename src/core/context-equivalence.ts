@@ -216,8 +216,18 @@ export function corpusCategoryDir(paths: ProjectPaths, category: WorkloadCategor
  * Persist a RunArtifact to the corpus.  File name: `<session_id>.json`.
  * Creates directories as needed.  Never throws (returns false on error).
  */
+/**
+ * A `session_id` becomes a corpus file name, so it must never contain path
+ * separators or `..` traversal segments. Accept only the conservative charset
+ * that real session IDs use; reject everything else.
+ */
+function isSafeSessionId(sessionId: string): boolean {
+  return /^[A-Za-z0-9_-]+$/.test(sessionId);
+}
+
 export function writeCorpusEntry(paths: ProjectPaths, artifact: RunArtifact): boolean {
   try {
+    if (!isSafeSessionId(artifact.session_id)) return false;
     const dir = corpusCategoryDir(paths, artifact.workload_category);
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `${artifact.session_id}.json`);
@@ -238,6 +248,7 @@ export function readCorpusEntry(
   sessionId: string,
 ): RunArtifact | undefined {
   try {
+    if (!isSafeSessionId(sessionId)) return undefined;
     const file = path.join(corpusCategoryDir(paths, category), `${sessionId}.json`);
     if (!fs.existsSync(file)) return undefined;
     return JSON.parse(fs.readFileSync(file, "utf8")) as RunArtifact;
@@ -406,6 +417,16 @@ function compareRequirements(
   const cCov = [...c.covered].sort().join(",");
   if (bCov !== cCov) {
     return { dimension: dim, diverged: true, reason: "covered requirements differ" };
+  }
+
+  // Promotion safety: an unchanged covered-set but a divergent uncovered-set
+  // means the context run left different requirements unaddressed — not
+  // equivalent. Comparing only `covered` (the prior behavior) reported these
+  // runs clean and made promotion unsafe. (#6)
+  const bUncov = [...b.uncovered].sort().join(",");
+  const cUncov = [...c.uncovered].sort().join(",");
+  if (bUncov !== cUncov) {
+    return { dimension: dim, diverged: true, reason: "uncovered requirements differ" };
   }
 
   return { dimension: dim, diverged: false };

@@ -1312,10 +1312,22 @@ function resolveToolPage(tool_name, tool_input) {
     }
     if (tool_name.includes("__")) {
         // mcp__<server>__<op> pattern
+        // The params land in `logical_key` (via normalizeLocator), so they MUST be
+        // reachable by the secret scan, which only inspects `source_locator` and the
+        // response. Serialize them into the locator so an inline secret in tool_input
+        // (e.g. an api_key arg) is detected and the page is classified sensitive —
+        // otherwise the raw key would be written into ledger-*.jsonl. (#2 / AC-7 / R2)
+        let paramsRepr = "";
+        try {
+            paramsRepr = JSON.stringify(tool_input ?? {});
+        }
+        catch {
+            paramsRepr = "";
+        }
         return {
             source_kind: "mcp",
             parts: { tool: tool_name, params: tool_input },
-            source_locator: tool_name,
+            source_locator: `${tool_name}|${paramsRepr}`,
         };
     }
     return null;

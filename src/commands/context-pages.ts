@@ -117,6 +117,19 @@ function readAllLedgerRecords(paths: ProjectPaths): LedgerRecord[] {
 }
 
 /**
+ * Order two ledger records by recency: ts (ISO-8601, lexical == chronological),
+ * then per-shard seq, then recordHash as a stable content-addressed tiebreaker.
+ * Returns >0 when `a` is newer than `b`. Deterministic regardless of the order
+ * shards were read from disk. (#5)
+ */
+function ledgerRecencyCompare(a: LedgerRecord, b: LedgerRecord): number {
+  if (a.ts !== b.ts) return a.ts < b.ts ? -1 : 1;
+  if (a.seq !== b.seq) return a.seq - b.seq;
+  if (a.recordHash !== b.recordHash) return a.recordHash < b.recordHash ? -1 : 1;
+  return 0;
+}
+
+/**
  * Read all valid TelemetryRecord lines from telemetry.jsonl.
  * Tolerant: missing file, garbled lines — returns [].
  */
@@ -382,18 +395,35 @@ function handleVerify(
   paths: ProjectPaths,
 ): CommandResult {
   try {
-    const records = readAllLedgerRecords(paths);
-    const result = verifyLedgerChain(records);
-    const human = result.ok
-      ? `Ledger chain: PASS — ${records.length} record(s) verified.`
-      : `Ledger chain: FAIL — broken at record ${result.brokenAt} (${result.reason}). ${records.length} records checked.`;
+    // Each shard is an independent GENESIS-anchored chain, so verify shard-by-shard.
+    // Flattening all shards into one verifyLedgerChain call false-failed with
+    // prev_mismatch the moment a second shard existed (its first record re-anchors
+    // at GENESIS, which never matches the prior shard's tail). (#5)
+    const pagesRoot = contextPagesRoot(paths);
+    const shardFiles = listShardFiles(pagesRoot);
+    let recordCount = 0;
+    for (const file of shardFiles) {
+      const records = readJsonlValues(file, isLedgerRec);
+      recordCount += records.length;
+      const result = verifyLedgerChain(records);
+      if (!result.ok) {
+        const shard = path.basename(file);
+        return success({
+          data: {
+            ok: false,
+            record_count: recordCount,
+            shard_count: shardFiles.length,
+            shard,
+            broken_at: result.brokenAt,
+            reason: result.reason,
+          },
+          human: `Ledger chain: FAIL — shard ${shard} broken at record ${result.brokenAt} (${result.reason}).`,
+        });
+      }
+    }
     return success({
-      data: {
-        ok: result.ok,
-        record_count: records.length,
-        ...(!result.ok ? { broken_at: result.brokenAt, reason: result.reason } : {}),
-      },
-      human,
+      data: { ok: true, record_count: recordCount, shard_count: shardFiles.length },
+      human: `Ledger chain: PASS — ${shardFiles.length} shard(s), ${recordCount} record(s) verified.`,
     });
   } catch {
     // Fail-safe: never throw across a handler boundary (D-16).
@@ -435,14 +465,15 @@ function handleRehydrate(
   try {
     const records = readAllLedgerRecords(paths);
 
-    // Find the most recent ledger record matching the query (tail-to-head).
+    // Select the most recent matching record DETERMINISTICALLY. The previous
+    // tail-to-head scan trusted the flattened shard order (readdir order), which
+    // is not chronological — so "latest" could vary by filesystem. Rank by ts
+    // (ISO-8601, lexical == chronological), then per-shard seq, then recordHash
+    // as a stable content-addressed tiebreaker. (#5)
     let match: LedgerRecord | undefined;
-    for (let i = records.length - 1; i >= 0; i--) {
-      const r = records[i]!;
-      if ((pageId && r.page_id === pageId) || (logicalKey && r.logical_key === logicalKey)) {
-        match = r;
-        break;
-      }
+    for (const r of records) {
+      if (!((pageId && r.page_id === pageId) || (logicalKey && r.logical_key === logicalKey))) continue;
+      if (match === undefined || ledgerRecencyCompare(r, match) > 0) match = r;
     }
 
     if (!match) {

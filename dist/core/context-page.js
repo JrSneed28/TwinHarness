@@ -358,6 +358,11 @@ function coldStorePut(paths, content, sensitive) {
  */
 function coldStoreGet(paths, hash) {
     try {
+        // D-08: object refs are 64-char lowercase hex (sha-256). Reject anything
+        // else BEFORE touching the filesystem — a tampered/tolerantly-read ledger
+        // record could otherwise smuggle a path-traversal ref (e.g. "../../secret").
+        if (!/^[0-9a-f]{64}$/.test(hash))
+            return undefined;
         const root = contextPagesRoot(paths);
         const objPath = casObjectPath(root, hash);
         if (!fs.existsSync(objPath))

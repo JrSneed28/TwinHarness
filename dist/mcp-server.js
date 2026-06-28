@@ -28173,6 +28173,7 @@ function casObjectPath(pagesRoot, hash) {
 }
 function coldStoreGet(paths, hash) {
   try {
+    if (!/^[0-9a-f]{64}$/.test(hash)) return void 0;
     const root = contextPagesRoot(paths);
     const objPath = casObjectPath(root, hash);
     if (!fs36.existsSync(objPath)) return void 0;
@@ -28263,8 +28264,12 @@ function corpusRoot(paths) {
 function corpusCategoryDir(paths, category) {
   return path37.join(corpusRoot(paths), category);
 }
+function isSafeSessionId(sessionId) {
+  return /^[A-Za-z0-9_-]+$/.test(sessionId);
+}
 function writeCorpusEntry(paths, artifact) {
   try {
+    if (!isSafeSessionId(artifact.session_id)) return false;
     const dir = corpusCategoryDir(paths, artifact.workload_category);
     fs37.mkdirSync(dir, { recursive: true });
     const file = path37.join(dir, `${artifact.session_id}.json`);
@@ -28276,6 +28281,7 @@ function writeCorpusEntry(paths, artifact) {
 }
 function readCorpusEntry(paths, category, sessionId) {
   try {
+    if (!isSafeSessionId(sessionId)) return void 0;
     const file = path37.join(corpusCategoryDir(paths, category), `${sessionId}.json`);
     if (!fs37.existsSync(file)) return void 0;
     return JSON.parse(fs37.readFileSync(file, "utf8"));
@@ -28373,6 +28379,11 @@ function compareRequirements(baseline, context) {
   const cCov = [...c.covered].sort().join(",");
   if (bCov !== cCov) {
     return { dimension: dim, diverged: true, reason: "covered requirements differ" };
+  }
+  const bUncov = [...b.uncovered].sort().join(",");
+  const cUncov = [...c.uncovered].sort().join(",");
+  if (bUncov !== cUncov) {
+    return { dimension: dim, diverged: true, reason: "uncovered requirements differ" };
   }
   return { dimension: dim, diverged: false };
 }
@@ -28501,6 +28512,12 @@ function readAllLedgerRecords(paths) {
     out.push(...records);
   }
   return out;
+}
+function ledgerRecencyCompare(a, b) {
+  if (a.ts !== b.ts) return a.ts < b.ts ? -1 : 1;
+  if (a.seq !== b.seq) return a.seq - b.seq;
+  if (a.recordHash !== b.recordHash) return a.recordHash < b.recordHash ? -1 : 1;
+  return 0;
 }
 function readAllTelemetryRecords(paths) {
   return readJsonlValues(telemetryFilePath(paths), isTelemetryRec);
@@ -28641,16 +28658,31 @@ function handleBaseline(args, paths) {
 }
 function handleVerify(_args, paths) {
   try {
-    const records = readAllLedgerRecords(paths);
-    const result = verifyLedgerChain2(records);
-    const human = result.ok ? `Ledger chain: PASS \u2014 ${records.length} record(s) verified.` : `Ledger chain: FAIL \u2014 broken at record ${result.brokenAt} (${result.reason}). ${records.length} records checked.`;
+    const pagesRoot = contextPagesRoot(paths);
+    const shardFiles = listShardFiles(pagesRoot);
+    let recordCount = 0;
+    for (const file of shardFiles) {
+      const records = readJsonlValues(file, isLedgerRec);
+      recordCount += records.length;
+      const result = verifyLedgerChain2(records);
+      if (!result.ok) {
+        const shard = path38.basename(file);
+        return success({
+          data: {
+            ok: false,
+            record_count: recordCount,
+            shard_count: shardFiles.length,
+            shard,
+            broken_at: result.brokenAt,
+            reason: result.reason
+          },
+          human: `Ledger chain: FAIL \u2014 shard ${shard} broken at record ${result.brokenAt} (${result.reason}).`
+        });
+      }
+    }
     return success({
-      data: {
-        ok: result.ok,
-        record_count: records.length,
-        ...!result.ok ? { broken_at: result.brokenAt, reason: result.reason } : {}
-      },
-      human
+      data: { ok: true, record_count: recordCount, shard_count: shardFiles.length },
+      human: `Ledger chain: PASS \u2014 ${shardFiles.length} shard(s), ${recordCount} record(s) verified.`
     });
   } catch {
     return success({
@@ -28671,12 +28703,9 @@ function handleRehydrate(args, paths) {
   try {
     const records = readAllLedgerRecords(paths);
     let match;
-    for (let i = records.length - 1; i >= 0; i--) {
-      const r = records[i];
-      if (pageId && r.page_id === pageId || logicalKey && r.logical_key === logicalKey) {
-        match = r;
-        break;
-      }
+    for (const r of records) {
+      if (!(pageId && r.page_id === pageId || logicalKey && r.logical_key === logicalKey)) continue;
+      if (match === void 0 || ledgerRecencyCompare(r, match) > 0) match = r;
     }
     if (!match) {
       return success({

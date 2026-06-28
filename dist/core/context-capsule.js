@@ -61,6 +61,29 @@ const NARRATIVE_FIELDS_DROP_ORDER = [
 ];
 /** Overflow pointer injected when a narrative field is collapsed due to budget. */
 const OVERFLOW_POINTER = "[overflow — `th context rehydrate` to restore full capsule]";
+/**
+ * Mandatory string-array fields (the safety subset). These are never collapsed
+ * to an overflow pointer (D-01), but when the narrative collapse alone cannot
+ * bring the capsule under {@link HARD_CAP_TOKENS} they are *truncated* — a
+ * bounded prefix of the exact IDs is kept and a marker is appended. The field
+ * stays present and the retained IDs stay exact; only the overflow is elided.
+ */
+const MANDATORY_ARRAY_FIELDS = [
+    "open_blocking_drift",
+    "blast_radius_flags",
+    "approved_constraints",
+    "requirement_ids",
+];
+/** Appended to a mandatory array when budget pressure forces truncation. */
+const TRUNCATION_MARKER = "[truncated — `th context rehydrate` for full list]";
+/** Keep at most `max` elements of an array, appending the marker when elided. */
+function truncateArrayField(value, max) {
+    if (!Array.isArray(value))
+        return value;
+    if (value.length <= max)
+        return value;
+    return [...value.slice(0, max), TRUNCATION_MARKER];
+}
 // ---------------------------------------------------------------------------
 // Canonical serialization (for capsule_hash)
 // ---------------------------------------------------------------------------
@@ -168,6 +191,23 @@ function enforceBudget(body, budgetTokens) {
     if (estimateBodyTokens(current) > exports.HARD_CAP_TOKENS) {
         for (const field of NARRATIVE_FIELDS_DROP_ORDER) {
             current = { ...current, [field]: collapseField(current[field]) };
+        }
+    }
+    // Mandatory-array truncation pass: with all narrative fields collapsed, the
+    // only remaining unbounded vector is the mandatory string arrays. Collapsing
+    // them to a pointer is forbidden (D-01), so truncate to a shrinking prefix
+    // until the body fits. D-17 (the hard cap) MUST hold; this guarantees it for
+    // any input array sizes. Deterministic: fixed field order, fixed max sequence.
+    if (estimateBodyTokens(current) > exports.HARD_CAP_TOKENS) {
+        let max = 64;
+        while (estimateBodyTokens(current) > exports.HARD_CAP_TOKENS && max >= 0) {
+            for (const field of MANDATORY_ARRAY_FIELDS) {
+                current = {
+                    ...current,
+                    [field]: truncateArrayField(current[field], max),
+                };
+            }
+            max = max === 0 ? -1 : Math.floor(max / 2);
         }
     }
     return current;

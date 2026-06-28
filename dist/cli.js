@@ -1555,8 +1555,11 @@ function main() {
             const { effectiveCwd, payload } = readHookPayload(parsed.flags.cwd);
             hookOut = (0, hook_1.runHookSessionContext)(effectiveCwd, payload);
         }
+        else if (parsed.positionals[1] === "precompact-seal") {
+            const { effectiveCwd, payload } = readHookPayload(parsed.flags.cwd);
+            hookOut = (0, hook_1.runHookPrecompactSeal)(effectiveCwd, payload);
+        }
         else if (parsed.positionals[1] === "prompt-context" ||
-            parsed.positionals[1] === "precompact-seal" ||
             parsed.positionals[1] === "subagent-context" ||
             parsed.positionals[1] === "subagent-seal" ||
             parsed.positionals[1] === "session-end") {

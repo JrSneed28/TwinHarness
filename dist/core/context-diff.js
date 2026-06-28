@@ -314,9 +314,23 @@ function assertBaseObjectPresent(paths, base_hash) {
 // ---------------------------------------------------------------------------
 // reconstruct
 // ---------------------------------------------------------------------------
+/** True when CRLF is the dominant line ending in `s` (vs lone LF). */
+function preferCrlf(s) {
+    const crlf = (s.match(/\r\n/g) ?? []).length;
+    const lf = (s.match(/\n/g) ?? []).length;
+    const loneLf = lf - crlf;
+    return crlf > loneLf;
+}
 /**
  * Reconstruct the current content from base content and a delta patch.
  * Pure, no I/O; never throws (returns baseContent on any error).
+ *
+ * The line split is EOL-agnostic (`/\r?\n/`), so the join must restore the
+ * original ending. We try the base's dominant ending first, then the alternate,
+ * and accept whichever candidate matches the patch's `current_hash`. This makes
+ * uniform CRLF content round-trip exactly (previously it was silently rewritten
+ * to LF) and ensures a lossy reconstruction (e.g. mixed EOLs) is never returned
+ * as if correct — on no match we fall back to `baseContent` (#7).
  */
 function reconstruct(baseContent, patch) {
     try {
@@ -353,7 +367,17 @@ function reconstruct(baseContent, patch) {
             out.push(baseLines[baseIdx - 1] ?? "");
             baseIdx++;
         }
-        return out.join("\n");
+        // Restore the original line ending, validating against current_hash.
+        const eolCandidates = preferCrlf(baseContent) ? ["\r\n", "\n"] : ["\n", "\r\n"];
+        for (const eol of eolCandidates) {
+            const candidate = out.join(eol);
+            if (!patch.current_hash || (0, hash_1.hashContent)(candidate) === patch.current_hash) {
+                return candidate;
+            }
+        }
+        // No EOL candidate reproduced current_hash → fail-safe; the caller should
+        // treat reconstruction as failed and fetch the FULL object instead.
+        return baseContent;
     }
     catch {
         return baseContent;

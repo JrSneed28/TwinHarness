@@ -50,11 +50,13 @@ import {
   runHookSubagentStopFromRoot,
   runHookPostToolContext,
   runHookSessionContext,
+  runHookPrecompactSeal,
   type StopHookInput,
   type PreToolHookInput,
   type SubagentStopHookInput,
   type PostToolContextInput,
   type SessionContextInput,
+  type PrecompactSealInput,
 } from "./commands/hook";
 import { runSlicesSync, runSliceSetStatus } from "./commands/slices";
 import { runMigrate } from "./commands/migrate";
@@ -1737,9 +1739,11 @@ function main(): void {
     } else if (parsed.positionals[1] === "session-context") {
       const { effectiveCwd, payload } = readHookPayload<SessionContextInput>(parsed.flags.cwd);
       hookOut = runHookSessionContext(effectiveCwd, payload);
+    } else if (parsed.positionals[1] === "precompact-seal") {
+      const { effectiveCwd, payload } = readHookPayload<PrecompactSealInput>(parsed.flags.cwd);
+      hookOut = runHookPrecompactSeal(effectiveCwd, payload);
     } else if (
       parsed.positionals[1] === "prompt-context" ||
-      parsed.positionals[1] === "precompact-seal" ||
       parsed.positionals[1] === "subagent-context" ||
       parsed.positionals[1] === "subagent-seal" ||
       parsed.positionals[1] === "session-end"
