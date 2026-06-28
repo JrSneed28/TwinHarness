@@ -204,11 +204,12 @@ describe("REQ-PCO-070: CLI/MCP asymmetry is pinned (intentional, not accidental 
   const TOOL_NAMES_SET = new Set(TOOL_DEFS.map((t) => t.name));
   const mcpSrc = fs.readFileSync(path.join(ROOT, "src", "mcp-server.ts"), "utf8");
 
-  it("AC#5: the MCP-only tool count is pinned to 5", () => {
+  it("AC#5: the MCP-only tool count is pinned to 6", () => {
     // MCP-only = tools with NO mirroring CLI leaf (the typed gate setters
-    // th_blast_radius_record/th_write_gate_set + the agent-only interview trio).
+    // th_blast_radius_record/th_write_gate_set + the agent-only interview trio
+    // + th_context: S0 context-pages multi-op reader, no 1:1 CLI leaf).
     // A new MCP-only tool must bump this number AND be justified in MCP_ONLY_TOOLS.
-    expect(Object.keys(MCP_ONLY_TOOLS).length).toBe(5);
+    expect(Object.keys(MCP_ONLY_TOOLS).length).toBe(6);
     // Every MCP-only entry is a real registered tool (no ghosts) — re-pinned here
     // so this guard travels with the asymmetry count it protects.
     for (const name of Object.keys(MCP_ONLY_TOOLS)) {
