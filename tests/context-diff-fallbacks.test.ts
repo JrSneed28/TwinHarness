@@ -19,6 +19,7 @@ import {
   isDenylisted,
   DIFF_RATIO_THRESHOLD,
   DIFF_MAX_HUNKS,
+  MAX_DIFF_LINES,
 } from "../src/core/context-diff";
 import { hashContent } from "../src/core/hash";
 import { coldStorePut } from "../src/core/context-page";
@@ -179,6 +180,44 @@ describe("fallback: hunk count > max", () => {
     const current = "a\nX\nc";
     const result = computeDelta(base, current, { maxHunks: 0 });
     expect(result).toMatchObject({ fallback: "FULL" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fallback: oversized input (size pre-check before Myers diff)
+// ---------------------------------------------------------------------------
+
+describe("fallback: oversized input (too-large)", () => {
+  it("oversized dissimilar pair returns FULL/too-large WITHOUT running full Myers", () => {
+    // 4000 + 4000 = 8000 combined lines, well over MAX_DIFF_LINES (5000), and
+    // fully dissimilar — the worst case for myersDiff (D ≈ N+M). The pre-check
+    // must short-circuit before the O(N·D) diff allocates/snapshots anything.
+    const n = 4000;
+    const base = makeLines(n, "base");
+    const current = makeLines(n, "current");
+
+    const start = Date.now();
+    const result = computeDelta(base, current);
+    const elapsedMs = Date.now() - start;
+
+    expect(result).toMatchObject({ fallback: "FULL", reason: "too-large" });
+    // If Myers ran on a 4000x4000 dissimilar pair this would take seconds and
+    // allocate ~1 GB; the guard makes it effectively instant.
+    expect(elapsedMs).toBeLessThan(500);
+  });
+
+  it("input at the cap (<= MAX_DIFF_LINES) still diffs normally", () => {
+    // Combined line count <= MAX_DIFF_LINES must NOT trip the pre-check. Use a
+    // near-identical pair so ratio/hunk fallbacks also stay clear.
+    const half = Math.floor(MAX_DIFF_LINES / 2) - 1; // base + current <= cap
+    const baseLines = makeLines(half, "line").split("\n");
+    const currentLines = [...baseLines];
+    currentLines[0] = "CHANGED";
+    const base = baseLines.join("\n");
+    const current = currentLines.join("\n");
+
+    const result = computeDelta(base, current);
+    expect(result).not.toHaveProperty("fallback");
   });
 });
 

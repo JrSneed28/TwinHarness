@@ -106,7 +106,7 @@ describe("renderStatusLine", () => {
 });
 
 describe("renderDetail", () => {
-  it("AC-18: renders per-category breakdown + cost label + cache line", () => {
+  it("AC-18: renders per-category breakdown + cache line (cost emitted by handler)", () => {
     const detail = renderDetail(result({ uncategorized_tokens: 12 }), "$0.42 [estimated · snapshot 2026-06-28]");
     expect(detail).toContain("\n");
     for (const cat of TELEMETRY_WORKLOAD_CATEGORIES) {
@@ -115,12 +115,13 @@ describe("renderDetail", () => {
     expect(detail).toContain("uncategorized");
     expect(detail).toContain("[incomplete]");
     expect(detail).toContain("cache-read");
-    expect(detail).toContain("$0.42 [estimated · snapshot 2026-06-28]");
+    // The `cost:` line is the handler's responsibility (single source of truth, with USD).
+    expect(detail).not.toContain("cost:");
   });
 
-  it("defaults cost to [unavailable] and payback to [unavailable] when unmeasured", () => {
+  it("defaults payback to [unavailable] when unmeasured and does not emit a cost line", () => {
     const detail = renderDetail(result({ payback_measured: false }));
-    expect(detail).toContain("cost:       [unavailable]");
+    expect(detail).not.toContain("cost:");
     expect(detail).toContain("payback:    [unavailable]");
   });
 });

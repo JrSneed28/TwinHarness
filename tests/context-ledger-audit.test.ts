@@ -194,6 +194,48 @@ describe("context-ledger — verifyLedgerChain (audit-only)", () => {
     expect(auditResult.ok).toBe(false);
   });
 
+  // F8 — validator rejects NaN / negative / float seq & epoch and bad est_tokens.
+  // Exercised through readShardRecords, whose filter is isValidLedgerRecord.
+  it("rejects records with NaN/negative/float seq, epoch, or est_tokens", () => {
+    tp = makeTempProject();
+    const valid = appendLedgerRecord(tp.paths, TEST_SCOPE, makeRec({ seq: 0 }));
+    const shardFile = ledgerShardPath(tp.paths, TEST_SCOPE);
+
+    // Build well-formed-but-for-one-field bodies, sealed with a correct recordHash
+    // so ONLY the numeric-field validation can reject them.
+    const seal = (body: Omit<LedgerRecord, "recordHash">): string =>
+      JSON.stringify({ ...body, recordHash: computeLedgerRecordHash(body) }) + "\n";
+    const baseBody = (over: Partial<Omit<LedgerRecord, "recordHash">>): Omit<LedgerRecord, "recordHash"> => ({
+      ...makeRec({ seq: 1 }),
+      prevHash: GENESIS_PREV_HASH,
+      ...over,
+    });
+
+    // seq variants
+    fs.appendFileSync(shardFile, seal(baseBody({ seq: NaN })), "utf8");
+    fs.appendFileSync(shardFile, seal(baseBody({ seq: -1 })), "utf8");
+    fs.appendFileSync(shardFile, seal(baseBody({ seq: 1.5 })), "utf8");
+    // epoch variants
+    fs.appendFileSync(shardFile, seal(baseBody({ epoch: NaN })), "utf8");
+    fs.appendFileSync(shardFile, seal(baseBody({ epoch: -2 })), "utf8");
+    fs.appendFileSync(shardFile, seal(baseBody({ epoch: 2.7 })), "utf8");
+    // est_tokens variants
+    fs.appendFileSync(shardFile, seal(baseBody({ est_tokens: NaN })), "utf8");
+    fs.appendFileSync(shardFile, seal(baseBody({ est_tokens: -5 })), "utf8");
+    fs.appendFileSync(shardFile, seal(baseBody({ est_tokens: Infinity })), "utf8");
+
+    // Every malformed-numeric record is rejected; only the original valid one remains.
+    const records = readShardRecords(tp.paths, TEST_SCOPE);
+    expect(records).toEqual([valid]);
+  });
+
+  it("accepts a record with seq=0 and est_tokens=0 (boundary, non-negative integers)", () => {
+    tp = makeTempProject();
+    const valid = appendLedgerRecord(tp.paths, TEST_SCOPE, makeRec({ seq: 0, epoch: 0, est_tokens: 0 }));
+    const records = readShardRecords(tp.paths, TEST_SCOPE);
+    expect(records).toEqual([valid]);
+  });
+
   it("live read path never throws on a shard with a tampered record", () => {
     tp = makeTempProject();
     const r0 = appendLedgerRecord(tp.paths, TEST_SCOPE, makeRec({ seq: 0 }));

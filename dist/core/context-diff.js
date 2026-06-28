@@ -14,7 +14,7 @@
  *   DIFF_RATIO_THRESHOLD / DIFF_MAX_HUNKS               (Balanced preset tunables)
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DIFF_CONTEXT_LINES = exports.DIFF_MAX_HUNKS = exports.DIFF_RATIO_THRESHOLD = void 0;
+exports.MAX_DIFF_LINES = exports.DIFF_CONTEXT_LINES = exports.DIFF_MAX_HUNKS = exports.DIFF_RATIO_THRESHOLD = void 0;
 exports.isDenylisted = isDenylisted;
 exports.assertBaseObjectPresent = assertBaseObjectPresent;
 exports.reconstruct = reconstruct;
@@ -31,6 +31,19 @@ exports.DIFF_RATIO_THRESHOLD = 0.6;
 exports.DIFF_MAX_HUNKS = 12;
 /** Context lines around each change group in a hunk. */
 exports.DIFF_CONTEXT_LINES = 3;
+/**
+ * Hard cap on (baseLines + currentLines) before we even attempt a Myers diff.
+ *
+ * myersDiff is O(N·D) in time AND memory: it snapshots the full `v` array
+ * (length 2·(N+M)+1) on every iteration of d. For a large, dissimilar pair
+ * (D ≈ N+M) this blows up to ~O((N+M)²) — a 4000×4000-line pair allocates on
+ * the order of a gigabyte before any ratio/hunk-count fallback can fire. Since
+ * such inputs would fall back to FULL anyway, we guard up front and return the
+ * FULL shape immediately. 5000 combined lines keeps worst-case Myers work
+ * bounded (~5000² ≈ 25M ints) while comfortably clearing realistic source
+ * files (delta is only worthwhile for small, similar edits regardless).
+ */
+exports.MAX_DIFF_LINES = 5000;
 // ---------------------------------------------------------------------------
 // Denylist — locators matching these always fall back to FULL
 // ---------------------------------------------------------------------------
@@ -423,6 +436,14 @@ function computeDelta(baseContent, currentContent, opts = {}) {
         // Split into lines for diff
         const baseLines = baseContent.split(/\r?\n/);
         const currentLines = currentContent.split(/\r?\n/);
+        // Cheap size pre-check BEFORE myersDiff: that diff is O(N·D) in both time
+        // and memory (it snapshots the full search vector every iteration), so a
+        // large dissimilar pair can consume ~1 GB before the ratio/hunk fallbacks
+        // below would ever fire. Such inputs fall back to FULL regardless, so bail
+        // out up front instead of paying the Myers cost. See MAX_DIFF_LINES.
+        if (baseLines.length + currentLines.length > exports.MAX_DIFF_LINES) {
+            return { fallback: "FULL", reason: "too-large" };
+        }
         const ops = myersDiff(baseLines, currentLines);
         const hunks = opsToHunks(ops, exports.DIFF_CONTEXT_LINES);
         // Fallback: too many hunks

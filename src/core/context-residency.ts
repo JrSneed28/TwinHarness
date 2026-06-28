@@ -63,6 +63,21 @@ function epochFilePath(paths: ProjectPaths): string {
 }
 
 /**
+ * Atomically write an epoch record to `epochFile`.  Writes to a sibling temp
+ * file in the SAME directory, then `renameSync`s it into place — an atomic
+ * operation on POSIX and Windows for same-directory renames.  This prevents a
+ * crash or torn write from leaving a partial/zero-length `epoch.json` that
+ * `currentEpoch` would treat as malformed and silently reset to epoch 0.
+ *
+ * Callers must already hold the epoch lock and have created the parent dir.
+ */
+function writeEpochAtomic(epochFile: string, rec: EpochRecord): void {
+  const tmp = epochFile + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(rec), "utf8");
+  fs.renameSync(tmp, epochFile);
+}
+
+/**
  * Read the current epoch record.  Missing or malformed file → safe default
  * `{ session_id: "", epoch: 0, reason: "init", ts: "" }`.  Never throws.
  */
@@ -154,7 +169,7 @@ export function bumpEpoch(paths: ProjectPaths, reason: string): number {
       ts: new Date().toISOString(),
     };
     fs.mkdirSync(path.dirname(epochFile), { recursive: true });
-    fs.writeFileSync(epochFile, JSON.stringify(next), "utf8");
+    writeEpochAtomic(epochFile, next);
     return next.epoch;
   } catch {
     return currentEpoch(paths).epoch;
@@ -244,7 +259,7 @@ export function maybeCheckEpoch(
                 ts: new Date().toISOString(),
               };
               fs.mkdirSync(path.dirname(epochFile), { recursive: true });
-              fs.writeFileSync(epochFile, JSON.stringify(next), "utf8");
+              writeEpochAtomic(epochFile, next);
               return next.epoch;
             }
             return fresh.epoch;
@@ -264,7 +279,7 @@ export function maybeCheckEpoch(
             const pagesRoot = contextPagesRoot(paths);
             fs.mkdirSync(pagesRoot, { recursive: true });
             const updated: EpochRecord = { ...rec, session_id: opts.session_id };
-            fs.writeFileSync(epochFilePath(paths), JSON.stringify(updated), "utf8");
+            writeEpochAtomic(epochFilePath(paths), updated);
           } catch {
             // fail-safe
           }

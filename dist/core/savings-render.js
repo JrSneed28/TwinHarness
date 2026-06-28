@@ -90,10 +90,12 @@ function renderStatusLine(result, width, color) {
 // ---------------------------------------------------------------------------
 /**
  * Render the multi-line `--detail` breakdown: headline, per-category lines (the
- * `rehydration` line shown as a subtracted negative), the cache-read line, and
- * the passed `costLabel` (defaults to `[unavailable]`). Plain text only.
+ * `rehydration` line shown as a subtracted negative) and the cache-read line.
+ * Plain text only. The `cost:` line is appended by the command handler (the
+ * single source of truth, since it can include the USD amount); `costLabel` is
+ * retained for signature compatibility but no longer rendered here.
  */
-function renderDetail(result, costLabel) {
+function renderDetail(result, _costLabel) {
     const lines = [];
     lines.push(`TwinHarness savings — ${result.headline_label}`);
     lines.push(`  saved:      ${fmtPct(result.saved_pct)}%  [${result.payback_measured ? "measured" : "upper bound"}]`);
@@ -110,6 +112,5 @@ function renderDetail(result, costLabel) {
         lines.push(`    ${"uncategorized".padEnd(18)} ${result.uncategorized_tokens} tok  [incomplete]`);
     }
     lines.push(`  cache-read: ${result.cache_read_tokens} tok  [excluded · separate]`);
-    lines.push(`  cost:       ${costLabel ?? "[unavailable]"}`);
     return lines.join("\n");
 }

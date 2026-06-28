@@ -2985,7 +2985,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve23.call(this, root, ref);
+      let _sch = resolve24.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3012,7 +3012,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve23(root, ref) {
+    function resolve24(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3643,55 +3643,55 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve23(baseURI, relativeURI, options) {
+    function resolve24(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative25, options, skipNormalization) {
+    function resolveComponent(base, relative26, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative25 = parse3(serialize(relative25, options), options);
+        relative26 = parse3(serialize(relative26, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative25.scheme) {
-        target.scheme = relative25.scheme;
-        target.userinfo = relative25.userinfo;
-        target.host = relative25.host;
-        target.port = relative25.port;
-        target.path = removeDotSegments(relative25.path || "");
-        target.query = relative25.query;
+      if (!options.tolerant && relative26.scheme) {
+        target.scheme = relative26.scheme;
+        target.userinfo = relative26.userinfo;
+        target.host = relative26.host;
+        target.port = relative26.port;
+        target.path = removeDotSegments(relative26.path || "");
+        target.query = relative26.query;
       } else {
-        if (relative25.userinfo !== void 0 || relative25.host !== void 0 || relative25.port !== void 0) {
-          target.userinfo = relative25.userinfo;
-          target.host = relative25.host;
-          target.port = relative25.port;
-          target.path = removeDotSegments(relative25.path || "");
-          target.query = relative25.query;
+        if (relative26.userinfo !== void 0 || relative26.host !== void 0 || relative26.port !== void 0) {
+          target.userinfo = relative26.userinfo;
+          target.host = relative26.host;
+          target.port = relative26.port;
+          target.path = removeDotSegments(relative26.path || "");
+          target.query = relative26.query;
         } else {
-          if (!relative25.path) {
+          if (!relative26.path) {
             target.path = base.path;
-            if (relative25.query !== void 0) {
-              target.query = relative25.query;
+            if (relative26.query !== void 0) {
+              target.query = relative26.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative25.path[0] === "/") {
-              target.path = removeDotSegments(relative25.path);
+            if (relative26.path[0] === "/") {
+              target.path = removeDotSegments(relative26.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative25.path;
+                target.path = "/" + relative26.path;
               } else if (!base.path) {
-                target.path = relative25.path;
+                target.path = relative26.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative25.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative26.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative25.query;
+            target.query = relative26.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3699,7 +3699,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative25.fragment;
+      target.fragment = relative26.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -3901,7 +3901,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve23,
+      resolve: resolve24,
       resolveComponent,
       equal,
       serialize,
@@ -14230,7 +14230,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve23) => setTimeout(resolve23, pollInterval));
+        await new Promise((resolve24) => setTimeout(resolve24, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -14247,7 +14247,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve23, reject) => {
+    return new Promise((resolve24, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -14325,7 +14325,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve23(parseResult.data);
+            resolve24(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -14586,12 +14586,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve23, reject) => {
+    return new Promise((resolve24, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve23, interval);
+      const timeoutId = setTimeout(resolve24, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -15461,12 +15461,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve23) => {
+    return new Promise((resolve24) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve23();
+        resolve24();
       } else {
-        this._stdout.once("drain", resolve23);
+        this._stdout.once("drain", resolve24);
       }
     });
   }
@@ -21026,9 +21026,9 @@ var path18 = __toESM(require("node:path"));
 function containLcovPath(absRoot, lcovDirRel, sfPath) {
   if (sfPath.length === 0) return null;
   const norm = sfPath.replace(/\\/g, "/");
-  const isAbsolute8 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
+  const isAbsolute9 = norm.startsWith("/") || /^[A-Za-z]:\//.test(norm);
   let abs;
-  if (isAbsolute8) {
+  if (isAbsolute9) {
     abs = path18.resolve(norm);
   } else {
     abs = path18.resolve(absRoot, lcovDirRel, norm);
@@ -27881,11 +27881,34 @@ var ADVISORY_DEFAULT = {
   critic_evidence: [],
   max_budget: 0
 };
+var SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
+function isSafeSegment(seg) {
+  if (seg === "" || seg === "." || seg === "..") return false;
+  return SAFE_SEGMENT.test(seg);
+}
+function manifestsDir(paths) {
+  return path34.join(paths.stateDir, "context-manifests");
+}
+function resolveUnderManifestsDir(rootDir, candidate) {
+  const resolvedRoot = path34.resolve(rootDir);
+  const resolvedCandidate = path34.resolve(candidate);
+  const rel = path34.relative(resolvedRoot, resolvedCandidate);
+  if (rel !== "" && !rel.startsWith("..") && !path34.isAbsolute(rel)) {
+    return resolvedCandidate;
+  }
+  return null;
+}
 function manifestFilePath(paths, tier, stage) {
-  return path34.join(paths.stateDir, "context-manifests", tier, `${stage}.json`);
+  return path34.join(manifestsDir(paths), tier, `${stage}.json`);
 }
 function loadManifest(paths, tier, stage) {
+  if (!isSafeSegment(tier) || !isSafeSegment(stage)) {
+    return { manifest: { ...ADVISORY_DEFAULT, sections: { artifact: [] } }, found: false, valid: false };
+  }
   const filePath = manifestFilePath(paths, tier, stage);
+  if (resolveUnderManifestsDir(manifestsDir(paths), filePath) === null) {
+    return { manifest: { ...ADVISORY_DEFAULT, sections: { artifact: [] } }, found: false, valid: false };
+  }
   let raw;
   try {
     raw = fs34.readFileSync(filePath, "utf8");
@@ -28213,6 +28236,7 @@ function canonicalText3(rec) {
 function computeLedgerRecordHash2(rec) {
   return hashContent(canonicalText3(rec));
 }
+var TAIL_READ_BYTES = 256 * 1024;
 function verifyLedgerChain2(records) {
   let expectedPrev = GENESIS_PREV_HASH;
   for (let i = 0; i < records.length; i++) {
@@ -28794,7 +28818,7 @@ function parseTranscriptModelId(transcriptPath) {
 function fmtPct(pct) {
   return Number.isInteger(pct) ? `${pct}` : `${pct}`;
 }
-function renderDetail(result, costLabel) {
+function renderDetail(result, _costLabel) {
   const lines = [];
   lines.push(`TwinHarness savings \u2014 ${result.headline_label}`);
   lines.push(`  saved:      ${fmtPct(result.saved_pct)}%  [${result.payback_measured ? "measured" : "upper bound"}]`);
@@ -28813,7 +28837,6 @@ function renderDetail(result, costLabel) {
     lines.push(`    ${"uncategorized".padEnd(18)} ${result.uncategorized_tokens} tok  [incomplete]`);
   }
   lines.push(`  cache-read: ${result.cache_read_tokens} tok  [excluded \xB7 separate]`);
-  lines.push(`  cost:       ${costLabel ?? "[unavailable]"}`);
   return lines.join("\n");
 }
 
@@ -30386,7 +30409,7 @@ function normalizeTemplateName(name) {
   if (trimmed === "." || trimmed === "..") return null;
   return trimmed.toLowerCase().endsWith(TEMPLATE_EXT) ? trimmed : trimmed + TEMPLATE_EXT;
 }
-function resolve19(name, projectRoot, plugin) {
+function resolve20(name, projectRoot, plugin) {
   const projectPath = path49.join(projectRoot, PROJECT_TEMPLATE_REL, name);
   const pluginPath = path49.join(plugin, PLUGIN_TEMPLATE_REL, name);
   for (const [abs, source] of [
@@ -30414,7 +30437,7 @@ function runTemplateGet(paths, name) {
       data: { error: "invalid_name", name }
     });
   }
-  const r = resolve19(normalized, paths.root, pluginRoot());
+  const r = resolve20(normalized, paths.root, pluginRoot());
   if ("error" in r) {
     structuredLog({ cmd: "template get", name: normalized, error: "template_not_found" });
     return failure({

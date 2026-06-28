@@ -140,11 +140,53 @@ exports.INSPECTOR_MANIFEST_PACK = {
 // Path helpers
 // ---------------------------------------------------------------------------
 /**
+ * Safe path-segment charset for `tier` / `stage`. A segment is rejected unless it
+ * matches this AND is not `.` / `..`. This excludes `/`, `\`, NUL, and any other
+ * separator, so an interpolated segment can never climb out of the manifests dir.
+ * Mirrors the defensive posture of context-ledger.ts (untrusted ids are never
+ * interpolated raw into a filesystem path).
+ */
+const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
+/**
+ * True when `seg` is safe to use as a single path segment: non-empty, drawn only
+ * from {@link SAFE_SEGMENT}, and not the current/parent directory aliases.
+ */
+function isSafeSegment(seg) {
+    if (seg === "" || seg === "." || seg === "..")
+        return false;
+    return SAFE_SEGMENT.test(seg);
+}
+/** `<stateDir>/context-manifests/` — the directory all manifest files live under. */
+function manifestsDir(paths) {
+    return path.join(paths.stateDir, "context-manifests");
+}
+/**
+ * Verify that `candidate` resolves to a path under `<stateDir>/context-manifests/`.
+ * Returns the resolved absolute path when contained, or `null` when it escapes.
+ * Mirrors assertUnderContextPages in context-ledger.ts, but returns null instead
+ * of throwing — the manifest loader is advisory and must never throw.
+ */
+function resolveUnderManifestsDir(rootDir, candidate) {
+    const resolvedRoot = path.resolve(rootDir);
+    const resolvedCandidate = path.resolve(candidate);
+    const rel = path.relative(resolvedRoot, resolvedCandidate);
+    if (rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel)) {
+        return resolvedCandidate;
+    }
+    return null;
+}
+/**
  * Absolute path of a manifest file:
  * `<stateDir>/context-manifests/<tier>/<stage>.json`.
+ *
+ * `tier` and `stage` are caller-controlled. They are interpolated into the path
+ * verbatim, so callers that read the resulting path MUST first validate them with
+ * {@link isSafeSegment} / contain the result under {@link manifestsDir} — see
+ * {@link loadManifest}. This function is kept pure (no validation, no throw) so
+ * the existing path-shape tests and write helpers continue to work.
  */
 function manifestFilePath(paths, tier, stage) {
-    return path.join(paths.stateDir, "context-manifests", tier, `${stage}.json`);
+    return path.join(manifestsDir(paths), tier, `${stage}.json`);
 }
 /**
  * Load the stage manifest for `<tier>/<stage>` from disk.
@@ -159,7 +201,18 @@ function manifestFilePath(paths, tier, stage) {
  * default is all-empty / zero, ensuring no behaviour change on the absent path.
  */
 function loadManifest(paths, tier, stage) {
+    // Defence-in-depth (mirrors context-ledger.ts): never read a path built from an
+    // unsafe caller-controlled segment. An unsafe tier/stage behaves exactly like an
+    // absent file — advisory passthrough, never an arbitrary read, never a throw.
+    if (!isSafeSegment(tier) || !isSafeSegment(stage)) {
+        return { manifest: { ...ADVISORY_DEFAULT, sections: { artifact: [] } }, found: false, valid: false };
+    }
     const filePath = manifestFilePath(paths, tier, stage);
+    // Containment check: even with a safe charset, confirm the resolved path stays
+    // under <stateDir>/context-manifests/ before touching the filesystem.
+    if (resolveUnderManifestsDir(manifestsDir(paths), filePath) === null) {
+        return { manifest: { ...ADVISORY_DEFAULT, sections: { artifact: [] } }, found: false, valid: false };
+    }
     let raw;
     try {
         raw = fs.readFileSync(filePath, "utf8");

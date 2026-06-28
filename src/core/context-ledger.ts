@@ -15,7 +15,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProjectPaths } from "./paths";
 import { hashContent, GENESIS_PREV_HASH, HEX64 } from "./hash";
-import { readJsonlValues, scanTailValid } from "./jsonl";
+import { readJsonlValues, scanTailValid, safeParseJson } from "./jsonl";
 import { sleepSync } from "./sleep";
 
 const SHARD_COMPONENT_FALLBACK = "unknown";
@@ -162,19 +162,22 @@ const OP_VALUES = new Set<LedgerOp>([
 function isValidLedgerRecord(parsed: unknown): parsed is LedgerRecord {
   if (typeof parsed !== "object" || parsed === null) return false;
   const r = parsed as Record<string, unknown>;
-  if (typeof r.seq !== "number") return false;
+  // seq/epoch are turn-monotone ordinals consumed by deriveResidency's TTL
+  // comparison; a NaN/Infinity/negative/float value must be rejected here so it
+  // can never bypass the `nowTurn - seq <= TTL` check downstream.
+  if (!Number.isInteger(r.seq) || (r.seq as number) < 0) return false;
   if (typeof r.ts !== "string" || r.ts === "") return false;
   if (typeof r.session_id !== "string" || r.session_id === "") return false;
   if (typeof r.agent_id !== "string") return false;
   if (typeof r.agent_type !== "string") return false;
-  if (typeof r.epoch !== "number") return false;
+  if (!Number.isInteger(r.epoch) || (r.epoch as number) < 0) return false;
   if (typeof r.op !== "string" || !OP_VALUES.has(r.op as LedgerOp)) return false;
   if (typeof r.page_id !== "string" || r.page_id === "") return false;
   if (typeof r.logical_key !== "string") return false;
   if (typeof r.content_hash !== "string") return false;
   if (r.base_hash !== undefined && typeof r.base_hash !== "string") return false;
   if (typeof r.complete !== "boolean") return false;
-  if (typeof r.est_tokens !== "number") return false;
+  if (!Number.isFinite(r.est_tokens) || (r.est_tokens as number) < 0) return false;
   if (typeof r.reduction_kind !== "string") return false;
   if (typeof r.prevHash !== "string" || !HEX64.test(r.prevHash)) return false;
   if (typeof r.recordHash !== "string" || !HEX64.test(r.recordHash)) return false;
@@ -186,12 +189,87 @@ function isValidLedgerRecord(parsed: unknown): parsed is LedgerRecord {
 // ---------------------------------------------------------------------------
 
 /**
+ * Bytes read from the end of a shard by readShardRecordsTail. 256 KB holds many
+ * hundreds of typical ledger lines — comfortably more than any residency window
+ * needs — while keeping per-call cost constant regardless of total shard size.
+ */
+const TAIL_READ_BYTES = 256 * 1024;
+
+/**
  * Read all valid records from a shard in file order. Missing file → [].
  * Unparseable / schema-invalid lines are silently skipped — tolerant, never throws.
  * Chain integrity is NOT checked here; use verifyLedgerChain for that (audit-only).
  */
 export function readShardRecords(paths: ProjectPaths, scope: LedgerScope): LedgerRecord[] {
   return readJsonlValues(ledgerShardPath(paths, scope), isValidLedgerRecord);
+}
+
+/**
+ * Bounded tail read: the last `maxRecords` valid records of a shard, in file
+ * order. Missing file → []. Unparseable / schema-invalid lines are skipped and
+ * a torn (partial) first line of the read window is dropped, exactly like
+ * readShardRecords — tolerant, never throws.
+ *
+ * Why bounded: the live residency path (PostToolUse) previously read+parsed the
+ * ENTIRE shard on every tool call — O(N) per call, O(N²) per session, unbounded
+ * as the shard grows. This reader bounds the BYTES read: it reads only the last
+ * window of the file (TAIL_READ_BYTES) via a file descriptor, so cost is constant
+ * regardless of shard size. Because deriveResidency only matches pages within the
+ * RESIDENCY_TTL_TURNS window, a caller passing maxRecords comfortably larger than
+ * that window observes identical residency outcomes to a full read for any
+ * realistic shard.
+ */
+export function readShardRecordsTail(
+  paths: ProjectPaths,
+  scope: LedgerScope,
+  maxRecords: number,
+): LedgerRecord[] {
+  if (maxRecords <= 0) return [];
+  const file = ledgerShardPath(paths, scope);
+
+  let buf: Buffer;
+  let readWholeFile: boolean;
+  try {
+    const size = fs.statSync(file).size;
+    const start = Math.max(0, size - TAIL_READ_BYTES);
+    readWholeFile = start === 0;
+    const length = size - start;
+    if (length <= 0) return [];
+    buf = Buffer.allocUnsafe(length);
+    const fd = fs.openSync(file, "r");
+    try {
+      let off = 0;
+      while (off < length) {
+        const n = fs.readSync(fd, buf, off, length - off, start + off);
+        if (n <= 0) break;
+        off += n;
+      }
+      buf = buf.subarray(0, off);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return []; // missing file → []
+    // Any other I/O failure → fall back to the tolerant full reader, then bound.
+    const all = readJsonlValues(file, isValidLedgerRecord);
+    return all.length > maxRecords ? all.slice(all.length - maxRecords) : all;
+  }
+
+  const lines = buf.toString("utf8").split(/\r?\n/);
+  // If we did NOT read from byte 0, the first line is almost certainly a partial
+  // (torn) line straddling the read window boundary — drop it. readJsonlValues
+  // would skip it as unparseable anyway; dropping explicitly avoids accidentally
+  // accepting a fragment that happens to parse.
+  const startIdx = readWholeFile ? 0 : 1;
+  const out: LedgerRecord[] = [];
+  for (let i = startIdx; i < lines.length; i++) {
+    const trimmed = lines[i]!.trim();
+    if (!trimmed) continue;
+    const parsed = safeParseJson(trimmed);
+    if (parsed !== undefined && isValidLedgerRecord(parsed)) out.push(parsed);
+  }
+  return out.length > maxRecords ? out.slice(out.length - maxRecords) : out;
 }
 
 function readLastShardRecord(paths: ProjectPaths, scope: LedgerScope): LedgerRecord | undefined {
@@ -212,15 +290,21 @@ export function readLastShardRecordHash(paths: ProjectPaths, scope: LedgerScope)
 // Per-shard lock (dedicated mkdir lock — NOT .state.lock / withStateLock)
 // ---------------------------------------------------------------------------
 
-/** Milliseconds before the shard lock dir is considered stale and may be stolen. */
-const SHARD_LOCK_STALE_MS = 3_000;
-
 /**
  * Milliseconds we wait to acquire the shard lock before falling back to an
  * unlocked appendFileSync. A shorter ceiling than the state lock (25s) because
  * a ledger append is a fast, lock-scope-narrow operation.
  */
 const SHARD_LOCK_TIMEOUT_MS = 5_000;
+
+/**
+ * Milliseconds before the shard lock dir is considered stale and may be stolen.
+ * Deliberately MUCH greater than SHARD_LOCK_TIMEOUT_MS: a holder that is still
+ * within its acquire-and-write window must NEVER have its lock reclaimed, or two
+ * writers would interleave appends and fork the chain. Only a genuinely crashed
+ * holder (no progress for ≥30s, far beyond any single fast append) is reclaimed.
+ */
+const SHARD_LOCK_STALE_MS = 30_000;
 
 /**
  * Classify a mkdirSync failure as "lock already held" vs. a real error.
@@ -279,10 +363,12 @@ function acquireShardLock(lockDir: string): boolean {
  * under context-pages/ so shard appends are serialized without touching the
  * main .state.lock span.
  *
- * On lock-timeout: falls back to a single-syscall appendFileSync with
- * GENESIS_PREV_HASH as prevHash. The resulting forked chain link is tolerated
- * (matches external-receipts precedent in receipts.ts §682–684). The record is
- * written, never silently dropped.
+ * On lock-timeout: falls back to a single-syscall appendFileSync, but FIRST does
+ * a best-effort tail re-read (readLastShardRecord) to derive prevHash/seq from
+ * the current tail, minimizing forks and seq collisions even on the unlocked
+ * path. Only if that read throws do we fall back to GENESIS_PREV_HASH / seq=0.
+ * The record is always written, never silently dropped (forked chain links are
+ * tolerated — matches external-receipts precedent in receipts.ts §682–684).
  *
  * The caller provides all fields except prevHash and recordHash.
  */
@@ -300,13 +386,22 @@ export function appendLedgerRecord(
 
   const acquiredLock = acquireShardLock(lockDir);
   try {
-    // Inside the lock: read the accurate tail. On timeout: use GENESIS_PREV_HASH
-    // (forked prevHash is acceptable — chain is advisory, not a gate).
-    const last = acquiredLock ? readLastShardRecord(paths, scope) : undefined;
-    const prevHash = acquiredLock
-      ? (last ? last.recordHash : GENESIS_PREV_HASH)
-      : GENESIS_PREV_HASH;
-    const seq = acquiredLock ? (last ? last.seq + 1 : 0) : rec.seq;
+    // Read the accurate tail to seed prevHash/seq. Under the lock this is
+    // authoritative; on lock-timeout it is best-effort (a concurrent writer may
+    // append between our read and write) but still far better than forcing
+    // GENESIS/seq=0, which guarantees a fork + seq collision on every fallback.
+    let last: LedgerRecord | undefined;
+    if (acquiredLock) {
+      last = readLastShardRecord(paths, scope);
+    } else {
+      try {
+        last = readLastShardRecord(paths, scope);
+      } catch {
+        last = undefined; // read failed → safe GENESIS / seq=0 fallback below
+      }
+    }
+    const prevHash = last ? last.recordHash : GENESIS_PREV_HASH;
+    const seq = last ? last.seq + 1 : 0;
 
     const withPrev: Omit<LedgerRecord, "recordHash"> = { ...rec, seq, prevHash };
     const recordHash = computeLedgerRecordHash(withPrev);

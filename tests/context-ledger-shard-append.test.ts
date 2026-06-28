@@ -19,10 +19,12 @@ import { makeTempProject, type TempProject } from "./helpers";
 import {
   appendLedgerRecord,
   readShardRecords,
+  readShardRecordsTail,
   readLastShardRecordHash,
   contextPagesDir,
   ledgerShardPath,
   computeLedgerRecordHash,
+  verifyLedgerChain,
   type LedgerRecord,
   type LedgerScope,
 } from "../src/core/context-ledger";
@@ -198,6 +200,82 @@ describe("context-ledger — shard append", () => {
     expect(readShardRecords(tp.paths, TEST_SCOPE)).toHaveLength(1);
     expect(readShardRecords(tp.paths, scope2)).toHaveLength(1);
   });
+
+  // F1 — bounded tail reader
+  it("readShardRecordsTail returns [] for a missing shard", () => {
+    tp = makeTempProject();
+    expect(readShardRecordsTail(tp.paths, TEST_SCOPE, 10)).toEqual([]);
+  });
+
+  it("readShardRecordsTail returns the correct last-N records in file order", () => {
+    tp = makeTempProject();
+    for (let i = 0; i < 10; i++) {
+      appendLedgerRecord(tp.paths, TEST_SCOPE, makeRec({ seq: i, page_id: `aabbcc0011${i}0` }));
+    }
+    const tail = readShardRecordsTail(tp.paths, TEST_SCOPE, 3);
+    expect(tail).toHaveLength(3);
+    expect(tail.map((r) => r.seq)).toEqual([7, 8, 9]);
+    // Tail must equal the last 3 of the full read
+    const all = readShardRecords(tp.paths, TEST_SCOPE);
+    expect(tail).toEqual(all.slice(all.length - 3));
+  });
+
+  it("readShardRecordsTail returns all records when maxRecords exceeds shard depth", () => {
+    tp = makeTempProject();
+    const r0 = appendLedgerRecord(tp.paths, TEST_SCOPE, makeRec({ seq: 0 }));
+    const r1 = appendLedgerRecord(tp.paths, TEST_SCOPE, makeRec({ seq: 1 }));
+    const tail = readShardRecordsTail(tp.paths, TEST_SCOPE, 100);
+    expect(tail).toEqual([r0, r1]);
+  });
+
+  it("readShardRecordsTail tolerates a torn first line and skips invalid lines", () => {
+    tp = makeTempProject();
+    const shardFile = ledgerShardPath(tp.paths, TEST_SCOPE);
+    fs.mkdirSync(contextPagesDir(tp.paths), { recursive: true });
+    // Leading torn/partial line (as if the read window began mid-line), then an
+    // unparseable line, then two valid records.
+    fs.appendFileSync(shardFile, '{"partial": "torn line with no newline pre', "utf8");
+    fs.appendFileSync(shardFile, "\nNOT VALID JSON {{{{\n", "utf8");
+    const r1 = appendLedgerRecord(tp.paths, TEST_SCOPE, makeRec({ seq: 1 }));
+    const r2 = appendLedgerRecord(tp.paths, TEST_SCOPE, makeRec({ seq: 2 }));
+
+    let records!: LedgerRecord[];
+    expect(() => {
+      records = readShardRecordsTail(tp.paths, TEST_SCOPE, 10);
+    }).not.toThrow();
+    // Torn + invalid lines dropped; the two valid records remain.
+    expect(records).toEqual([r1, r2]);
+  });
+
+  // F9 — lock-timeout fallback no longer forks when the tail is readable
+  it("lock-timeout fallback derives prevHash/seq from the tail instead of forking", () => {
+    tp = makeTempProject();
+    // Seed two genuinely-chained records via the normal (locked) path.
+    const r0 = appendLedgerRecord(tp.paths, TEST_SCOPE, makeRec({ seq: 0 }));
+    const r1 = appendLedgerRecord(tp.paths, TEST_SCOPE, makeRec({ seq: 1 }));
+
+    // Hold a FRESH (non-stale) lock so the next append cannot acquire it and is
+    // forced down the unlocked fallback path after SHARD_LOCK_TIMEOUT_MS.
+    const shardFile = ledgerShardPath(tp.paths, TEST_SCOPE);
+    const lockDir = shardFile + ".lock";
+    fs.mkdirSync(lockDir, { recursive: true });
+    try {
+      const fallback = appendLedgerRecord(tp.paths, TEST_SCOPE, makeRec({ seq: 999 }));
+      // With the fix: fallback reads the tail → chains onto r1 (no fork).
+      expect(fallback.prevHash).toBe(r1.recordHash);
+      expect(fallback.prevHash).not.toBe(GENESIS_PREV_HASH);
+      expect(fallback.seq).toBe(r1.seq + 1); // 2, not the caller-passed 999 or 0
+    } finally {
+      fs.rmSync(lockDir, { recursive: true, force: true });
+    }
+
+    // The full chain (r0 → r1 → fallback) verifies cleanly — no fork introduced.
+    const records = readShardRecords(tp.paths, TEST_SCOPE);
+    expect(records).toHaveLength(3);
+    expect(records[0]).toEqual(r0);
+    expect(records[1]).toEqual(r1);
+    expect(verifyLedgerChain(records)).toEqual({ ok: true });
+  }, 15_000);
 
   it("encodes untrusted scope ids so shard paths stay inside context-pages", () => {
     tp = makeTempProject();

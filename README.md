@@ -209,6 +209,8 @@ A **token-savings display** (`th savings [--detail]`, and `th statusline` as a C
 }
 ```
 
+**Local data & privacy.** ContextPages' on-by-default PostToolUse hook runs in OBSERVE mode: it never alters tool output but does persist tool outputs (file reads, bash/web/MCP results) as **local plaintext** under `.twinharness/context-pages/` (gitignored; never sent off-machine). Sensitive content is excluded by a best-effort secret classifier (path denylist + regex, fail-toward-sensitive) — only its hash is recorded. Set `TH_DISABLE_CONTEXT_PAGES=1` to record nothing, and clear the store with `th context-pages gc [--age-days <n>]` or `th context-pages purge`. Details in [docs/guide/advanced.md](./docs/guide/advanced.md#context-pages-what-lands-on-disk).
+
 ---
 
 ## Status

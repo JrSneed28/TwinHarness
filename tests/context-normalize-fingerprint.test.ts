@@ -100,6 +100,26 @@ describe("normalize: timestamps", () => {
     expect(s).not.toContain("1700000000 ");
   });
 
+  it("F6: leaves a non-epoch 10-digit integer (account id) untouched", () => {
+    // Leading digit 9 is outside the plausible Unix-second range (~2001-2033),
+    // so an account/order id like 9876543210 must NOT collapse to <epoch-s>.
+    const s = normalize("account=9876543210 done");
+    expect(s).toContain("9876543210");
+    expect(s).not.toContain("<epoch-s>");
+  });
+
+  it("F6: two distinct 10-digit account ids hash differently", () => {
+    const a = normalize("account=9876543210");
+    const b = normalize("account=9000000001");
+    expect(a).not.toBe(b);
+  });
+
+  it("F6: still normalizes a genuine 2-prefixed epoch second", () => {
+    const s = normalize("created=2000000000 done");
+    expect(s).toContain("<epoch-s>");
+    expect(s).not.toContain("2000000000");
+  });
+
   it("two different timestamps normalize to same placeholder", () => {
     const a = normalize("at 2024-01-01T00:00:00Z");
     const b = normalize("at 2025-12-31T23:59:59Z");
@@ -130,6 +150,23 @@ describe("normalize: duration literals", () => {
 
   it("replaces combined 1h2m3s form", () => {
     expect(normalize("duration 1h2m3s")).toContain("<duration>");
+  });
+
+  it("F6: preserves plural-integer prose like '100s of items'", () => {
+    const s = normalize("processed 100s of items");
+    expect(s).toBe("processed 100s of items");
+    expect(s).not.toContain("<duration>");
+  });
+
+  it("F6: two distinct plural-integer phrases hash differently", () => {
+    const a = normalize("100s of items");
+    const b = normalize("200s of items");
+    expect(a).not.toBe(b);
+  });
+
+  it("F6: still normalizes genuine fractional-second durations", () => {
+    expect(normalize("took 1.5s")).toContain("<duration>");
+    expect(normalize("took 1.5s")).not.toContain("1.5s");
   });
 });
 
@@ -222,6 +259,38 @@ describe("normalize: port patterns", () => {
     const a = normalize("server :3000 ready");
     const b = normalize("server :4000 ready");
     expect(a).toBe(b);
+  });
+
+  it("F6: does NOT treat a stack-trace location 'file.ts:1234' as a port", () => {
+    const s = normalize("    at run (server.ts:1234)");
+    expect(s).toContain("server.ts:1234");
+    expect(s).not.toContain(":<port>");
+  });
+
+  it("F6: two distinct stack-trace locations hash differently", () => {
+    const a = normalize("    at run (server.ts:1234)");
+    const b = normalize("    at run (server.ts:5678)");
+    expect(a).not.toBe(b);
+    expect(hashNormalized(a)).not.toBe(hashNormalized(b));
+  });
+
+  it("F6: does NOT collapse the ':line:col' suffix of a source location", () => {
+    // `:4567` here is followed by `:5` (a column), i.e. a `:line:col` form.
+    const s = normalize("    at main (index.ts:4567:5)");
+    expect(s).toContain(":4567:5");
+    expect(s).not.toContain(":<port>");
+  });
+
+  it("F6: still normalizes a genuine host:port reference", () => {
+    const s = normalize("connecting to localhost:5432");
+    expect(s).toContain(":<port>");
+    expect(s).not.toContain(":5432");
+  });
+
+  it("F6: still normalizes an <ip>:port reference", () => {
+    // IPv4 is replaced with <ip> first, then the port suffix normalizes.
+    const s = normalize("listening 192.168.0.10:8080");
+    expect(s).toContain("<ip>:<port>");
   });
 });
 

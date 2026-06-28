@@ -1405,7 +1405,18 @@ function runHookPostToolContext(root, input, env = process.env) {
         let isResident = false;
         if (scopeRes.kind !== "indeterminate" && !sensitive) {
             try {
-                const shardRecs = (0, context_ledger_1.readShardRecords)(paths, scopeRes.scope);
+                // F1: bounded tail read instead of a full O(N) shard read on every
+                // PostToolUse. deriveResidency only matches records within the
+                // RESIDENCY_TTL_TURNS window, so reading the recent tail cannot change
+                // residency outcomes for any realistic shard. The limit is set well
+                // above the TTL window (×8, floored at 256) to absorb interleaved
+                // non-eligible ops and concurrent-agent records within the window.
+                const RESIDENCY_TAIL_LIMIT = Math.max(context_residency_1.RESIDENCY_TTL_TURNS * 8, 256);
+                const shardRecs = (0, context_ledger_1.readShardRecordsTail)(paths, scopeRes.scope, RESIDENCY_TAIL_LIMIT);
+                // nowTurn = depth of what we read (matches prior behavior on short
+                // shards). deriveResidency compares nowTurn - record.seq against the TTL;
+                // because records appended within the TTL window are all present in the
+                // tail, the age comparison is preserved for any in-window page.
                 const nowTurn = shardRecs.length; // shard depth as turn proxy (S1 counter)
                 const residency = (0, context_residency_1.deriveResidency)(shardRecs, scopeRes.scope, ledger_logical_key, content_hash, epochRec.epoch, nowTurn);
                 isResident = residency.resident;

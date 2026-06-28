@@ -375,3 +375,62 @@ describe("REQ-MANIFEST-006: manifestFilePath returns the correct path structure"
     expect(b).not.toBe(c);
   });
 });
+
+// ---------------------------------------------------------------------------
+// REQ-MANIFEST-007: path-traversal in tier/stage is neutralized (F7)
+// ---------------------------------------------------------------------------
+
+describe("REQ-MANIFEST-007: unsafe tier/stage cannot escape the manifests dir", () => {
+  it("a traversal stage returns the advisory default (found:false), never reads outside", () => {
+    tp = makeTempProject();
+    // Plant a target file OUTSIDE the manifests dir that a traversal would reach.
+    const secretDir = path.join(tp.paths.stateDir, "secret");
+    fs.mkdirSync(secretDir, { recursive: true });
+    // A valid manifest payload — if traversal worked, it would load as valid.
+    fs.writeFileSync(path.join(secretDir, "passwd.json"), JSON.stringify(VALID_MANIFEST), "utf8");
+
+    const result = loadManifest(tp.paths, "T1", "../../secret/passwd");
+    expect(result.found).toBe(false);
+    expect(result.valid).toBe(false);
+    // Advisory default — none of the planted file's contents leaked through.
+    expect(result.manifest.pinned).toEqual([]);
+    expect(result.manifest.max_budget).toBe(0);
+  });
+
+  it("a traversal tier returns the advisory default (found:false)", () => {
+    tp = makeTempProject();
+    const result = loadManifest(tp.paths, "..", "passwd");
+    expect(result.found).toBe(false);
+    expect(result.valid).toBe(false);
+    expect(result.manifest.pinned).toEqual([]);
+  });
+
+  it("tier/stage containing a path separator are rejected as unsafe", () => {
+    tp = makeTempProject();
+    const sep = loadManifest(tp.paths, "T1", "sub/dir");
+    expect(sep.found).toBe(false);
+    expect(sep.valid).toBe(false);
+
+    const back = loadManifest(tp.paths, "a\\b", "stage");
+    expect(back.found).toBe(false);
+    expect(back.valid).toBe(false);
+  });
+
+  it('"." and empty segments are rejected, and never throw', () => {
+    tp = makeTempProject();
+    expect(() => loadManifest(tp.paths, ".", "stage")).not.toThrow();
+    expect(loadManifest(tp.paths, ".", "stage").found).toBe(false);
+    expect(loadManifest(tp.paths, "T1", "").found).toBe(false);
+    expect(loadManifest(tp.paths, "", "stage").found).toBe(false);
+  });
+
+  it("a traversal that targets a real absolute file does not read it", () => {
+    tp = makeTempProject();
+    // Even with /etc/passwd present on the host, the unsafe segment is rejected
+    // before any readFileSync — the result is the advisory default.
+    const result = loadManifest(tp.paths, "..", "../../etc/passwd");
+    expect(result.found).toBe(false);
+    expect(result.valid).toBe(false);
+    expect(result.manifest.sections.artifact).toEqual([]);
+  });
+});

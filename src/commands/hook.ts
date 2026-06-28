@@ -27,12 +27,13 @@ import {
   type ReductionKind,
 } from "../core/context-page";
 import type { LedgerScope, LedgerRecord } from "../core/context-ledger";
-import { appendLedgerRecord, readShardRecords } from "../core/context-ledger";
+import { appendLedgerRecord, readShardRecordsTail } from "../core/context-ledger";
 import {
   deriveResidency,
   currentEpoch,
   bumpEpoch,
   maybeCheckEpoch,
+  RESIDENCY_TTL_TURNS,
 } from "../core/context-residency";
 import { capsuleFromState } from "../core/context-capsule";
 import {
@@ -1714,7 +1715,18 @@ export function runHookPostToolContext(
 
     if (scopeRes.kind !== "indeterminate" && !sensitive) {
       try {
-        const shardRecs = readShardRecords(paths, scopeRes.scope);
+        // F1: bounded tail read instead of a full O(N) shard read on every
+        // PostToolUse. deriveResidency only matches records within the
+        // RESIDENCY_TTL_TURNS window, so reading the recent tail cannot change
+        // residency outcomes for any realistic shard. The limit is set well
+        // above the TTL window (×8, floored at 256) to absorb interleaved
+        // non-eligible ops and concurrent-agent records within the window.
+        const RESIDENCY_TAIL_LIMIT = Math.max(RESIDENCY_TTL_TURNS * 8, 256);
+        const shardRecs = readShardRecordsTail(paths, scopeRes.scope, RESIDENCY_TAIL_LIMIT);
+        // nowTurn = depth of what we read (matches prior behavior on short
+        // shards). deriveResidency compares nowTurn - record.seq against the TTL;
+        // because records appended within the TTL window are all present in the
+        // tail, the age comparison is preserved for any in-window page.
         const nowTurn = shardRecs.length; // shard depth as turn proxy (S1 counter)
         const residency = deriveResidency(
           shardRecs,

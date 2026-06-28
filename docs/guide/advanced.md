@@ -122,6 +122,40 @@ goes over budget, the Orchestrator runs a Continue/Fresh handoff. See
 [Context budget](../../USAGE.md#context-budget-th-budget-check) and
 [Context preservation & delegation](../../USAGE.md#context-preservation--delegation).
 
+## Context-pages: what lands on disk
+
+ContextPages ships an **on-by-default PostToolUse hook** (registered in `hooks/hooks.json`,
+matching `Read|Grep|Glob|Bash|WebFetch|mcp__.*`). By default it runs in **OBSERVE** mode:
+it does **not** alter any tool output, but it **does** persist data locally under
+`.twinharness/context-pages/`. `.twinharness/` is gitignored, so nothing is committed, and
+nothing leaves the machine — but the cold store is **local plaintext**, so it is worth
+knowing what is written and how to clear it.
+
+What gets persisted by default:
+
+- **`objects/<hh>/<hash>`** — the raw text of *non-sensitive* tool outputs (file reads,
+  bash output, web/MCP results), stored **in plaintext** in a content-addressed cold store.
+- **`ledger-*.jsonl`, `telemetry.jsonl`, `epoch.json`** — counts, hashes, and labels only.
+  No raw content lives here; when a payload is sensitive, only its short hash is recorded.
+
+**Secret redaction (best-effort).** Sensitive content — detected by a path denylist plus a
+secret-regex classifier, biased **fail-toward-sensitive** — is **never** written to the cold
+store; only its hash is recorded in the ledger. Detection is **best-effort** and may miss
+unusual secret shapes, so treat the cold store as potentially holding any output you read or
+ran. **Retention is until you clean it up**: objects persist until `gc` or `purge` (below).
+
+Control knobs:
+
+- **`TH_DISABLE_CONTEXT_PAGES=1`** — full passthrough; the hook records **nothing** (no I/O).
+- **OBSERVE vs suppress.** The default is OBSERVE: data is recorded but tool output is never
+  altered. **`TH_EXACT_SUPPRESS=1`** opts in to actual content suppression (off by default).
+- **`th context-pages gc [--age-days <n>]`** — remove cold CAS objects older than *n* days
+  (default 5). It **never** removes ledger records. Human-only.
+- **`th context-pages purge`** — remove **all** context-pages data. Human-only, destructive.
+
+See [Token-savings display](../../README.md#the-th-cli) for how the OBSERVE-mode savings are
+reported, and [SECURITY.md](../../SECURITY.md) for the trust model.
+
 ## The MCP surface
 
 The entire `th` read/compute surface is exposed as a typed MCP server — an **81-tool**

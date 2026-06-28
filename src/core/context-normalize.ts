@@ -100,15 +100,27 @@ export function normalize(raw: string): string {
   // 3. Epoch numerics — only when surrounded by non-digits to avoid partial
   //    matches inside longer numbers (hash strings, etc.)
   s = s.replace(/(?<!\d)\d{13}(?!\d)/g, "<epoch-ms>");
-  s = s.replace(/(?<!\d)\d{10}(?!\d)/g, "<epoch-s>");
+  //    10-digit second epochs: restrict the leading digit to 1 or 2 so we only
+  //    match plausible Unix-second values (~2001-2033, i.e. 1000000000 ..
+  //    2999999999) instead of ANY isolated 10-digit integer (account/order IDs
+  //    such as 9876543210 are left untouched).
+  s = s.replace(/(?<!\d)[12]\d{9}(?!\d)/g, "<epoch-s>");
 
   // 4. Duration literals
   //    Combined forms first (longer patterns before shorter)
   s = s.replace(/\b\d+h\d+m\d+s\b/g, "<duration>"); // 1h2m3s
   s = s.replace(/\b\d+h\d+m\b/g, "<duration>");      // 1h2m
   s = s.replace(/\b\d+m\d+s\b/g, "<duration>");      // 2m3s
-  //    Simple unit suffixes
-  s = s.replace(/\b\d+(?:\.\d+)?(?:ms|ns|µs|us|s)\b/g, "<duration>");
+  //    Simple unit suffixes with explicit, unambiguous units (ms/ns/µs/us):
+  //    these never collide with prose, so accept both integer and fractional.
+  s = s.replace(/\b\d+(?:\.\d+)?(?:ms|ns|µs|us)\b/g, "<duration>");
+  //    Bare-second literals: the lone `s` is the same character used to
+  //    pluralize nouns ("100s of items"), so a plain integer + `s` is too
+  //    ambiguous to treat as a duration.  Require a fractional part so we
+  //    normalize genuine durations like `1.5s` / `4.5s` while leaving prose
+  //    such as `100s of items` untouched.  Also forbid a following letter so
+  //    we never bite into a longer word.
+  s = s.replace(/\b\d+\.\d+s\b(?![A-Za-z])/g, "<duration>");
 
   // 5. Temp-path tokens (POSIX and Windows)
   s = s.replace(
@@ -128,9 +140,25 @@ export function normalize(raw: string): string {
   // 8. Hex memory addresses (0x followed by ≥4 hex digits)
   s = s.replace(/\b0x[0-9a-f]{4,}\b/gi, "<addr>");
 
-  // 9. Port patterns — :NNNN or :NNNNN not preceded by another digit
-  //    Matches patterns like "localhost:3000", "<ip>:8080", ":443"
-  s = s.replace(/(?<!\d):\d{4,5}(?!\d)/g, ":<port>");
+  // 9. Port patterns — :NNNN or :NNNNN in a clear host:port reference.
+  //    The old pattern (/(?<!\d):\d{4,5}(?!\d)/) was over-broad: it also
+  //    collapsed stack-trace locations such as `server.ts:1234` and the
+  //    `:line:col` suffix of `index.ts:10:5`, causing distinct traces to
+  //    fingerprint identically.  Tightenings:
+  //      * (?<!\d)                — not part of a larger number
+  //      * (?<![A-Za-z]\.[A-Za-z]{1,8})
+  //                               — not preceded by a `file.ext` token, so
+  //                                 `server.ts:1234` (a source location) is
+  //                                 left alone while `localhost:3000` matches.
+  //      * (?!\d)                 — port is not the prefix of a longer number
+  //      * (?!:\d)                — not followed by `:<digits>`, i.e. the
+  //                                 `:line:col` form `…:10:5` is left alone.
+  //    Genuine host:port refs (`localhost:3000`, `<ip>:8080`, bare `:443`)
+  //    still normalize.
+  s = s.replace(
+    /(?<!\d)(?<![A-Za-z]\.[A-Za-z]{1,8}):\d{4,5}(?!\d)(?!:\d)/g,
+    ":<port>",
+  );
 
   return s;
 }
