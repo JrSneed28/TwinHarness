@@ -453,6 +453,21 @@ export function rawColdStoreEnabled(env: NodeJS.ProcessEnv = process.env): boole
 export const COLD_STORE_DEFAULT_MAX_BYTES = 256 * 1024 * 1024; // 256 MB
 export const COLD_STORE_DEFAULT_MAX_AGE_DAYS = 14;
 
+/**
+ * Default AGGREGATE store cap (#4): the whole context-pages tree — cold objects
+ * PLUS the append-only ledger, telemetry, and corpus metadata. The cold cap
+ * alone leaves metadata-only mode unbounded (0 cold bytes while ledger/telemetry
+ * grow indefinitely), so this aggregate ceiling is what `th doctor` /
+ * `th context-pages usage` warn against. 0 disables. Overridable via
+ * `TH_CONTEXT_TOTAL_MAX_BYTES`.
+ */
+export const CONTEXT_STORE_DEFAULT_TOTAL_MAX_BYTES = 512 * 1024 * 1024; // 512 MB
+
+/** Resolve the aggregate (whole-tree) storage cap in bytes (0 disables). */
+export function aggregateStoreCapBytes(env: NodeJS.ProcessEnv = process.env): number {
+  return nonNegativeIntEnv(env.TH_CONTEXT_TOTAL_MAX_BYTES, CONTEXT_STORE_DEFAULT_TOTAL_MAX_BYTES);
+}
+
 export interface ColdStoreCaps {
   /** Max total bytes across all cold objects; 0 disables the size cap. */
   maxBytes: number;

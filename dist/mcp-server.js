@@ -28245,6 +28245,10 @@ function rawColdStoreEnabled(env = process.env) {
 }
 var COLD_STORE_DEFAULT_MAX_BYTES = 256 * 1024 * 1024;
 var COLD_STORE_DEFAULT_MAX_AGE_DAYS = 14;
+var CONTEXT_STORE_DEFAULT_TOTAL_MAX_BYTES = 512 * 1024 * 1024;
+function aggregateStoreCapBytes(env = process.env) {
+  return nonNegativeIntEnv(env.TH_CONTEXT_TOTAL_MAX_BYTES, CONTEXT_STORE_DEFAULT_TOTAL_MAX_BYTES);
+}
 function nonNegativeIntEnv(raw, fallback) {
   if (raw === void 0) return fallback;
   const n = Number(raw);
@@ -29064,6 +29068,7 @@ var ALL_OPS = /* @__PURE__ */ new Set([
   "telemetry",
   "savings",
   "savings-detail",
+  "usage",
   // S1+ (CLI + MCP)
   "verify",
   "rehydrate",
@@ -29742,17 +29747,46 @@ function fmtBytes(n) {
   }
   return `${v.toFixed(1)} ${units[i]}`;
 }
+function dirSizeBytes(dir) {
+  let total = 0;
+  let entries;
+  try {
+    entries = fs41.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const e of entries) {
+    const p = path39.join(dir, e.name);
+    try {
+      if (e.isDirectory()) total += dirSizeBytes(p);
+      else if (e.isFile()) total += fs41.statSync(p).size;
+    } catch {
+    }
+  }
+  return total;
+}
 function storageReport(paths) {
   const caps = coldStoreCaps();
   const usage = coldStoreUsage(paths);
+  const root = contextPagesRoot(paths);
   let ledgerBytes = 0;
-  const shardFiles = listShardFiles(contextPagesRoot(paths));
+  const shardFiles = listShardFiles(root);
   for (const f of shardFiles) {
     try {
       ledgerBytes += fs41.statSync(f).size;
     } catch {
     }
   }
+  let telemetryBytes = 0;
+  try {
+    telemetryBytes = fs41.statSync(telemetryFilePath(paths)).size;
+  } catch {
+  }
+  const corpusBytes = dirSizeBytes(path39.join(root, "corpus"));
+  const totalBytes = dirSizeBytes(root);
+  const metadataBytes = Math.max(0, totalBytes - usage.total_bytes);
+  const aggregateMax = aggregateStoreCapBytes();
+  const aggregatePct = aggregateMax > 0 ? Math.round(totalBytes / aggregateMax * 100) : 0;
   return {
     cold_objects: usage.object_count,
     cold_bytes: usage.total_bytes,
@@ -29762,8 +29796,39 @@ function storageReport(paths) {
     max_age_days: Math.round(caps.maxAgeMs / (24 * 60 * 60 * 1e3)),
     ledger_shards: shardFiles.length,
     ledger_bytes: ledgerBytes,
+    telemetry_bytes: telemetryBytes,
+    corpus_bytes: corpusBytes,
+    metadata_bytes: metadataBytes,
+    total_bytes: totalBytes,
+    aggregate_max_bytes: aggregateMax,
+    aggregate_over_cap: aggregateMax > 0 && totalBytes > aggregateMax,
+    aggregate_pct: aggregatePct,
     raw_store_enabled: rawColdStoreEnabled()
   };
+}
+function handleUsage(_args, paths) {
+  const storage = storageReport(paths);
+  const guidance = storage.aggregate_over_cap ? "OVER aggregate cap \u2014 run `th context-pages gc` (cold objects) and/or `th context-pages purge` (all data; metadata is append-only)." : storage.aggregate_pct >= 80 && storage.aggregate_max_bytes > 0 ? "Approaching aggregate cap \u2014 cold objects are GC-eligible; ledger/telemetry are append-only (purge to reclaim)." : "Within aggregate budget.";
+  const human = [
+    `Context-pages storage (aggregate):`,
+    `  Total        : ${fmtBytes(storage.total_bytes)} / cap ${fmtBytes(storage.aggregate_max_bytes)} (${storage.aggregate_pct}%)${storage.aggregate_over_cap ? "  [OVER AGGREGATE CAP]" : ""}`,
+    `  Cold objects : ${storage.cold_objects} (${fmtBytes(storage.cold_bytes)}) / cold cap ${fmtBytes(storage.max_bytes)}${storage.over_cap ? "  [OVER COLD CAP]" : ""}`,
+    `  Ledger       : ${fmtBytes(storage.ledger_bytes)} (${storage.ledger_shards} shard(s), append-only)`,
+    `  Telemetry    : ${fmtBytes(storage.telemetry_bytes)} (append-only)`,
+    `  Corpus       : ${fmtBytes(storage.corpus_bytes)}`,
+    `  Metadata tot : ${fmtBytes(storage.metadata_bytes)} (ledger + telemetry + corpus + markers)`,
+    `  Raw storage  : ${storage.raw_store_enabled ? "ENABLED" : "disabled (metadata-only default)"}`,
+    `  Guidance     : ${guidance}`
+  ].join("\n");
+  return success({
+    data: {
+      storage,
+      // Explicit, machine-readable honesty about what GC can and cannot reclaim.
+      append_only: ["ledger-*.jsonl", "telemetry.jsonl"],
+      guidance
+    },
+    human
+  });
 }
 function handlePurge(_args, paths) {
   const pagesRoot = contextPagesRoot(paths);
@@ -29793,6 +29858,7 @@ var HANDLERS = {
   telemetry: handleTelemetry,
   savings: handleSavings,
   "savings-detail": handleSavingsDetail,
+  usage: handleUsage,
   // S1+ (CLI + MCP)
   verify: handleVerify,
   rehydrate: handleRehydrate,
@@ -32110,12 +32176,14 @@ function runDoctor(paths, opts = {}) {
   }
   try {
     const s = storageReport(paths);
-    const pct = s.max_bytes > 0 ? Math.round(s.cold_bytes / s.max_bytes * 100) : 0;
-    const approaching = pct >= 80;
+    const coldPct = s.max_bytes > 0 ? Math.round(s.cold_bytes / s.max_bytes * 100) : 0;
+    const coldApproaching = coldPct >= 80 && s.cold_objects > 0;
+    const aggApproaching = s.aggregate_max_bytes > 0 && s.aggregate_pct >= 80;
+    const warn = s.over_cap || s.aggregate_over_cap || coldApproaching || aggApproaching;
     checks.push({
       name: "context-pages",
-      status: s.over_cap || approaching && s.cold_objects > 0 ? "warn" : "ok",
-      detail: s.cold_objects === 0 ? "cold store empty (raw persistence is metadata-only by default)" : `${s.cold_objects} cold object(s), ${fmtBytes(s.cold_bytes)} / ${fmtBytes(s.max_bytes)} cap (${pct}%)` + (s.over_cap ? " \u2014 OVER CAP, run `th context-pages gc`" : approaching ? " \u2014 approaching cap" : "")
+      status: warn ? "warn" : "ok",
+      detail: `total ${fmtBytes(s.total_bytes)} / ${fmtBytes(s.aggregate_max_bytes)} aggregate cap (${s.aggregate_pct}%); cold ${s.cold_objects} obj ${fmtBytes(s.cold_bytes)} / ${fmtBytes(s.max_bytes)} (${coldPct}%); ledger ${fmtBytes(s.ledger_bytes)} + telemetry ${fmtBytes(s.telemetry_bytes)} (append-only)` + (s.aggregate_over_cap ? " \u2014 OVER AGGREGATE CAP, run `th context-pages purge` (metadata is append-only) or `gc` (cold)" : s.over_cap ? " \u2014 OVER COLD CAP, run `th context-pages gc`" : aggApproaching || coldApproaching ? " \u2014 approaching cap" : "")
     });
   } catch {
   }
@@ -33858,14 +33926,14 @@ var TOOL_DEFS = [
   // Human-only ops (baseline/gc/purge) are excluded from this enum and listed in MCP_EXCLUDED.
   {
     name: "th_context",
-    description: "Inspect the context-pages store. `operation` selects the view: page-status (shard inventory), residency (delivered pages), telemetry (raw telemetry records), savings (dedup savings \u2014 0% at S0), savings-detail (savings + whole-window estimate + per-category breakdown + USD cost), verify (ledger chain integrity audit), rehydrate (fetch page from cold store; GC-evicted \u2192 re-derive FULL), compare (equivalence harness on two corpus RunArtifacts). Optional `session_id` filters residency and scopes savings; `limit` caps telemetry (default 50); `page_id`/`logical_key` for rehydrate; `baseline_id`/`context_id`/`category` for compare; `transcript_path` for savings-detail whole-window and cost estimates. Read-only (human-only ops gc/baseline/purge are CLI-only).",
+    description: "Inspect the context-pages store. `operation` selects the view: page-status (shard inventory), residency (live-resident pages with per-page status/reason), telemetry (raw telemetry records), savings (dedup savings \u2014 0% at S0), savings-detail (savings + whole-window estimate + per-category breakdown + USD cost), usage (aggregate whole-tree storage report: cold objects + append-only ledger/telemetry/corpus vs caps), verify (ledger chain integrity audit), rehydrate (fetch page from cold store; absent \u2192 source-kind-aware recovery policy), compare (equivalence harness on two corpus RunArtifacts). Optional `session_id` filters residency and scopes savings; `limit` caps telemetry (default 50); `page_id`/`logical_key` for rehydrate; `baseline_id`/`context_id`/`category` for compare; `transcript_path` for savings-detail whole-window and cost estimates. Read-only (human-only ops gc/baseline/purge are CLI-only).",
     inputSchema: {
       type: "object",
       properties: {
         operation: {
           type: "string",
-          description: "The context-pages view to run: page-status | residency | telemetry | savings | savings-detail | verify | rehydrate | compare.",
-          enum: ["page-status", "residency", "telemetry", "savings", "savings-detail", "verify", "rehydrate", "compare"]
+          description: "The context-pages view to run: page-status | residency | telemetry | savings | savings-detail | usage | verify | rehydrate | compare.",
+          enum: ["page-status", "residency", "telemetry", "savings", "savings-detail", "usage", "verify", "rehydrate", "compare"]
         },
         session_id: {
           type: "string",

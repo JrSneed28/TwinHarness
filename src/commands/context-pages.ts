@@ -38,6 +38,7 @@ import {
   coldStoreEnforceRetention,
   coldStoreCaps,
   rawColdStoreEnabled,
+  aggregateStoreCapBytes,
 } from "../core/context-page";
 import { hashContent } from "../core/hash";
 import { type LedgerRecord, verifyLedgerChain, isValidLedgerRecord } from "../core/context-ledger";
@@ -61,7 +62,7 @@ import { renderDetail } from "../core/savings-render";
 
 const ALL_OPS = new Set([
   // S0 (CLI + MCP)
-  "page-status", "residency", "telemetry", "savings", "savings-detail",
+  "page-status", "residency", "telemetry", "savings", "savings-detail", "usage",
   // S1+ (CLI + MCP)
   "verify", "rehydrate", "compare",
   // Human-only (CLI only)
@@ -1240,25 +1241,78 @@ export interface StorageReport {
   max_age_days: number;
   ledger_shards: number;
   ledger_bytes: number;
+  /** telemetry.jsonl size in bytes (append-only metadata). (#4) */
+  telemetry_bytes: number;
+  /** corpus/ subtree size in bytes (RunArtifact equivalence corpus). (#4) */
+  corpus_bytes: number;
+  /** Append-only metadata that is NOT cold objects: ledger + telemetry + corpus + markers. (#4) */
+  metadata_bytes: number;
+  /** Whole context-pages tree in bytes: cold objects + all metadata. (#4) */
+  total_bytes: number;
+  /** Aggregate (whole-tree) cap; 0 disables. (#4) */
+  aggregate_max_bytes: number;
+  /** True when total_bytes exceeds the aggregate cap. (#4) */
+  aggregate_over_cap: boolean;
+  /** total_bytes as a percent of the aggregate cap (0 when the cap is disabled). (#4) */
+  aggregate_pct: number;
   raw_store_enabled: boolean;
 }
 
+/** Recursive byte total of a directory subtree. Fail-safe: skips unreadable entries. */
+function dirSizeBytes(dir: string): number {
+  let total = 0;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const e of entries) {
+    const p = path.join(dir, e.name);
+    try {
+      if (e.isDirectory()) total += dirSizeBytes(p);
+      else if (e.isFile()) total += fs.statSync(p).size;
+    } catch {
+      // skip unreadable / racing entries
+    }
+  }
+  return total;
+}
+
 /**
- * Compute the context-pages storage usage report (#5): cold-object count and
- * bytes versus the configured cap, the oldest object's age, ledger shard count
- * and bytes (reported, never pruned — chain verification depends on them), and
- * whether raw cold storage is currently enabled. Used by `page-status` and the
- * `th doctor` storage check.
+ * Compute the context-pages storage usage report (#4/#5).
+ *
+ * Reports the cold-object count/bytes versus the cold cap AND the AGGREGATE
+ * whole-tree footprint, so metadata-only mode is no longer "invisible": the
+ * append-only `ledger-*.jsonl`, `telemetry.jsonl`, and `corpus/` are measured and
+ * counted toward an aggregate cap. The cold cap alone reported ~0 bytes in
+ * metadata-only mode while those files grew unbounded (#4). Used by
+ * `page-status`, the new `usage` op, and the `th doctor` storage check.
  */
 export function storageReport(paths: ProjectPaths): StorageReport {
   const caps = coldStoreCaps();
   const usage = coldStoreUsage(paths);
+  const root = contextPagesRoot(paths);
 
   let ledgerBytes = 0;
-  const shardFiles = listShardFiles(contextPagesRoot(paths));
+  const shardFiles = listShardFiles(root);
   for (const f of shardFiles) {
     try { ledgerBytes += fs.statSync(f).size; } catch { /* skip */ }
   }
+
+  let telemetryBytes = 0;
+  try { telemetryBytes = fs.statSync(telemetryFilePath(paths)).size; } catch { /* absent */ }
+
+  const corpusBytes = dirSizeBytes(path.join(root, "corpus"));
+
+  // Whole tree minus cold objects = all append-only metadata + markers. Computing
+  // total from the tree (not a fixed file list) means new metadata files are
+  // counted automatically and can never silently escape the aggregate cap.
+  const totalBytes = dirSizeBytes(root);
+  const metadataBytes = Math.max(0, totalBytes - usage.total_bytes);
+
+  const aggregateMax = aggregateStoreCapBytes();
+  const aggregatePct = aggregateMax > 0 ? Math.round((totalBytes / aggregateMax) * 100) : 0;
 
   return {
     cold_objects: usage.object_count,
@@ -1272,8 +1326,70 @@ export function storageReport(paths: ProjectPaths): StorageReport {
     max_age_days: Math.round(caps.maxAgeMs / (24 * 60 * 60 * 1000)),
     ledger_shards: shardFiles.length,
     ledger_bytes: ledgerBytes,
+    telemetry_bytes: telemetryBytes,
+    corpus_bytes: corpusBytes,
+    metadata_bytes: metadataBytes,
+    total_bytes: totalBytes,
+    aggregate_max_bytes: aggregateMax,
+    aggregate_over_cap: aggregateMax > 0 && totalBytes > aggregateMax,
+    aggregate_pct: aggregatePct,
     raw_store_enabled: rawColdStoreEnabled(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Handler: usage (#4) — aggregate storage report + retention guidance
+// ---------------------------------------------------------------------------
+
+/**
+ * Aggregate ContextPages storage report (#4). Surfaces the WHOLE-tree footprint
+ * — cold objects PLUS the append-only ledger, telemetry, and corpus metadata —
+ * against the aggregate cap, so metadata-only mode (0 cold bytes) is no longer
+ * "invisible" while ledger/telemetry grow. Read-only (CLI + MCP).
+ *
+ * NOTE (honest disclosure): ledger and telemetry are currently append-only — the
+ * `gc` op prunes ONLY cold objects, never metadata. The aggregate cap is a
+ * WARNING threshold, not an enforced rotation. To reclaim metadata today, use
+ * `th context-pages purge` (clears everything) — automatic rotation/archival of
+ * sealed ledger segments is planned, not yet implemented.
+ *
+ * data: { storage, append_only, guidance }
+ */
+function handleUsage(
+  _args: Record<string, unknown>,
+  paths: ProjectPaths,
+): CommandResult {
+  const storage = storageReport(paths);
+  const guidance =
+    storage.aggregate_over_cap
+      ? "OVER aggregate cap — run `th context-pages gc` (cold objects) and/or `th context-pages purge` (all data; metadata is append-only)."
+      : storage.aggregate_pct >= 80 && storage.aggregate_max_bytes > 0
+        ? "Approaching aggregate cap — cold objects are GC-eligible; ledger/telemetry are append-only (purge to reclaim)."
+        : "Within aggregate budget.";
+
+  const human = [
+    `Context-pages storage (aggregate):`,
+    `  Total        : ${fmtBytes(storage.total_bytes)} / cap ${fmtBytes(storage.aggregate_max_bytes)} (${storage.aggregate_pct}%)` +
+      `${storage.aggregate_over_cap ? "  [OVER AGGREGATE CAP]" : ""}`,
+    `  Cold objects : ${storage.cold_objects} (${fmtBytes(storage.cold_bytes)}) / cold cap ${fmtBytes(storage.max_bytes)}` +
+      `${storage.over_cap ? "  [OVER COLD CAP]" : ""}`,
+    `  Ledger       : ${fmtBytes(storage.ledger_bytes)} (${storage.ledger_shards} shard(s), append-only)`,
+    `  Telemetry    : ${fmtBytes(storage.telemetry_bytes)} (append-only)`,
+    `  Corpus       : ${fmtBytes(storage.corpus_bytes)}`,
+    `  Metadata tot : ${fmtBytes(storage.metadata_bytes)} (ledger + telemetry + corpus + markers)`,
+    `  Raw storage  : ${storage.raw_store_enabled ? "ENABLED" : "disabled (metadata-only default)"}`,
+    `  Guidance     : ${guidance}`,
+  ].join("\n");
+
+  return success({
+    data: {
+      storage,
+      // Explicit, machine-readable honesty about what GC can and cannot reclaim.
+      append_only: ["ledger-*.jsonl", "telemetry.jsonl"],
+      guidance,
+    },
+    human,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1325,6 +1441,7 @@ const HANDLERS: Record<string, Handler> = {
   telemetry: handleTelemetry,
   savings: handleSavings,
   "savings-detail": handleSavingsDetail,
+  usage: handleUsage,
   // S1+ (CLI + MCP)
   verify: handleVerify,
   rehydrate: handleRehydrate,

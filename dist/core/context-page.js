@@ -47,7 +47,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RETENTION_THROTTLE_MS = exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS = exports.COLD_STORE_DEFAULT_MAX_BYTES = exports.CONTEXT_PAGE_SCHEMA_VERSION = void 0;
+exports.RETENTION_THROTTLE_MS = exports.CONTEXT_STORE_DEFAULT_TOTAL_MAX_BYTES = exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS = exports.COLD_STORE_DEFAULT_MAX_BYTES = exports.CONTEXT_PAGE_SCHEMA_VERSION = void 0;
 exports.computePageId = computePageId;
 exports.normalizeLocator = normalizeLocator;
 exports.classifySensitive = classifySensitive;
@@ -55,6 +55,7 @@ exports.contextPagesRoot = contextPagesRoot;
 exports.coldStorePut = coldStorePut;
 exports.coldStoreGet = coldStoreGet;
 exports.rawColdStoreEnabled = rawColdStoreEnabled;
+exports.aggregateStoreCapBytes = aggregateStoreCapBytes;
 exports.coldStoreCaps = coldStoreCaps;
 exports.coldStoreUsage = coldStoreUsage;
 exports.coldStoreEnforceRetention = coldStoreEnforceRetention;
@@ -402,6 +403,19 @@ function rawColdStoreEnabled(env = process.env) {
 /** Default cold-store retention caps (overridable via env). */
 exports.COLD_STORE_DEFAULT_MAX_BYTES = 256 * 1024 * 1024; // 256 MB
 exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS = 14;
+/**
+ * Default AGGREGATE store cap (#4): the whole context-pages tree — cold objects
+ * PLUS the append-only ledger, telemetry, and corpus metadata. The cold cap
+ * alone leaves metadata-only mode unbounded (0 cold bytes while ledger/telemetry
+ * grow indefinitely), so this aggregate ceiling is what `th doctor` /
+ * `th context-pages usage` warn against. 0 disables. Overridable via
+ * `TH_CONTEXT_TOTAL_MAX_BYTES`.
+ */
+exports.CONTEXT_STORE_DEFAULT_TOTAL_MAX_BYTES = 512 * 1024 * 1024; // 512 MB
+/** Resolve the aggregate (whole-tree) storage cap in bytes (0 disables). */
+function aggregateStoreCapBytes(env = process.env) {
+    return nonNegativeIntEnv(env.TH_CONTEXT_TOTAL_MAX_BYTES, exports.CONTEXT_STORE_DEFAULT_TOTAL_MAX_BYTES);
+}
 /**
  * Parse a NON-NEGATIVE integer from an env var (#7). Zero is a VALID, meaningful
  * value — it disables the corresponding cap, exactly as the {@link ColdStoreCaps}

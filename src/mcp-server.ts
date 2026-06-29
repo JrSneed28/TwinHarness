@@ -1847,14 +1847,14 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     name: "th_context",
     description:
-      "Inspect the context-pages store. `operation` selects the view: page-status (shard inventory), residency (delivered pages), telemetry (raw telemetry records), savings (dedup savings — 0% at S0), savings-detail (savings + whole-window estimate + per-category breakdown + USD cost), verify (ledger chain integrity audit), rehydrate (fetch page from cold store; GC-evicted → re-derive FULL), compare (equivalence harness on two corpus RunArtifacts). Optional `session_id` filters residency and scopes savings; `limit` caps telemetry (default 50); `page_id`/`logical_key` for rehydrate; `baseline_id`/`context_id`/`category` for compare; `transcript_path` for savings-detail whole-window and cost estimates. Read-only (human-only ops gc/baseline/purge are CLI-only).",
+      "Inspect the context-pages store. `operation` selects the view: page-status (shard inventory), residency (live-resident pages with per-page status/reason), telemetry (raw telemetry records), savings (dedup savings — 0% at S0), savings-detail (savings + whole-window estimate + per-category breakdown + USD cost), usage (aggregate whole-tree storage report: cold objects + append-only ledger/telemetry/corpus vs caps), verify (ledger chain integrity audit), rehydrate (fetch page from cold store; absent → source-kind-aware recovery policy), compare (equivalence harness on two corpus RunArtifacts). Optional `session_id` filters residency and scopes savings; `limit` caps telemetry (default 50); `page_id`/`logical_key` for rehydrate; `baseline_id`/`context_id`/`category` for compare; `transcript_path` for savings-detail whole-window and cost estimates. Read-only (human-only ops gc/baseline/purge are CLI-only).",
     inputSchema: {
       type: "object",
       properties: {
         operation: {
           type: "string",
-          description: "The context-pages view to run: page-status | residency | telemetry | savings | savings-detail | verify | rehydrate | compare.",
-          enum: ["page-status", "residency", "telemetry", "savings", "savings-detail", "verify", "rehydrate", "compare"],
+          description: "The context-pages view to run: page-status | residency | telemetry | savings | savings-detail | usage | verify | rehydrate | compare.",
+          enum: ["page-status", "residency", "telemetry", "savings", "savings-detail", "usage", "verify", "rehydrate", "compare"],
         },
         session_id: {
           type: "string",
