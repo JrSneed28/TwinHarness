@@ -61,6 +61,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.fmtBytes = fmtBytes;
+exports.storageReport = storageReport;
 exports.runContextPagesCommand = runContextPagesCommand;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
@@ -167,9 +169,11 @@ function readAllTelemetryRecords(paths) {
 // ---------------------------------------------------------------------------
 /**
  * Report the ledger shard inventory: one row per shard file with its record
- * count, plus totals (total_records, unique_pages).  S0-safe read.
+ * count, plus totals (total_records, unique_pages) AND a storage-usage report
+ * (#5): cold-object count/bytes vs. cap, oldest object age, ledger bytes, and
+ * whether raw cold storage is enabled.  S0-safe read.
  *
- * data: { shards, total_records, unique_pages, pages_root }
+ * data: { shards, total_records, unique_pages, pages_root, storage }
  */
 function handlePageStatus(_args, paths) {
     const pagesRoot = (0, context_page_1.contextPagesRoot)(paths);
@@ -185,15 +189,23 @@ function handlePageStatus(_args, paths) {
         totalRecords += records.length;
     }
     const uniquePages = allPageIds.size;
+    const storage = storageReport(paths);
     const human = [
         `Context-pages directory: ${pagesRoot}`,
         `Shards: ${shards.length}`,
         ...shards.map((s) => `  ${s.file}: ${s.records} record(s)`),
         `Total records : ${totalRecords}`,
         `Unique page_ids: ${uniquePages}`,
+        `Storage:`,
+        `  Cold objects : ${storage.cold_objects} (${fmtBytes(storage.cold_bytes)})` +
+            ` / cap ${fmtBytes(storage.max_bytes)}${storage.over_cap ? "  [OVER CAP — run: th context-pages gc]" : ""}`,
+        `  Oldest object: ${storage.oldest_age_days !== null ? `${storage.oldest_age_days}d` : "—"}` +
+            ` (age cap ${storage.max_age_days}d)`,
+        `  Ledger bytes : ${fmtBytes(storage.ledger_bytes)} (retained for chain verification)`,
+        `  Raw storage  : ${storage.raw_store_enabled ? "ENABLED (suppression/opt-in)" : "disabled (metadata-only default)"}`,
     ].join("\n");
     return (0, output_1.success)({
-        data: { shards, total_records: totalRecords, unique_pages: uniquePages, pages_root: pagesRoot },
+        data: { shards, total_records: totalRecords, unique_pages: uniquePages, pages_root: pagesRoot, storage },
         human,
     });
 }
@@ -295,20 +307,37 @@ function handleSavings(args, paths) {
     const savingsPct = origTokens > 0 ? Math.round(((origTokens - returnedTokens) / origTokens) * 10000) / 100 : 0;
     // New session-scoped, per-cycle-netted savings calculation (B1).
     const result = (0, savings_1.computeSavings)(records, { session_id, suppressMode });
-    const human = [
-        `Savings: ${result.saved_pct}% — ${result.headline_label}`,
-        `  Original tokens : ${origTokens}`,
-        `  Returned tokens : ${returnedTokens}`,
-        `  Delta tokens    : ${deltaTokens}`,
-        `  Dups avoided    : ${dupAvoidedCount}`,
-        `  Records         : ${records.length}`,
-    ].join("\n");
+    // #7: when a session filter is active, the human display MUST show that
+    // session's totals — not the all-store legacy aggregates — so the headline
+    // percentage and the totals beneath it share one scope. The legacy all-store
+    // fields stay in `data` (deprecated-in-place) but are explicitly labelled.
+    const scoped = session_id !== undefined;
+    const human = scoped
+        ? [
+            `Savings: ${result.saved_pct}% — ${result.headline_label} (session ${session_id})`,
+            `  Baseline tokens : ${result.baseline_tokens}`,
+            `  Actual tokens   : ${result.actual_tokens}`,
+            `  Avoided tokens  : ${result.avoided_tokens}`,
+            `  Records         : ${result.record_count}`,
+        ].join("\n")
+        : [
+            `Savings: ${result.saved_pct}% — ${result.headline_label} (all sessions)`,
+            `  Original tokens : ${origTokens}`,
+            `  Returned tokens : ${returnedTokens}`,
+            `  Delta tokens    : ${deltaTokens}`,
+            `  Dups avoided    : ${dupAvoidedCount}`,
+            `  Records         : ${records.length}`,
+        ].join("\n");
     return (0, output_1.success)({
         data: {
+            // Scope of the headline `saved_pct` and the `savings` sub-object (#7).
+            scope: scoped ? "session" : "all",
             // Deprecated-in-place (I3/M6 — do not rename; old all-records/no-payback semantics).
             savings_pct: savingsPct,
             // New session-scoped savings fields (AC-22, AC-26).
             saved_pct: result.saved_pct,
+            // Legacy ALL-STORE aggregates (unscoped — kept for compatibility; use
+            // `savings.*` or the scoped human display for session-correct totals).
             orig_tokens: origTokens,
             returned_tokens: returnedTokens,
             delta_tokens: deltaTokens,
@@ -370,10 +399,15 @@ function handleSavingsDetail(args, paths) {
     ].join("\n");
     return (0, output_1.success)({
         data: {
+            // Scope of the headline `saved_pct` and the `savings` sub-object (#7). The
+            // renderDetail() human block is already session-scoped via `result`.
+            scope: session_id !== undefined ? "session" : "all",
             // Deprecated-in-place (I3/M6 — do not rename; old all-records/no-payback semantics).
             savings_pct: savingsPct,
             // New session-scoped savings fields (AC-22, AC-26).
             saved_pct: result.saved_pct,
+            // Legacy ALL-STORE aggregates (unscoped — kept for compatibility; use
+            // `savings.*` for session-correct totals).
             orig_tokens: origTokens,
             returned_tokens: returnedTokens,
             record_count: records.length,
@@ -461,9 +495,12 @@ function handleBaseline(args, paths) {
  * A forked chain (concurrent writers using GENESIS_PREV_HASH) surfaces as
  * `prev_mismatch` — diagnostic, not data loss.
  *
- * Fail-safe: any read error returns ok:true with 0 records (never blocks).
+ * States are distinguishable via `status`: "verified" (chains intact),
+ * "empty" (no shards to verify), "broken" (a chain failed), and "unknown" (a
+ * read/verify error — reported as ok:false/verified:false, NOT a false PASS).
+ * Always non-blocking (advisory): the command exits zero in every state.
  *
- * data: { ok, record_count, broken_at?, reason? }
+ * data: { ok, status, verified, record_count, shard_count?, broken_at?, reason?, blocking? }
  */
 function handleVerify(_args, paths) {
     try {
@@ -483,6 +520,8 @@ function handleVerify(_args, paths) {
                 return (0, output_1.success)({
                     data: {
                         ok: false,
+                        status: "broken",
+                        verified: false,
                         record_count: recordCount,
                         shard_count: shardFiles.length,
                         shard,
@@ -493,16 +532,39 @@ function handleVerify(_args, paths) {
                 });
             }
         }
+        // Distinguish a genuinely-empty store from a verified one. An empty store has
+        // nothing to verify; a non-empty store passed every shard's chain check.
+        const empty = shardFiles.length === 0;
         return (0, output_1.success)({
-            data: { ok: true, record_count: recordCount, shard_count: shardFiles.length },
-            human: `Ledger chain: PASS — ${shardFiles.length} shard(s), ${recordCount} record(s) verified.`,
+            data: {
+                ok: true,
+                status: empty ? "empty" : "verified",
+                verified: true,
+                record_count: recordCount,
+                shard_count: shardFiles.length,
+            },
+            human: empty
+                ? "Ledger chain: no ledger shards found (empty store)."
+                : `Ledger chain: PASS — ${shardFiles.length} shard(s), ${recordCount} record(s) verified.`,
         });
     }
     catch {
-        // Fail-safe: never throw across a handler boundary (D-16).
+        // Fail-safe: never throw across a handler boundary (D-16). A read/verify
+        // failure is NOT proof of a clean ledger — surfacing ok:true here would let
+        // automation mistake "could not read" for "verified", violating the broader
+        // rule that unknown evidence must never be presented as proof. Return a
+        // DISTINCT unknown/unverified state instead. Still non-blocking (advisory):
+        // CommandResult stays a success() so the command exits zero. (#3)
         return (0, output_1.success)({
-            data: { ok: true, record_count: 0, note: "read_error_passthrough" },
-            human: "Ledger chain: no records read (fail-safe passthrough).",
+            data: {
+                ok: false,
+                status: "unknown",
+                verified: false,
+                blocking: false,
+                record_count: 0,
+                reason: "read_error_passthrough",
+            },
+            human: "Ledger chain: UNKNOWN — could not read or verify ledger (advisory, non-blocking).",
         });
     }
 }
@@ -693,57 +755,81 @@ function handleGc(args, paths) {
         ? Math.floor(args.age_days)
         : GC_DEFAULT_AGE_DAYS;
     const maxAgeMs = ageDays * 24 * 60 * 60 * 1000;
-    const cutoffMs = Date.now() - maxAgeMs;
-    const pagesRoot = (0, context_page_1.contextPagesRoot)(paths);
-    const objectsDir = path.join(pagesRoot, "objects");
-    let removedCount = 0;
-    let bytesFreed = 0;
+    // GC enforces the configured size cap too (#5): drop objects older than
+    // `age_days`, then evict oldest-first until under the byte cap. Only cold
+    // objects are touched — ledger shards are never removed.
+    const caps = (0, context_page_1.coldStoreCaps)();
     try {
-        if (!fs.existsSync(objectsDir)) {
-            return (0, output_1.success)({
-                data: { removed_count: 0, bytes_freed: 0, age_days: ageDays },
-                human: `GC: objects directory absent — nothing to collect (${ageDays}d threshold).`,
-            });
-        }
-        // Walk objects/<hh>/<hash> two-level tree.
-        for (const hh of fs.readdirSync(objectsDir)) {
-            const hhDir = path.join(objectsDir, hh);
-            let stat;
-            try {
-                stat = fs.statSync(hhDir);
-            }
-            catch {
-                continue;
-            }
-            if (!stat.isDirectory())
-                continue;
-            for (const hash of fs.readdirSync(hhDir)) {
-                const objPath = path.join(hhDir, hash);
-                try {
-                    const objStat = fs.statSync(objPath);
-                    if (objStat.isFile() && objStat.mtimeMs < cutoffMs) {
-                        bytesFreed += objStat.size;
-                        fs.unlinkSync(objPath);
-                        removedCount++;
-                    }
-                }
-                catch {
-                    // Skip unreadable / already-deleted entries — fail-safe.
-                }
-            }
-        }
-    }
-    catch {
-        // Fail-safe: return partial results on any scan error (D-16).
+        const r = (0, context_page_1.coldStoreEnforceRetention)(paths, { maxBytes: caps.maxBytes, maxAgeMs });
         return (0, output_1.success)({
-            data: { removed_count: removedCount, bytes_freed: bytesFreed, age_days: ageDays, note: "partial_gc" },
-            human: `GC (partial): removed ${removedCount} object(s) (${bytesFreed} B). Scan error after partial walk.`,
+            data: {
+                removed_count: r.removed_count,
+                bytes_freed: r.removed_bytes,
+                age_days: ageDays,
+                max_bytes: caps.maxBytes,
+                remaining_count: r.remaining_count,
+                remaining_bytes: r.remaining_bytes,
+            },
+            human: `GC: removed ${r.removed_count} cold object(s) (${r.removed_bytes} B freed) — older than ` +
+                `${ageDays}d or over the ${caps.maxBytes} B cap. ${r.remaining_count} object(s) / ` +
+                `${r.remaining_bytes} B remain. Ledger records untouched.`,
         });
     }
-    return (0, output_1.success)({
-        data: { removed_count: removedCount, bytes_freed: bytesFreed, age_days: ageDays },
-        human: `GC: removed ${removedCount} cold object(s) older than ${ageDays}d (${bytesFreed} B freed). Ledger records untouched.`,
-    });
+    catch {
+        // Fail-safe: never throw across a handler boundary (D-16).
+        return (0, output_1.success)({
+            data: { removed_count: 0, bytes_freed: 0, age_days: ageDays, note: "gc_error_passthrough" },
+            human: `GC: scan error — fail-safe passthrough (${ageDays}d threshold).`,
+        });
+    }
+}
+// ---------------------------------------------------------------------------
+// Storage usage report (#5) — surfaced via page-status (and th doctor)
+// ---------------------------------------------------------------------------
+/** Format a byte count as a short human string (B / KiB / MiB / GiB). */
+function fmtBytes(n) {
+    if (n < 1024)
+        return `${n} B`;
+    const units = ["KiB", "MiB", "GiB", "TiB"];
+    let v = n / 1024;
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) {
+        v /= 1024;
+        i++;
+    }
+    return `${v.toFixed(1)} ${units[i]}`;
+}
+/**
+ * Compute the context-pages storage usage report (#5): cold-object count and
+ * bytes versus the configured cap, the oldest object's age, ledger shard count
+ * and bytes (reported, never pruned — chain verification depends on them), and
+ * whether raw cold storage is currently enabled. Used by `page-status` and the
+ * `th doctor` storage check.
+ */
+function storageReport(paths) {
+    const caps = (0, context_page_1.coldStoreCaps)();
+    const usage = (0, context_page_1.coldStoreUsage)(paths);
+    let ledgerBytes = 0;
+    const shardFiles = listShardFiles((0, context_page_1.contextPagesRoot)(paths));
+    for (const f of shardFiles) {
+        try {
+            ledgerBytes += fs.statSync(f).size;
+        }
+        catch { /* skip */ }
+    }
+    return {
+        cold_objects: usage.object_count,
+        cold_bytes: usage.total_bytes,
+        max_bytes: caps.maxBytes,
+        over_cap: caps.maxBytes > 0 && usage.total_bytes > caps.maxBytes,
+        oldest_age_days: usage.oldest_mtime_ms !== null
+            ? Math.round(((Date.now() - usage.oldest_mtime_ms) / (24 * 60 * 60 * 1000)) * 10) / 10
+            : null,
+        max_age_days: Math.round(caps.maxAgeMs / (24 * 60 * 60 * 1000)),
+        ledger_shards: shardFiles.length,
+        ledger_bytes: ledgerBytes,
+        raw_store_enabled: (0, context_page_1.rawColdStoreEnabled)(),
+    };
 }
 // ---------------------------------------------------------------------------
 // Handler: purge (CLI-only / human-only)

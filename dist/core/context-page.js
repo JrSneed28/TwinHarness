@@ -47,13 +47,18 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CONTEXT_PAGE_SCHEMA_VERSION = void 0;
+exports.RETENTION_THROTTLE_MS = exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS = exports.COLD_STORE_DEFAULT_MAX_BYTES = exports.CONTEXT_PAGE_SCHEMA_VERSION = void 0;
 exports.computePageId = computePageId;
 exports.normalizeLocator = normalizeLocator;
 exports.classifySensitive = classifySensitive;
 exports.contextPagesRoot = contextPagesRoot;
 exports.coldStorePut = coldStorePut;
 exports.coldStoreGet = coldStoreGet;
+exports.rawColdStoreEnabled = rawColdStoreEnabled;
+exports.coldStoreCaps = coldStoreCaps;
+exports.coldStoreUsage = coldStoreUsage;
+exports.coldStoreEnforceRetention = coldStoreEnforceRetention;
+exports.maybeEnforceColdStoreRetention = maybeEnforceColdStoreRetention;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const hash_1 = require("./hash");
@@ -326,17 +331,27 @@ function casObjectPath(pagesRoot, hash) {
  * Rules:
  *   - Binary content (NUL byte in first 8 KiB) → skipped, returns null.
  *   - `sensitive === true` → objref returned but NO bytes written to disk.
+ *   - `opts.persistRaw === false` → objref returned but NO bytes written. This
+ *     is the privacy-by-default path (#4): the on-by-default OBSERVE hook passes
+ *     `persistRaw:false` so non-classified tool output (file reads, Bash, WebFetch,
+ *     MCP results) is NOT copied to a plaintext cold store. The hash still lets the
+ *     ledger reference the page, and rehydrate re-derives FULL from `logical_key`.
+ *     Raw bytes are persisted only when callers explicitly opt in — suppression
+ *     (TH_EXACT_SUPPRESS, which needs them to rehydrate) or TH_CONTEXT_RAW_STORE.
+ *     Other callers (delta/fingerprint) omit `opts` and keep the prior persist
+ *     behavior.
  *   - CAS is immutable: if the object already exists the write is skipped.
  */
-function coldStorePut(paths, content, sensitive) {
+function coldStorePut(paths, content, sensitive, opts = {}) {
     try {
         const hash = (0, hash_1.hashContent)(content);
         // Binary check: skip non-text content
         const buf = Buffer.from(content, "utf8");
         if ((0, extract_1.looksBinary)(buf))
             return null;
-        // Sensitive: return objref (the hash) but never write raw bytes
-        if (sensitive)
+        // Sensitive OR raw persistence opted out → return objref (the hash) but never
+        // write raw bytes.
+        if (sensitive || opts.persistRaw === false)
             return hash;
         const root = contextPagesRoot(paths);
         const objPath = casObjectPath(root, hash);
@@ -371,5 +386,158 @@ function coldStoreGet(paths, hash) {
     }
     catch {
         return undefined;
+    }
+}
+// ---------------------------------------------------------------------------
+// Cold-store: raw-persistence policy + retention/usage (#4, #5)
+// ---------------------------------------------------------------------------
+/**
+ * Is raw cold-store persistence enabled? Default is OFF (metadata-only, #4).
+ * Raw bytes are persisted only when the caller has a use for them: exact
+ * suppression (needs them to rehydrate) or an explicit opt-in.
+ */
+function rawColdStoreEnabled(env = process.env) {
+    return env.TH_EXACT_SUPPRESS === "1" || env.TH_CONTEXT_RAW_STORE === "1";
+}
+/** Default cold-store retention caps (overridable via env). */
+exports.COLD_STORE_DEFAULT_MAX_BYTES = 256 * 1024 * 1024; // 256 MB
+exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS = 14;
+function positiveIntEnv(raw, fallback) {
+    if (raw === undefined)
+        return fallback;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+/** Resolve the cold-store retention caps from env (with defaults). */
+function coldStoreCaps(env = process.env) {
+    const maxBytes = positiveIntEnv(env.TH_CONTEXT_MAX_BYTES, exports.COLD_STORE_DEFAULT_MAX_BYTES);
+    const maxAgeDays = positiveIntEnv(env.TH_CONTEXT_MAX_AGE_DAYS, exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS);
+    return { maxBytes, maxAgeMs: maxAgeDays * 24 * 60 * 60 * 1000 };
+}
+/** Enumerate cold object files under `objects/<hh>/<hash>` with size + mtime. */
+function listColdObjects(objectsDir) {
+    const out = [];
+    let shards;
+    try {
+        shards = fs.readdirSync(objectsDir);
+    }
+    catch {
+        return out; // absent dir → empty store
+    }
+    for (const hh of shards) {
+        const hhDir = path.join(objectsDir, hh);
+        let entries;
+        try {
+            if (!fs.statSync(hhDir).isDirectory())
+                continue; // skip marker files (.last-retention)
+            entries = fs.readdirSync(hhDir);
+        }
+        catch {
+            continue;
+        }
+        for (const name of entries) {
+            const p = path.join(hhDir, name);
+            try {
+                const st = fs.statSync(p);
+                if (st.isFile())
+                    out.push({ path: p, size: st.size, mtimeMs: st.mtimeMs });
+            }
+            catch {
+                // skip unreadable / racing entries
+            }
+        }
+    }
+    return out;
+}
+/** Read-only cold-store usage snapshot (object count + total bytes + oldest). */
+function coldStoreUsage(paths) {
+    const objectsDir = path.join(contextPagesRoot(paths), "objects");
+    const objs = listColdObjects(objectsDir);
+    let total = 0;
+    let oldest = null;
+    for (const o of objs) {
+        total += o.size;
+        if (oldest === null || o.mtimeMs < oldest)
+            oldest = o.mtimeMs;
+    }
+    return { object_count: objs.length, total_bytes: total, oldest_mtime_ms: oldest };
+}
+/**
+ * Enforce cold-store caps: first drop objects older than `caps.maxAgeMs`, then,
+ * if still over `caps.maxBytes`, evict oldest-first until under the cap. Only
+ * touches `objects/<hh>/<hash>` files — never ledger shards. Fail-safe per file.
+ */
+function coldStoreEnforceRetention(paths, caps, now = Date.now()) {
+    const objectsDir = path.join(contextPagesRoot(paths), "objects");
+    let objs = listColdObjects(objectsDir);
+    let removedCount = 0;
+    let removedBytes = 0;
+    const tryUnlink = (o) => {
+        try {
+            fs.unlinkSync(o.path);
+            removedCount++;
+            removedBytes += o.size;
+            return true;
+        }
+        catch {
+            return false;
+        }
+    };
+    // 1. Age cap.
+    if (caps.maxAgeMs > 0) {
+        const cutoff = now - caps.maxAgeMs;
+        objs = objs.filter((o) => (o.mtimeMs < cutoff ? !tryUnlink(o) : true));
+    }
+    // 2. Size cap: evict oldest-first until the remaining total is within budget.
+    let total = objs.reduce((s, o) => s + o.size, 0);
+    if (caps.maxBytes > 0 && total > caps.maxBytes) {
+        objs.sort((a, b) => a.mtimeMs - b.mtimeMs); // oldest first
+        for (const o of objs) {
+            if (total <= caps.maxBytes)
+                break;
+            if (tryUnlink(o))
+                total -= o.size;
+        }
+    }
+    const after = coldStoreUsage(paths);
+    return {
+        removed_count: removedCount,
+        removed_bytes: removedBytes,
+        remaining_count: after.object_count,
+        remaining_bytes: after.total_bytes,
+    };
+}
+/** Throttle window for lazy automatic retention from the hot path. */
+exports.RETENTION_THROTTLE_MS = 60 * 60 * 1000; // 1h
+/**
+ * Lazy, throttled retention for the OBSERVE hot path (used only when raw storage
+ * is enabled). Runs a full enforcement pass at most once per
+ * {@link RETENTION_THROTTLE_MS}, stamped via a marker file, so the per-tool-call
+ * cost is a single small stat in the common case. Never throws.
+ */
+function maybeEnforceColdStoreRetention(paths, caps, now = Date.now()) {
+    try {
+        const marker = path.join(contextPagesRoot(paths), "objects", ".last-retention");
+        let last = 0;
+        try {
+            last = fs.statSync(marker).mtimeMs;
+        }
+        catch {
+            last = 0;
+        }
+        if (last !== 0 && now - last < exports.RETENTION_THROTTLE_MS)
+            return null;
+        // Stamp first (best-effort) so concurrent hooks don't all sweep at once.
+        try {
+            fs.mkdirSync(path.dirname(marker), { recursive: true });
+            fs.writeFileSync(marker, String(now), "utf8");
+        }
+        catch {
+            // ignore — enforcement still proceeds
+        }
+        return coldStoreEnforceRetention(paths, caps, now);
+    }
+    catch {
+        return null;
     }
 }

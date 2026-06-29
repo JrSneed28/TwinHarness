@@ -46,6 +46,7 @@ const verify_1 = require("../core/verify");
 const leases_1 = require("../core/leases");
 const wave_1 = require("../core/wave");
 const repo_1 = require("./repo");
+const context_pages_1 = require("./context-pages");
 /**
  * Forward-compat top-level state keys that `th doctor --strict` tolerates (#15).
  *
@@ -491,6 +492,29 @@ function runDoctor(paths, opts = {}) {
                 detail: `${allowed.length} allowlisted forward-compat key(s): ${allowed.join(", ")}`,
             });
         }
+    }
+    // Context-pages cold-store usage (#5): warn when over (or approaching) the
+    // configured byte cap so growth is visible before it becomes operationally
+    // significant. Fail-safe: any error skips the check rather than failing doctor.
+    try {
+        const s = (0, context_pages_1.storageReport)(paths);
+        const pct = s.max_bytes > 0 ? Math.round((s.cold_bytes / s.max_bytes) * 100) : 0;
+        const approaching = pct >= 80;
+        checks.push({
+            name: "context-pages",
+            status: s.over_cap || (approaching && s.cold_objects > 0) ? "warn" : "ok",
+            detail: s.cold_objects === 0
+                ? "cold store empty (raw persistence is metadata-only by default)"
+                : `${s.cold_objects} cold object(s), ${(0, context_pages_1.fmtBytes)(s.cold_bytes)} / ${(0, context_pages_1.fmtBytes)(s.max_bytes)} cap (${pct}%)` +
+                    (s.over_cap
+                        ? " — OVER CAP, run `th context-pages gc`"
+                        : approaching
+                            ? " — approaching cap"
+                            : ""),
+        });
+    }
+    catch {
+        // skip on any error
     }
     const hasFail = checks.some((c) => c.status === "fail");
     const icon = (s) => (s === "ok" ? "✓" : s === "warn" ? "!" : "✗");

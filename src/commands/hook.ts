@@ -22,6 +22,9 @@ import {
   classifySensitive,
   coldStorePut,
   contextPagesRoot,
+  rawColdStoreEnabled,
+  coldStoreCaps,
+  maybeEnforceColdStoreRetention,
   CONTEXT_PAGE_SCHEMA_VERSION,
   type SourceKind,
   type ReductionKind,
@@ -1481,15 +1484,19 @@ export function resolveScope(input: {
     const session_id = input.session_id ?? "unknown";
     return { kind: "agent", scope: { session_id, agentOrRoot: input.agent_id } };
   }
-  // IMPORTANT — B3/P2 "Phantom Root" gate (MUST be probe-gated before S1):
-  // A bare session_id with no agent_id is assumed to be the root session here
-  // at S0 because there are no consumers and S1 is hard-gated.  Before S1 is
-  // enabled this branch MUST be tightened: only a CONFIRMED-distinct root
-  // session_id (verified against epoch.json / SubagentStart probe counters)
-  // may map to `root`; an unconfirmed id MUST map to `indeterminate` instead,
-  // preventing a phantom-root attribution that would merge subagent pages into
-  // the root shard.  Per plan B3/P2 — do NOT remove this comment until the
-  // probe-gate is wired.
+  // IMPORTANT — B3/P2 "Phantom Root" gate.
+  // A bare session_id with no agent_id is mapped to `root` so the event is still
+  // recorded for OBSERVE (the default, suppression-free mode). This attribution
+  // is NOT positive proof of root identity: a subagent tool result that arrived
+  // without an agent_id (possibly sharing the root session_id) would land in the
+  // root shard too. To prevent that phantom record from ever omitting real root
+  // output, the S1 suppression path hard-requires `kind === "agent"` (see the
+  // suppression gate in runHookPostToolContext) — so `root` scope is recorded but
+  // NEVER suppressed. Promoting `root` to a suppressible scope requires
+  // positively establishing root identity first (a CONFIRMED-distinct root
+  // session_id verified against epoch.json / SubagentStart probe counters); until
+  // that probe-gate is wired, root suppression stays off by construction. Do NOT
+  // relax the agent-only suppression gate before that work lands.
   if (input.session_id) {
     return { kind: "root", scope: { session_id: input.session_id, agentOrRoot: "root" } };
   }
@@ -1677,7 +1684,20 @@ export function runHookPostToolContext(
     const pageLike = { source_locator, source_kind };
     const sensitive = classifySensitive(pageLike, paths, toolResponse);
 
-    const raw_objref = coldStorePut(paths, toolResponse, sensitive);
+    // #4: privacy-by-default. The on-by-default OBSERVE hook does NOT persist raw
+    // tool output to the plaintext cold store — only the content hash is kept (in
+    // the ledger). Raw bytes are written only when a consumer needs them: exact
+    // suppression (to rehydrate) or an explicit TH_CONTEXT_RAW_STORE opt-in.
+    const persistRaw = rawColdStoreEnabled(env);
+    const raw_objref = coldStorePut(paths, toolResponse, sensitive, { persistRaw });
+
+    // #5: when raw storage is active the cold store grows, so opportunistically
+    // enforce the size/age caps here. Throttled to ≤ once/hour via a marker, and
+    // skipped entirely on the default (metadata-only) path, so the common case
+    // adds no filesystem work beyond the (skipped) cold-store write.
+    if (persistRaw && !sensitive) {
+      maybeEnforceColdStoreRetention(paths, coldStoreCaps(env));
+    }
 
     const reduction_kind: ReductionKind = sensitive ? "hash-only" : "FULL";
     const session_id = input?.session_id ?? "";
@@ -1723,11 +1743,19 @@ export function runHookPostToolContext(
         // non-eligible ops and concurrent-agent records within the window.
         const RESIDENCY_TAIL_LIMIT = Math.max(RESIDENCY_TTL_TURNS * 8, 256);
         const shardRecs = readShardRecordsTail(paths, scopeRes.scope, RESIDENCY_TAIL_LIMIT);
-        // nowTurn = depth of what we read (matches prior behavior on short
-        // shards). deriveResidency compares nowTurn - record.seq against the TTL;
-        // because records appended within the TTL window are all present in the
-        // tail, the age comparison is preserved for any in-window page.
-        const nowTurn = shardRecs.length; // shard depth as turn proxy (S1 counter)
+        // nowTurn MUST be the ABSOLUTE ledger sequence of the most recent record
+        // — NOT the tail length. The tail reader returns at most
+        // RESIDENCY_TAIL_LIMIT records, so on a large shard `shardRecs.length`
+        // (≤256) can sit far below the real seq values (e.g. seq≈1000). Using the
+        // length yields `nowTurn - record.seq = 256 - 1000 = -744`, a negative age
+        // that is never greater than RESIDENCY_TTL_TURNS, so an expired page would
+        // incorrectly remain resident. deriveResidency computes
+        // `age = nowTurn - record.seq`, so nowTurn has to live in the same
+        // absolute-seq space as record.seq. Records are returned in append order
+        // (ascending seq) and the tail always includes the newest record, so the
+        // last element carries the max seq. (#1)
+        const nowTurn =
+          shardRecs.length > 0 ? shardRecs[shardRecs.length - 1]!.seq : 0;
         const residency = deriveResidency(
           shardRecs,
           scopeRes.scope,
@@ -1744,7 +1772,19 @@ export function runHookPostToolContext(
 
     // PF-i: suppress path — exact_suppress ON and page is resident.
     // Record ATTEST first; on write failure → return original output, NO attest written.
-    if (exactSuppressOn && isResident && scopeRes.kind !== "indeterminate") {
+    //
+    // B3/P2 "Phantom Root" gate: suppression is restricted to a POSITIVELY
+    // attributed `agent` scope (one that carried an explicit agent_id). A bare
+    // session_id maps to `root` for OBSERVE recording, but the root shard can be
+    // contaminated by a subagent tool result that arrived without an agent_id
+    // (and may even share the root session_id). Such a phantom record could make
+    // the real root "resident" and omit content the root never actually saw.
+    // Agent shards are keyed by an explicit agent_id, so they can ONLY contain
+    // that agent's own deliveries and are immune to phantom contamination —
+    // making `agent`-scoped suppression provably free of cross-agent omission.
+    // Root suppression stays disabled until root identity can be positively
+    // established by the probe-gate (see resolveScope). (#2)
+    if (exactSuppressOn && isResident && scopeRes.kind === "agent") {
       let attestOk = false;
       try {
         doAppendLedger(paths, scopeRes.scope, {
@@ -1841,7 +1881,10 @@ export function runHookPostToolContext(
 
     // Shadow mode OR not resident: deliver as normal (S0 behavior preserved).
     // In shadow mode with a resident page: log would-suppress telemetry but deliver FULL.
-    const wouldSuppress = !exactSuppressOn && isResident;
+    // Mirror the real suppression gate above (agent-scope only): a resident root
+    // page would NOT be suppressed even with the flag on, so it is not a
+    // would-suppress candidate either. (#2)
+    const wouldSuppress = !exactSuppressOn && isResident && scopeRes.kind === "agent";
 
     if (scopeRes.kind !== "indeterminate") {
       doAppendLedger(paths, scopeRes.scope, {

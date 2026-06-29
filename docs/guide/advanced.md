@@ -158,12 +158,12 @@ reported, and [SECURITY.md](../../SECURITY.md) for the trust model.
 
 ## The MCP surface
 
-The entire `th` read/compute surface is exposed as a typed MCP server — an **81-tool**
+The entire `th` read/compute surface is exposed as a typed MCP server — an **82-tool**
 surface at parity with the CLI (parity is enforced by tests). Sub-agents call the
 `th_*` tools natively instead of shelling out; a tool that *returns* an error result
 (e.g. `not_initialized`) is working as intended. See
-[MCP tools](../../USAGE.md#mcp-tools-registered-count-81) and the
-[full MCP roster](../../USAGE.md#mcp-tool-roster-exhaustive--all-81).
+[MCP tools](../../USAGE.md#mcp-tools-registered-count-82) and the
+[full MCP roster](../../USAGE.md#mcp-tool-roster-exhaustive--all-82).
 
 ## Using `th` in CI
 

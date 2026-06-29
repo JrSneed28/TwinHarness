@@ -28205,6 +28205,96 @@ function coldStoreGet(paths, hash) {
     return void 0;
   }
 }
+function rawColdStoreEnabled(env = process.env) {
+  return env.TH_EXACT_SUPPRESS === "1" || env.TH_CONTEXT_RAW_STORE === "1";
+}
+var COLD_STORE_DEFAULT_MAX_BYTES = 256 * 1024 * 1024;
+var COLD_STORE_DEFAULT_MAX_AGE_DAYS = 14;
+function positiveIntEnv(raw, fallback) {
+  if (raw === void 0) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+function coldStoreCaps(env = process.env) {
+  const maxBytes = positiveIntEnv(env.TH_CONTEXT_MAX_BYTES, COLD_STORE_DEFAULT_MAX_BYTES);
+  const maxAgeDays = positiveIntEnv(env.TH_CONTEXT_MAX_AGE_DAYS, COLD_STORE_DEFAULT_MAX_AGE_DAYS);
+  return { maxBytes, maxAgeMs: maxAgeDays * 24 * 60 * 60 * 1e3 };
+}
+function listColdObjects(objectsDir) {
+  const out = [];
+  let shards;
+  try {
+    shards = fs36.readdirSync(objectsDir);
+  } catch {
+    return out;
+  }
+  for (const hh of shards) {
+    const hhDir = path35.join(objectsDir, hh);
+    let entries;
+    try {
+      if (!fs36.statSync(hhDir).isDirectory()) continue;
+      entries = fs36.readdirSync(hhDir);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      const p = path35.join(hhDir, name);
+      try {
+        const st = fs36.statSync(p);
+        if (st.isFile()) out.push({ path: p, size: st.size, mtimeMs: st.mtimeMs });
+      } catch {
+      }
+    }
+  }
+  return out;
+}
+function coldStoreUsage(paths) {
+  const objectsDir = path35.join(contextPagesRoot(paths), "objects");
+  const objs = listColdObjects(objectsDir);
+  let total = 0;
+  let oldest = null;
+  for (const o of objs) {
+    total += o.size;
+    if (oldest === null || o.mtimeMs < oldest) oldest = o.mtimeMs;
+  }
+  return { object_count: objs.length, total_bytes: total, oldest_mtime_ms: oldest };
+}
+function coldStoreEnforceRetention(paths, caps, now = Date.now()) {
+  const objectsDir = path35.join(contextPagesRoot(paths), "objects");
+  let objs = listColdObjects(objectsDir);
+  let removedCount = 0;
+  let removedBytes = 0;
+  const tryUnlink = (o) => {
+    try {
+      fs36.unlinkSync(o.path);
+      removedCount++;
+      removedBytes += o.size;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (caps.maxAgeMs > 0) {
+    const cutoff = now - caps.maxAgeMs;
+    objs = objs.filter((o) => o.mtimeMs < cutoff ? !tryUnlink(o) : true);
+  }
+  let total = objs.reduce((s, o) => s + o.size, 0);
+  if (caps.maxBytes > 0 && total > caps.maxBytes) {
+    objs.sort((a, b) => a.mtimeMs - b.mtimeMs);
+    for (const o of objs) {
+      if (total <= caps.maxBytes) break;
+      if (tryUnlink(o)) total -= o.size;
+    }
+  }
+  const after = coldStoreUsage(paths);
+  return {
+    removed_count: removedCount,
+    removed_bytes: removedBytes,
+    remaining_count: after.object_count,
+    remaining_bytes: after.total_bytes
+  };
+}
+var RETENTION_THROTTLE_MS = 60 * 60 * 1e3;
 
 // src/core/context-ledger.ts
 var CANONICAL_FIELD_ORDER5 = [
@@ -28907,15 +28997,21 @@ function handlePageStatus(_args, paths) {
     totalRecords += records.length;
   }
   const uniquePages = allPageIds.size;
+  const storage = storageReport(paths);
   const human = [
     `Context-pages directory: ${pagesRoot}`,
     `Shards: ${shards.length}`,
     ...shards.map((s) => `  ${s.file}: ${s.records} record(s)`),
     `Total records : ${totalRecords}`,
-    `Unique page_ids: ${uniquePages}`
+    `Unique page_ids: ${uniquePages}`,
+    `Storage:`,
+    `  Cold objects : ${storage.cold_objects} (${fmtBytes(storage.cold_bytes)}) / cap ${fmtBytes(storage.max_bytes)}${storage.over_cap ? "  [OVER CAP \u2014 run: th context-pages gc]" : ""}`,
+    `  Oldest object: ${storage.oldest_age_days !== null ? `${storage.oldest_age_days}d` : "\u2014"} (age cap ${storage.max_age_days}d)`,
+    `  Ledger bytes : ${fmtBytes(storage.ledger_bytes)} (retained for chain verification)`,
+    `  Raw storage  : ${storage.raw_store_enabled ? "ENABLED (suppression/opt-in)" : "disabled (metadata-only default)"}`
   ].join("\n");
   return success({
-    data: { shards, total_records: totalRecords, unique_pages: uniquePages, pages_root: pagesRoot },
+    data: { shards, total_records: totalRecords, unique_pages: uniquePages, pages_root: pagesRoot, storage },
     human
   });
 }
@@ -28972,8 +29068,15 @@ function handleSavings(args, paths) {
   }
   const savingsPct = origTokens > 0 ? Math.round((origTokens - returnedTokens) / origTokens * 1e4) / 100 : 0;
   const result = computeSavings(records, { session_id, suppressMode });
-  const human = [
-    `Savings: ${result.saved_pct}% \u2014 ${result.headline_label}`,
+  const scoped = session_id !== void 0;
+  const human = scoped ? [
+    `Savings: ${result.saved_pct}% \u2014 ${result.headline_label} (session ${session_id})`,
+    `  Baseline tokens : ${result.baseline_tokens}`,
+    `  Actual tokens   : ${result.actual_tokens}`,
+    `  Avoided tokens  : ${result.avoided_tokens}`,
+    `  Records         : ${result.record_count}`
+  ].join("\n") : [
+    `Savings: ${result.saved_pct}% \u2014 ${result.headline_label} (all sessions)`,
     `  Original tokens : ${origTokens}`,
     `  Returned tokens : ${returnedTokens}`,
     `  Delta tokens    : ${deltaTokens}`,
@@ -28982,10 +29085,14 @@ function handleSavings(args, paths) {
   ].join("\n");
   return success({
     data: {
+      // Scope of the headline `saved_pct` and the `savings` sub-object (#7).
+      scope: scoped ? "session" : "all",
       // Deprecated-in-place (I3/M6 — do not rename; old all-records/no-payback semantics).
       savings_pct: savingsPct,
       // New session-scoped savings fields (AC-22, AC-26).
       saved_pct: result.saved_pct,
+      // Legacy ALL-STORE aggregates (unscoped — kept for compatibility; use
+      // `savings.*` or the scoped human display for session-correct totals).
       orig_tokens: origTokens,
       returned_tokens: returnedTokens,
       delta_tokens: deltaTokens,
@@ -29021,10 +29128,15 @@ function handleSavingsDetail(args, paths) {
   ].join("\n");
   return success({
     data: {
+      // Scope of the headline `saved_pct` and the `savings` sub-object (#7). The
+      // renderDetail() human block is already session-scoped via `result`.
+      scope: session_id !== void 0 ? "session" : "all",
       // Deprecated-in-place (I3/M6 — do not rename; old all-records/no-payback semantics).
       savings_pct: savingsPct,
       // New session-scoped savings fields (AC-22, AC-26).
       saved_pct: result.saved_pct,
+      // Legacy ALL-STORE aggregates (unscoped — kept for compatibility; use
+      // `savings.*` for session-correct totals).
       orig_tokens: origTokens,
       returned_tokens: returnedTokens,
       record_count: records.length,
@@ -29099,6 +29211,8 @@ function handleVerify(_args, paths) {
         return success({
           data: {
             ok: false,
+            status: "broken",
+            verified: false,
             record_count: recordCount,
             shard_count: shardFiles.length,
             shard,
@@ -29109,14 +29223,28 @@ function handleVerify(_args, paths) {
         });
       }
     }
+    const empty = shardFiles.length === 0;
     return success({
-      data: { ok: true, record_count: recordCount, shard_count: shardFiles.length },
-      human: `Ledger chain: PASS \u2014 ${shardFiles.length} shard(s), ${recordCount} record(s) verified.`
+      data: {
+        ok: true,
+        status: empty ? "empty" : "verified",
+        verified: true,
+        record_count: recordCount,
+        shard_count: shardFiles.length
+      },
+      human: empty ? "Ledger chain: no ledger shards found (empty store)." : `Ledger chain: PASS \u2014 ${shardFiles.length} shard(s), ${recordCount} record(s) verified.`
     });
   } catch {
     return success({
-      data: { ok: true, record_count: 0, note: "read_error_passthrough" },
-      human: "Ledger chain: no records read (fail-safe passthrough)."
+      data: {
+        ok: false,
+        status: "unknown",
+        verified: false,
+        blocking: false,
+        record_count: 0,
+        reason: "read_error_passthrough"
+      },
+      human: "Ledger chain: UNKNOWN \u2014 could not read or verify ledger (advisory, non-blocking)."
     });
   }
 }
@@ -29237,50 +29365,60 @@ var GC_DEFAULT_AGE_DAYS = 5;
 function handleGc(args, paths) {
   const ageDays = typeof args.age_days === "number" && args.age_days > 0 ? Math.floor(args.age_days) : GC_DEFAULT_AGE_DAYS;
   const maxAgeMs = ageDays * 24 * 60 * 60 * 1e3;
-  const cutoffMs = Date.now() - maxAgeMs;
-  const pagesRoot = contextPagesRoot(paths);
-  const objectsDir = path38.join(pagesRoot, "objects");
-  let removedCount = 0;
-  let bytesFreed = 0;
+  const caps = coldStoreCaps();
   try {
-    if (!fs40.existsSync(objectsDir)) {
-      return success({
-        data: { removed_count: 0, bytes_freed: 0, age_days: ageDays },
-        human: `GC: objects directory absent \u2014 nothing to collect (${ageDays}d threshold).`
-      });
-    }
-    for (const hh of fs40.readdirSync(objectsDir)) {
-      const hhDir = path38.join(objectsDir, hh);
-      let stat;
-      try {
-        stat = fs40.statSync(hhDir);
-      } catch {
-        continue;
-      }
-      if (!stat.isDirectory()) continue;
-      for (const hash of fs40.readdirSync(hhDir)) {
-        const objPath = path38.join(hhDir, hash);
-        try {
-          const objStat = fs40.statSync(objPath);
-          if (objStat.isFile() && objStat.mtimeMs < cutoffMs) {
-            bytesFreed += objStat.size;
-            fs40.unlinkSync(objPath);
-            removedCount++;
-          }
-        } catch {
-        }
-      }
-    }
+    const r = coldStoreEnforceRetention(paths, { maxBytes: caps.maxBytes, maxAgeMs });
+    return success({
+      data: {
+        removed_count: r.removed_count,
+        bytes_freed: r.removed_bytes,
+        age_days: ageDays,
+        max_bytes: caps.maxBytes,
+        remaining_count: r.remaining_count,
+        remaining_bytes: r.remaining_bytes
+      },
+      human: `GC: removed ${r.removed_count} cold object(s) (${r.removed_bytes} B freed) \u2014 older than ${ageDays}d or over the ${caps.maxBytes} B cap. ${r.remaining_count} object(s) / ${r.remaining_bytes} B remain. Ledger records untouched.`
+    });
   } catch {
     return success({
-      data: { removed_count: removedCount, bytes_freed: bytesFreed, age_days: ageDays, note: "partial_gc" },
-      human: `GC (partial): removed ${removedCount} object(s) (${bytesFreed} B). Scan error after partial walk.`
+      data: { removed_count: 0, bytes_freed: 0, age_days: ageDays, note: "gc_error_passthrough" },
+      human: `GC: scan error \u2014 fail-safe passthrough (${ageDays}d threshold).`
     });
   }
-  return success({
-    data: { removed_count: removedCount, bytes_freed: bytesFreed, age_days: ageDays },
-    human: `GC: removed ${removedCount} cold object(s) older than ${ageDays}d (${bytesFreed} B freed). Ledger records untouched.`
-  });
+}
+function fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+function storageReport(paths) {
+  const caps = coldStoreCaps();
+  const usage = coldStoreUsage(paths);
+  let ledgerBytes = 0;
+  const shardFiles = listShardFiles(contextPagesRoot(paths));
+  for (const f of shardFiles) {
+    try {
+      ledgerBytes += fs40.statSync(f).size;
+    } catch {
+    }
+  }
+  return {
+    cold_objects: usage.object_count,
+    cold_bytes: usage.total_bytes,
+    max_bytes: caps.maxBytes,
+    over_cap: caps.maxBytes > 0 && usage.total_bytes > caps.maxBytes,
+    oldest_age_days: usage.oldest_mtime_ms !== null ? Math.round((Date.now() - usage.oldest_mtime_ms) / (24 * 60 * 60 * 1e3) * 10) / 10 : null,
+    max_age_days: Math.round(caps.maxAgeMs / (24 * 60 * 60 * 1e3)),
+    ledger_shards: shardFiles.length,
+    ledger_bytes: ledgerBytes,
+    raw_store_enabled: rawColdStoreEnabled()
+  };
 }
 function handlePurge(_args, paths) {
   const pagesRoot = contextPagesRoot(paths);
@@ -31624,6 +31762,17 @@ function runDoctor(paths, opts = {}) {
         detail: `${allowed.length} allowlisted forward-compat key(s): ${allowed.join(", ")}`
       });
     }
+  }
+  try {
+    const s = storageReport(paths);
+    const pct = s.max_bytes > 0 ? Math.round(s.cold_bytes / s.max_bytes * 100) : 0;
+    const approaching = pct >= 80;
+    checks.push({
+      name: "context-pages",
+      status: s.over_cap || approaching && s.cold_objects > 0 ? "warn" : "ok",
+      detail: s.cold_objects === 0 ? "cold store empty (raw persistence is metadata-only by default)" : `${s.cold_objects} cold object(s), ${fmtBytes(s.cold_bytes)} / ${fmtBytes(s.max_bytes)} cap (${pct}%)` + (s.over_cap ? " \u2014 OVER CAP, run `th context-pages gc`" : approaching ? " \u2014 approaching cap" : "")
+    });
+  } catch {
   }
   const hasFail = checks.some((c) => c.status === "fail");
   const icon = (s) => s === "ok" ? "\u2713" : s === "warn" ? "!" : "\u2717";
