@@ -493,22 +493,28 @@ function runDoctor(paths, opts = {}) {
             });
         }
     }
-    // Context-pages cold-store usage (#5): warn when over (or approaching) the
-    // configured byte cap so growth is visible before it becomes operationally
-    // significant. Fail-safe: any error skips the check rather than failing doctor.
+    // Context-pages storage usage (#4/#5): warn when over (or approaching) EITHER
+    // the cold-object cap OR the aggregate whole-tree cap. The aggregate check is
+    // what catches metadata-only growth — in metadata-only mode the cold store is
+    // ~empty while ledger/telemetry grow append-only, which the cold cap alone
+    // never surfaces (#4). Fail-safe: any error skips the check.
     try {
         const s = (0, context_pages_1.storageReport)(paths);
-        const pct = s.max_bytes > 0 ? Math.round((s.cold_bytes / s.max_bytes) * 100) : 0;
-        const approaching = pct >= 80;
+        const coldPct = s.max_bytes > 0 ? Math.round((s.cold_bytes / s.max_bytes) * 100) : 0;
+        const coldApproaching = coldPct >= 80 && s.cold_objects > 0;
+        const aggApproaching = s.aggregate_max_bytes > 0 && s.aggregate_pct >= 80;
+        const warn = s.over_cap || s.aggregate_over_cap || coldApproaching || aggApproaching;
         checks.push({
             name: "context-pages",
-            status: s.over_cap || (approaching && s.cold_objects > 0) ? "warn" : "ok",
-            detail: s.cold_objects === 0
-                ? "cold store empty (raw persistence is metadata-only by default)"
-                : `${s.cold_objects} cold object(s), ${(0, context_pages_1.fmtBytes)(s.cold_bytes)} / ${(0, context_pages_1.fmtBytes)(s.max_bytes)} cap (${pct}%)` +
-                    (s.over_cap
-                        ? " — OVER CAP, run `th context-pages gc`"
-                        : approaching
+            status: warn ? "warn" : "ok",
+            detail: `total ${(0, context_pages_1.fmtBytes)(s.total_bytes)} / ${(0, context_pages_1.fmtBytes)(s.aggregate_max_bytes)} aggregate cap (${s.aggregate_pct}%); ` +
+                `cold ${s.cold_objects} obj ${(0, context_pages_1.fmtBytes)(s.cold_bytes)} / ${(0, context_pages_1.fmtBytes)(s.max_bytes)} (${coldPct}%); ` +
+                `ledger ${(0, context_pages_1.fmtBytes)(s.ledger_bytes)} + telemetry ${(0, context_pages_1.fmtBytes)(s.telemetry_bytes)} (append-only)` +
+                (s.aggregate_over_cap
+                    ? " — OVER AGGREGATE CAP, run `th context-pages purge` (metadata is append-only) or `gc` (cold)"
+                    : s.over_cap
+                        ? " — OVER COLD CAP, run `th context-pages gc`"
+                        : aggApproaching || coldApproaching
                             ? " — approaching cap"
                             : ""),
         });

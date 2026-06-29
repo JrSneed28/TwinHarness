@@ -190,8 +190,8 @@ Usage:
                                     Assemble the §9 handoff bundle (artifact Summary blocks + slice/REQ/file framing; --max-tokens bounds the pack)
   th context read --files-list <a,b,c> [--max-tokens <N>]
                                     Batch-read files under ONE token budget with deterministic truncation + per-file read receipts (C-11)
-  th context-pages page-status|residency|telemetry|savings|savings-detail|verify|rehydrate|compare [--session-id <id>] [--limit <n>] [--page-id <id>] [--logical-key <k>] [--baseline-id <id>] [--context-id <id>] [--transcript-path <path>]
-                                    Inspect the context-pages store (th_context MCP shares the same handler for these ops)
+  th context-pages page-status|residency|telemetry|savings|savings-detail|usage|verify|rehydrate|compare [--session-id <id>] [--limit <n>] [--page-id <id>] [--logical-key <k>] [--baseline-id <id>] [--context-id <id>] [--transcript-path <path>]
+                                    Inspect the context-pages store (th_context MCP shares the same handler for these ops; usage = aggregate storage report)
   th context-pages baseline [--session-id <id>]
                                     S0 token denominator; writes a RunArtifact corpus entry when --session-id is given (human-only)
   th context-pages gc [--age-days <n>]
@@ -1086,6 +1086,8 @@ function dispatch(parsed: ParsedArgs): CommandResult {
             session_id: parsed.flags.sessionId,
             transcript_path: parsed.flags.transcriptPath,
           }, paths);
+        case "usage":
+          return runContextPagesCommand("usage", {}, paths);
         // S1+: CLI + MCP shared ops.
         case "verify":
           return runContextPagesCommand("verify", {}, paths);
@@ -1113,7 +1115,7 @@ function dispatch(parsed: ParsedArgs): CommandResult {
           return runContextPagesCommand("purge", {}, paths);
         default:
           return failure({
-            human: `unknown 'context-pages' subcommand: ${sub ?? "(none)"}. Valid ops: page-status, residency, telemetry, savings, savings-detail, verify, rehydrate, compare, baseline, gc, purge`,
+            human: `unknown 'context-pages' subcommand: ${sub ?? "(none)"}. Valid ops: page-status, residency, telemetry, savings, savings-detail, usage, verify, rehydrate, compare, baseline, gc, purge`,
           });
       }
     // B5 — top-level convenience wrappers over the context-pages savings ops.

@@ -106,19 +106,45 @@ these results flow through the context store. By default only content hashes and
 metadata are persisted (metadata-only); raw tool output is written to the local cold
 store only when exact suppression or `TH_CONTEXT_RAW_STORE=1` is enabled.
 
-- **PostToolUse (`th hook posttool-context`)** — observes and persists tool results
-  matching `Read|Grep|Glob|Bash|WebFetch|mcp__.*__.*`.
-- **SessionStart (`th hook session-context`)** — restores persisted context at the
-  start of each session.
-- **UserPromptSubmit (`th hook prompt-context`)** — injects relevant context pages on
-  each user prompt.
-- **PreCompact (`th hook precompact-seal`)** — seals context before compaction so
-  nothing is lost across a context window rollover.
-- **SubagentStart (`th hook subagent-context`)** — provides context to newly spawned
-  sub-agents.
-- **SubagentStop seal (`th hook subagent-seal`)** — seals sub-agent context on exit so
-  results propagate back to the parent session.
-- **SessionEnd (`th hook session-end`)** — performs end-of-session context cleanup.
+> **Implementation status.** All seven hook events below are *registered* in
+> `hooks/hooks.json` and dispatch through the CLI. They are at different stages of
+> implementation — the table is grouped by what the code actually does today, not by
+> the eventual design. Several events are deliberately registered as fail-safe
+> passthrough stubs (they exit 0 with an empty `{}` decision and change nothing).
+> Do not assume context injection, sealing, or cleanup is active for an event listed
+> as "registered (passthrough)" or "planned". This is enforced by a behavior test
+> (`tests/hooks-implementation-state.doc-truth.test.ts`).
+
+**Implemented (active behavior):**
+
+- **PostToolUse (`th hook posttool-context`)** — observes tool results matching
+  `Read|Grep|Glob|Bash|WebFetch|mcp__.*__.*`, records a ledger entry + telemetry, and
+  (only when raw storage is enabled) persists content to the cold store. Returns the
+  original output unchanged.
+- **SessionStart (`th hook session-context`)** — reconciles the context epoch
+  (session-id change) and, after a compaction, injects a post-compact eager-rehydrate
+  capsule derived from `state.json`. Returns `{}` when there is nothing to inject.
+- **PreCompact (`th hook precompact-seal`)** — bumps the context epoch and invalidates
+  prior-epoch residency, and emits compaction telemetry so the next SessionStart can
+  eager-rehydrate. It does **not** yet seal an active manifest (see Planned).
+
+**Registered but currently passthrough (no behavior yet — exit 0, empty `{}`):**
+
+- **UserPromptSubmit (`th hook prompt-context`)** — *will* inject relevant context
+  pages on each user prompt. Currently a no-op stub.
+- **SubagentStart (`th hook subagent-context`)** — *will* provide context to newly
+  spawned sub-agents. Currently a no-op stub.
+- **SubagentStop (`th hook subagent-seal`)** — *will* seal sub-agent context on exit
+  and propagate results back to the parent. Currently a no-op stub.
+- **SessionEnd (`th hook session-end`)** — *will* perform end-of-session context
+  cleanup. Currently a no-op stub — **no cleanup happens at session end today.**
+
+**Planned (not yet implemented):**
+
+- Active manifest sealing on PreCompact (the `runHookPrecompactSeal` source carries a
+  TODO for this).
+- Full parent/child context propagation across SubagentStart/SubagentStop.
+- End-of-session lifecycle cleanup on SessionEnd.
 
 Hook wiring lives in `hooks/hooks.json`. See [The stop-gate](../../USAGE.md#the-stop-gate),
 [The write-gate](../../USAGE.md#the-write-gate), and [The hooks](../../USAGE.md#the-hooks).

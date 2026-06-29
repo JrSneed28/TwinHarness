@@ -68,10 +68,12 @@ const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const output_1 = require("../core/output");
 const context_page_1 = require("../core/context-page");
+const hash_1 = require("../core/hash");
 const context_ledger_1 = require("../core/context-ledger");
 const context_telemetry_1 = require("../core/context-telemetry");
 const jsonl_1 = require("../core/jsonl");
 const context_equivalence_1 = require("../core/context-equivalence");
+const context_residency_1 = require("../core/context-residency");
 const savings_1 = require("../core/savings");
 const pricing_1 = require("../core/pricing");
 const savings_render_1 = require("../core/savings-render");
@@ -80,7 +82,7 @@ const savings_render_1 = require("../core/savings-render");
 // ---------------------------------------------------------------------------
 const ALL_OPS = new Set([
     // S0 (CLI + MCP)
-    "page-status", "residency", "telemetry", "savings", "savings-detail",
+    "page-status", "residency", "telemetry", "savings", "savings-detail", "usage",
     // S1+ (CLI + MCP)
     "verify", "rehydrate", "compare",
     // Human-only (CLI only)
@@ -126,6 +128,30 @@ function listShardFiles(pagesRoot) {
     }
     catch {
         return [];
+    }
+}
+/**
+ * STRICT enumeration of ledger shard files for the audit path (#1). Unlike the
+ * tolerant {@link listShardFiles}, which swallows a directory-enumeration error
+ * and returns `[]` (making an UNREADABLE pages root look like an EMPTY store),
+ * this distinguishes three states so `verify` can report them honestly:
+ *   - absent:     the pages root does not exist (legitimately empty)
+ *   - !enumerable: the root exists but cannot be listed (e.g. it is a regular
+ *                  file → ENOTDIR, or a permissions error) → audit "unknown"
+ *   - enumerable: the listed shard file paths
+ */
+function enumerateShardFilesStrict(pagesRoot) {
+    if (!fs.existsSync(pagesRoot))
+        return { absent: true, enumerable: true, files: [] };
+    try {
+        const files = fs
+            .readdirSync(pagesRoot)
+            .filter((name) => name.startsWith("ledger-") && name.endsWith(".jsonl"))
+            .map((name) => path.join(pagesRoot, name));
+        return { absent: false, enumerable: true, files };
+    }
+    catch {
+        return { absent: false, enumerable: false, files: [] };
     }
 }
 /**
@@ -212,38 +238,116 @@ function handlePageStatus(_args, paths) {
 // ---------------------------------------------------------------------------
 // Handler: residency
 // ---------------------------------------------------------------------------
+/** Page-bearing ops that can carry residency (mirror RESIDENT_OPS in context-residency). */
+const RESIDENT_BEARING_OPS = new Set(["deliver", "attest", "delta", "rehydrate"]);
 /**
- * List pages currently considered resident (op="deliver"; at S0 no invalidations
- * exist, so all deliver records are resident).  Optionally filtered by session_id
- * when `args.session_id` is present.
+ * Group every ledger shard's records by scope, using the STRICT record validator
+ * so the records carry the prevHash/recordHash that deriveResidency's tamper
+ * check needs (the live reader uses the same validator). A shard whose records
+ * carry a non-empty agent_id is an agent scope (suppressible); an empty agent_id
+ * is the root shard (recorded but never suppressed — the "Phantom Root" gate).
+ */
+function readShardGroups(paths) {
+    const groups = [];
+    for (const file of listShardFiles((0, context_page_1.contextPagesRoot)(paths))) {
+        const records = (0, jsonl_1.readJsonlValues)(file, context_ledger_1.isValidLedgerRecord);
+        if (records.length === 0)
+            continue;
+        const session_id = records[0].session_id;
+        // resolveScope keys an agent shard by a present agent_id and the root shard
+        // by "root"; root-scope records are written with agent_id "". Mirror that.
+        const agentId = records[0].agent_id;
+        const isAgentScope = agentId !== "" && agentId !== "root";
+        const agentOrRoot = isAgentScope ? agentId : "root";
+        let nowTurn = 0;
+        for (const r of records)
+            if (r.seq > nowTurn)
+                nowTurn = r.seq;
+        groups.push({ scope: { session_id, agentOrRoot }, isAgentScope, records, nowTurn });
+    }
+    return groups;
+}
+/** Map a deriveResidency reason + scope onto a stable residency status string. */
+function residencyStatus(reason, isAgentScope) {
+    if (reason === "ok")
+        return isAgentScope ? "resident" : "root_not_suppressible";
+    if (reason.startsWith("ttl_expired"))
+        return "expired_ttl";
+    if (reason === "epoch_mismatch")
+        return "prior_epoch";
+    if (reason === "hash_mismatch")
+        return "invalidated"; // superseded by a newer content version
+    if (reason === "incomplete")
+        return "incomplete";
+    if (reason === "hash_tampered")
+        return "hash_tampered";
+    if (reason === "no_record")
+        return "no_record";
+    return "error";
+}
+/**
+ * Report pages and whether each is LIVE-RESIDENT — i.e. whether the real
+ * PostToolUse hook would currently suppress against it. This runs the SAME
+ * `deriveResidency` logic the live hook runs, per shard, against the current
+ * epoch and each shard's absolute current sequence, then applies the agent-only
+ * suppression restriction. A page delivered hundreds of turns ago, in a prior
+ * epoch, in the root shard, or superseded by a newer content hash is reported
+ * with the reason it is NOT resident — never as plain "resident". (#3)
  *
- * data: { resident_count, records: [{ page_id, logical_key, content_hash, est_tokens, reduction_kind, session_id, ts }] }
+ * Optionally filtered by `args.session_id`.
+ *
+ * data: {
+ *   epoch, resident_count, page_count,
+ *   pages: [{ page_id, logical_key, content_hash, est_tokens, reduction_kind,
+ *             session_id, scope, status, reason, ts }]
+ * }
  */
 function handleResidency(args, paths) {
     const sessionFilter = typeof args.session_id === "string" ? args.session_id : undefined;
-    let records = readAllLedgerRecords(paths).filter((r) => r.op === "deliver");
-    if (sessionFilter !== undefined) {
-        records = records.filter((r) => r.session_id === sessionFilter);
+    const epoch = (0, context_residency_1.currentEpoch)(paths).epoch;
+    const groups = readShardGroups(paths).filter((g) => sessionFilter === undefined || g.scope.session_id === sessionFilter);
+    const pages = [];
+    for (const g of groups) {
+        // Candidate pages = latest record per page_id among the page-bearing ops.
+        const byPageId = new Map();
+        for (const r of g.records) {
+            if (!RESIDENT_BEARING_OPS.has(r.op))
+                continue;
+            const prev = byPageId.get(r.page_id);
+            if (prev === undefined || r.seq > prev.seq)
+                byPageId.set(r.page_id, r);
+        }
+        for (const r of [...byPageId.values()].sort((a, b) => a.seq - b.seq)) {
+            // Identical inputs to the live hook's suppression check (same shard
+            // records, same scope, same epoch, same nowTurn).
+            const res = (0, context_residency_1.deriveResidency)(g.records, g.scope, r.logical_key, r.content_hash, epoch, g.nowTurn);
+            pages.push({
+                page_id: r.page_id,
+                logical_key: r.logical_key,
+                content_hash: r.content_hash,
+                est_tokens: r.est_tokens,
+                reduction_kind: r.reduction_kind,
+                session_id: r.session_id,
+                scope: g.isAgentScope ? "agent" : "root",
+                agent_or_root: g.scope.agentOrRoot,
+                // The hook only suppresses in an `agent` scope, so a residency-OK page in
+                // the root shard is reported observed-but-not-suppressible, not resident.
+                status: residencyStatus(res.reason, g.isAgentScope),
+                reason: res.reason,
+                ts: r.ts,
+            });
+        }
     }
-    // Deduplicate: if the same page_id appears multiple times, keep the latest.
-    const byPageId = new Map();
-    for (const r of records)
-        byPageId.set(r.page_id, r);
-    const resident = [...byPageId.values()].sort((a, b) => a.seq - b.seq);
-    const summary = resident.map((r) => ({
-        page_id: r.page_id,
-        logical_key: r.logical_key,
-        content_hash: r.content_hash,
-        est_tokens: r.est_tokens,
-        reduction_kind: r.reduction_kind,
-        session_id: r.session_id,
-        ts: r.ts,
-    }));
+    const residentCount = pages.filter((p) => p.status === "resident").length;
     const human = [
-        `Resident pages: ${resident.length}${sessionFilter ? ` (session: ${sessionFilter})` : ""}`,
-        ...summary.map((r) => `  ${r.page_id}  ${r.logical_key}  (${r.est_tokens} tok, ${r.reduction_kind})`),
+        `Resident pages: ${residentCount} of ${pages.length} observed` +
+            `${sessionFilter ? ` (session: ${sessionFilter})` : ""} — epoch ${epoch}`,
+        ...pages.map((p) => `  [${p.status}] ${p.page_id}  ${p.logical_key}  (${p.est_tokens} tok, ${p.scope})`),
     ].join("\n");
-    return (0, output_1.success)({ data: { resident_count: resident.length, records: summary }, human });
+    return (0, output_1.success)({
+        data: { epoch, resident_count: residentCount, page_count: pages.length, pages },
+        human,
+    });
 }
 // ---------------------------------------------------------------------------
 // Handler: telemetry
@@ -504,19 +608,88 @@ function handleBaseline(args, paths) {
  */
 function handleVerify(_args, paths) {
     try {
-        // Each shard is an independent GENESIS-anchored chain, so verify shard-by-shard.
-        // Flattening all shards into one verifyLedgerChain call false-failed with
-        // prev_mismatch the moment a second shard existed (its first record re-anchors
-        // at GENESIS, which never matches the prior shard's tail). (#5)
         const pagesRoot = (0, context_page_1.contextPagesRoot)(paths);
-        const shardFiles = listShardFiles(pagesRoot);
+        // #1 — STRICT audit, not the tolerant live read. The previous version used
+        // listShardFiles()/readJsonlValues(), both of which SILENTLY swallow
+        // failures: an unreadable pages root became an "empty" store, and a shard of
+        // pure garbage became a verified ZERO-record shard. Both are false-greens —
+        // corrupt or inaccessible evidence presented as proof. The audit reader
+        // counts every anomaly so we can map it to a distinct, honest status.
+        const enumerated = enumerateShardFilesStrict(pagesRoot);
+        // Pages root exists but cannot be enumerated (it is a regular file, or a
+        // permissions error) → UNKNOWN, never "empty". (Remaining problem A.)
+        if (!enumerated.enumerable) {
+            return (0, output_1.success)({
+                data: {
+                    ok: false,
+                    status: "unknown",
+                    verified: false,
+                    blocking: false,
+                    record_count: 0,
+                    reason: "pages_root_unreadable",
+                },
+                human: "Ledger chain: UNKNOWN — context-pages root exists but could not be enumerated (advisory, non-blocking).",
+            });
+        }
+        const shardFiles = enumerated.files;
         let recordCount = 0;
+        let totalLines = 0;
         for (const file of shardFiles) {
-            const records = (0, jsonl_1.readJsonlValues)(file, isLedgerRec);
-            recordCount += records.length;
-            const result = (0, context_ledger_1.verifyLedgerChain)(records);
+            const shard = path.basename(file);
+            // Strict per-shard audit: distinguishes unreadable from malformed from
+            // schema-invalid from clean. readJsonlAudit validates with the canonical
+            // strict ledger predicate (not the tolerant 6-field isLedgerRec).
+            const audit = (0, jsonl_1.readJsonlAudit)(file, context_ledger_1.isValidLedgerRecord);
+            // Shard exists but cannot be read (e.g. a directory where a file is
+            // expected) → UNKNOWN. (Required test: unreadable shard file.)
+            if (audit.read_error) {
+                return (0, output_1.success)({
+                    data: {
+                        ok: false,
+                        status: "unknown",
+                        verified: false,
+                        blocking: false,
+                        record_count: recordCount,
+                        shard_count: shardFiles.length,
+                        shard,
+                        reason: "shard_unreadable",
+                    },
+                    human: `Ledger chain: UNKNOWN — shard ${shard} could not be read (advisory, non-blocking).`,
+                });
+            }
+            // Any non-blank line that does not parse as JSON, or parses but fails the
+            // record schema, makes the shard BROKEN — never a verified zero-record
+            // shard. (Remaining problem B.)
+            if (audit.malformed_lines > 0 || audit.schema_invalid_lines > 0) {
+                const reason = audit.malformed_lines > 0 ? "malformed_json" : "schema_invalid";
+                return (0, output_1.success)({
+                    data: {
+                        ok: false,
+                        status: "broken",
+                        verified: false,
+                        record_count: recordCount,
+                        shard_count: shardFiles.length,
+                        shard,
+                        reason,
+                        diagnostics: {
+                            total_lines: audit.total_lines,
+                            valid_lines: audit.valid_lines,
+                            malformed_lines: audit.malformed_lines,
+                            schema_invalid_lines: audit.schema_invalid_lines,
+                        },
+                    },
+                    human: `Ledger chain: BROKEN — shard ${shard} has ${audit.malformed_lines} malformed and ` +
+                        `${audit.schema_invalid_lines} schema-invalid line(s) out of ${audit.total_lines}.`,
+                });
+            }
+            recordCount += audit.valid_lines;
+            totalLines += audit.total_lines;
+            // Each shard is an independent GENESIS-anchored chain, so verify
+            // shard-by-shard. Flattening all shards into one verifyLedgerChain call
+            // false-failed with prev_mismatch the moment a second shard existed (its
+            // first record re-anchors at GENESIS, never matching the prior tail).
+            const result = (0, context_ledger_1.verifyLedgerChain)(audit.values);
             if (!result.ok) {
-                const shard = path.basename(file);
                 return (0, output_1.success)({
                     data: {
                         ok: false,
@@ -532,9 +705,11 @@ function handleVerify(_args, paths) {
                 });
             }
         }
-        // Distinguish a genuinely-empty store from a verified one. An empty store has
-        // nothing to verify; a non-empty store passed every shard's chain check.
-        const empty = shardFiles.length === 0;
+        // Distinguish a genuinely-empty store (no records anywhere — whether the
+        // pages root is absent or only holds blank shards) from a verified one. With
+        // the audit guards above, reaching here with recordCount===0 means there was
+        // nothing corrupt to find, so "empty" is honest, not a false-green.
+        const empty = recordCount === 0;
         return (0, output_1.success)({
             data: {
                 ok: true,
@@ -542,9 +717,10 @@ function handleVerify(_args, paths) {
                 verified: true,
                 record_count: recordCount,
                 shard_count: shardFiles.length,
+                total_lines: totalLines,
             },
             human: empty
-                ? "Ledger chain: no ledger shards found (empty store)."
+                ? "Ledger chain: no ledger records found (empty store)."
                 : `Ledger chain: PASS — ${shardFiles.length} shard(s), ${recordCount} record(s) verified.`,
         });
     }
@@ -568,18 +744,104 @@ function handleVerify(_args, paths) {
         });
     }
 }
-// ---------------------------------------------------------------------------
-// Handler: rehydrate (S1+)
-// ---------------------------------------------------------------------------
+/**
+ * Decide how a GC-evicted / never-stored page may be recovered, based on the
+ * SOURCE KIND inferred from its ledger record. (#8)
+ *
+ * The old behavior returned "re-derive FULL from logical_key" for EVERY page,
+ * which is only safe for stable file content. Replaying a Bash command, an MCP
+ * call, a web fetch, or a test run may be nondeterministic, side-effecting, or
+ * require credentials no longer present — and the re-derived content may not even
+ * match the original content hash. So we NEVER instruct automatic replay of Bash
+ * or arbitrary MCP calls; those report "unavailable"/"requires_confirmation".
+ *
+ * source_kind is inferred from the normalized logical_key (see normalizeLocator):
+ *   - "hash-only" reduction → sensitive page; logical_key is hashed → unavailable.
+ *   - "bash|…"               → bash       → unavailable (nondeterministic/side-effecting)
+ *   - "test|…"               → test       → unavailable (time-sensitive output)
+ *   - "…|query=…"            → search     → requery (read-only; may differ if repo changed)
+ *   - "<tool>|{…}"/"<tool>|[…]" → mcp     → requires_confirmation (side effects / credentials)
+ *   - otherwise (no pipe)    → file/range/symbol → reread (re-readable from disk)
+ */
+function classifyRehydration(record) {
+    if (record.reduction_kind === "hash-only") {
+        return {
+            mode: "unavailable",
+            source_kind: "sensitive",
+            safe_to_replay: false,
+            reason: "sensitive page: logical key is hashed and the source cannot be reconstructed",
+        };
+    }
+    const lk = record.logical_key;
+    if (lk.startsWith("bash|")) {
+        return {
+            mode: "unavailable",
+            source_kind: "bash",
+            safe_to_replay: false,
+            reason: "command output may be nondeterministic or side-effecting; do not replay automatically",
+        };
+    }
+    if (lk.startsWith("test|")) {
+        return {
+            mode: "unavailable",
+            source_kind: "test",
+            safe_to_replay: false,
+            reason: "test/command output is time-sensitive and may differ on replay",
+        };
+    }
+    if (lk.startsWith("WebFetch|")) {
+        return {
+            mode: "requires_confirmation",
+            source_kind: "web",
+            safe_to_replay: false,
+            reason: "web content is time-variant: it may have changed or disappeared since the fetch; confirm before re-fetching",
+        };
+    }
+    if (lk.includes("|query=")) {
+        return {
+            mode: "requery",
+            source_kind: "search",
+            safe_to_replay: true,
+            reason: "read-only query; results may differ if the repository changed since delivery",
+        };
+    }
+    const pipe = lk.indexOf("|");
+    if (pipe > 0) {
+        const rhs = lk.slice(pipe + 1);
+        if (rhs.startsWith("{") || rhs.startsWith("[")) {
+            return {
+                mode: "requires_confirmation",
+                source_kind: "mcp",
+                safe_to_replay: false,
+                reason: "MCP call may have side effects or require credentials no longer available; confirm before replay",
+            };
+        }
+        return {
+            mode: "requires_confirmation",
+            source_kind: "unknown",
+            safe_to_replay: false,
+            reason: "source kind could not be determined from the logical key; confirm before replay",
+        };
+    }
+    return {
+        mode: "reread",
+        source_kind: "file",
+        safe_to_replay: true,
+        reason: "file content can be re-read from its path (logical_key)",
+    };
+}
 /**
  * Fetch a page's content from the CAS cold store by `page_id` or `logical_key`.
  * The most recent matching ledger record is used to resolve the `content_hash`.
  *
- * GC-evicted or sensitive objects (absent from cold store) → never errors:
- * returns `gc_evicted: true` with the `logical_key` so the caller can re-derive
- * the page FULL from its source (D-06 — never throws, fail-safe).
+ * When the cold object is absent (GC-evicted, sensitive, or never raw-stored),
+ * never errors: returns `raw_available:false` plus a source-kind-aware
+ * `rehydration` policy (#8) so the caller knows whether the page may be safely
+ * re-read, re-queried, or must be confirmed/left alone — Bash/MCP/web sources
+ * are NEVER auto-replayed.
  *
- * data: { found, gc_evicted, page_id, logical_key, content_hash, content?, est_tokens? }
+ * data: { found, raw_available, gc_evicted, page_id, logical_key, content_hash,
+ *         content?, est_tokens?, rehydration? }
  */
 function handleRehydrate(args, paths) {
     const pageId = typeof args.page_id === "string" && args.page_id.length > 0 ? args.page_id : undefined;
@@ -613,26 +875,69 @@ function handleRehydrate(args, paths) {
         // Try to fetch content from cold store.
         const content = (0, context_page_1.coldStoreGet)(paths, match.content_hash);
         if (content === undefined) {
-            // GC-evicted or sensitive: re-derive FULL from logical_key (D-06), never error.
+            // GC-evicted, sensitive, or never raw-stored: the recovery path depends on
+            // the SOURCE KIND. Never blanket-instruct "re-derive FULL" — that is only
+            // safe for files. (#8)
+            const policy = classifyRehydration(match);
+            const safeModes = {
+                reread: `Re-read source via logical_key "${match.logical_key}".`,
+                requery: `Re-run the read-only query "${match.logical_key}" (results may differ if the repo changed).`,
+                requires_confirmation: `Do NOT auto-replay. Confirm with a human before re-running "${match.logical_key}".`,
+                unavailable: `Raw content is unavailable and the source cannot be safely replayed (${policy.reason}).`,
+            };
             return (0, output_1.success)({
                 data: {
                     found: true,
+                    raw_available: false,
+                    // gc_evicted retained for back-compat; it means "no raw object present".
                     gc_evicted: true,
                     page_id: match.page_id,
                     logical_key: match.logical_key,
                     content_hash: match.content_hash,
-                    action: "re-derive FULL from logical_key",
+                    rehydration: {
+                        mode: policy.mode,
+                        source_kind: policy.source_kind,
+                        safe_to_replay: policy.safe_to_replay,
+                        reason: policy.reason,
+                    },
                 },
                 human: [
-                    `Page ${match.page_id} (${match.logical_key}): cold object absent (GC-evicted or sensitive).`,
-                    `Re-derive FULL: re-read source via logical_key "${match.logical_key}".`,
+                    `Page ${match.page_id} (${match.logical_key}): cold object absent.`,
+                    `Source kind: ${policy.source_kind} — ${policy.mode}. ${safeModes[policy.mode]}`,
                 ].join("\n"),
+            });
+        }
+        // Integrity check (#8): the cold object is addressed by content_hash, but a
+        // tampered/corrupted object could still be returned. Recompute and report a
+        // mismatch rather than silently handing back content that is not what the
+        // ledger attested.
+        const actualHash = (0, hash_1.hashContent)(content);
+        if (actualHash !== match.content_hash) {
+            return (0, output_1.success)({
+                data: {
+                    found: true,
+                    raw_available: false,
+                    content_hash_mismatch: true,
+                    page_id: match.page_id,
+                    logical_key: match.logical_key,
+                    content_hash: match.content_hash,
+                    actual_hash: actualHash,
+                    rehydration: {
+                        mode: "unavailable",
+                        source_kind: classifyRehydration(match).source_kind,
+                        safe_to_replay: false,
+                        reason: "stored cold object does not match the attested content hash (corruption/tamper)",
+                    },
+                },
+                human: `Page ${match.page_id} (${match.logical_key}): cold object hash mismatch — ` +
+                    `expected ${match.content_hash.slice(0, 12)}…, got ${actualHash.slice(0, 12)}…. Not returned.`,
             });
         }
         const estTokens = Math.ceil(content.length / 4);
         return (0, output_1.success)({
             data: {
                 found: true,
+                raw_available: true,
                 gc_evicted: false,
                 page_id: match.page_id,
                 logical_key: match.logical_key,
@@ -799,24 +1104,65 @@ function fmtBytes(n) {
     }
     return `${v.toFixed(1)} ${units[i]}`;
 }
+/** Recursive byte total of a directory subtree. Fail-safe: skips unreadable entries. */
+function dirSizeBytes(dir) {
+    let total = 0;
+    let entries;
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    }
+    catch {
+        return 0;
+    }
+    for (const e of entries) {
+        const p = path.join(dir, e.name);
+        try {
+            if (e.isDirectory())
+                total += dirSizeBytes(p);
+            else if (e.isFile())
+                total += fs.statSync(p).size;
+        }
+        catch {
+            // skip unreadable / racing entries
+        }
+    }
+    return total;
+}
 /**
- * Compute the context-pages storage usage report (#5): cold-object count and
- * bytes versus the configured cap, the oldest object's age, ledger shard count
- * and bytes (reported, never pruned — chain verification depends on them), and
- * whether raw cold storage is currently enabled. Used by `page-status` and the
- * `th doctor` storage check.
+ * Compute the context-pages storage usage report (#4/#5).
+ *
+ * Reports the cold-object count/bytes versus the cold cap AND the AGGREGATE
+ * whole-tree footprint, so metadata-only mode is no longer "invisible": the
+ * append-only `ledger-*.jsonl`, `telemetry.jsonl`, and `corpus/` are measured and
+ * counted toward an aggregate cap. The cold cap alone reported ~0 bytes in
+ * metadata-only mode while those files grew unbounded (#4). Used by
+ * `page-status`, the new `usage` op, and the `th doctor` storage check.
  */
 function storageReport(paths) {
     const caps = (0, context_page_1.coldStoreCaps)();
     const usage = (0, context_page_1.coldStoreUsage)(paths);
+    const root = (0, context_page_1.contextPagesRoot)(paths);
     let ledgerBytes = 0;
-    const shardFiles = listShardFiles((0, context_page_1.contextPagesRoot)(paths));
+    const shardFiles = listShardFiles(root);
     for (const f of shardFiles) {
         try {
             ledgerBytes += fs.statSync(f).size;
         }
         catch { /* skip */ }
     }
+    let telemetryBytes = 0;
+    try {
+        telemetryBytes = fs.statSync((0, context_telemetry_1.telemetryFilePath)(paths)).size;
+    }
+    catch { /* absent */ }
+    const corpusBytes = dirSizeBytes(path.join(root, "corpus"));
+    // Whole tree minus cold objects = all append-only metadata + markers. Computing
+    // total from the tree (not a fixed file list) means new metadata files are
+    // counted automatically and can never silently escape the aggregate cap.
+    const totalBytes = dirSizeBytes(root);
+    const metadataBytes = Math.max(0, totalBytes - usage.total_bytes);
+    const aggregateMax = (0, context_page_1.aggregateStoreCapBytes)();
+    const aggregatePct = aggregateMax > 0 ? Math.round((totalBytes / aggregateMax) * 100) : 0;
     return {
         cold_objects: usage.object_count,
         cold_bytes: usage.total_bytes,
@@ -828,8 +1174,62 @@ function storageReport(paths) {
         max_age_days: Math.round(caps.maxAgeMs / (24 * 60 * 60 * 1000)),
         ledger_shards: shardFiles.length,
         ledger_bytes: ledgerBytes,
+        telemetry_bytes: telemetryBytes,
+        corpus_bytes: corpusBytes,
+        metadata_bytes: metadataBytes,
+        total_bytes: totalBytes,
+        aggregate_max_bytes: aggregateMax,
+        aggregate_over_cap: aggregateMax > 0 && totalBytes > aggregateMax,
+        aggregate_pct: aggregatePct,
         raw_store_enabled: (0, context_page_1.rawColdStoreEnabled)(),
     };
+}
+// ---------------------------------------------------------------------------
+// Handler: usage (#4) — aggregate storage report + retention guidance
+// ---------------------------------------------------------------------------
+/**
+ * Aggregate ContextPages storage report (#4). Surfaces the WHOLE-tree footprint
+ * — cold objects PLUS the append-only ledger, telemetry, and corpus metadata —
+ * against the aggregate cap, so metadata-only mode (0 cold bytes) is no longer
+ * "invisible" while ledger/telemetry grow. Read-only (CLI + MCP).
+ *
+ * NOTE (honest disclosure): ledger and telemetry are currently append-only — the
+ * `gc` op prunes ONLY cold objects, never metadata. The aggregate cap is a
+ * WARNING threshold, not an enforced rotation. To reclaim metadata today, use
+ * `th context-pages purge` (clears everything) — automatic rotation/archival of
+ * sealed ledger segments is planned, not yet implemented.
+ *
+ * data: { storage, append_only, guidance }
+ */
+function handleUsage(_args, paths) {
+    const storage = storageReport(paths);
+    const guidance = storage.aggregate_over_cap
+        ? "OVER aggregate cap — run `th context-pages gc` (cold objects) and/or `th context-pages purge` (all data; metadata is append-only)."
+        : storage.aggregate_pct >= 80 && storage.aggregate_max_bytes > 0
+            ? "Approaching aggregate cap — cold objects are GC-eligible; ledger/telemetry are append-only (purge to reclaim)."
+            : "Within aggregate budget.";
+    const human = [
+        `Context-pages storage (aggregate):`,
+        `  Total        : ${fmtBytes(storage.total_bytes)} / cap ${fmtBytes(storage.aggregate_max_bytes)} (${storage.aggregate_pct}%)` +
+            `${storage.aggregate_over_cap ? "  [OVER AGGREGATE CAP]" : ""}`,
+        `  Cold objects : ${storage.cold_objects} (${fmtBytes(storage.cold_bytes)}) / cold cap ${fmtBytes(storage.max_bytes)}` +
+            `${storage.over_cap ? "  [OVER COLD CAP]" : ""}`,
+        `  Ledger       : ${fmtBytes(storage.ledger_bytes)} (${storage.ledger_shards} shard(s), append-only)`,
+        `  Telemetry    : ${fmtBytes(storage.telemetry_bytes)} (append-only)`,
+        `  Corpus       : ${fmtBytes(storage.corpus_bytes)}`,
+        `  Metadata tot : ${fmtBytes(storage.metadata_bytes)} (ledger + telemetry + corpus + markers)`,
+        `  Raw storage  : ${storage.raw_store_enabled ? "ENABLED" : "disabled (metadata-only default)"}`,
+        `  Guidance     : ${guidance}`,
+    ].join("\n");
+    return (0, output_1.success)({
+        data: {
+            storage,
+            // Explicit, machine-readable honesty about what GC can and cannot reclaim.
+            append_only: ["ledger-*.jsonl", "telemetry.jsonl"],
+            guidance,
+        },
+        human,
+    });
 }
 // ---------------------------------------------------------------------------
 // Handler: purge (CLI-only / human-only)
@@ -870,6 +1270,7 @@ const HANDLERS = {
     telemetry: handleTelemetry,
     savings: handleSavings,
     "savings-detail": handleSavingsDetail,
+    usage: handleUsage,
     // S1+ (CLI + MCP)
     verify: handleVerify,
     rehydrate: handleRehydrate,

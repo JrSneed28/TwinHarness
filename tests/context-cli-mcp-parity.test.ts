@@ -27,7 +27,7 @@ afterEach(() => tp?.cleanup());
  */
 const MCP_OPS = [
   // S0
-  "page-status", "residency", "telemetry", "savings", "savings-detail",
+  "page-status", "residency", "telemetry", "savings", "savings-detail", "usage",
   // S1+ (verify/rehydrate/compare)
   "verify", "rehydrate", "compare",
 ] as const;
@@ -124,7 +124,7 @@ describe("N1: th_context MCP registration", () => {
  * rehydrate/compare require args (page_id/baseline_id) and return ok:false
  * without them — they are tested individually below.
  */
-const NO_ARG_OPS = ["page-status", "residency", "telemetry", "savings", "verify"] as const;
+const NO_ARG_OPS = ["page-status", "residency", "telemetry", "savings", "usage", "verify"] as const;
 
 describe("AC-10/D-19: CLI↔MCP parity — shared pure handler contract", () => {
   for (const op of NO_ARG_OPS) {

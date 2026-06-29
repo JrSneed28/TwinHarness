@@ -7,6 +7,66 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+ContextPages preview hardening. The on-by-default PostToolUse observation hook
+changed from raw-plaintext persistence to **metadata-only by default**, plus a
+batch of correctness, lifecycle, and documentation-accuracy fixes. Preview-build
+users should note the privacy-default change in particular.
+
+### Added
+- `TH_CONTEXT_RAW_STORE=1` — explicit opt-in for raw cold-store persistence
+  (OBSERVE is metadata-only without it).
+- Cold-store retention: size and age caps (`TH_CONTEXT_MAX_BYTES`,
+  `TH_CONTEXT_MAX_AGE_DAYS`; defaults 256 MiB / 14 days; `0` disables a cap),
+  oldest-first eviction, and lazy throttled enforcement on the hot path.
+- Aggregate storage accounting (`th context-pages usage`, also in the `th_context`
+  MCP tool): reports the whole-tree footprint — cold objects plus the append-only
+  ledger, telemetry, and corpus — against a new aggregate cap
+  (`TH_CONTEXT_TOTAL_MAX_BYTES`, default 512 MiB), and discloses what `gc` can and
+  cannot reclaim.
+- `th doctor` ContextPages storage warning (cold cap **and** aggregate cap).
+- `page-status` storage report block.
+- Hook performance benchmarks: in-process (`npm run bench:hook`) and end-to-end
+  subprocess (`npm run bench:hook:subprocess`), plus the
+  [performance guide](docs/guide/context-pages-perf.md).
+- Regression suites for absolute-sequence TTL, agent/root isolation, the strict
+  verify audit reader, the live-residency command, source-kind rehydration, and
+  doc-truth guards for hook implementation state and privacy defaults.
+
+### Changed
+- ContextPages OBSERVE mode is **metadata-only by default**; raw output is
+  persisted only on explicit opt-in.
+- Root-scoped pages are no longer eligible for exact suppression (the "Phantom
+  Root" gate — suppression requires a positively-attributed agent scope).
+- Savings output is consistently scoped by session when a `session_id` is given.
+- `th context-pages residency` now reports **actual live residency** — it applies
+  the same epoch / TTL / absolute-sequence / agent-root-scope / content-hash logic
+  the PostToolUse hook uses, with a per-page status and reason — instead of a raw
+  `op=deliver` projection.
+- `rehydrate` is **source-kind-aware**: files are re-readable and read-only
+  queries re-runnable, but Bash/MCP/web sources are never auto-replayed
+  (nondeterministic, side-effecting, or credential-bound); a present cold object
+  is integrity-checked against the attested content hash before it is returned.
+- Cold-store cap env vars honor the documented zero-disables contract (`0` now
+  disables a cap instead of silently falling back to the default).
+- Architecture / README / advanced-guide ContextPages docs corrected to match the
+  implementation (hook states grouped Implemented / Registered-passthrough /
+  Planned; privacy defaults; retention).
+
+### Fixed
+- Corrected TTL calculations on bounded ledger tails (absolute sequence, not tail
+  length).
+- Prevented cross-agent suppression from unidentified root records.
+- `verify` no longer reports caught read errors as successful verification, and a
+  new strict audit reader prevents an unreadable/structurally-invalid store from
+  being reported as `empty` or `verified` (unreadable → `unknown`; malformed /
+  schema-invalid / broken-chain → `broken`).
+- MCP tool counts and hook registration counts are mechanically checked.
+
+### Security
+- Raw PostToolUse output is no longer copied to plaintext storage by default
+  (metadata-only OBSERVE); raw persistence is opt-in and bounded by retention
+  caps.
+
 ## [1.0.0] — 2026-06-26
 
 First stable release. The public `th` CLI and the MCP tool surface are now considered stable: within the 1.x line, breaking changes to documented CLI commands and flags, MCP tool names and schemas, and the `state.json` schema follow semantic versioning. New beginner-oriented guides live under [`docs/guide/`](docs/guide/getting-started.md); [`USAGE.md`](USAGE.md) remains the exhaustive reference.

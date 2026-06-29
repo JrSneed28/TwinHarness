@@ -47,7 +47,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RETENTION_THROTTLE_MS = exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS = exports.COLD_STORE_DEFAULT_MAX_BYTES = exports.CONTEXT_PAGE_SCHEMA_VERSION = void 0;
+exports.RETENTION_THROTTLE_MS = exports.CONTEXT_STORE_DEFAULT_TOTAL_MAX_BYTES = exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS = exports.COLD_STORE_DEFAULT_MAX_BYTES = exports.CONTEXT_PAGE_SCHEMA_VERSION = void 0;
 exports.computePageId = computePageId;
 exports.normalizeLocator = normalizeLocator;
 exports.classifySensitive = classifySensitive;
@@ -55,6 +55,7 @@ exports.contextPagesRoot = contextPagesRoot;
 exports.coldStorePut = coldStorePut;
 exports.coldStoreGet = coldStoreGet;
 exports.rawColdStoreEnabled = rawColdStoreEnabled;
+exports.aggregateStoreCapBytes = aggregateStoreCapBytes;
 exports.coldStoreCaps = coldStoreCaps;
 exports.coldStoreUsage = coldStoreUsage;
 exports.coldStoreEnforceRetention = coldStoreEnforceRetention;
@@ -402,16 +403,45 @@ function rawColdStoreEnabled(env = process.env) {
 /** Default cold-store retention caps (overridable via env). */
 exports.COLD_STORE_DEFAULT_MAX_BYTES = 256 * 1024 * 1024; // 256 MB
 exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS = 14;
-function positiveIntEnv(raw, fallback) {
+/**
+ * Default AGGREGATE store cap (#4): the whole context-pages tree — cold objects
+ * PLUS the append-only ledger, telemetry, and corpus metadata. The cold cap
+ * alone leaves metadata-only mode unbounded (0 cold bytes while ledger/telemetry
+ * grow indefinitely), so this aggregate ceiling is what `th doctor` /
+ * `th context-pages usage` warn against. 0 disables. Overridable via
+ * `TH_CONTEXT_TOTAL_MAX_BYTES`.
+ */
+exports.CONTEXT_STORE_DEFAULT_TOTAL_MAX_BYTES = 512 * 1024 * 1024; // 512 MB
+/** Resolve the aggregate (whole-tree) storage cap in bytes (0 disables). */
+function aggregateStoreCapBytes(env = process.env) {
+    return nonNegativeIntEnv(env.TH_CONTEXT_TOTAL_MAX_BYTES, exports.CONTEXT_STORE_DEFAULT_TOTAL_MAX_BYTES);
+}
+/**
+ * Parse a NON-NEGATIVE integer from an env var (#7). Zero is a VALID, meaningful
+ * value — it disables the corresponding cap, exactly as the {@link ColdStoreCaps}
+ * doc-contract promises. The previous `positiveIntEnv` rejected zero and silently
+ * fell back to the default, so `TH_CONTEXT_MAX_BYTES=0` did NOT disable the size
+ * cap. Contract here:
+ *   - undefined          → fallback (default)
+ *   - 0                  → 0 (cap disabled — preserved through coldStoreCaps)
+ *   - positive integer   → that value
+ *   - positive decimal   → floored
+ *   - negative / NaN / non-numeric → fallback (default; a cap can't be "negative")
+ */
+function nonNegativeIntEnv(raw, fallback) {
     if (raw === undefined)
         return fallback;
     const n = Number(raw);
-    return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+    if (!Number.isFinite(n) || n < 0)
+        return fallback;
+    return Math.floor(n);
 }
 /** Resolve the cold-store retention caps from env (with defaults). */
 function coldStoreCaps(env = process.env) {
-    const maxBytes = positiveIntEnv(env.TH_CONTEXT_MAX_BYTES, exports.COLD_STORE_DEFAULT_MAX_BYTES);
-    const maxAgeDays = positiveIntEnv(env.TH_CONTEXT_MAX_AGE_DAYS, exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS);
+    const maxBytes = nonNegativeIntEnv(env.TH_CONTEXT_MAX_BYTES, exports.COLD_STORE_DEFAULT_MAX_BYTES);
+    const maxAgeDays = nonNegativeIntEnv(env.TH_CONTEXT_MAX_AGE_DAYS, exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS);
+    // 0 is preserved (disables the cap); the retention/report consumers all guard
+    // on `> 0`, so maxAgeMs = 0 disables the age cap just like maxBytes = 0.
     return { maxBytes, maxAgeMs: maxAgeDays * 24 * 60 * 60 * 1000 };
 }
 /** Enumerate cold object files under `objects/<hh>/<hash>` with size + mtime. */

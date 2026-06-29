@@ -125,33 +125,50 @@ goes over budget, the Orchestrator runs a Continue/Fresh handoff. See
 ## Context-pages: what lands on disk
 
 ContextPages ships an **on-by-default PostToolUse hook** (registered in `hooks/hooks.json`,
-matching `Read|Grep|Glob|Bash|WebFetch|mcp__.*`). By default it runs in **OBSERVE** mode:
-it does **not** alter any tool output, but it **does** persist data locally under
-`.twinharness/context-pages/`. `.twinharness/` is gitignored, so nothing is committed, and
-nothing leaves the machine — but the cold store is **local plaintext**, so it is worth
-knowing what is written and how to clear it.
+matching `Read|Grep|Glob|Bash|WebFetch|mcp__.*`). By default it runs in **OBSERVE** mode and
+is **metadata-only**: it does **not** alter any tool output, and it does **not** copy raw
+tool output to disk. It persists *metadata* locally under `.twinharness/context-pages/`.
+`.twinharness/` is gitignored, so nothing is committed and nothing leaves the machine.
 
-What gets persisted by default:
+What gets persisted **by default (metadata-only)**:
 
-- **`objects/<hh>/<hash>`** — the raw text of *non-sensitive* tool outputs (file reads,
-  bash output, web/MCP results), stored **in plaintext** in a content-addressed cold store.
-- **`ledger-*.jsonl`, `telemetry.jsonl`, `epoch.json`** — counts, hashes, and labels only.
-  No raw content lives here; when a payload is sensitive, only its short hash is recorded.
+- **`ledger-*.jsonl`, `telemetry.jsonl`, `epoch.json`** — content **hashes**, identifiers,
+  counts, categories, and labels only. **No raw tool output lives here.** When a payload is
+  sensitive, only its short hash is recorded.
+- **`objects/<hh>/<hash>` (the cold store) is empty by default** — raw bytes are written
+  there only when you opt in (below).
 
-**Secret redaction (best-effort).** Sensitive content — detected by a path denylist plus a
-secret-regex classifier, biased **fail-toward-sensitive** — is **never** written to the cold
-store; only its hash is recorded in the ledger. Detection is **best-effort** and may miss
-unusual secret shapes, so treat the cold store as potentially holding any output you read or
-ran. **Retention is until you clean it up**: objects persist until `gc` or `purge` (below).
+What requires **explicit opt-in** before any raw bytes land on disk:
+
+- **`TH_CONTEXT_RAW_STORE=1`** — persist the raw text of *non-sensitive* tool outputs (file
+  reads, bash output, web/MCP results) into the content-addressed cold store. This is the
+  only switch whose purpose is raw persistence.
+- **`TH_EXACT_SUPPRESS=1`** — enables actual content suppression; because suppression must be
+  able to rehydrate a page, it also persists the raw bytes it needs. Off by default.
+
+Once raw storage is enabled, the cold store is **local plaintext**, so the same caveats apply:
+
+- **Secret redaction (best-effort).** Sensitive content — detected by a path denylist plus a
+  secret-regex classifier, biased **fail-toward-sensitive** — is **never** written to the cold
+  store; only its hash is recorded. Detection is best-effort and may miss unusual secret
+  shapes, so treat the cold store as potentially holding any output you read or ran.
+- **Retention.** Raw objects are bounded by **size and age caps** (defaults **256 MiB** /
+  **14 days**; override with `TH_CONTEXT_MAX_BYTES` / `TH_CONTEXT_MAX_AGE_DAYS`, `0` disables a
+  cap). Oldest-first eviction runs on `gc` and lazily on the hot path. The **ledger and
+  telemetry are append-only** today — they grow until you `purge`; inspect the whole-tree
+  footprint and the aggregate cap with `th context-pages usage`.
 
 Control knobs:
 
 - **`TH_DISABLE_CONTEXT_PAGES=1`** — full passthrough; the hook records **nothing** (no I/O).
-- **OBSERVE vs suppress.** The default is OBSERVE: data is recorded but tool output is never
-  altered. **`TH_EXACT_SUPPRESS=1`** opts in to actual content suppression (off by default).
+- **OBSERVE vs suppress.** The default is OBSERVE: metadata is recorded but tool output is
+  never altered. **`TH_EXACT_SUPPRESS=1`** opts in to actual content suppression (off by default).
+- **`th context-pages usage`** — aggregate storage report (cold objects + append-only
+  ledger/telemetry/corpus) against the caps; shows what `gc` can and cannot reclaim.
 - **`th context-pages gc [--age-days <n>]`** — remove cold CAS objects older than *n* days
-  (default 5). It **never** removes ledger records. Human-only.
-- **`th context-pages purge`** — remove **all** context-pages data. Human-only, destructive.
+  (default 5) and enforce the size cap. It **never** removes ledger records. Human-only.
+- **`th context-pages purge`** — remove **all** context-pages data (the only way to reclaim
+  append-only ledger/telemetry today). Human-only, destructive.
 
 See [Token-savings display](../../README.md#the-th-cli) for how the OBSERVE-mode savings are
 reported, and [SECURITY.md](../../SECURITY.md) for the trust model.

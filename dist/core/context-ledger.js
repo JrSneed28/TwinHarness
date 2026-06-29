@@ -48,6 +48,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.contextPagesDir = contextPagesDir;
 exports.ledgerShardPath = ledgerShardPath;
 exports.computeLedgerRecordHash = computeLedgerRecordHash;
+exports.isValidLedgerRecord = isValidLedgerRecord;
 exports.readShardRecords = readShardRecords;
 exports.readShardRecordsTail = readShardRecordsTail;
 exports.readLastShardRecordHash = readLastShardRecordHash;

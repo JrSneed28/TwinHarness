@@ -30,7 +30,8 @@
     "verify": "npm run typecheck && npm run build && npm test && git diff --exit-code dist/",
     "dist-sync-check": "git diff --exit-code dist/",
     "prepare": "git config core.hooksPath .githooks || exit 0",
-    "bench:hook": "node scripts/bench-hook.cjs"
+    "bench:hook": "node scripts/bench-hook.cjs",
+    "bench:hook:subprocess": "node scripts/bench-hook-subprocess.cjs"
   },
   "engines": {
     "node": ">=20"
