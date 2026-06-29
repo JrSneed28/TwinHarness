@@ -242,6 +242,31 @@ describe("DOC-TRUTH: docs match mechanical reality", () => {
   });
 
   // -------------------------------------------------------------------------
+  // GUIDE DOCS TOOL-COUNT GUARD (issue #8): MCP tool-count numeric claims in
+  // docs/guide/architecture.md, docs/guide/advanced.md, and
+  // docs/guide/cli-reference.md must equal TOOL_DEFS.length. Patterns checked:
+  //   - "(\d+)[- ]tool"  e.g. "82-tool surface" or "82 tool"
+  //   - "all (\d+)"      e.g. "all 82"
+  // -------------------------------------------------------------------------
+  it.each([
+    "docs/guide/architecture.md",
+    "docs/guide/advanced.md",
+    "docs/guide/cli-reference.md",
+  ])("%s: every MCP tool-count claim equals TOOL_DEFS.length", (rel) => {
+    const content = read(rel);
+    const toolMentions = [
+      ...content.matchAll(/(\d+)[- ]tool\b/gi),
+      ...content.matchAll(/\ball\s+(\d+)\b/gi),
+    ];
+    for (const m of toolMentions) {
+      expect(
+        Number(m[1]),
+        `${rel} says "${m[0].trim()}" but TOOL_DEFS.length is ${TOOL_DEFS.length}`,
+      ).toBe(TOOL_DEFS.length);
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // SKIP-COUNT TRUTH (P1-3 / DOC-003≡TEST-002): the suite has exactly ONE
   // platform-conditional skip (tests/concurrency.test.ts — skipIf win32||root).
   // verify/coverage-report no longer use POSIX-only commands, so the old

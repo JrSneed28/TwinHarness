@@ -126,10 +126,10 @@ broken coverage map. See [Exit codes](../../USAGE.md#exit-codes) and
 
 ## MCP parity
 
-Every read/compute verb is also exposed as a typed MCP tool (an 81-tool surface at
+Every read/compute verb is also exposed as a typed MCP tool (an 82-tool surface at
 parity with the CLI) so sub-agents call it natively instead of shelling out. See
 [advanced.md](./advanced.md#the-mcp-surface) and
-[MCP tools](../../USAGE.md#mcp-tools-registered-count-81).
+[MCP tools](../../USAGE.md#mcp-tools-registered-count-82).
 
 ## See also
 

@@ -27,7 +27,7 @@ The governing rule that decides which half owns a thing:
 > anything touching security, money, data integrity, or migrations — gets **human
 > gates**. Everything else flows.
 
-The same surface is exposed two ways at parity: as the `th` CLI and as an 81-tool MCP
+The same surface is exposed two ways at parity: as the `th` CLI and as an 82-tool MCP
 server (`src/mcp-server.ts`, bundled separately). Agents prefer the typed MCP tools;
 humans and CI use the CLI. Parity between them is itself enforced by tests.
 
@@ -79,20 +79,46 @@ is what makes the artifacts trustworthy after a build, not just before one. See
 
 ## The hooks: enforcement at the harness boundary
 
-Three Claude Code hooks turn policy into something the session physically cannot skip.
-They are fail-open by design: with no `.twinharness/state.json`, every hook is inert,
-so non-TwinHarness projects are completely unaffected.
+Nine Claude Code hook event types (11 command entries) turn policy into something the
+session physically cannot skip. They are fail-open by design: with no
+`.twinharness/state.json`, every hook is inert, so non-TwinHarness projects are
+completely unaffected.
+
+### Governance / enforcement hooks
 
 - **Stop hook (`th hook stop-gate`)** — fires when Claude tries to end its turn. It
   blocks "done" while state is invalid, a blocking requirement-drift is open, or
   (at `final-verification`) slices are unbuilt or the verify suite is missing/red. It
   blocks at most once per stop sequence to avoid spinning the model.
-- **SubagentStop hook** — the same discipline applied when a spawned agent tries to
-  finish, so a sub-agent cannot declare success past an open gate.
-- **PreToolUse hook (`th hook pretool-gate`)** — the **write-gate**. Before every
+- **SubagentStop hook (`th hook subagent-stop`)** — the same discipline applied when a
+  spawned agent tries to finish, so a sub-agent cannot declare success past an open gate.
+- **PreToolUse write-gate (`th hook pretool-gate`)** — fires before every
   `Write`/`Edit`/`NotebookEdit` (and, as defense-in-depth, obvious `Bash`-mediated
-  writes) it blocks implementation files from being written before the pre-build
+  writes). It blocks implementation files from being written before the pre-build
   gates clear, and polices slice/component boundaries during the build.
+
+### Context observation / residency hooks (ContextPages subsystem)
+
+These hooks observe and persist context so it survives compaction and agent handoffs.
+Tool results from `Read`, `Grep`, `Glob`, `Bash`, `WebFetch`, and all MCP tools are
+observed by the PostToolUse hook — security and privacy reviewers should be aware that
+these results flow through the context store. By default only content hashes and
+metadata are persisted (metadata-only); raw tool output is written to the local cold
+store only when exact suppression or `TH_CONTEXT_RAW_STORE=1` is enabled.
+
+- **PostToolUse (`th hook posttool-context`)** — observes and persists tool results
+  matching `Read|Grep|Glob|Bash|WebFetch|mcp__.*__.*`.
+- **SessionStart (`th hook session-context`)** — restores persisted context at the
+  start of each session.
+- **UserPromptSubmit (`th hook prompt-context`)** — injects relevant context pages on
+  each user prompt.
+- **PreCompact (`th hook precompact-seal`)** — seals context before compaction so
+  nothing is lost across a context window rollover.
+- **SubagentStart (`th hook subagent-context`)** — provides context to newly spawned
+  sub-agents.
+- **SubagentStop seal (`th hook subagent-seal`)** — seals sub-agent context on exit so
+  results propagate back to the parent session.
+- **SessionEnd (`th hook session-end`)** — performs end-of-session context cleanup.
 
 Hook wiring lives in `hooks/hooks.json`. See [The stop-gate](../../USAGE.md#the-stop-gate),
 [The write-gate](../../USAGE.md#the-write-gate), and [The hooks](../../USAGE.md#the-hooks).

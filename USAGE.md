@@ -66,7 +66,7 @@ You don't need to memorize these — but every section below assumes them. Skim 
 | **Coverage gate** | `th coverage check` mechanically blocks the build from starting until every in-scope REQ-ID maps to ≥ 1 slice **and** ≥ 1 test. |
 | **Stop-gate** | A Claude Code *Stop hook* that refuses to let the session claim "done" while state is invalid, a blocking drift is open, or final slices/tests aren't finished. It's code, not a reminder. |
 | **Write-gate** | A Claude Code *PreToolUse hook* that blocks file writes before the pre-build gates clear, and polices slice boundaries during the build. Fail-open: it never touches non-TwinHarness projects. |
-| **MCP tools** | The same `th` read/compute surface exposed as **73** typed `th_*` tools so agents can call it natively over MCP instead of shelling out. |
+| **MCP tools** | The same `th` read/compute surface exposed as **82** typed `th_*` tools so agents can call it natively over MCP instead of shelling out. |
 
 ---
 
@@ -185,7 +185,7 @@ inspection commands themselves:
   decision gate).
 - **Run `th` straight** for scripting/debugging: `node <plugin-or-clone>/dist/cli.js <command>` — the
   full surface is in [Part 3](#part-3--the-th-cli-advanced).
-- **Let agents call it over MCP:** the 62 `th_*` MCP tools expose the same read/compute surface to
+- **Let agents call it over MCP:** the 82 `th_*` MCP tools expose the same read/compute surface to
   sub-agents natively (no shelling out).
 - **Wire the exit-code gates into CI** so a drifted artifact/test contract fails the build — see
   [Using `th` in CI](#using-th-in-ci).
