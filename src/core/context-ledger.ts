@@ -159,7 +159,7 @@ const OP_VALUES = new Set<LedgerOp>([
   "epoch-bump",
 ]);
 
-function isValidLedgerRecord(parsed: unknown): parsed is LedgerRecord {
+export function isValidLedgerRecord(parsed: unknown): parsed is LedgerRecord {
   if (typeof parsed !== "object" || parsed === null) return false;
   const r = parsed as Record<string, unknown>;
   // seq/epoch are turn-monotone ordinals consumed by deriveResidency's TTL

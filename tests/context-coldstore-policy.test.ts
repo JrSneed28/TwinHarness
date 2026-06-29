@@ -20,7 +20,10 @@ import {
   coldStoreGet,
   coldStoreUsage,
   coldStoreEnforceRetention,
+  coldStoreCaps,
   contextPagesRoot,
+  COLD_STORE_DEFAULT_MAX_BYTES,
+  COLD_STORE_DEFAULT_MAX_AGE_DAYS,
 } from "../src/core/context-page";
 import { runHookPostToolContext } from "../src/commands/hook";
 import { runContextPagesCommand } from "../src/commands/context-pages";
@@ -190,5 +193,52 @@ describe("issue #5 — cold-store retention caps and usage report", () => {
       if (prev === undefined) delete process.env.TH_CONTEXT_MAX_BYTES;
       else process.env.TH_CONTEXT_MAX_BYTES = prev;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #7 — env cap parsing matches the documented zero-disables contract
+// ---------------------------------------------------------------------------
+
+describe("issue #7 — coldStoreCaps env parsing honors the zero-disables contract", () => {
+  const DEFAULT_BYTES = COLD_STORE_DEFAULT_MAX_BYTES;
+  const DEFAULT_AGE_MS = COLD_STORE_DEFAULT_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+
+  it("undefined env → defaults", () => {
+    const caps = coldStoreCaps({} as NodeJS.ProcessEnv);
+    expect(caps.maxBytes).toBe(DEFAULT_BYTES);
+    expect(caps.maxAgeMs).toBe(DEFAULT_AGE_MS);
+  });
+
+  it("positive value overrides the default", () => {
+    const caps = coldStoreCaps({ TH_CONTEXT_MAX_BYTES: "500", TH_CONTEXT_MAX_AGE_DAYS: "3" } as NodeJS.ProcessEnv);
+    expect(caps.maxBytes).toBe(500);
+    expect(caps.maxAgeMs).toBe(3 * 24 * 60 * 60 * 1000);
+  });
+
+  it("zero DISABLES the cap (0 preserved, not coerced to default)", () => {
+    const caps = coldStoreCaps({ TH_CONTEXT_MAX_BYTES: "0", TH_CONTEXT_MAX_AGE_DAYS: "0" } as NodeJS.ProcessEnv);
+    expect(caps.maxBytes).toBe(0);
+    expect(caps.maxAgeMs).toBe(0);
+  });
+
+  it("a zero size cap disables eviction in coldStoreEnforceRetention", () => {
+    const { paths, root } = makeTmp();
+    cleanup = () => fs.rmSync(root, { recursive: true, force: true });
+    coldStorePut(paths, "x".repeat(100), false);
+    coldStorePut(paths, "y".repeat(100), false);
+    // maxBytes 0 (disabled) + maxAgeMs 0 (disabled) → nothing removed.
+    const res = coldStoreEnforceRetention(paths, { maxBytes: 0, maxAgeMs: 0 });
+    expect(res.removed_count).toBe(0);
+  });
+
+  it("negative and non-numeric values fall back to defaults", () => {
+    expect(coldStoreCaps({ TH_CONTEXT_MAX_BYTES: "-5" } as NodeJS.ProcessEnv).maxBytes).toBe(DEFAULT_BYTES);
+    expect(coldStoreCaps({ TH_CONTEXT_MAX_BYTES: "abc" } as NodeJS.ProcessEnv).maxBytes).toBe(DEFAULT_BYTES);
+  });
+
+  it("decimal is floored; very large value is accepted", () => {
+    expect(coldStoreCaps({ TH_CONTEXT_MAX_BYTES: "10.9" } as NodeJS.ProcessEnv).maxBytes).toBe(10);
+    expect(coldStoreCaps({ TH_CONTEXT_MAX_BYTES: "9999999999" } as NodeJS.ProcessEnv).maxBytes).toBe(9999999999);
   });
 });

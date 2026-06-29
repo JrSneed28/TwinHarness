@@ -105,7 +105,9 @@ describe("issue #3 — verify reports distinguishable states; read errors are UN
     expect(data.verified).toBe(false);
     expect(data.ok).toBe(false); // NOT ok:true — could-not-read is not proof
     expect(data.blocking).toBe(false);
-    expect(data.reason).toBe("read_error_passthrough");
+    // The strict audit reader (#1) reports a precise reason for an unreadable
+    // shard rather than the generic passthrough; both are "unknown", non-blocking.
+    expect(data.reason).toBe("shard_unreadable");
   });
 
   it("all four states carry a distinct `status`", () => {

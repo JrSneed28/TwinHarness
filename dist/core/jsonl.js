@@ -49,6 +49,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.safeParseJson = safeParseJson;
 exports.readJsonlValues = readJsonlValues;
+exports.readJsonlAudit = readJsonlAudit;
 exports.scanTailValid = scanTailValid;
 const fs = __importStar(require("node:fs"));
 /** Tolerant JSON parse: the parsed value, or `undefined` on any parse error. */
@@ -76,6 +77,55 @@ function readJsonlValues(file, isValid) {
         const parsed = safeParseJson(trimmed);
         if (parsed !== undefined && isValid(parsed))
             out.push(parsed);
+    }
+    return out;
+}
+/**
+ * STRICT audit read of a JSONL file. Unlike {@link readJsonlValues}, which is the
+ * tolerant live-path reader that silently skips bad lines, this reader counts
+ * every anomaly so an auditor can distinguish:
+ *   - a missing file          → all counters 0, read_error=false
+ *   - an unreadable file       → read_error=true (e.g. the path is a directory)
+ *   - a corrupt file           → malformed_lines / schema_invalid_lines > 0
+ *   - a clean file             → valid_lines === total_lines
+ *
+ * Blank lines are ignored (never counted). Never throws.
+ */
+function readJsonlAudit(file, isValid) {
+    const out = {
+        values: [],
+        total_lines: 0,
+        valid_lines: 0,
+        malformed_lines: 0,
+        schema_invalid_lines: 0,
+        read_error: false,
+    };
+    let text;
+    try {
+        if (!fs.existsSync(file))
+            return out; // absent → genuinely empty, not an error
+        text = fs.readFileSync(file, "utf8");
+    }
+    catch {
+        out.read_error = true; // exists but unreadable (a directory, permissions, …)
+        return out;
+    }
+    for (const line of text.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed)
+            continue;
+        out.total_lines++;
+        const parsed = safeParseJson(trimmed);
+        if (parsed === undefined) {
+            out.malformed_lines++;
+            continue;
+        }
+        if (!isValid(parsed)) {
+            out.schema_invalid_lines++;
+            continue;
+        }
+        out.valid_lines++;
+        out.values.push(parsed);
     }
     return out;
 }

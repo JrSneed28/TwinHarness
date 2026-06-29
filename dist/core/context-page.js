@@ -402,16 +402,32 @@ function rawColdStoreEnabled(env = process.env) {
 /** Default cold-store retention caps (overridable via env). */
 exports.COLD_STORE_DEFAULT_MAX_BYTES = 256 * 1024 * 1024; // 256 MB
 exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS = 14;
-function positiveIntEnv(raw, fallback) {
+/**
+ * Parse a NON-NEGATIVE integer from an env var (#7). Zero is a VALID, meaningful
+ * value — it disables the corresponding cap, exactly as the {@link ColdStoreCaps}
+ * doc-contract promises. The previous `positiveIntEnv` rejected zero and silently
+ * fell back to the default, so `TH_CONTEXT_MAX_BYTES=0` did NOT disable the size
+ * cap. Contract here:
+ *   - undefined          → fallback (default)
+ *   - 0                  → 0 (cap disabled — preserved through coldStoreCaps)
+ *   - positive integer   → that value
+ *   - positive decimal   → floored
+ *   - negative / NaN / non-numeric → fallback (default; a cap can't be "negative")
+ */
+function nonNegativeIntEnv(raw, fallback) {
     if (raw === undefined)
         return fallback;
     const n = Number(raw);
-    return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+    if (!Number.isFinite(n) || n < 0)
+        return fallback;
+    return Math.floor(n);
 }
 /** Resolve the cold-store retention caps from env (with defaults). */
 function coldStoreCaps(env = process.env) {
-    const maxBytes = positiveIntEnv(env.TH_CONTEXT_MAX_BYTES, exports.COLD_STORE_DEFAULT_MAX_BYTES);
-    const maxAgeDays = positiveIntEnv(env.TH_CONTEXT_MAX_AGE_DAYS, exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS);
+    const maxBytes = nonNegativeIntEnv(env.TH_CONTEXT_MAX_BYTES, exports.COLD_STORE_DEFAULT_MAX_BYTES);
+    const maxAgeDays = nonNegativeIntEnv(env.TH_CONTEXT_MAX_AGE_DAYS, exports.COLD_STORE_DEFAULT_MAX_AGE_DAYS);
+    // 0 is preserved (disables the cap); the retention/report consumers all guard
+    // on `> 0`, so maxAgeMs = 0 disables the age cap just like maxBytes = 0.
     return { maxBytes, maxAgeMs: maxAgeDays * 24 * 60 * 60 * 1000 };
 }
 /** Enumerate cold object files under `objects/<hh>/<hash>` with size + mtime. */
