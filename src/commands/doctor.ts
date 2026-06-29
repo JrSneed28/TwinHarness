@@ -11,6 +11,7 @@ import { readVerifyConfig, readVerifyReport } from "../core/verify";
 import { staleLeases } from "../core/leases";
 import { validateDeps, hasDepIssues } from "../core/wave";
 import { repoFreshnessSummary } from "./repo";
+import { storageReport, fmtBytes } from "./context-pages";
 
 /**
  * `th doctor` — self-diagnostic + run-health audit. Reports environment and
@@ -492,6 +493,30 @@ export function runDoctor(paths: ProjectPaths, opts: { strict?: boolean } = {}):
         detail: `${allowed.length} allowlisted forward-compat key(s): ${allowed.join(", ")}`,
       });
     }
+  }
+
+  // Context-pages cold-store usage (#5): warn when over (or approaching) the
+  // configured byte cap so growth is visible before it becomes operationally
+  // significant. Fail-safe: any error skips the check rather than failing doctor.
+  try {
+    const s = storageReport(paths);
+    const pct = s.max_bytes > 0 ? Math.round((s.cold_bytes / s.max_bytes) * 100) : 0;
+    const approaching = pct >= 80;
+    checks.push({
+      name: "context-pages",
+      status: s.over_cap || (approaching && s.cold_objects > 0) ? "warn" : "ok",
+      detail:
+        s.cold_objects === 0
+          ? "cold store empty (raw persistence is metadata-only by default)"
+          : `${s.cold_objects} cold object(s), ${fmtBytes(s.cold_bytes)} / ${fmtBytes(s.max_bytes)} cap (${pct}%)` +
+            (s.over_cap
+              ? " — OVER CAP, run `th context-pages gc`"
+              : approaching
+                ? " — approaching cap"
+                : ""),
+    });
+  } catch {
+    // skip on any error
   }
 
   const hasFail = checks.some((c) => c.status === "fail");

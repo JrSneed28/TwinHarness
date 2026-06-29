@@ -373,12 +373,22 @@ function casObjectPath(pagesRoot: string, hash: string): string {
  * Rules:
  *   - Binary content (NUL byte in first 8 KiB) → skipped, returns null.
  *   - `sensitive === true` → objref returned but NO bytes written to disk.
+ *   - `opts.persistRaw === false` → objref returned but NO bytes written. This
+ *     is the privacy-by-default path (#4): the on-by-default OBSERVE hook passes
+ *     `persistRaw:false` so non-classified tool output (file reads, Bash, WebFetch,
+ *     MCP results) is NOT copied to a plaintext cold store. The hash still lets the
+ *     ledger reference the page, and rehydrate re-derives FULL from `logical_key`.
+ *     Raw bytes are persisted only when callers explicitly opt in — suppression
+ *     (TH_EXACT_SUPPRESS, which needs them to rehydrate) or TH_CONTEXT_RAW_STORE.
+ *     Other callers (delta/fingerprint) omit `opts` and keep the prior persist
+ *     behavior.
  *   - CAS is immutable: if the object already exists the write is skipped.
  */
 export function coldStorePut(
   paths: ProjectPaths,
   content: string,
   sensitive: boolean,
+  opts: { persistRaw?: boolean } = {},
 ): string | null {
   try {
     const hash = hashContent(content);
@@ -387,8 +397,9 @@ export function coldStorePut(
     const buf = Buffer.from(content, "utf8");
     if (looksBinary(buf)) return null;
 
-    // Sensitive: return objref (the hash) but never write raw bytes
-    if (sensitive) return hash;
+    // Sensitive OR raw persistence opted out → return objref (the hash) but never
+    // write raw bytes.
+    if (sensitive || opts.persistRaw === false) return hash;
 
     const root = contextPagesRoot(paths);
     const objPath = casObjectPath(root, hash);
@@ -422,5 +433,187 @@ export function coldStoreGet(paths: ProjectPaths, hash: string): string | undefi
     return fs.readFileSync(objPath, "utf8");
   } catch {
     return undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cold-store: raw-persistence policy + retention/usage (#4, #5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Is raw cold-store persistence enabled? Default is OFF (metadata-only, #4).
+ * Raw bytes are persisted only when the caller has a use for them: exact
+ * suppression (needs them to rehydrate) or an explicit opt-in.
+ */
+export function rawColdStoreEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.TH_EXACT_SUPPRESS === "1" || env.TH_CONTEXT_RAW_STORE === "1";
+}
+
+/** Default cold-store retention caps (overridable via env). */
+export const COLD_STORE_DEFAULT_MAX_BYTES = 256 * 1024 * 1024; // 256 MB
+export const COLD_STORE_DEFAULT_MAX_AGE_DAYS = 14;
+
+export interface ColdStoreCaps {
+  /** Max total bytes across all cold objects; 0 disables the size cap. */
+  maxBytes: number;
+  /** Max object age in ms; 0 disables the age cap. */
+  maxAgeMs: number;
+}
+
+function positiveIntEnv(raw: string | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+/** Resolve the cold-store retention caps from env (with defaults). */
+export function coldStoreCaps(env: NodeJS.ProcessEnv = process.env): ColdStoreCaps {
+  const maxBytes = positiveIntEnv(env.TH_CONTEXT_MAX_BYTES, COLD_STORE_DEFAULT_MAX_BYTES);
+  const maxAgeDays = positiveIntEnv(env.TH_CONTEXT_MAX_AGE_DAYS, COLD_STORE_DEFAULT_MAX_AGE_DAYS);
+  return { maxBytes, maxAgeMs: maxAgeDays * 24 * 60 * 60 * 1000 };
+}
+
+/** Enumerate cold object files under `objects/<hh>/<hash>` with size + mtime. */
+function listColdObjects(objectsDir: string): Array<{ path: string; size: number; mtimeMs: number }> {
+  const out: Array<{ path: string; size: number; mtimeMs: number }> = [];
+  let shards: string[];
+  try {
+    shards = fs.readdirSync(objectsDir);
+  } catch {
+    return out; // absent dir → empty store
+  }
+  for (const hh of shards) {
+    const hhDir = path.join(objectsDir, hh);
+    let entries: string[];
+    try {
+      if (!fs.statSync(hhDir).isDirectory()) continue; // skip marker files (.last-retention)
+      entries = fs.readdirSync(hhDir);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      const p = path.join(hhDir, name);
+      try {
+        const st = fs.statSync(p);
+        if (st.isFile()) out.push({ path: p, size: st.size, mtimeMs: st.mtimeMs });
+      } catch {
+        // skip unreadable / racing entries
+      }
+    }
+  }
+  return out;
+}
+
+export interface ColdStoreUsage {
+  object_count: number;
+  total_bytes: number;
+  /** Epoch-ms mtime of the oldest object, or null when the store is empty. */
+  oldest_mtime_ms: number | null;
+}
+
+/** Read-only cold-store usage snapshot (object count + total bytes + oldest). */
+export function coldStoreUsage(paths: ProjectPaths): ColdStoreUsage {
+  const objectsDir = path.join(contextPagesRoot(paths), "objects");
+  const objs = listColdObjects(objectsDir);
+  let total = 0;
+  let oldest: number | null = null;
+  for (const o of objs) {
+    total += o.size;
+    if (oldest === null || o.mtimeMs < oldest) oldest = o.mtimeMs;
+  }
+  return { object_count: objs.length, total_bytes: total, oldest_mtime_ms: oldest };
+}
+
+export interface RetentionResult {
+  removed_count: number;
+  removed_bytes: number;
+  remaining_count: number;
+  remaining_bytes: number;
+}
+
+/**
+ * Enforce cold-store caps: first drop objects older than `caps.maxAgeMs`, then,
+ * if still over `caps.maxBytes`, evict oldest-first until under the cap. Only
+ * touches `objects/<hh>/<hash>` files — never ledger shards. Fail-safe per file.
+ */
+export function coldStoreEnforceRetention(
+  paths: ProjectPaths,
+  caps: ColdStoreCaps,
+  now: number = Date.now(),
+): RetentionResult {
+  const objectsDir = path.join(contextPagesRoot(paths), "objects");
+  let objs = listColdObjects(objectsDir);
+  let removedCount = 0;
+  let removedBytes = 0;
+
+  const tryUnlink = (o: { path: string; size: number }): boolean => {
+    try {
+      fs.unlinkSync(o.path);
+      removedCount++;
+      removedBytes += o.size;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // 1. Age cap.
+  if (caps.maxAgeMs > 0) {
+    const cutoff = now - caps.maxAgeMs;
+    objs = objs.filter((o) => (o.mtimeMs < cutoff ? !tryUnlink(o) : true));
+  }
+
+  // 2. Size cap: evict oldest-first until the remaining total is within budget.
+  let total = objs.reduce((s, o) => s + o.size, 0);
+  if (caps.maxBytes > 0 && total > caps.maxBytes) {
+    objs.sort((a, b) => a.mtimeMs - b.mtimeMs); // oldest first
+    for (const o of objs) {
+      if (total <= caps.maxBytes) break;
+      if (tryUnlink(o)) total -= o.size;
+    }
+  }
+
+  const after = coldStoreUsage(paths);
+  return {
+    removed_count: removedCount,
+    removed_bytes: removedBytes,
+    remaining_count: after.object_count,
+    remaining_bytes: after.total_bytes,
+  };
+}
+
+/** Throttle window for lazy automatic retention from the hot path. */
+export const RETENTION_THROTTLE_MS = 60 * 60 * 1000; // 1h
+
+/**
+ * Lazy, throttled retention for the OBSERVE hot path (used only when raw storage
+ * is enabled). Runs a full enforcement pass at most once per
+ * {@link RETENTION_THROTTLE_MS}, stamped via a marker file, so the per-tool-call
+ * cost is a single small stat in the common case. Never throws.
+ */
+export function maybeEnforceColdStoreRetention(
+  paths: ProjectPaths,
+  caps: ColdStoreCaps,
+  now: number = Date.now(),
+): RetentionResult | null {
+  try {
+    const marker = path.join(contextPagesRoot(paths), "objects", ".last-retention");
+    let last = 0;
+    try {
+      last = fs.statSync(marker).mtimeMs;
+    } catch {
+      last = 0;
+    }
+    if (last !== 0 && now - last < RETENTION_THROTTLE_MS) return null;
+    // Stamp first (best-effort) so concurrent hooks don't all sweep at once.
+    try {
+      fs.mkdirSync(path.dirname(marker), { recursive: true });
+      fs.writeFileSync(marker, String(now), "utf8");
+    } catch {
+      // ignore — enforcement still proceeds
+    }
+    return coldStoreEnforceRetention(paths, caps, now);
+  } catch {
+    return null;
   }
 }

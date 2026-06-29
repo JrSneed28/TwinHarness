@@ -22,6 +22,9 @@ import {
   classifySensitive,
   coldStorePut,
   contextPagesRoot,
+  rawColdStoreEnabled,
+  coldStoreCaps,
+  maybeEnforceColdStoreRetention,
   CONTEXT_PAGE_SCHEMA_VERSION,
   type SourceKind,
   type ReductionKind,
@@ -1681,7 +1684,20 @@ export function runHookPostToolContext(
     const pageLike = { source_locator, source_kind };
     const sensitive = classifySensitive(pageLike, paths, toolResponse);
 
-    const raw_objref = coldStorePut(paths, toolResponse, sensitive);
+    // #4: privacy-by-default. The on-by-default OBSERVE hook does NOT persist raw
+    // tool output to the plaintext cold store — only the content hash is kept (in
+    // the ledger). Raw bytes are written only when a consumer needs them: exact
+    // suppression (to rehydrate) or an explicit TH_CONTEXT_RAW_STORE opt-in.
+    const persistRaw = rawColdStoreEnabled(env);
+    const raw_objref = coldStorePut(paths, toolResponse, sensitive, { persistRaw });
+
+    // #5: when raw storage is active the cold store grows, so opportunistically
+    // enforce the size/age caps here. Throttled to ≤ once/hour via a marker, and
+    // skipped entirely on the default (metadata-only) path, so the common case
+    // adds no filesystem work beyond the (skipped) cold-store write.
+    if (persistRaw && !sensitive) {
+      maybeEnforceColdStoreRetention(paths, coldStoreCaps(env));
+    }
 
     const reduction_kind: ReductionKind = sensitive ? "hash-only" : "FULL";
     const session_id = input?.session_id ?? "";
