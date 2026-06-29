@@ -23,12 +23,14 @@ cleaned up after the run.
 
 **Important: this benchmark does not capture per-call Node.js process spawn
 cost.** The real Claude Code plugin integration invokes `node
-dist/cli.js hook post-tool-context` as a subprocess on every `PostToolUse`
+dist/cli.js hook posttool-context` as a subprocess on every `PostToolUse`
 event. That per-call cold start typically adds tens to hundreds of milliseconds
 per invocation and completely dominates real-world latency. The numbers below
 measure only the in-process logic (hashing, ledger I/O, CAS write), which is
 the contribution the hook code itself makes on top of the unavoidable spawn
-cost (issue #6 risk item).
+cost (issue #6 risk item). The companion `scripts/bench-hook-subprocess.cjs`
+measures the full end-to-end subprocess path — see
+[End-to-End (subprocess) Latency](#end-to-end-subprocess-latency--the-number-users-actually-pay).
 
 ---
 
@@ -85,7 +87,46 @@ content hash. With 2000 unique hashes across the benchmark run this produces
 
 ---
 
+## End-to-End (subprocess) Latency — the number users actually pay
+
+The in-process numbers above are the hook code's own contribution. The real
+Claude Code integration spawns a **fresh `node dist/cli.js hook
+posttool-context` process per `PostToolUse` event**, so the cost the user pays
+includes Node startup, module loading, CLI arg parsing, stdin read + JSON parse,
+the hook work, stdout serialization, and process exit. `scripts/bench-hook-subprocess.cjs`
+measures that full path by spawning the built CLI once per invocation.
+
+Environment: Linux 6.18.5, Node.js v22.22.2, x64. `BENCH_N=60 BENCH_SEED=3000
+node scripts/bench-hook-subprocess.cjs` (representative single run — absolute
+values are host-dependent and will be higher on slower disks / cold caches):
+
+| Scenario                          | Cold (ms) | Median (ms) | Mean (ms) | p95 (ms) | p99 (ms) |
+|-----------------------------------|----------:|------------:|----------:|---------:|---------:|
+| (a) metadata-only, empty history  |    ~161   |    ~162     |   ~163    |  ~177    |  ~186    |
+| (b) metadata-only, large history  |    ~170   |    ~168     |   ~171    |  ~191    |  ~197    |
+| (c) raw-store, empty history      |    ~164   |    ~165     |   ~165    |  ~173    |  ~183    |
+
+**The headline finding:** end-to-end median (~162 ms) is roughly **60× the
+in-process median (~2.6 ms)** on the same host. Node process startup, not the
+hook logic, dominates — exactly the risk item #6 flags. A large pre-seeded
+ledger (scenario b, 3,000 records) adds only a few ms over the empty case
+(the tail-bounded reader is doing its job), and raw-store (scenario c) is within
+noise of metadata-only. **Projected wall-clock for 1,000 PostToolUse events:
+~160 s of cumulative subprocess time** — minutes of latency spread across a
+session, almost all of it Node cold-start.
+
+This confirms the optimization target: reduce per-call *process spawn* cost
+(persistent daemon, long-lived MCP path, batched telemetry, or narrower hook
+event matching), not the already-cheap in-process logic.
+
+> **Still unmeasured (cross-platform).** These are Linux/CI numbers. Windows
+> with Defender on-access scanning, macOS Gatekeeper/notarization checks,
+> network/encrypted filesystems, and many concurrent agents can each add cost
+> this single-host run cannot see. Treat the table as a floor.
+
 ## How to Reproduce
+
+In-process (hook logic only):
 
 ```
 node scripts/bench-hook.cjs
@@ -93,9 +134,19 @@ node scripts/bench-hook.cjs
 npm run bench:hook
 ```
 
-The script creates isolated temp directories, runs 2000 iterations per
-scenario with varying synthetic inputs, and prints a summary table plus a
-JSON summary line.
+End-to-end (real subprocess spawn per call; dist/ must be built):
+
+```
+npm run build
+node scripts/bench-hook-subprocess.cjs
+# tune iteration count / seeded history:
+BENCH_N=200 BENCH_SEED=5000 node scripts/bench-hook-subprocess.cjs
+# or, if the npm script is available:
+npm run bench:hook:subprocess
+```
+
+The scripts create isolated temp directories, run with varying synthetic
+inputs, and print a summary table plus a JSON summary line.
 
 ---
 
